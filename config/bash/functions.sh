@@ -94,3 +94,13 @@ if [ "${RED_ENV:-}" = "wsl" ]; then
   # Translate a path for pasting into a Windows program.
   winpath() { wslpath -w "${1:-.}"; }
 fi
+
+# ----------------------------------------------- native Windows only
+
+# Git Bash / MSYS2. Same commands as the WSL bridge above so muscle
+# memory carries across, but the path translation tool differs:
+# wslpath does not exist here, cygpath does.
+if [ "${RED_ENV:-}" = "windows" ]; then
+  winopen() { explorer.exe "$(cygpath -w "${1:-.}")"; }
+  winpath() { cygpath -w "${1:-.}"; }
+fi

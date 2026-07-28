@@ -13,13 +13,23 @@ export RED_ROOT
 # shell config must not depend on the binary being installed or on
 # PATH being correct yet — this file runs before either is guaranteed.
 if [ -z "${RED_ENV:-}" ]; then
-  if [ -n "${WSL_DISTRO_NAME:-}" ] || grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null; then
-    RED_ENV="wsl"
-  elif [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
-    RED_ENV="desktop"
-  else
-    RED_ENV="server"
-  fi
+  case "$(uname -s 2>/dev/null)" in
+    # Git Bash, MSYS2 and Cygwin are bash on *native* Windows, not WSL
+    # and not a Linux desktop. Without this branch they fall through to
+    # "server" and the Windows-specific bridges never load.
+    MINGW*|MSYS*|CYGWIN*)
+      RED_ENV="windows"
+      ;;
+    *)
+      if [ -n "${WSL_DISTRO_NAME:-}" ] || grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null; then
+        RED_ENV="wsl"
+      elif [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+        RED_ENV="desktop"
+      else
+        RED_ENV="server"
+      fi
+      ;;
+  esac
   export RED_ENV
 fi
 
