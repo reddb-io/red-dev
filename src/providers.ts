@@ -12,11 +12,26 @@ import { log, RedError } from "./log.ts";
 import type { Provider } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
 
+/**
+ * Inheriting stdin is only safe when there is a real terminal behind it.
+ * Under CI, a pipe, or a background job, apt and dpkg can stop at a
+ * prompt that nothing will ever answer — the process then sits at full
+ * CPU forever rather than failing. Observed exactly once, for eight
+ * minutes, which is how this guard came to exist. Detaching stdin turns
+ * that deadlock into a normal non-zero exit.
+ */
+const stdinMode = (): "inherit" | "ignore" =>
+  process.stdin.isTTY === true ? "inherit" : "ignore";
+
 async function run(
   cmd: string[],
   opts: { allowFailure?: boolean } = {},
 ): Promise<number> {
-  const proc = Bun.spawn(cmd, { stdout: "inherit", stderr: "inherit", stdin: "inherit" });
+  const proc = Bun.spawn(cmd, {
+    stdout: "inherit",
+    stderr: "inherit",
+    stdin: stdinMode(),
+  });
   const code = await proc.exited;
   if (code !== 0 && !opts.allowFailure) {
     throw new RedError(`${cmd[0]} exited ${code}: ${cmd.join(" ")}`);
@@ -55,7 +70,7 @@ export async function aptInstall(pkgs: string[]): Promise<void> {
   const proc = Bun.spawn(["sudo", "-E", "apt-get", "install", "-y", ...pkgs], {
     stdout: "inherit",
     stderr: "inherit",
-    stdin: "inherit",
+    stdin: stdinMode(),
     env,
   });
   const code = await proc.exited;
@@ -209,7 +224,7 @@ export async function systemUpdate(p: Platform): Promise<void> {
     const proc = Bun.spawn(["sudo", "-E", "apt-get", "full-upgrade", "-y"], {
       stdout: "inherit",
       stderr: "inherit",
-      stdin: "inherit",
+      stdin: stdinMode(),
       env,
     });
     if ((await proc.exited) !== 0) throw new RedError("apt full-upgrade failed");
