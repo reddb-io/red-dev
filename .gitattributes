@@ -1,0 +1,18 @@
+# This repo is authored on Windows and consumed on Linux, so normalise
+# everything to LF rather than letting core.autocrlf decide per machine.
+* text=auto eol=lf
+
+# Shell scripts must keep LF even when checked out on Windows —
+# CRLF breaks the shebang and every heredoc.
+*.sh    text eol=lf
+*.bash  text eol=lf
+bin/red text eol=lf
+boot.sh text eol=lf
+*.tsv   text eol=lf
+
+# PowerShell is happier with CRLF on Windows.
+*.ps1   text eol=crlf
+
+*.png   binary
+*.ttf   binary
+*.zip   binary
