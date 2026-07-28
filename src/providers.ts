@@ -193,6 +193,47 @@ export async function scriptInstall(name: string, root: string): Promise<void> {
   await run(["bash", path]);
 }
 
+// -------------------------------------------------------- updates
+
+/**
+ * Update everything the platform's own package manager owns. Kept
+ * separate from `install` because upgrading and converging are
+ * different intents: converge makes the manifest true, update moves
+ * already-installed things forward.
+ */
+export async function systemUpdate(p: Platform): Promise<void> {
+  if (p.caps.apt) {
+    await aptRefreshOnce();
+    log.step("apt full-upgrade");
+    const env = { ...process.env, DEBIAN_FRONTEND: "noninteractive" };
+    const proc = Bun.spawn(["sudo", "-E", "apt-get", "full-upgrade", "-y"], {
+      stdout: "inherit",
+      stderr: "inherit",
+      stdin: "inherit",
+      env,
+    });
+    if ((await proc.exited) !== 0) throw new RedError("apt full-upgrade failed");
+
+    log.step("apt autoremove");
+    await run(["sudo", "-E", "apt-get", "autoremove", "-y"], { allowFailure: true });
+  }
+
+  if (p.caps.winget) {
+    log.step("winget upgrade --all");
+    await run(
+      [
+        wingetBin(),
+        "upgrade",
+        "--all",
+        "--silent",
+        "--accept-package-agreements",
+        "--accept-source-agreements",
+      ],
+      { allowFailure: true },
+    );
+  }
+}
+
 // -------------------------------------------------------- dispatch
 
 export async function applyProvider(

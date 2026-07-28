@@ -14,7 +14,8 @@ import {
   type Tool,
 } from "./manifest.ts";
 import { detect, summary, type Platform } from "./platform.ts";
-import { aptInstall, applyProvider } from "./providers.ts";
+import { aptInstall, applyProvider, systemUpdate } from "./providers.ts";
+import { banner, interactive, select } from "./ui.ts";
 
 /**
  * Where the shipped config lives. A compiled binary can be run from
@@ -28,12 +29,14 @@ function findRoot(): string {
   return dir.replace(/[\\/](src|bin|dist)$/, "");
 }
 
-const USAGE = `red — cross-platform dev environment
+const USAGE = `red-dev — cross-platform dev environment
 
-  red platform          show what red thinks this machine is
-  red plan [scope]      list what would be installed, change nothing
-  red install [scope]   converge this machine toward the manifest
-  red doctor            report drift against the manifest
+  red-dev                    interactive menu (when attached to a terminal)
+  red-dev platform           show what red-dev thinks this machine is
+  red-dev plan [scope]       list what would change, change nothing
+  red-dev install [scope]    converge this machine toward the manifest
+  red-dev update             upgrade what the package managers own
+  red-dev doctor             report drift against the manifest
 
 Scopes: core, desktop, wsl
   core     the identical-experience layer, every target
@@ -85,7 +88,7 @@ function cmdDoctor(p: Platform): number {
     }
   }
   if (missing > 0) {
-    log.warn(`${missing} missing — run: red install`);
+    log.warn(`${missing} missing — run: red-dev install`);
     return 1;
   }
   log.ok("no drift");
@@ -143,11 +146,61 @@ async function cmdInstall(p: Platform, scopeArg?: string): Promise<number> {
   }
 
   if (failures > 0) {
-    log.warn(`${failures} step(s) failed — re-run 'red install' after fixing`);
+    log.warn(`${failures} step(s) failed — re-run 'red-dev install' after fixing`);
     return 1;
   }
   log.ok("converged — restart your shell");
   return 0;
+}
+
+async function cmdUpdate(p: Platform): Promise<number> {
+  try {
+    await systemUpdate(p);
+  } catch (err) {
+    log.err((err as Error).message);
+    return 1;
+  }
+  // Upgrading can leave the manifest unsatisfied (a package removed, a
+  // binary replaced), so always re-converge afterwards.
+  return await cmdInstall(p);
+}
+
+const MENU = [
+  "install — converge this machine",
+  "update — upgrade installed packages",
+  "plan — preview changes",
+  "doctor — report drift",
+  "platform — show detection",
+  "quit",
+] as const;
+
+async function cmdMenu(p: Platform): Promise<number> {
+  if (!interactive()) {
+    // Piped or redirected: a menu would hang waiting for input that is
+    // never coming. Fall back to the thing a script most likely wants.
+    log.plain(USAGE);
+    return 0;
+  }
+
+  log.plain(banner(summary(p).split("\n")[0] ?? ""));
+  const choice = await select("What now?", MENU, "quit");
+
+  switch (choice.split(" ")[0]) {
+    case "install":
+      return await cmdInstall(p);
+    case "update":
+      return await cmdUpdate(p);
+    case "plan":
+      cmdPlan(p);
+      return 0;
+    case "doctor":
+      return cmdDoctor(p);
+    case "platform":
+      cmdPlatform(p);
+      return 0;
+    default:
+      return 0;
+  }
 }
 
 async function main(): Promise<number> {
@@ -165,7 +218,12 @@ async function main(): Promise<number> {
       return cmdDoctor(p);
     case "install":
       return await cmdInstall(p, arg);
+    case "update":
+      return await cmdUpdate(p);
+    case "menu":
+      return await cmdMenu(p);
     case undefined:
+      return await cmdMenu(p);
     case "help":
     case "-h":
     case "--help":
