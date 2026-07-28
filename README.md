@@ -60,6 +60,24 @@ screen. Compiling the interface into the binary removes that bootstrap
 dependency: red-dev can always draw its own interface, including the screen that
 reports a failed install.
 
+## Install
+
+Linux and WSL:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.sh | sh
+```
+
+Native Windows:
+
+```powershell
+irm https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.ps1 | iex
+```
+
+Both download the binary for your platform from the latest release and then
+converge. Neither needs administrator or root rights to install red-dev itself;
+individual packages may still ask for sudo.
+
 ## Usage
 
 ```
@@ -154,8 +172,10 @@ Early, but the whole loop runs.
 
 Not done yet, in rough order of how much it matters:
 
-- **No way to install red-dev.** No `boot.sh`, no `boot.ps1`, no published
-  releases — the binaries exist only in a local `dist/`.
+- **No release has been cut.** `boot.sh`, `boot.ps1` and the release workflow
+  exist and are validated, but they resolve against a release that does not
+  exist yet, so the install commands above fail with
+  "has no published releases yet" until the first `v*` tag is pushed.
 - **The `desktop` scope has never run.** It is implemented against bare-metal
   Ubuntu and no bare-metal Ubuntu has executed it. That is unknown, not "nearly
   done".
