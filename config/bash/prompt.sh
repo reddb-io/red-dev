@@ -13,6 +13,14 @@
 force_color_prompt=yes
 color_prompt=yes
 
+# starship owns the prompt when it is installed. It has to win, not
+# merge: two things writing PS1 produces a prompt that is neither.
+# Without it we fall through to omakub's minimal glyph below.
+if command -v starship >/dev/null 2>&1; then
+  eval "$(starship init bash)"
+  return 0 2>/dev/null || true
+fi
+
 # Set RED_PROMPT=plain to opt out of the glyph, e.g. on a machine where
 # you cannot install fonts.
 if [ "${RED_PROMPT:-glyph}" = "plain" ]; then

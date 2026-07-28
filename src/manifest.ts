@@ -150,6 +150,29 @@ export const TOOLS: Tool[] = [
   { name: "fzf", scope: "core", u24: apt("fzf"), win: winget("junegunn.fzf") },
   { name: "btop", scope: "core", u24: apt("btop"), win: winget("aristocratos.btop4win") },
   { name: "jq", scope: "core", u24: apt("jq"), win: winget("jqlang.jq") },
+
+  // The bash answer to what people actually want from oh-my-zsh.
+  // Every one of these is cross-shell and cross-platform, which is why
+  // they belong in core rather than in a Linux-only corner.
+  {
+    name: "starship",
+    scope: "core",
+    u24: gh("starship/starship", "starship-x86_64-unknown-linux-gnu.tar.gz"),
+    win: winget("Starship.Starship"),
+  },
+  {
+    name: "atuin",
+    scope: "core",
+    u24: gh("atuinsh/atuin", "atuin-x86_64-unknown-linux-musl.tar.gz"),
+    win: winget("Atuinsh.Atuin"),
+  },
+  {
+    name: "carapace",
+    scope: "core",
+    u24: gh("carapace-sh/carapace-bin", "carapace-bin_*_linux_amd64.deb"),
+    win: winget("rsteube.Carapace"),
+  },
+  { name: "direnv", scope: "core", u24: apt("direnv"), win: winget("direnv.direnv") },
   {
     name: "fastfetch",
     scope: "core",

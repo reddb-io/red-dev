@@ -50,9 +50,41 @@ async function capture(cmd: string[]): Promise<string> {
 // ------------------------------------------------------------- apt
 
 let aptRefreshed = false;
+let sudoChecked = false;
+
+/**
+ * Fail fast when sudo would block on a password prompt.
+ *
+ * Detaching stdin is not enough: WSL hands even a non-interactive
+ * `wsl -- bash -lc` a pty, so isTTY is true, sudo prompts, and the run
+ * sits there forever against a terminal nobody is watching. `sudo -n`
+ * answers "would this block?" without blocking, which turns a hang
+ * into one line telling the user what to do.
+ */
+export async function requireSudo(): Promise<void> {
+  if (sudoChecked) return;
+  if (process.getuid?.() === 0) {
+    sudoChecked = true;
+    return;
+  }
+
+  const probe = Bun.spawn(["sudo", "-n", "true"], {
+    stdout: "ignore",
+    stderr: "ignore",
+    stdin: "ignore",
+  });
+  if ((await probe.exited) !== 0) {
+    throw new RedError(
+      "sudo needs a password and nothing here can supply one.\n" +
+        "      Run `sudo -v` first, then re-run red-dev — or run it as root.",
+    );
+  }
+  sudoChecked = true;
+}
 
 export async function aptRefreshOnce(): Promise<void> {
   if (aptRefreshed) return;
+  await requireSudo();
   log.step("apt-get update");
   await run(["sudo", "-E", "apt-get", "update", "-y"]);
   aptRefreshed = true;
@@ -151,6 +183,9 @@ export async function resolveGhAsset(repo: string, glob: string): Promise<string
 }
 
 export async function ghInstall(repo: string, glob: string): Promise<void> {
+  // Installing lands binaries in /usr/local/bin, so the same check has
+  // to happen here and not only on the apt path.
+  await requireSudo();
   const url = await resolveGhAsset(repo, glob);
   const file = url.split("/").pop() ?? "asset";
   log.step(`github: ${repo} -> ${file}`);
@@ -202,6 +237,7 @@ async function installBinariesFrom(dir: string): Promise<void> {
 // ------------------------------------------------- ppa / apt repos
 
 export async function ppaInstall(ppa: string, pkgs: string[]): Promise<void> {
+  await requireSudo();
   log.step(`ppa: ${ppa}`);
   // add-apt-repository refreshes the lists itself, but only for the
   // repository it just added; the batched refresh still has to happen.
