@@ -48,6 +48,11 @@ export function buildCli(): CLI {
         choices: [...FONTS],
         default: "firacode",
       },
+      opacity: {
+        type: "number",
+        description: "terminal background opacity, 0-100 (100 = opaque)",
+        default: 90,
+      },
     },
     commands: {
       platform: {
@@ -96,10 +101,25 @@ export interface Invocation {
   scope: string | undefined;
   themeName: string;
   font: string;
+  opacity: number;
   dryRun: boolean;
   errors: string[];
   /** Args that matched no command — an unknown verb. */
   unknown: string[];
+}
+
+/**
+ * The schema coerces to a number but does not range-check, and an
+ * out-of-range opacity is silently ignored by Windows Terminal — the
+ * worst outcome, because the user sees no error and no effect.
+ */
+function clampOpacity(raw: unknown, errors: string[]): number {
+  if (typeof raw !== "number" || Number.isNaN(raw)) return 90;
+  if (raw < 0 || raw > 100) {
+    errors.push(`opacity must be between 0 and 100 (got ${raw})`);
+    return 90;
+  }
+  return Math.round(raw);
 }
 
 export function parseArgs(cli: CLI, argv: string[]): Invocation {
@@ -131,6 +151,7 @@ export function parseArgs(cli: CLI, argv: string[]): Invocation {
     scope: scope ?? (typeof rawName === "string" ? rawName : undefined),
     themeName: typeof opts["theme"] === "string" ? opts["theme"] : DEFAULT_THEME,
     font: typeof opts["font"] === "string" ? opts["font"] : "firacode",
+    opacity: clampOpacity(opts["opacity"], errors),
     dryRun: opts["dry-run"] === true,
     errors,
     // An unrecognised verb lands in `rest` with an empty command path,

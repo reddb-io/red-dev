@@ -35,7 +35,13 @@ function resolveScopes(p: Platform, arg?: string): Scope[] {
 }
 
 function contextFor(p: Platform, inv: Invocation): ApplyContext {
-  return { root: findRoot(), platform: p, theme: inv.themeName, font: inv.font };
+  return {
+    root: findRoot(),
+    platform: p,
+    theme: inv.themeName,
+    font: inv.font,
+    opacity: inv.opacity,
+  };
 }
 
 function cmdPlatform(p: Platform): number {
@@ -187,6 +193,7 @@ async function cmdTheme(p: Platform, inv: Invocation, name?: string): Promise<nu
     await wsl.configureWindowsTerminal({
       fontFace: spec.family,
       theme,
+      opacity: inv.opacity,
       distro: process.env["WSL_DISTRO_NAME"] ?? undefined,
       home: process.env["HOME"] ?? undefined,
     });

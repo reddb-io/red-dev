@@ -346,6 +346,8 @@ export interface ApplyContext {
   theme: string;
   /** Font key from src/wsl.ts NERD_FONTS. */
   font: string;
+  /** Terminal background opacity, 0-100. */
+  opacity: number;
 }
 
 export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<void> {
@@ -386,6 +388,7 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
         await wsl.configureWindowsTerminal({
           fontFace: spec.family,
           theme,
+          opacity: ctx.opacity,
           distro: process.env["WSL_DISTRO_NAME"] ?? undefined,
           home: process.env["HOME"] ?? undefined,
         });

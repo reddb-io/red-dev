@@ -19,14 +19,21 @@ import rcSh from "../config/bash/rc.sh" with { type: "text" };
 import pathSh from "../config/bash/path.sh" with { type: "text" };
 import initSh from "../config/bash/init.sh" with { type: "text" };
 import aliasesSh from "../config/bash/aliases.sh" with { type: "text" };
+import functionsSh from "../config/bash/functions.sh" with { type: "text" };
 import promptSh from "../config/bash/prompt.sh" with { type: "text" };
+import inputrc from "../config/bash/inputrc.conf" with { type: "text" };
 
 const FILES: Record<string, string> = {
   "rc.sh": rcSh,
   "path.sh": pathSh,
   "init.sh": initSh,
   "aliases.sh": aliasesSh,
+  "functions.sh": functionsSh,
   "prompt.sh": promptSh,
+  // Deployed without the .conf suffix: the repo needs an extension for
+  // the text import to resolve, readline does not care what it is
+  // called, and INPUTRC points straight at it.
+  inputrc: inputrc,
 };
 
 /** The line we add to the user's shell rc, and the marker we look for. */

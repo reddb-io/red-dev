@@ -221,6 +221,13 @@ interface WtSettings {
 export interface TerminalOptions {
   fontFace: string;
   theme: Theme;
+  /**
+   * Background opacity, 0–100. Omakub gets this from Alacritty's
+   * window.opacity; Windows Terminal spells it `opacity` and needs
+   * `useAcrylic` for the blur behind it. 100 disables both rather than
+   * writing a no-op transparency that still costs a compositor pass.
+   */
+  opacity?: number;
   /** WSL distro to make the default profile, e.g. "Ubuntu-24.04". */
   distro?: string;
   /** Home directory inside that distro, used as startingDirectory. */
@@ -261,6 +268,15 @@ export async function configureWindowsTerminal(opts: TerminalOptions): Promise<v
     ...(settings.profiles.defaults["font"] as Record<string, unknown> | undefined),
     face: opts.fontFace,
   };
+
+  const opacity = opts.opacity ?? 100;
+  if (opacity >= 100) {
+    delete settings.profiles.defaults["opacity"];
+    delete settings.profiles.defaults["useAcrylic"];
+  } else {
+    settings.profiles.defaults["opacity"] = opacity;
+    settings.profiles.defaults["useAcrylic"] = true;
+  }
 
   // Replace our scheme by name; leave any other scheme alone.
   settings.schemes ??= [];

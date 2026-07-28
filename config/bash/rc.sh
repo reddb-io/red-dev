@@ -23,7 +23,16 @@ if [ -z "${RED_ENV:-}" ]; then
   export RED_ENV
 fi
 
-for _red_part in path init aliases prompt; do
+# Readline settings. INPUTRC has to be exported before bash builds its
+# line editor, which is why this sits ahead of the sourcing loop rather
+# than inside init.sh.
+if [ -r "$RED_ROOT/config/bash/inputrc" ]; then
+  INPUTRC="$RED_ROOT/config/bash/inputrc"
+  export INPUTRC
+  bind -f "$INPUTRC" 2>/dev/null || true
+fi
+
+for _red_part in path init aliases functions prompt; do
   _red_file="$RED_ROOT/config/bash/${_red_part}.sh"
   if [ -r "$_red_file" ]; then
     # shellcheck disable=SC1090

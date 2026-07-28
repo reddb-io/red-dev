@@ -45,7 +45,7 @@ if command -v fzf >/dev/null 2>&1; then
   fi
 fi
 
-compress() { tar -czf "${1%/}.tar.gz" "${1%/}"; }
+# compress() lives in functions.sh; this is its counterpart.
 alias decompress='tar -xzf'
 
 # WSL only: bridge to the host. These are the commands that upstream's
