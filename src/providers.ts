@@ -376,7 +376,27 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
         await installDotfiles();
         return;
       }
+      if (pr.name === "alacritty") {
+        const { configureAlacritty } = await import("./alacritty.ts");
+        const { THEMES } = await import("./themes.ts");
+        const theme = THEMES[ctx.theme];
+        if (!theme) throw new RedError(`unknown theme '${ctx.theme}'`);
+        const { NERD_FONTS } = await import("./wsl.ts");
+        const spec = NERD_FONTS[ctx.font];
+        if (!spec) throw new RedError(`unknown font '${ctx.font}'`);
+        await configureAlacritty({
+          platform: ctx.platform,
+          theme,
+          fontFamily: spec.family,
+          opacity: ctx.opacity,
+        });
+        return;
+      }
       const wsl = await import("./wsl.ts");
+      if (pr.name === "wsl-interop") {
+        await wsl.ensureWslInterop();
+        return;
+      }
       if (pr.name === "nerd-font") {
         await wsl.installNerdFont(ctx.font);
       } else {

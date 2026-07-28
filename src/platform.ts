@@ -23,7 +23,11 @@ export type Arch = "x64" | "arm64" | "unsupported";
 export interface Capabilities {
   /** apt-get is available (any Ubuntu/Debian target). */
   apt: boolean;
-  /** We own a local display, so .deb GUI apps make sense. */
+  /**
+   * There is a display on this machine that we install GUI apps onto.
+   * True for bare-metal Linux and for native Windows; false for WSL,
+   * where the display belongs to the host, and for headless servers.
+   */
   gui: boolean;
   /** systemd is PID 1 — decides whether we can enable services. */
   systemd: boolean;
@@ -148,7 +152,7 @@ export function detect(): Platform {
 
   const caps: Capabilities = {
     apt: which("apt-get"),
-    gui: env === "desktop",
+    gui: env === "desktop" || env === "windows",
     // systemd as PID 1. Under WSL this is false unless the user enabled
     // systemd=true in /etc/wsl.conf, which changes whether services can
     // be enabled at all.

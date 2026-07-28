@@ -12,7 +12,7 @@
  * before anything was built on top of it; see scripts/embed-smoke.ts.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { log } from "./log.ts";
 
 import rcSh from "../config/bash/rc.sh" with { type: "text" };
@@ -92,7 +92,10 @@ async function wireShellRc(): Promise<void> {
 
 export async function installDotfiles(): Promise<void> {
   const dest = `${home()}/.local/share/red-dev/config/bash`;
-  await Bun.spawn(["mkdir", "-p", dest], { stdout: "ignore" }).exited;
+  // node:fs rather than shelling out to mkdir, which native Windows
+  // does not have. Git Bash understands the forward-slash HOME it
+  // reports, so the path itself needs no translation.
+  mkdirSync(dest, { recursive: true });
 
   let changed = 0;
   for (const [name, content] of Object.entries(FILES)) {

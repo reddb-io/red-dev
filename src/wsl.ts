@@ -37,6 +37,14 @@ async function run(cmd: string[]): Promise<void> {
  * non-C: installs and domain accounts.
  */
 export async function windowsLocalAppData(): Promise<string> {
+  // On native Windows the variable is simply ours; cmd.exe and wslpath
+  // are WSL-crossing tools that do not exist there.
+  if (process.platform === "win32") {
+    const local = process.env["LOCALAPPDATA"];
+    if (!local) throw new RedError("LOCALAPPDATA is not set");
+    return local;
+  }
+
   const raw = await capture(["cmd.exe", "/c", "echo %LOCALAPPDATA%"]);
   // cmd emits CRLF and may prefix a warning when cwd is a UNC path.
   const winPath = raw.split("\n").pop()?.trim().replace(/\r$/, "") ?? "";
@@ -44,6 +52,61 @@ export async function windowsLocalAppData(): Promise<string> {
     throw new RedError(`could not read %LOCALAPPDATA% from Windows (got: ${raw})`);
   }
   return await capture(["wslpath", "-u", winPath]);
+}
+
+// ---------------------------------------------------------- interop
+
+/**
+ * Keep Windows interop alive under systemd.
+ *
+ * Enabling systemd in /etc/wsl.conf has a side effect nobody warns you
+ * about: systemd-binfmt clears binfmt_misc on boot and re-registers
+ * only what /etc/binfmt.d/ declares. WSL's own WSLInterop entry is not
+ * there, so it silently disappears and every .exe stops working with
+ * "cannot execute binary file: Exec format error" — winget.exe,
+ * explorer.exe, cmd.exe, all of it.
+ *
+ * That breaks the entire premise of the WSL scope, which exists to act
+ * on the host. Declaring the entry makes it survive.
+ */
+export async function ensureWslInterop(): Promise<void> {
+  if (existsSync("/proc/sys/fs/binfmt_misc/WSLInterop")) {
+    log.skip("WSL interop registered");
+    return;
+  }
+
+  log.step("registering WSLInterop with binfmt_misc");
+  const entry = ":WSLInterop:M::MZ::/init:PF";
+
+  await run(["sudo", "mkdir", "-p", "/etc/binfmt.d"]);
+  await run([
+    "sudo",
+    "sh",
+    "-c",
+    `printf '%s\\n' '${entry}' > /etc/binfmt.d/WSLInterop.conf`,
+  ]);
+
+  // Apply now rather than waiting for the next boot.
+  const restart = Bun.spawn(["sudo", "systemctl", "restart", "systemd-binfmt"], {
+    stdout: "ignore",
+    stderr: "ignore",
+  });
+  await restart.exited;
+
+  if (!existsSync("/proc/sys/fs/binfmt_misc/WSLInterop")) {
+    await run([
+      "sudo",
+      "sh",
+      "-c",
+      `printf '%s\\n' '${entry}' > /proc/sys/fs/binfmt_misc/register`,
+    ]);
+  }
+
+  if (existsSync("/proc/sys/fs/binfmt_misc/WSLInterop")) {
+    log.ok("WSL interop restored");
+  } else {
+    throw new RedError("could not register WSLInterop; .exe calls will fail");
+  }
 }
 
 // ------------------------------------------------------------ fonts

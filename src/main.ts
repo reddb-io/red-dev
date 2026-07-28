@@ -178,31 +178,48 @@ async function cmdTheme(p: Platform, inv: Invocation, name?: string): Promise<nu
     return 1;
   }
 
-  if (p.env !== "wsl" && p.os !== "windows") {
-    log.warn(`theme switching on ${p.env} targets is not implemented yet`);
+  const wsl = await import("./wsl.ts");
+  const spec = wsl.NERD_FONTS[inv.font];
+  if (!spec) {
+    log.err(`unknown font '${inv.font}'`);
     return 1;
   }
 
+  let failures = 0;
+
+  // Alacritty is the terminal on every target, so this is the branch
+  // that always runs. Windows Terminal is configured too where it
+  // exists, because plenty of people keep using it.
   try {
-    const wsl = await import("./wsl.ts");
-    const spec = wsl.NERD_FONTS[inv.font];
-    if (!spec) {
-      log.err(`unknown font '${inv.font}'`);
-      return 1;
-    }
-    await wsl.configureWindowsTerminal({
-      fontFace: spec.family,
+    const { configureAlacritty } = await import("./alacritty.ts");
+    await configureAlacritty({
+      platform: p,
       theme,
+      fontFamily: spec.family,
       opacity: inv.opacity,
-      distro: process.env["WSL_DISTRO_NAME"] ?? undefined,
-      home: process.env["HOME"] ?? undefined,
     });
-    log.ok(`theme: ${theme.name} — open a new terminal tab to see it`);
-    return 0;
   } catch (err) {
-    log.err((err as Error).message);
-    return 1;
+    log.err(`alacritty: ${(err as Error).message}`);
+    failures++;
   }
+
+  if (p.env === "wsl" || p.os === "windows") {
+    try {
+      await wsl.configureWindowsTerminal({
+        fontFace: spec.family,
+        theme,
+        opacity: inv.opacity,
+        distro: process.env["WSL_DISTRO_NAME"] ?? undefined,
+        home: process.env["HOME"] ?? undefined,
+      });
+    } catch (err) {
+      log.warn(`windows terminal: ${(err as Error).message}`);
+    }
+  }
+
+  if (failures > 0) return 1;
+  log.ok(`theme: ${theme.name} — open a new terminal to see it`);
+  return 0;
 }
 
 const MENU = [

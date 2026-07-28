@@ -48,7 +48,15 @@ export type Provider =
       group?: string;
     }
   /** Implemented in TypeScript, in this binary. */
-  | { kind: "builtin"; name: "nerd-font" | "windows-terminal" | "dotfiles" }
+  | {
+      kind: "builtin";
+      name:
+        | "nerd-font"
+        | "windows-terminal"
+        | "dotfiles"
+        | "alacritty"
+        | "wsl-interop";
+    }
   /** Not installed here, deliberately. The reason is required. */
   | { kind: "skip"; reason: string };
 
@@ -93,10 +101,14 @@ const aptrepo = (spec: {
   entry: string;
   group?: string;
 }): Provider => ({ kind: "aptrepo", ...spec });
-const builtin = (name: "nerd-font" | "windows-terminal" | "dotfiles"): Provider => ({
-  kind: "builtin",
-  name,
-});
+const builtin = (
+  name:
+    | "nerd-font"
+    | "windows-terminal"
+    | "dotfiles"
+    | "alacritty"
+    | "wsl-interop",
+): Provider => ({ kind: "builtin", name });
 const skip = (reason: string): Provider => ({ kind: "skip", reason });
 
 const NO_GUI = "no GUI layer on this target";
@@ -226,12 +238,23 @@ export const TOOLS: Tool[] = [
   // Last in core on purpose: aliases.sh probes for what actually got
   // installed (batcat vs bat, eza present or not), so it has to run
   // after the tools above, not before them.
+  //
+  // Native Windows gets the same files: Git Bash runs them unchanged,
+  // which is why standardising on bash rather than PowerShell is what
+  // makes "same experience" true instead of aspirational.
   {
     name: "dotfiles",
     scope: "core",
     managed: true,
     u24: builtin("dotfiles"),
-    win: skip("no bash on native Windows; a PowerShell profile is not written yet"),
+    win: builtin("dotfiles"),
+  },
+  {
+    name: "alacritty-config",
+    scope: "core",
+    managed: true,
+    u24: builtin("alacritty"),
+    win: builtin("alacritty"),
   },
 
   // ------------------------------------------------------- desktop
@@ -257,10 +280,30 @@ export const TOOLS: Tool[] = [
   // there. Without this scope the WSL target renders icon glyphs as
   // empty boxes and the "same experience" claim is simply false.
   {
+    // First in the wsl scope: everything after it calls a .exe, and
+    // without the binfmt entry every one of those fails with a message
+    // that points nowhere near the cause.
+    name: "wsl-interop",
+    scope: "wsl",
+    managed: true,
+    u24: builtin("wsl-interop"),
+    win: skip("native Windows needs no interop shim"),
+  },
+  {
     name: "nerd-font",
     scope: "wsl",
     managed: true,
     u24: builtin("nerd-font"),
+    win: skip(HOST_PROVIDES),
+  },
+  {
+    // The terminal that will run this distro lives on the host, so it
+    // is installed there. winget.exe is reachable through interop —
+    // which is exactly what upstream's PATH replacement was breaking.
+    name: "alacritty-host",
+    scope: "wsl",
+    managed: true,
+    u24: winget("Alacritty.Alacritty"),
     win: skip(HOST_PROVIDES),
   },
   {
