@@ -369,6 +369,11 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
     case "builtin": {
       // Imported lazily so the Windows build does not pull WSL-only
       // code into a target that can never reach a WSL host.
+      if (pr.name === "dotfiles") {
+        const { installDotfiles } = await import("./dotfiles.ts");
+        await installDotfiles();
+        return;
+      }
       const wsl = await import("./wsl.ts");
       if (pr.name === "nerd-font") {
         await wsl.installNerdFont(ctx.font);

@@ -48,7 +48,7 @@ export type Provider =
       group?: string;
     }
   /** Implemented in TypeScript, in this binary. */
-  | { kind: "builtin"; name: "nerd-font" | "windows-terminal" }
+  | { kind: "builtin"; name: "nerd-font" | "windows-terminal" | "dotfiles" }
   /** Not installed here, deliberately. The reason is required. */
   | { kind: "skip"; reason: string };
 
@@ -93,7 +93,7 @@ const aptrepo = (spec: {
   entry: string;
   group?: string;
 }): Provider => ({ kind: "aptrepo", ...spec });
-const builtin = (name: "nerd-font" | "windows-terminal"): Provider => ({
+const builtin = (name: "nerd-font" | "windows-terminal" | "dotfiles"): Provider => ({
   kind: "builtin",
   name,
 });
@@ -221,6 +221,17 @@ export const TOOLS: Tool[] = [
       group: "docker",
     }),
     win: winget("Docker.DockerDesktop"),
+  },
+
+  // Last in core on purpose: aliases.sh probes for what actually got
+  // installed (batcat vs bat, eza present or not), so it has to run
+  // after the tools above, not before them.
+  {
+    name: "dotfiles",
+    scope: "core",
+    managed: true,
+    u24: builtin("dotfiles"),
+    win: skip("no bash on native Windows; a PowerShell profile is not written yet"),
   },
 
   // ------------------------------------------------------- desktop

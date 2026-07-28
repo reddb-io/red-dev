@@ -129,17 +129,44 @@ And one from Windows itself: commands installed from the Microsoft Store —
 `winget` among them — are `APPEXECLINK` reparse points that `stat` reports as
 absent. Detection uses `where.exe` rather than stat-ing PATH entries.
 
+## Dotfiles
+
+`install` deploys the shell configuration too — that layer *is* the same
+experience, and tools without it produce a machine with the right binaries and
+none of the feel.
+
+The files travel inside the binary as text imports, because the normal way to
+get red-dev is to download one executable, not to clone a repository. They are
+written to `~/.local/share/red-dev/config/bash`, and the source line is
+**appended** to `~/.bashrc` after a backup, never replacing it: a shell rc
+usually holds work its owner cares about more than anything we are installing.
+Re-running is a no-op.
+
 ## Status
 
 Early, but the whole loop runs.
 
 - Working: `platform`, `plan`, `doctor`, `menu`, `install`, `update`, `theme`
-- Providers: apt, winget, GitHub releases, and builtins for the WSL scope
-- Verified on WSL Ubuntu 24.04 and native Windows from one source tree
-- Not written yet: the `script:` providers (`fastfetch`, `mise`, `neovim`,
-  `docker`, `github-cli` still lean on upstream install scripts), theme
-  application to Neovim and Alacritty, and the whole `desktop` scope on real
-  bare-metal Ubuntu — it is implemented but has never run on one
+- Providers: apt, ppa, apt repositories, winget, GitHub releases, and builtins
+  (dotfiles, Nerd Font, Windows Terminal)
+- Verified on WSL Ubuntu 24.04 and native Windows from one source tree, and on
+  a freshly created user for the dotfiles path
+
+Not done yet, in rough order of how much it matters:
+
+- **No way to install red-dev.** No `boot.sh`, no `boot.ps1`, no published
+  releases — the binaries exist only in a local `dist/`.
+- **The `desktop` scope has never run.** It is implemented against bare-metal
+  Ubuntu and no bare-metal Ubuntu has executed it. That is unknown, not "nearly
+  done".
+- **Ubuntu 26.04 is likewise untested.** The `u26` column exists; no 26.04
+  target has exercised it, so package-name drift is undiscovered.
+- Themes reach the terminal only — not Neovim, Alacritty, `bat` or `fzf`.
+- No LazyVim configuration is shipped (Omakub ships one).
+- No `uninstall`, no migrations.
+- No automated tests and no CI. Everything above was verified by hand.
+- Native Windows gets no shell configuration: there is no bash, and a
+  PowerShell profile equivalent is not written.
 
 ## License
 
