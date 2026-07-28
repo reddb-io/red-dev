@@ -30,7 +30,23 @@ export type Provider =
    * the available candidates instead.
    */
   | { kind: "gh"; repo: string; asset: string }
-  | { kind: "script"; name: string }
+  /** A Launchpad PPA, then apt. */
+  | { kind: "ppa"; ppa: string; pkgs: string[] }
+  /**
+   * A third-party apt repository: fetch the signing key, write the
+   * sources entry, then apt. `entry` may contain {{codename}}, which is
+   * substituted with the running release — the same definition then
+   * works on 24.04 and 26.04 instead of needing one script per version.
+   */
+  | {
+      kind: "aptrepo";
+      pkgs: string[];
+      keyUrl: string;
+      keyring: string;
+      entry: string;
+      /** Add the invoking user to this group after install (docker). */
+      group?: string;
+    }
   /** Implemented in TypeScript, in this binary. */
   | { kind: "builtin"; name: "nerd-font" | "windows-terminal" }
   /** Not installed here, deliberately. The reason is required. */
@@ -65,7 +81,18 @@ export interface Tool {
 const apt = (pkg: string): Provider => ({ kind: "apt", pkg });
 const winget = (id: string): Provider => ({ kind: "winget", id });
 const gh = (repo: string, asset: string): Provider => ({ kind: "gh", repo, asset });
-const script = (name: string): Provider => ({ kind: "script", name });
+const ppa =(name: string, ...pkgs: string[]): Provider => ({
+  kind: "ppa",
+  ppa: name,
+  pkgs,
+});
+const aptrepo = (spec: {
+  pkgs: string[];
+  keyUrl: string;
+  keyring: string;
+  entry: string;
+  group?: string;
+}): Provider => ({ kind: "aptrepo", ...spec });
 const builtin = (name: "nerd-font" | "windows-terminal"): Provider => ({
   kind: "builtin",
   name,
@@ -114,10 +141,23 @@ export const TOOLS: Tool[] = [
   {
     name: "fastfetch",
     scope: "core",
-    u24: script("fastfetch"),
+    // Not in the 24.04 archive. The PPA publishes per-suite, so this is
+    // unverified on 26.04 — no 26.04 target has run yet.
+    u24: ppa("zhangsongcui3371/fastfetch", "fastfetch"),
     win: winget("Fastfetch-cli.Fastfetch"),
   },
-  { name: "gh", scope: "core", u24: script("github-cli"), win: winget("GitHub.cli") },
+  {
+    name: "gh",
+    scope: "core",
+    u24: aptrepo({
+      pkgs: ["gh"],
+      keyUrl: "https://cli.github.com/packages/githubcli-archive-keyring.gpg",
+      keyring: "/usr/share/keyrings/githubcli-archive-keyring.gpg",
+      entry:
+        "deb [arch=amd64 signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main",
+    }),
+    win: winget("GitHub.cli"),
+  },
   {
     name: "lazygit",
     scope: "core",
@@ -138,18 +178,48 @@ export const TOOLS: Tool[] = [
     // panes/tabs come from Windows Terminal itself.
     win: skip("no native Windows build; Windows Terminal provides panes"),
   },
-  { name: "mise", scope: "core", u24: script("mise"), win: winget("jdx.mise") },
+  {
+    name: "mise",
+    scope: "core",
+    u24: aptrepo({
+      pkgs: ["mise"],
+      keyUrl: "https://mise.jdx.dev/gpg-key.pub",
+      keyring: "/etc/apt/keyrings/mise-archive-keyring.gpg",
+      entry:
+        "deb [signed-by=/etc/apt/keyrings/mise-archive-keyring.gpg arch=amd64] https://mise.jdx.dev/deb stable main",
+    }),
+    win: winget("jdx.mise"),
+  },
   {
     name: "neovim",
     cmd: ["nvim"],
     scope: "core",
-    u24: script("neovim"),
+    // The archive ships 0.9.5 on noble. LazyVim runs on it but the
+    // ecosystem has moved on, and the upstream tarball is not a drop-in
+    // either: nvim needs its runtime tree, so installing just the
+    // binary produces a broken editor. The PPA packages both properly.
+    u24: ppa("neovim-ppa/unstable", "neovim"),
     win: winget("Neovim.Neovim"),
   },
   {
     name: "docker",
     scope: "core",
-    u24: script("docker"),
+    u24: aptrepo({
+      pkgs: [
+        "docker-ce",
+        "docker-ce-cli",
+        "containerd.io",
+        "docker-buildx-plugin",
+        "docker-compose-plugin",
+      ],
+      keyUrl: "https://download.docker.com/linux/ubuntu/gpg",
+      keyring: "/etc/apt/keyrings/docker.asc",
+      entry:
+        "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu {{codename}} stable",
+      // Without this, every docker command needs sudo — which is not
+      // the experience anyone means by "docker is installed".
+      group: "docker",
+    }),
     win: winget("Docker.DockerDesktop"),
   },
 
@@ -224,8 +294,10 @@ export function describeProvider(pr: Provider): string {
       return `winget:${pr.id}`;
     case "gh":
       return `gh:${pr.repo}:${pr.asset}`;
-    case "script":
-      return `script:${pr.name}`;
+    case "ppa":
+      return `ppa:${pr.ppa}`;
+    case "aptrepo":
+      return `aptrepo:${pr.pkgs.join(",")}`;
     case "builtin":
       return `builtin:${pr.name}`;
     case "skip":

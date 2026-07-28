@@ -8,6 +8,7 @@
  * lost one to a full host disk while writing this.
  */
 
+import { existsSync } from "node:fs";
 import { log, RedError } from "./log.ts";
 import type { Provider } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
@@ -198,14 +199,101 @@ async function installBinariesFrom(dir: string): Promise<void> {
   }
 }
 
-// ---------------------------------------------------------- script
+// ------------------------------------------------- ppa / apt repos
 
-export async function scriptInstall(name: string, root: string): Promise<void> {
-  const path = `${root}/install/providers/${name}.sh`;
-  const f = Bun.file(path);
-  if (!(await f.exists())) throw new RedError(`missing provider script: ${path}`);
-  log.step(`script: ${name}`);
-  await run(["bash", path]);
+export async function ppaInstall(ppa: string, pkgs: string[]): Promise<void> {
+  log.step(`ppa: ${ppa}`);
+  // add-apt-repository refreshes the lists itself, but only for the
+  // repository it just added; the batched refresh still has to happen.
+  await run(["sudo", "-E", "add-apt-repository", "-y", `ppa:${ppa}`]);
+  aptRefreshed = false;
+  await aptInstall(pkgs);
+}
+
+/**
+ * Which file under sources.list.d already configures this repository,
+ * if any. Both the one-line .list format and the deb822 .sources format
+ * are checked, because Ubuntu 24.04 onward writes the latter.
+ */
+async function findSourceFor(repoUrl: string): Promise<string | null> {
+  const dir = "/etc/apt/sources.list.d";
+  if (!existsSync(dir)) return null;
+  const listing = await capture(["sh", "-c", `grep -rl "${repoUrl}" ${dir} 2>/dev/null || true`]);
+  const first = listing.split("\n").find(Boolean);
+  return first ?? null;
+}
+
+export interface AptRepoSpec {
+  pkgs: string[];
+  keyUrl: string;
+  keyring: string;
+  entry: string;
+  group?: string;
+}
+
+/**
+ * Add a third-party apt repository and install from it.
+ *
+ * The key is fetched and dearmored only if it is not already present,
+ * and the sources entry is written only if its content differs, so a
+ * re-run touches nothing. That matters: apt refuses to work at all when
+ * the same repository is configured twice.
+ */
+export async function aptRepoInstall(
+  spec: AptRepoSpec,
+  codename: string,
+): Promise<void> {
+  const entry = spec.entry.replaceAll("{{codename}}", codename);
+  const listName = spec.keyring.split("/").pop()?.replace(/\.(gpg|asc)$/, "") ?? "red-dev";
+  const listPath = `/etc/apt/sources.list.d/${listName}.list`;
+
+  if (!existsSync(spec.keyring)) {
+    log.step(`key: ${spec.keyUrl}`);
+    await run(["sudo", "install", "-m", "0755", "-d", "/etc/apt/keyrings"]);
+    const res = await fetch(spec.keyUrl);
+    if (!res.ok) throw new RedError(`key download failed ${res.status}: ${spec.keyUrl}`);
+    const tmp = `/tmp/red-dev-key-${listName}`;
+    await Bun.write(tmp, res);
+
+    // .asc keys are armoured text and apt reads them directly; .gpg
+    // must be binary, so dearmor when the target says so.
+    if (spec.keyring.endsWith(".gpg")) {
+      await run(["sudo", "sh", "-c", `gpg --dearmor < "${tmp}" > "${spec.keyring}"`]);
+    } else {
+      await run(["sudo", "cp", tmp, spec.keyring]);
+    }
+    await run(["sudo", "chmod", "a+r", spec.keyring]);
+    await run(["rm", "-f", tmp], { allowFailure: true });
+  }
+
+  // Someone else may already have configured this repository under a
+  // different filename — omakub writes github-cli.list where we would
+  // write githubcli-archive-keyring.list. Adding ours too makes apt
+  // complain about a duplicate source on every single invocation, so
+  // look for the URL anywhere under sources.list.d before writing.
+  const repoUrl = /https?:\/\/\S+/.exec(entry)?.[0] ?? "";
+  const existingOwner = repoUrl ? await findSourceFor(repoUrl) : null;
+
+  if (existingOwner && existingOwner !== listPath) {
+    log.skip(`repository already configured in ${existingOwner}`);
+  } else {
+    const current = existsSync(listPath) ? await Bun.file(listPath).text() : "";
+    if (current.trim() !== entry.trim()) {
+      log.step(`repo: ${listPath}`);
+      await run(["sudo", "sh", "-c", `printf '%s\\n' "${entry}" > "${listPath}"`]);
+      aptRefreshed = false;
+    }
+  }
+
+  await aptInstall(spec.pkgs);
+
+  if (spec.group) {
+    const user = process.env["USER"] ?? process.env["LOGNAME"];
+    if (user) {
+      await run(["sudo", "usermod", "-aG", spec.group, user], { allowFailure: true });
+      log.ok(`${user} added to group '${spec.group}' — log out and back in to take effect`);
+    }
+  }
 }
 
 // -------------------------------------------------------- updates
@@ -272,8 +360,11 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
     case "gh":
       await ghInstall(pr.repo, pr.asset);
       return;
-    case "script":
-      await scriptInstall(pr.name, ctx.root);
+    case "ppa":
+      await ppaInstall(pr.ppa, pr.pkgs);
+      return;
+    case "aptrepo":
+      await aptRepoInstall(pr, ctx.platform.codename ?? "stable");
       return;
     case "builtin": {
       // Imported lazily so the Windows build does not pull WSL-only
