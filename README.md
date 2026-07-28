@@ -63,16 +63,44 @@ reports a failed install.
 ## Usage
 
 ```
-red-dev            # interactive menu
-red-dev platform   # what red-dev thinks this machine is
-red-dev plan       # what would change, changes nothing
-red-dev install    # converge toward the manifest
-red-dev update     # upgrade what the package managers own
-red-dev doctor     # report drift
+red-dev                      # interactive menu
+red-dev platform             # what red-dev thinks this machine is
+red-dev plan [scope]         # what would change, changes nothing
+red-dev install [scope]      # converge toward the manifest
+red-dev install --dry-run    # print the plan, touch nothing
+red-dev update               # upgrade what the package managers own
+red-dev theme <name>         # tokyo-night | catppuccin | gruvbox
+red-dev doctor               # report drift
 ```
+
+Global options: `--theme`, `--font` (`firacode`, `jetbrainsmono`, `hack`,
+`caskaydiacove`).
+
+Arguments are declared as a schema with
+[cli-args-parser](https://www.npmjs.com/package/cli-args-parser), so an unknown
+option, an invalid scope or an unknown theme is rejected before any provider
+runs — the cheapest place to fail.
 
 Every provider is idempotent. Re-running after a partial failure is the normal
 recovery path, not an edge case.
+
+## The WSL scope
+
+Under WSL the terminal, the fonts and the GUI belong to Windows. Installing a
+Nerd Font into the distro accomplishes nothing: the glyphs are drawn on the
+other side of the boundary. So the `wsl` scope runs inside Ubuntu and acts on
+the host — installing the font into the Windows per-user font store (no
+administrator rights needed) and patching Windows Terminal's `settings.json`.
+
+That patch preserves everything it does not own. Your keybindings, actions and
+extra profiles are yours; red-dev touches the colour scheme, the font, the
+default profile and the starting directory, and writes a backup first, because
+a malformed `settings.json` makes Windows Terminal silently fall back to
+defaults and lose your configuration.
+
+The starting directory is set to your home *inside* the distro. Without it the
+profile opens in the Windows working directory, which puts you under `/mnt/c` —
+the slow path across the 9p boundary, where `npm ci` and `bundle install` crawl.
 
 ## Bugs inherited from the WSL forks, fixed here
 
@@ -103,12 +131,15 @@ absent. Detection uses `where.exe` rather than stat-ing PATH entries.
 
 ## Status
 
-Early.
+Early, but the whole loop runs.
 
-- Working: `platform`, `plan`, `doctor`, `menu`, `update`
-- `install` covers the apt, winget and GitHub-release providers
-- Not written yet: the `script:` providers, the `wsl` scope (Nerd Font and
-  Windows Terminal configuration on the host), and theme switching
+- Working: `platform`, `plan`, `doctor`, `menu`, `install`, `update`, `theme`
+- Providers: apt, winget, GitHub releases, and builtins for the WSL scope
+- Verified on WSL Ubuntu 24.04 and native Windows from one source tree
+- Not written yet: the `script:` providers (`fastfetch`, `mise`, `neovim`,
+  `docker`, `github-cli` still lean on upstream install scripts), theme
+  application to Neovim and Alacritty, and the whole `desktop` scope on real
+  bare-metal Ubuntu — it is implemented but has never run on one
 
 ## License
 

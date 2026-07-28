@@ -31,6 +31,8 @@ export type Provider =
    */
   | { kind: "gh"; repo: string; asset: string }
   | { kind: "script"; name: string }
+  /** Implemented in TypeScript, in this binary. */
+  | { kind: "builtin"; name: "nerd-font" | "windows-terminal" }
   /** Not installed here, deliberately. The reason is required. */
   | { kind: "skip"; reason: string };
 
@@ -46,6 +48,14 @@ export interface Tool {
    */
   cmd?: string[];
   scope: Scope;
+  /**
+   * True when presence cannot be answered by probing for a command —
+   * a font, a settings file. The provider owns the check and is
+   * idempotent, so `install` always calls it and it decides whether
+   * there is work to do. Reporting these as "missing" forever, which
+   * a command probe would, is worse than useless.
+   */
+  managed?: boolean;
   u24: Provider;
   /** Omit when identical to u24. */
   u26?: Provider;
@@ -56,6 +66,10 @@ const apt = (pkg: string): Provider => ({ kind: "apt", pkg });
 const winget = (id: string): Provider => ({ kind: "winget", id });
 const gh = (repo: string, asset: string): Provider => ({ kind: "gh", repo, asset });
 const script = (name: string): Provider => ({ kind: "script", name });
+const builtin = (name: "nerd-font" | "windows-terminal"): Provider => ({
+  kind: "builtin",
+  name,
+});
 const skip = (reason: string): Provider => ({ kind: "skip", reason });
 
 const NO_GUI = "no GUI layer on this target";
@@ -164,13 +178,15 @@ export const TOOLS: Tool[] = [
   {
     name: "nerd-font",
     scope: "wsl",
-    u24: script("wsl-nerd-font"),
+    managed: true,
+    u24: builtin("nerd-font"),
     win: skip(HOST_PROVIDES),
   },
   {
     name: "windows-terminal",
     scope: "wsl",
-    u24: script("wsl-terminal-config"),
+    managed: true,
+    u24: builtin("windows-terminal"),
     win: skip(HOST_PROVIDES),
   },
 ];
@@ -191,6 +207,7 @@ export function applicableScopes(p: Platform): Scope[] {
 }
 
 export function isInstalled(tool: Tool): boolean {
+  if (tool.managed) return false; // the provider decides; see Tool.managed
   const candidates = tool.cmd ?? [tool.name];
   return candidates.some(commandExists);
 }
@@ -209,6 +226,8 @@ export function describeProvider(pr: Provider): string {
       return `gh:${pr.repo}:${pr.asset}`;
     case "script":
       return `script:${pr.name}`;
+    case "builtin":
+      return `builtin:${pr.name}`;
     case "skip":
       return `skip (${pr.reason})`;
   }

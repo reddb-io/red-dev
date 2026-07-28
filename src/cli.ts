@@ -1,0 +1,140 @@
+/**
+ * Command-line surface, declared as a schema rather than parsed by
+ * hand.
+ *
+ * The previous version did `const [, , cmd, arg] = process.argv`, which
+ * cannot express an optional flag, cannot validate a scope against its
+ * allowed values, and silently accepts nonsense. Declaring the shape
+ * means unknown options and bad values are rejected before any provider
+ * runs — the cheapest possible place to fail.
+ */
+
+import { createCLI, type CLI } from "cli-args-parser";
+import { themeNames, DEFAULT_THEME } from "./themes.ts";
+
+export const VERSION = "0.2.0";
+
+const SCOPES = ["core", "desktop", "wsl"] as const;
+
+/** Font keys accepted by --font; mirrors NERD_FONTS in wsl.ts. */
+const FONTS = ["firacode", "jetbrainsmono", "hack", "caskaydiacove"] as const;
+
+// PositionalDefinition has no `choices` field, so positional values are
+// validated in parseArgs rather than by the schema. Declaring choices
+// here would look like validation and do nothing — TypeScript only
+// excess-property-checks inline literals, so it would not even warn.
+const scopePositional = {
+  name: "scope",
+  description: `limit to one scope (${SCOPES.join(", ")})`,
+  required: false,
+} as const;
+
+export function buildCli(): CLI {
+  return createCLI({
+    name: "red-dev",
+    version: VERSION,
+    description: "One dev environment across Ubuntu 24, Ubuntu 26, WSL and Windows",
+    strict: true,
+    options: {
+      theme: {
+        type: "string",
+        description: "colour scheme to apply",
+        choices: themeNames(),
+        default: DEFAULT_THEME,
+      },
+      font: {
+        type: "string",
+        description: "Nerd Font to install (WSL and Windows targets)",
+        choices: [...FONTS],
+        default: "firacode",
+      },
+    },
+    commands: {
+      platform: {
+        description: "show what red-dev thinks this machine is",
+      },
+      plan: {
+        description: "list what would change, change nothing",
+        positional: [scopePositional],
+      },
+      install: {
+        description: "converge this machine toward the manifest",
+        positional: [scopePositional],
+        options: {
+          "dry-run": {
+            type: "boolean",
+            description: "print what install would do, then stop",
+            default: false,
+          },
+        },
+      },
+      update: {
+        description: "upgrade what the package managers own, then converge",
+      },
+      doctor: {
+        description: "report drift against the manifest",
+      },
+      theme: {
+        description: "apply a colour scheme",
+        positional: [
+          {
+            name: "name",
+            description: `theme to apply (${themeNames().join(", ")})`,
+            required: false,
+          },
+        ],
+      },
+      menu: {
+        description: "interactive menu",
+      },
+    },
+  });
+}
+
+export interface Invocation {
+  command: string | null;
+  scope: string | undefined;
+  themeName: string;
+  font: string;
+  dryRun: boolean;
+  errors: string[];
+  /** Args that matched no command — an unknown verb. */
+  unknown: string[];
+}
+
+export function parseArgs(cli: CLI, argv: string[]): Invocation {
+  const r = cli.parse(argv);
+  const opts = r.options as Record<string, unknown>;
+  const pos = r.positional as Record<string, unknown>;
+  const errors = [...(r.errors ?? [])];
+
+  // Positionals carry no schema-level choices, so check them here.
+  const rawScope = pos["scope"];
+  let scope: string | undefined;
+  if (typeof rawScope === "string") {
+    if ((SCOPES as readonly string[]).includes(rawScope)) {
+      scope = rawScope;
+    } else {
+      errors.push(`invalid scope '${rawScope}' (expected: ${SCOPES.join(", ")})`);
+    }
+  }
+
+  const rawName = pos["name"];
+  if (typeof rawName === "string" && !themeNames().includes(rawName)) {
+    errors.push(`unknown theme '${rawName}' (known: ${themeNames().join(", ")})`);
+  }
+
+  return {
+    command: r.command[0] ?? null,
+    // `theme <name>` and `plan <scope>` both land in the positional map
+    // under their own key; the caller reads whichever applies.
+    scope: scope ?? (typeof rawName === "string" ? rawName : undefined),
+    themeName: typeof opts["theme"] === "string" ? opts["theme"] : DEFAULT_THEME,
+    font: typeof opts["font"] === "string" ? opts["font"] : "firacode",
+    dryRun: opts["dry-run"] === true,
+    errors,
+    // An unrecognised verb lands in `rest` with an empty command path,
+    // which is different from "no arguments at all".
+    unknown: r.command.length === 0 ? (r.rest ?? []) : [],
+  };
+}

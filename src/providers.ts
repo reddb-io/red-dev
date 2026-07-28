@@ -251,10 +251,16 @@ export async function systemUpdate(p: Platform): Promise<void> {
 
 // -------------------------------------------------------- dispatch
 
-export async function applyProvider(
-  pr: Provider,
-  ctx: { root: string; platform: Platform },
-): Promise<void> {
+export interface ApplyContext {
+  root: string;
+  platform: Platform;
+  /** Theme key from src/themes.ts. */
+  theme: string;
+  /** Font key from src/wsl.ts NERD_FONTS. */
+  font: string;
+}
+
+export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<void> {
   switch (pr.kind) {
     case "apt":
       // Batched by the caller; reaching here means a one-off.
@@ -269,6 +275,27 @@ export async function applyProvider(
     case "script":
       await scriptInstall(pr.name, ctx.root);
       return;
+    case "builtin": {
+      // Imported lazily so the Windows build does not pull WSL-only
+      // code into a target that can never reach a WSL host.
+      const wsl = await import("./wsl.ts");
+      if (pr.name === "nerd-font") {
+        await wsl.installNerdFont(ctx.font);
+      } else {
+        const { THEMES } = await import("./themes.ts");
+        const theme = THEMES[ctx.theme];
+        if (!theme) throw new RedError(`unknown theme '${ctx.theme}'`);
+        const spec = wsl.NERD_FONTS[ctx.font];
+        if (!spec) throw new RedError(`unknown font '${ctx.font}'`);
+        await wsl.configureWindowsTerminal({
+          fontFace: spec.family,
+          theme,
+          distro: process.env["WSL_DISTRO_NAME"] ?? undefined,
+          home: process.env["HOME"] ?? undefined,
+        });
+      }
+      return;
+    }
     case "skip":
       return;
   }
