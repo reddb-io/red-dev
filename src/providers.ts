@@ -263,6 +263,39 @@ async function installBinariesFrom(dir: string): Promise<void> {
   }
 }
 
+// -------------------------------------------------------------- npm
+
+/**
+ * Fetch a vendor's install script and run it.
+ *
+ * Downloaded to a file and executed, rather than piped into sh: a pipe
+ * consumes stdin, so an installer that wants to ask something gets EOF
+ * instead — and a truncated download runs whatever prefix arrived.
+ * Writing it out first means a failed transfer fails before anything
+ * executes.
+ */
+export async function installerInstall(url: string, note: string): Promise<void> {
+  log.step(`installer: ${url}`);
+  log.plain(`       ${note}`);
+
+  const tmp = `/tmp/red-dev-installer-${Date.now()}.sh`;
+  const res = await fetch(url);
+  if (!res.ok) throw new RedError(`installer download failed ${res.status}: ${url}`);
+  const body = await res.text();
+  if (body.trim().length === 0) throw new RedError(`installer at ${url} was empty`);
+  await Bun.write(tmp, body);
+
+  const proc = Bun.spawn(["sh", tmp], {
+    stdout: "inherit",
+    stderr: "inherit",
+    stdin: stdinMode(),
+  });
+  const code = await proc.exited;
+  await run(["rm", "-f", tmp], { allowFailure: true });
+
+  if (code !== 0) throw new RedError(`installer exited ${code}: ${url}`);
+}
+
 // ------------------------------------------------- ppa / apt repos
 
 export async function ppaInstall(ppa: string, pkgs: string[]): Promise<void> {
@@ -424,6 +457,9 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
     case "winget":
       await wingetInstall(pr.id);
       return;
+    case "installer":
+      await installerInstall(pr.url, pr.note);
+      return;
     case "gh":
       await ghInstall(pr.repo, pr.asset, pr.bin);
       return;
@@ -444,6 +480,11 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
       if (pr.name === "blesh") {
         const { installBlesh } = await import("./blesh.ts");
         await installBlesh();
+        return;
+      }
+      if (pr.name === "runtimes") {
+        const { installRuntimes } = await import("./runtimes.ts");
+        await installRuntimes(ctx.platform);
         return;
       }
       if (pr.name === "alacritty") {

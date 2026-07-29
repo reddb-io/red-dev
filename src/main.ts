@@ -270,10 +270,93 @@ async function cmdTheme(p: Platform, inv: Invocation, name?: string): Promise<nu
   return 0;
 }
 
+/**
+ * Choose optional tools.
+ *
+ * `install` stays silent on purpose — it runs in CI and in scripts,
+ * where a prompt is a hang. Everything that wants an answer lives
+ * behind a command you invoke deliberately, which is also why this can
+ * be re-run whenever the answer changes.
+ */
+async function cmdApps(p: Platform, inv: Invocation): Promise<number> {
+  const { checkbox } = await import("./ui.ts");
+  const available = toolsInScope("optional").filter(
+    (t) => providerFor(t, p).kind !== "skip",
+  );
+
+  if (available.length === 0) {
+    log.skip("no optional tools apply to this target");
+    return 0;
+  }
+
+  const already = available.filter(isInstalled).map((t) => t.name);
+  const labels = available.map((t) =>
+    `${t.name}${t.about ? ` — ${t.about}` : ""}${already.includes(t.name) ? "  (installed)" : ""}`,
+  );
+
+  const picked = await checkbox("Which optional tools?", labels as [string, ...string[]], []);
+  if (picked.length === 0) {
+    log.skip("nothing selected");
+    return 0;
+  }
+
+  // Map the decorated labels back to tool names.
+  const names = picked.map((l) => l.split(" ")[0]!.trim());
+  const ctx = contextFor(p, inv);
+  let failures = 0;
+
+  for (const name of names) {
+    const tool = available.find((t) => t.name === name);
+    if (!tool) continue;
+    if (isInstalled(tool)) {
+      log.skip(`${name} already present`);
+      continue;
+    }
+    try {
+      await applyProvider(providerFor(tool, p), ctx);
+      log.ok(name);
+    } catch (err) {
+      log.err(`${name}: ${(err as Error).message}`);
+      failures++;
+    }
+  }
+
+  return failures > 0 ? 1 : 0;
+}
+
+/** Choose which language runtimes mise manages. */
+async function cmdLang(): Promise<number> {
+  const { checkbox } = await import("./ui.ts");
+  const { OFFERED_RUNTIMES, useRuntimes, currentRuntimes } = await import("./runtimes.ts");
+
+  const current = await currentRuntimes();
+  const labels = OFFERED_RUNTIMES.map((r) => {
+    const name = r.id.split("@")[0]!;
+    return `${r.id} — ${r.about}${current.includes(name) ? "  (installed)" : ""}`;
+  });
+
+  const picked = await checkbox("Which runtimes?", labels as [string, ...string[]], []);
+  if (picked.length === 0) {
+    log.skip("nothing selected");
+    return 0;
+  }
+
+  try {
+    await useRuntimes(picked.map((l) => l.split(" ")[0]!.trim()));
+    log.ok("runtimes updated — open a new shell");
+    return 0;
+  } catch (err) {
+    log.err((err as Error).message);
+    return 1;
+  }
+}
+
 const MENU = [
   "install — converge this machine",
   "update — upgrade installed packages",
   "theme — change colour scheme",
+  "apps — choose optional tools",
+  "lang — choose language runtimes",
   "plan — preview changes",
   "doctor — report drift",
   "platform — show detection",
@@ -298,6 +381,10 @@ async function cmdMenu(p: Platform, inv: Invocation, cliHelp: string): Promise<n
       return await cmdUpdate(p, inv);
     case "theme":
       return await cmdTheme(p, inv);
+    case "apps":
+      return await cmdApps(p, inv);
+    case "lang":
+      return await cmdLang();
     case "plan":
       return cmdPlan(p, inv);
     case "doctor":
@@ -352,6 +439,10 @@ async function main(): Promise<number> {
       return await cmdUpdate(p, inv);
     case "theme":
       return await cmdTheme(p, inv, inv.scope);
+    case "apps":
+      return await cmdApps(p, inv);
+    case "lang":
+      return await cmdLang();
     case "menu":
     case null:
       return await cmdMenu(p, inv, cli.help());

@@ -162,11 +162,46 @@ red-dev plan [scope]         # what would change, changes nothing
 red-dev install [scope]      # converge toward the manifest
 red-dev install --dry-run    # print the plan, touch nothing
 red-dev update               # upgrade what the package managers own
-red-dev theme <name>         # tokyo-night | catppuccin | gruvbox
+red-dev theme [name]         # tokyo-night | catppuccin | gruvbox
+red-dev apps                 # choose optional tools
+red-dev lang                 # choose runtimes for mise to manage
 red-dev doctor               # report drift
 ```
 
 Global options: `--theme`, `--font`, `--opacity`.
+
+### Nothing to install
+
+Most of what this tool does is answer questions — what is this machine, what
+would change, what has drifted — and none of those are worth installing
+something to ask. Pass a command to the bootstrap and it runs from a temporary
+copy that deletes itself:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.sh | sh -s -- doctor
+```
+
+```console
+:: resolving stable release of reddb-io/red-dev
+:: downloading red-dev-linux-x64 (temporary)
+:: running: red-dev doctor
+```
+
+### What asks, and what does not
+
+`install` never prompts. It runs in CI, in scripts, and over SSH, where a
+question is a hang — so every choice lives behind a command you invoke
+deliberately:
+
+| Command | Asks |
+| --- | --- |
+| `red-dev` | the menu, then whatever you pick |
+| `red-dev theme` | which theme, when given no name |
+| `red-dev apps` | which optional tools |
+| `red-dev lang` | which runtimes mise should manage |
+
+Omakub asks these at first run; here they are re-runnable, because the answers
+change when a project does.
 
 ### Look before you touch
 

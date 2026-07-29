@@ -108,6 +108,27 @@ if [ -z "$URL" ]; then
   exit 1
 fi
 
+# Arguments turn this into a run, not an install.
+#
+#   curl ... | sh                 install, then converge
+#   curl ... | sh -s -- doctor    run `red-dev doctor` and leave nothing behind
+#
+# Worth having because most of what this tool does is answer questions —
+# what is this machine, what would change, what has drifted — and none
+# of those are worth installing something to ask.
+if [ "$#" -gt 0 ]; then
+  say "downloading $ASSET (temporary)"
+  TMP=$(mktemp -d)
+  # Clean up on any exit path, including the interrupt that a long
+  # command invites.
+  trap 'rm -rf "$TMP"' EXIT INT TERM
+  curl -fsSL "$URL" -o "$TMP/red-dev" || fail "download failed"
+  chmod +x "$TMP/red-dev"
+  say "running: red-dev $*"
+  "$TMP/red-dev" "$@"
+  exit $?
+fi
+
 say "downloading $ASSET"
 mkdir -p "$BIN_DIR"
 TMP=$(mktemp)

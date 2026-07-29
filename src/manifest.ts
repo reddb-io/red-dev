@@ -15,11 +15,44 @@ export type Scope =
   /** Bare-metal Ubuntu only: GUI apps, GNOME settings. */
   | "desktop"
   /** WSL only: runs in the distro but acts on the Windows host. */
-  | "wsl";
+  | "wsl"
+  /**
+   * Never installed by a plain converge — only when explicitly chosen.
+   *
+   * omakub asks which optional apps you want at first run. The same idea
+   * needs a scope of its own here rather than a flag on each tool,
+   * because `install` must stay non-interactive: it runs in CI and in
+   * scripts, where a prompt is a hang.
+   */
+  | "optional";
 
 export type Provider =
   | { kind: "apt"; pkg: string }
   | { kind: "winget"; id: string }
+  /**
+   * A global npm package. Used where the same package serves every
+   * target: one name, one version, no per-platform skew. The agent CLIs
+   * all exist in winget too, and all lag npm by a release or two, which
+   * would put a different version on Windows than on Linux for no gain.
+   *
+   * These live in the mise-managed node prefix, so a node major bump
+   * loses them — re-running install puts them back, which is the same
+   * contract every other provider here has.
+   */
+  /**
+   * The vendor's own install script, fetched and run.
+   *
+   * Used for tools whose publisher treats this as the supported path.
+   * It is `curl | sh` from a third party, which is a real trust
+   * decision, so it is spelled out in the manifest rather than hidden
+   * inside a helper: the URL is visible at the point of use.
+   *
+   * Preferred over npm for these, because npm 11 gates postinstall
+   * scripts by default and several of them fetch the platform binary in
+   * exactly that hook — which installs cleanly and leaves a command that
+   * does not work.
+   */
+  | { kind: "installer"; url: string; note: string }
   /**
    * Resolve a release asset by *matching a glob against the names the
    * release actually has*, never by building a filename from a pinned
@@ -66,7 +99,8 @@ export type Provider =
         | "dotfiles"
         | "alacritty"
         | "wsl-interop"
-        | "blesh";
+        | "blesh"
+        | "runtimes";
     }
   /** Not installed here, deliberately. The reason is required. */
   | { kind: "skip"; reason: string };
@@ -74,6 +108,8 @@ export type Provider =
 export interface Tool {
   /** Stable logical name — what the user thinks they have. */
   name: string;
+  /** One line shown when offering this tool in a selection list. */
+  about?: string;
   /**
    * Binaries to probe. Debian renames several of these (ripgrep -> rg,
    * bat -> batcat, fd-find -> fdfind) while Windows and upstream keep
@@ -99,6 +135,11 @@ export interface Tool {
 
 const apt = (pkg: string): Provider => ({ kind: "apt", pkg });
 const winget = (id: string): Provider => ({ kind: "winget", id });
+const installer =(url: string, note: string): Provider => ({
+  kind: "installer",
+  url,
+  note,
+});
 const gh = (repo: string, asset: string, bin?: string): Provider => ({
   kind: "gh",
   repo,
@@ -124,7 +165,8 @@ const builtin = (
     | "dotfiles"
     | "alacritty"
     | "wsl-interop"
-    | "blesh",
+    | "blesh"
+    | "runtimes",
 ): Provider => ({ kind: "builtin", name });
 const skip = (reason: string): Provider => ({ kind: "skip", reason });
 
@@ -332,6 +374,43 @@ export const TOOLS: Tool[] = [
     u24: builtin("alacritty"),
     win: builtin("alacritty"),
   },
+  // Coding agents. Same package, same version, all five targets — which
+  // is the point: an agent that behaves differently depending on which
+  // machine you opened is worse than not having it there.
+  //
+  // Ordered after `runtimes` because they install into the node prefix
+  // mise provides; without that step there is no npm to install with.
+  {
+    name: "claude-code",
+    cmd: ["claude"],
+    scope: "core",
+    u24: installer("https://claude.ai/install.sh", "Anthropic's official installer"),
+    win: winget("Anthropic.ClaudeCode"),
+  },
+  {
+    name: "opencode",
+    scope: "core",
+    u24: installer("https://opencode.ai/install", "opencode's official installer"),
+    win: winget("SST.opencode"),
+  },
+  {
+    // No install script published; the release carries a static musl
+    // binary, which is the most portable of the three.
+    name: "codex",
+    scope: "core",
+    u24: gh("openai/codex", "codex-x86_64-unknown-linux-musl.tar.gz"),
+    win: winget("OpenAI.Codex"),
+  },
+  {
+    // Installing mise without using it leaves the machine with a
+    // version manager and no versions — which is how `pnpm` ends up
+    // resolving in one shell and not another on the same box.
+    name: "runtimes",
+    scope: "core",
+    managed: true,
+    u24: builtin("runtimes"),
+    win: builtin("runtimes"),
+  },
   {
     // Installed but not enabled: see the note in src/blesh.ts. Turning
     // it on is RED_BLE=1, and the reason it is not the default is that
@@ -359,6 +438,52 @@ export const TOOLS: Tool[] = [
     win: winget("Alacritty.Alacritty"),
   },
   { name: "flatpak", scope: "desktop", u24: apt("flatpak"), win: skip(NO_GUI) },
+
+  // ------------------------------------------------------ optional
+  // Chosen, never assumed. `red-dev apps` offers these; a plain
+  // converge ignores them entirely.
+  {
+    name: "just",
+    about: "command runner; a Makefile without the Make",
+    scope: "optional",
+    u24: apt("just"),
+    win: winget("Casey.Just"),
+  },
+  {
+    name: "duf",
+    about: "df you can read at a glance",
+    scope: "optional",
+    u24: apt("duf"),
+    win: winget("muesli.duf"),
+  },
+  {
+    name: "dust",
+    about: "du sorted by what is actually large",
+    scope: "optional",
+    u24: gh("bootandy/dust", "dust-*-x86_64-unknown-linux-musl.tar.gz"),
+    win: winget("bootandy.dust"),
+  },
+  {
+    name: "hyperfine",
+    about: "benchmark a command properly, with warmup and statistics",
+    scope: "optional",
+    u24: apt("hyperfine"),
+    win: winget("sharkdp.hyperfine"),
+  },
+  {
+    name: "glow",
+    about: "render markdown in the terminal",
+    scope: "optional",
+    u24: gh("charmbracelet/glow", "glow_*_Linux_x86_64.tar.gz"),
+    win: winget("charmbracelet.glow"),
+  },
+  {
+    name: "gitui",
+    about: "a lighter, keyboard-first alternative to lazygit",
+    scope: "optional",
+    u24: gh("gitui-org/gitui", "gitui-linux-x86_64.tar.gz"),
+    win: winget("StephanDilly.gitui"),
+  },
 
   // ----------------------------------------------------------- wsl
   // Runs inside the distro but deliberately reaches the Windows host,
@@ -408,7 +533,12 @@ export function providerFor(tool: Tool, p: Platform): Provider {
   return tool.u24;
 }
 
-/** Which scopes apply here. This is the whole matrix, in four lines. */
+/**
+ * Which scopes a plain converge touches. This is the whole matrix.
+ *
+ * `optional` is deliberately absent: it is reached through `red-dev
+ * apps`, never by running install.
+ */
 export function applicableScopes(p: Platform): Scope[] {
   const scopes: Scope[] = ["core"];
   if (p.caps.gui) scopes.push("desktop");
@@ -432,6 +562,8 @@ export function describeProvider(pr: Provider): string {
       return `apt:${pr.pkg}`;
     case "winget":
       return `winget:${pr.id}`;
+    case "installer":
+      return `installer:${pr.url}`;
     case "gh":
       return `gh:${pr.repo}:${pr.asset}`;
     case "ppa":

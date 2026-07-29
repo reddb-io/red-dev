@@ -23,7 +23,7 @@ import { themeNames, DEFAULT_THEME } from "./themes.ts";
  */
 export const VERSION: string = pkg.version;
 
-const SCOPES = ["core", "desktop", "wsl"] as const;
+const SCOPES = ["core", "desktop", "wsl", "optional"] as const;
 
 /** Font keys accepted by --font; mirrors NERD_FONTS in wsl.ts. */
 const FONTS = ["firacode", "jetbrainsmono", "hack", "caskaydiacove"] as const;
@@ -97,6 +97,12 @@ export function buildCli(): CLI {
             required: false,
           },
         ],
+      },
+      apps: {
+        description: "choose optional tools to install",
+      },
+      lang: {
+        description: "choose language runtimes for mise to manage",
       },
       menu: {
         description: "interactive menu",

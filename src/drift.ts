@@ -238,6 +238,49 @@ async function checkFont(p: Platform): Promise<DriftCheck> {
   }
 }
 
+/**
+ * Does the toolchain resolve the same way in every shell on this
+ * machine?
+ *
+ * The failure this catches: a tool present in PowerShell and absent in
+ * Git Bash. It is invisible from inside either shell — each one is
+ * self-consistent — and it surfaces as a script that worked yesterday
+ * failing today with "command not found".
+ */
+async function checkToolchainParity(p: Platform): Promise<DriftCheck> {
+  if (p.os !== "windows") {
+    return { name: "toolchain parity", status: "n/a", detail: "single shell environment" };
+  }
+  const { toolchainParity } = await import("./runtimes.ts");
+  const problem = await toolchainParity(p);
+  return problem === null
+    ? { name: "toolchain parity", status: "ok", detail: "Git Bash and PowerShell agree" }
+    : {
+        name: "toolchain parity",
+        status: "drift",
+        detail: problem,
+        fix: "red-dev install core",
+      };
+}
+
+async function checkRuntimes(): Promise<DriftCheck> {
+  const mise = Bun.which("mise");
+  if (!mise) {
+    return { name: "runtimes", status: "drift", detail: "mise not on PATH", fix: "red-dev install core" };
+  }
+  const proc = Bun.spawn([mise, "ls", "--installed"], { stdout: "pipe", stderr: "ignore" });
+  const out = (await new Response(proc.stdout).text()).trim();
+  await proc.exited;
+  return out
+    ? { name: "runtimes", status: "ok", detail: out.split("\n").length + " managed by mise" }
+    : {
+        name: "runtimes",
+        status: "drift",
+        detail: "mise manages nothing — a version manager with no versions",
+        fix: "red-dev install core",
+      };
+}
+
 async function checkBlesh(): Promise<DriftCheck> {
   const { isInstalled } = await import("./blesh.ts");
   if (!isInstalled()) {
@@ -261,6 +304,8 @@ export async function collectDrift(p: Platform): Promise<DriftCheck[]> {
   checks.push(checkWslInterop(p));
   checks.push(await checkFont(p));
   checks.push(await checkDelta());
+  checks.push(await checkRuntimes());
+  checks.push(await checkToolchainParity(p));
   checks.push(await checkBlesh());
   return checks;
 }
