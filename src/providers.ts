@@ -439,6 +439,9 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
         const { applyThemeEverywhere } = await import("./theme-apply.ts");
         const { applied } = await applyThemeEverywhere(theme, ctx.platform);
         if (applied.length > 0) log.ok(`themed: ${applied.join(", ")}`);
+
+        const { applyWallpaperLogged } = await import("./wallpaper.ts");
+        await applyWallpaperLogged(theme, ctx.theme, ctx.platform);
         return;
       }
       const wsl = await import("./wsl.ts");

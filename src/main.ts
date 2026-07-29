@@ -215,6 +215,9 @@ async function cmdTheme(p: Platform, inv: Invocation, name?: string): Promise<nu
     log.warn(`theme surfaces: ${(err as Error).message}`);
   }
 
+  const { applyWallpaperLogged } = await import("./wallpaper.ts");
+  await applyWallpaperLogged(theme, chosen, p);
+
   if (p.env === "wsl" || p.os === "windows") {
     try {
       await wsl.configureWindowsTerminal({
