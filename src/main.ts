@@ -491,6 +491,21 @@ async function cmdUninstall(p: Platform): Promise<number> {
   return failures > 0 ? 1 : 0;
 }
 
+/**
+ * Set WSL up from the Windows side, on demand rather than only during a
+ * first run — someone who declined at setup should not have to reset
+ * their preferences to change their mind.
+ */
+async function cmdWsl(p: Platform): Promise<number> {
+  if (p.os !== "windows") {
+    log.skip("this sets WSL up from the Windows side; you are already inside a distro");
+    return 0;
+  }
+  const { offerWsl } = await import("./wsl-provision.ts");
+  await offerWsl(p);
+  return 0;
+}
+
 /** Choose which language runtimes mise manages. */
 async function cmdLang(): Promise<number> {
   const { checkbox } = await import("./ui.ts");
@@ -606,6 +621,8 @@ async function main(): Promise<number> {
       return await cmdShell(p, inv);
     case "uninstall":
       return await cmdUninstall(p);
+    case "wsl":
+      return await cmdWsl(p);
     case "menu":
     case null:
       return await cmdMenu(p, inv, cli.help());

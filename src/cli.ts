@@ -115,6 +115,9 @@ export function buildCli(): CLI {
       uninstall: {
         description: "remove tools or red-dev's own configuration",
       },
+      wsl: {
+        description: "set up WSL on this Windows machine",
+      },
       menu: {
         description: "interactive menu",
       },

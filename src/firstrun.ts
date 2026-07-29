@@ -91,6 +91,14 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
   log.plain("     reaches atuin.");
   const blesh = await confirm("Enable ble.sh?", false);
 
+  // On a fresh Windows the biggest question is not the theme: it is
+  // whether this machine gets a Linux side at all. Asked before the
+  // terminal question, because the answer changes what that one means.
+  if (p.os === "windows") {
+    const { offerWsl } = await import("./wsl-provision.ts");
+    await offerWsl(p);
+  }
+
   // The Windows/WSL question, asked only where both sides exist.
   let terminalShell: Preferences["terminalShell"];
   if (p.env === "wsl" || p.os === "windows") {
