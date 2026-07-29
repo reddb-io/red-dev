@@ -103,9 +103,12 @@ export interface Invocation {
   font: string;
   opacity: number;
   dryRun: boolean;
+  /**
+   * Parse and validation failures. Strict mode means an unrecognised
+   * command lands here too, with the list of real ones — so there is no
+   * separate "unknown verb" channel to check.
+   */
   errors: string[];
-  /** Args that matched no command — an unknown verb. */
-  unknown: string[];
 }
 
 /**
@@ -154,8 +157,5 @@ export function parseArgs(cli: CLI, argv: string[]): Invocation {
     opacity: clampOpacity(opts["opacity"], errors),
     dryRun: opts["dry-run"] === true,
     errors,
-    // An unrecognised verb lands in `rest` with an empty command path,
-    // which is different from "no arguments at all".
-    unknown: r.command.length === 0 ? (r.rest ?? []) : [],
   };
 }

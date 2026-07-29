@@ -295,12 +295,9 @@ async function main(): Promise<number> {
   const inv = parseArgs(cli, argv);
 
   if (inv.errors.length > 0) {
+    // Strict mode puts unrecognised commands here too, already carrying
+    // the list of real ones, so there is nothing extra to print.
     for (const e of inv.errors) log.err(e);
-    return 1;
-  }
-  if (inv.unknown.length > 0) {
-    log.err(`unknown command: ${inv.unknown[0]}`);
-    log.plain(cli.help());
     return 1;
   }
 

@@ -29,6 +29,9 @@ jobs:
       - name: Typecheck
         run: bunx tsc --noEmit
 
+      - name: Test
+        run: bun test
+
       - name: Verify embedded dotfiles survive compilation
         # The distribution model depends on this: a binary that cannot
         # carry config/ installs tools and no experience.

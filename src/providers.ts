@@ -138,7 +138,8 @@ export async function wingetInstall(id: string): Promise<void> {
 
 // --------------------------------------------------- github release
 
-function globToRegExp(glob: string): RegExp {
+/** Exported for tests: asset matching is where a silent bug costs most. */
+export function globToRegExp(glob: string): RegExp {
   const escaped = glob.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
   return new RegExp(`^${escaped}$`);
 }
