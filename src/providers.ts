@@ -112,8 +112,29 @@ export async function aptInstall(pkgs: string[]): Promise<void> {
 
 // ---------------------------------------------------------- winget
 
-function wingetBin(): string {
-  return process.platform === "win32" ? "winget" : "winget.exe";
+/**
+ * Build the argv that actually runs winget.
+ *
+ * winget is an APPEXECLINK reparse point under WindowsApps, and a
+ * process cannot exec one directly — not by name, and not by absolute
+ * path either, which is the part that took three attempts to learn.
+ * Bun's spawn reports "Executable not found in $PATH" even when handed
+ * the exact path `where.exe` returns.
+ *
+ * cmd.exe resolves execution aliases the way Explorer does, so going
+ * through it is the difference between every winget install failing and
+ * every one working. Under WSL the same alias is reached through the
+ * interop layer, where winget.exe is a normal executable again.
+ *
+ * This is the third face of the same reparse-point problem: detection
+ * needed where.exe, the font install needed AddFontResourceW, and
+ * execution needs cmd.exe.
+ */
+function wingetArgv(args: string[]): string[] {
+  if (process.platform === "win32") {
+    return ["cmd.exe", "/c", "winget", ...args];
+  }
+  return [Bun.which("winget.exe") ?? "winget.exe", ...args];
 }
 
 export async function wingetInstall(id: string): Promise<void> {
@@ -125,8 +146,7 @@ export async function wingetInstall(id: string): Promise<void> {
   // idempotent converge into something that reads like a problem —
   // right underneath winget's own line saying it is fine.
   const proc = Bun.spawn(
-    [
-      wingetBin(),
+    wingetArgv([
       "install",
       "--id",
       id,
@@ -134,7 +154,7 @@ export async function wingetInstall(id: string): Promise<void> {
       "--silent",
       "--accept-package-agreements",
       "--accept-source-agreements",
-    ],
+    ]),
     { stdout: "pipe", stderr: "pipe" },
   );
   const out = await new Response(proc.stdout).text();
@@ -422,14 +442,13 @@ export async function systemUpdate(p: Platform): Promise<void> {
   if (p.caps.winget) {
     log.step("winget upgrade --all");
     await run(
-      [
-        wingetBin(),
+      wingetArgv([
         "upgrade",
         "--all",
         "--silent",
         "--accept-package-agreements",
         "--accept-source-agreements",
-      ],
+      ]),
       { allowFailure: true },
     );
   }

@@ -23,8 +23,8 @@ import { existsSync, mkdirSync } from "node:fs";
 import { log, RedError } from "./log.ts";
 
 function home(): string {
-  const h = process.env["HOME"];
-  if (!h) throw new RedError("HOME is not set");
+  const h = process.env["HOME"] ?? process.env["USERPROFILE"];
+  if (!h) throw new RedError("neither HOME nor USERPROFILE is set");
   return h;
 }
 

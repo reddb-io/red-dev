@@ -45,8 +45,11 @@ const SOURCE_LINE = "source ~/.local/share/red-dev/config/bash/rc.sh";
 const MARKER = "red-dev/config/bash/rc.sh";
 
 function home(): string {
-  const h = process.env["HOME"];
-  if (!h) throw new Error("HOME is not set");
+  // Native Windows sets USERPROFILE, not HOME. Git Bash then sets HOME
+  // to the same place, so deploying against USERPROFILE puts the files
+  // exactly where the shell that reads them will look.
+  const h = process.env["HOME"] ?? process.env["USERPROFILE"];
+  if (!h) throw new Error("neither HOME nor USERPROFILE is set");
   return h;
 }
 

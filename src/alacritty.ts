@@ -49,8 +49,8 @@ export async function configDir(p: Platform): Promise<string> {
     return `${await capture(["wslpath", "-u", winPath])}/alacritty`;
   }
 
-  const home = process.env["HOME"];
-  if (!home) throw new RedError("HOME is not set");
+  const home = process.env["HOME"] ?? process.env["USERPROFILE"];
+  if (!home) throw new RedError("neither HOME nor USERPROFILE is set");
   return `${home}/.config/alacritty`;
 }
 
