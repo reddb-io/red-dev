@@ -130,8 +130,8 @@ export async function aptInstall(pkgs: string[]): Promise<void> {
  * needed where.exe, the font install needed AddFontResourceW, and
  * execution needs cmd.exe.
  */
-function wingetArgv(args: string[]): string[] {
-  if (process.platform === "win32") {
+export function wingetArgv(args: string[], platform: string = process.platform): string[] {
+  if (platform === "win32") {
     return ["cmd.exe", "/c", "winget", ...args];
   }
   return [Bun.which("winget.exe") ?? "winget.exe", ...args];
