@@ -112,6 +112,9 @@ export function buildCli(): CLI {
       shell: {
         description: "choose whether the terminal opens WSL or Git Bash",
       },
+      uninstall: {
+        description: "remove tools or red-dev's own configuration",
+      },
       menu: {
         description: "interactive menu",
       },

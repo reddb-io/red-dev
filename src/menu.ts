@@ -51,6 +51,7 @@ type Handlers = {
   apps: () => Promise<number>;
   lang: () => Promise<number>;
   shell: () => Promise<number>;
+  uninstall: () => Promise<number>;
   applyTheme: (name: string) => Promise<number>;
   applyFont: (font: string, size: number) => Promise<void>;
 };
@@ -136,6 +137,7 @@ export async function runMenu(
       "Update — upgrade, then converge",
       "Plan — preview, change nothing",
       "Doctor — report drift",
+      "Uninstall — remove tools or config",
       "Platform — what this machine is",
       "Quit",
     ] as [string, ...string[]];
@@ -170,6 +172,9 @@ export async function runMenu(
         break;
       case "Doctor":
         last = await h.doctor();
+        break;
+      case "Uninstall":
+        last = await h.uninstall();
         break;
       case "Platform":
         last = h.platform();

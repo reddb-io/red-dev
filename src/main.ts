@@ -142,6 +142,13 @@ async function cmdInstall(p: Platform, inv: Invocation): Promise<number> {
     }
   }
 
+  // Repairs before converging: a machine can be broken in a way that
+  // looks complete, and then converging finds nothing to do.
+  if (!inv.dryRun) {
+    const { runPendingMigrations } = await import("./migrations.ts");
+    await runPendingMigrations(p);
+  }
+
   log.step(summary(p).split("\n")[0] ?? "");
 
   const { Reporter } = await import("./report.ts");
@@ -421,6 +428,69 @@ async function cmdShell(p: Platform, inv: Invocation): Promise<number> {
   return 0;
 }
 
+/**
+ * Remove things. The only destructive command here, so it names what
+ * will go and waits for a yes before doing any of it.
+ */
+async function cmdUninstall(p: Platform): Promise<number> {
+  const { checkbox, confirm, select } = await import("./ui.ts");
+  const { removableTools, removeConfiguration } = await import("./uninstall.ts");
+
+  const what = await select(
+    "Remove what?",
+    ["Tools — pick from what is installed", "red-dev's own configuration", "Cancel"] as const,
+    "Cancel",
+  );
+  if (what === "Cancel") return 0;
+
+  if (what.startsWith("red-dev")) {
+    log.warn("This removes the shipped dotfiles, the ~/.bashrc hook and recorded preferences.");
+    log.plain("     Installed tools stay. Your pre-red-dev shell backup stays.");
+    if (!(await confirm("Remove red-dev's configuration?", false))) {
+      log.skip("nothing removed");
+      return 0;
+    }
+    const removed = await removeConfiguration();
+    for (const r of removed) log.ok(`removed ${r}`);
+    return 0;
+  }
+
+  const candidates = removableTools(p);
+  if (candidates.length === 0) {
+    log.skip("nothing removable found");
+    return 0;
+  }
+
+  const labels = candidates.map((c) => `${c.tool.name} — ${c.removal.how}`);
+  const picked = await checkbox("Which tools?", labels as [string, ...string[]], []);
+  if (picked.length === 0) {
+    log.skip("nothing selected");
+    return 0;
+  }
+
+  const names = picked.map((l) => l.split(" ")[0]!);
+  log.plain("");
+  log.warn(`About to remove: ${names.join(", ")}`);
+  if (!(await confirm("Go ahead?", false))) {
+    log.skip("nothing removed");
+    return 0;
+  }
+
+  let failures = 0;
+  for (const name of names) {
+    const found = candidates.find((c) => c.tool.name === name);
+    if (!found) continue;
+    try {
+      await found.removal.run();
+      log.ok(`removed ${name}`);
+    } catch (err) {
+      log.err(`${name}: ${(err as Error).message}`);
+      failures++;
+    }
+  }
+  return failures > 0 ? 1 : 0;
+}
+
 /** Choose which language runtimes mise manages. */
 async function cmdLang(): Promise<number> {
   const { checkbox } = await import("./ui.ts");
@@ -466,6 +536,7 @@ async function cmdMenu(p: Platform, inv: Invocation, cliHelp: string): Promise<n
     apps: () => cmdApps(p, inv),
     lang: () => cmdLang(),
     shell: () => cmdShell(p, inv),
+    uninstall: () => cmdUninstall(p),
     applyTheme: (name) => cmdTheme(p, inv, name),
     applyFont: async (font, size) => {
       const wsl = await import("./wsl.ts");
@@ -533,6 +604,8 @@ async function main(): Promise<number> {
       return await cmdLang();
     case "shell":
       return await cmdShell(p, inv);
+    case "uninstall":
+      return await cmdUninstall(p);
     case "menu":
     case null:
       return await cmdMenu(p, inv, cli.help());

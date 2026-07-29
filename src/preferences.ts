@@ -37,6 +37,8 @@ export interface Preferences {
   /** Terminal font size in points. omakub offers 7 to 14. */
   fontSize?: number;
   blesh?: boolean;
+  /** Ids of one-off repairs already applied; see src/migrations.ts. */
+  migrations?: string[];
 }
 
 const FILE = "red-dev.json";
