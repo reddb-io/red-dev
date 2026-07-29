@@ -30,12 +30,23 @@ esac
 
 command -v curl >/dev/null 2>&1 || fail "curl is required"
 
-say "resolving latest release of $REPO"
+# Channel, the way toon's installer does it. `stable` asks for
+# /releases/latest, which by GitHub's definition never returns a
+# prerelease — so a repository publishing only prereleases 404s there
+# and looks empty. `next` lists all releases and takes the newest.
+CHANNEL="${RED_DEV_CHANNEL:-stable}"
+
+case "$CHANNEL" in
+  stable) API="https://api.github.com/repos/$REPO/releases/latest" ;;
+  next)   API="https://api.github.com/repos/$REPO/releases?per_page=1" ;;
+  *)      fail "RED_DEV_CHANNEL must be 'stable' or 'next' (got '$CHANNEL')" ;;
+esac
+
+say "resolving $CHANNEL release of $REPO"
 
 # Ask the API which assets the release actually has, rather than
 # constructing a URL from a version we assume. Guessing that is exactly
 # the bug that motivated this project.
-API="https://api.github.com/repos/$REPO/releases/latest"
 
 # Capture the status rather than relying on curl -f, so each failure
 # gets the hint that actually applies. A 404 here means no release has
@@ -53,18 +64,24 @@ case "$STATUS" in
   200) ;;
   404)
     rm -f "$BODY"
-    # A 404 here is ambiguous by design: GitHub returns it both for a
-    # repository with no releases and for one the caller cannot see.
-    # Saying only the first sends someone with a private repo hunting a
-    # release that already exists.
-    if [ -n "${GITHUB_TOKEN:-}" ]; then
-      fail "$REPO has no published releases yet"
-    else
-      printf 'fail no release found for %s.\n' "$REPO" >&2
-      printf '     Either none has been published, or the repository is\n' >&2
-      printf '     private — in which case export GITHUB_TOKEN and retry.\n' >&2
-      exit 1
+    # /releases/latest 404s for three different reasons, and guessing
+    # wrong sends people hunting the wrong problem. Ask the plain
+    # /releases endpoint which of the three this is.
+    if [ "$CHANNEL" = "stable" ]; then
+      PRERELEASES="$(curl -sSL "https://api.github.com/repos/$REPO/releases?per_page=1" \
+        ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} 2>/dev/null \
+        | grep -c '"tag_name"' || true)"
+      if [ "${PRERELEASES:-0}" -gt 0 ]; then
+        printf 'fail %s has no stable release yet, only prereleases.\n' "$REPO" >&2
+        printf '     Install the newest prerelease with:\n' >&2
+        printf '       RED_DEV_CHANNEL=next curl -fsSL .../boot.sh | sh\n' >&2
+        exit 1
+      fi
     fi
+    printf 'fail no release found for %s.\n' "$REPO" >&2
+    printf '     Either none has been published, or the repository is\n' >&2
+    printf '     private -- in which case export GITHUB_TOKEN and retry.\n' >&2
+    exit 1
     ;;
   403) rm -f "$BODY"; fail "GitHub API rate limit reached — set GITHUB_TOKEN and retry" ;;
   401) rm -f "$BODY"; fail "GITHUB_TOKEN was rejected — check that it can read $REPO" ;;
@@ -75,6 +92,9 @@ esac
 JSON=$(cat "$BODY")
 rm -f "$BODY"
 
+# The `next` channel returns an array, so this must take the first
+# matching asset across the newest release rather than assuming a single
+# object. Both shapes flatten the same way here.
 URL=$(printf '%s' "$JSON" \
   | tr ',' '\n' \
   | grep '"browser_download_url"' \

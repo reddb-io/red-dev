@@ -92,10 +92,24 @@ Both resolve the binary for your platform from the latest release, install it
 under your own user, and converge. Neither needs administrator or root rights
 for red-dev itself; individual packages may still ask for sudo.
 
-> [!NOTE]
-> No release has been cut yet. Until the first `v*` tag is pushed, both
-> bootstraps stop with `red-dev has no published releases yet` — which is the
-> message they are supposed to give, rather than a 404.
+> [!IMPORTANT]
+> **No stable release has been cut yet — only prereleases.** GitHub's
+> `/releases/latest` never returns a prerelease, so the commands above stop and
+> tell you so. Until the first `v*.*.*` tag, install from the `next` channel:
+>
+> ```bash
+> RED_DEV_CHANNEL=next sh -c "$(curl -fsSL https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.sh)"
+> ```
+>
+> ```powershell
+> $env:RED_DEV_CHANNEL='next'; irm https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.ps1 | iex
+> ```
+
+| Variable | Effect |
+| --- | --- |
+| `RED_DEV_CHANNEL` | `stable` (default) or `next` — every push to `main` publishes a `next` prerelease |
+| `RED_DEV_BIN_DIR` | Where the binary lands; defaults to `~/.local/bin` (Linux) or `%LOCALAPPDATA%\red-dev\bin` |
+| `GITHUB_TOKEN` | Raises the API rate limit; required only for a private fork |
 
 ---
 

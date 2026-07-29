@@ -19,7 +19,22 @@ if ([Environment]::Is64BitOperatingSystem -eq $false) {
     Fail 'red-dev publishes 64-bit builds only'
 }
 
-Say "resolving latest release of $Repo"
+# Channel, matching boot.sh and toon's installer. 'stable' asks for
+# /releases/latest, which by GitHub's definition never returns a
+# prerelease -- so a repository publishing only prereleases 404s there
+# and looks empty. 'next' lists all releases and takes the newest.
+$Channel = if ($env:RED_DEV_CHANNEL) { $env:RED_DEV_CHANNEL } else { 'stable' }
+if ($Channel -notin @('stable', 'next')) {
+    Fail "RED_DEV_CHANNEL must be 'stable' or 'next' (got '$Channel')"
+}
+
+$api = if ($Channel -eq 'stable') {
+    "https://api.github.com/repos/$Repo/releases/latest"
+} else {
+    "https://api.github.com/repos/$Repo/releases?per_page=1"
+}
+
+Say "resolving $Channel release of $Repo"
 
 # Ask the API which assets exist rather than assembling a URL from an
 # assumed version -- the failure mode that motivated this project.
@@ -27,13 +42,24 @@ $headers = @{ 'User-Agent' = 'red-dev-boot'; 'Accept' = 'application/vnd.github+
 if ($env:GITHUB_TOKEN) { $headers['Authorization'] = "Bearer $env:GITHUB_TOKEN" }
 
 try {
-    $release = Invoke-RestMethod "https://api.github.com/repos/$Repo/releases/latest" -Headers $headers
+    $release = Invoke-RestMethod $api -Headers $headers
+    # The 'next' endpoint returns an array; take the newest entry.
+    if ($release -is [array]) { $release = $release[0] }
 } catch {
     $code = $_.Exception.Response.StatusCode.value__
     # 404 is ambiguous: GitHub returns it both for "no releases" and for
     # "you cannot see this repository". Reporting only the first sends
     # someone with a private repo hunting a release that already exists.
-    if ($code -eq 404 -and -not $env:GITHUB_TOKEN) {
+    if ($code -eq 404 -and $Channel -eq 'stable') {
+        # Distinguish "no stable yet" from "nothing at all" instead of
+        # guessing, the same way boot.sh does.
+        $any = $null
+        try {
+            $any = Invoke-RestMethod "https://api.github.com/repos/$Repo/releases?per_page=1" -Headers $headers
+        } catch { }
+        if ($any -and $any.Count -gt 0) {
+            Fail "$Repo has no stable release yet, only prereleases. Install the newest with: `$env:RED_DEV_CHANNEL='next'; irm .../boot.ps1 | iex"
+        }
         Fail "no release found for $Repo. Either none has been published, or the repository is private -- in which case set GITHUB_TOKEN and retry."
     } elseif ($code -eq 404) {
         Fail "$Repo has no published releases yet"
