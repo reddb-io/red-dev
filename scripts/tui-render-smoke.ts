@@ -78,6 +78,49 @@ if (!frame.includes("\x1b[48;2;31;31;40m")) {
 if (!frame.includes("Kanagawa")) problems.push("panel title missing");
 if (!frame.includes("❯ kanagawa")) problems.push("selection marker missing");
 
+
+// --- the install timeline -------------------------------------------
+// The progress view is the other reason for a fullscreen mode, and its
+// bar is the piece most likely to break silently: an off-by-one in the
+// fill maths renders as an empty or overflowing row, not an error.
+function Bar(done: number, total: number, width: number) {
+  const filled = total === 0 ? 0 : Math.round((done / total) * width);
+  return Box(
+    { flexDirection: "row" },
+    Text({ color: "red" }, "\u2588".repeat(Math.max(0, filled))),
+    Text({ dim: true }, "\u2591".repeat(Math.max(0, width - filled))),
+  );
+}
+
+const progress = renderToString(
+  Box(
+    { flexDirection: "column", padding: 1 },
+    Box({ flexDirection: "row" }, Bar(14, 33, 30), Text({ dim: true }, "  14/33  \u00b7  1m 12s")),
+    Box(
+      { flexDirection: "column", borderStyle: "round", padding: 1 },
+      Box({ flexDirection: "row" }, Text({ color: "green" }, "\u2713 "), Text({}, "ripgrep".padEnd(16)), Text({ dim: true }, "installed")),
+      Box({ flexDirection: "row" }, Text({ color: "red" }, "\u2717 "), Text({}, "docker".padEnd(16)), Text({ dim: true }, "failed")),
+      Box({ flexDirection: "row" }, Text({ color: "yellow" }, "\u25b8 "), Text({ bold: true }, "zellij".padEnd(16)), Text({ dim: true }, "gh:zellij-org")),
+    ),
+  ),
+);
+
+console.log(progress);
+
+// 14 of 33 over 30 cells is 13 filled. A bar that is all-empty or
+// all-full means the maths broke, and both look plausible in isolation.
+const filledCount = (progress.match(/\u2588/g) ?? []).length;
+if (filledCount !== 13) problems.push(`progress bar filled ${filledCount} cells, expected 13`);
+if (!(progress.match(/\u2591/g) ?? []).length) problems.push("progress bar has no empty portion");
+if (!progress.includes("14/33")) problems.push("counter missing");
+// Glyph and name are separate Text nodes, so an ANSI reset sits between
+// them: asserting on the raw frame tests the renderer's escape placement
+// rather than the content. Strip colour first and check what a human
+// actually reads.
+const plain = progress.replace(/\x1b\[[0-9;]*m/g, "");
+if (!plain.includes("\u2713 ripgrep")) problems.push("completed step marker missing");
+if (!plain.includes("\u2717 docker")) problems.push("failed step marker missing");
+if (!plain.includes("\u25b8 zellij")) problems.push("running step marker missing");
 if (problems.length > 0) {
   console.error("\nRENDER SMOKE FAILED");
   for (const p of problems) console.error(`  ${p}`);

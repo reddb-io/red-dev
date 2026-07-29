@@ -4,6 +4,7 @@
  */
 
 import { buildCli, parseArgs, VERSION, type Invocation } from "./cli.ts";
+import type { StepOutcome } from "./converge.ts";
 import { log } from "./log.ts";
 import {
   applicableScopes,
@@ -14,7 +15,7 @@ import {
   type Scope,
 } from "./manifest.ts";
 import { detect, summary, type Platform } from "./platform.ts";
-import { aptInstall, applyProvider, systemUpdate, type ApplyContext } from "./providers.ts";
+import { applyProvider, systemUpdate, type ApplyContext } from "./providers.ts";
 import { THEMES, themeNames } from "./themes.ts";
 import { interactive, select } from "./ui.ts";
 
@@ -152,75 +153,30 @@ async function cmdInstall(p: Platform, inv: Invocation): Promise<number> {
   log.step(summary(p).split("\n")[0] ?? "");
 
   const { Reporter } = await import("./report.ts");
+  const { converge } = await import("./converge.ts");
   const report = new Reporter();
 
-  for (const scope of [...resolveScopes(p, inv.scope), ...extraScopes]) {
-    const tools = toolsInScope(scope);
-    report.scope(scope, tools.length);
+  // The loop lives in converge.ts and emits events; this turns each one
+  // into a line. The fullscreen view subscribes to the same events and
+  // draws them instead — one ordering, one apt batch, one failure
+  // policy, two presentations.
+  let close: ((outcome: StepOutcome, detail?: string) => void) | null = null;
+  const { failed } = await converge(
+    { platform: p, ctx, scopes: [...resolveScopes(p, inv.scope), ...extraScopes], dryRun: inv.dryRun },
+    {
+      scopeStart: (scope, total) => report.scope(scope, total),
+      note: (message) => report.note(message),
+      stepStart: (e) => {
+        close = report.begin(e.tool, e.provider || "—");
+      },
+      stepEnd: (r) => {
+        close?.(r.outcome, r.detail);
+        close = null;
+      },
+    },
+  );
 
-    // Batched apt first, because twenty sequential apt-get calls is the
-    // slowest part of a fresh provision and each re-reads the package
-    // lists. Resolved up front so the per-tool loop below can report
-    // each one as its own step rather than hiding them all behind one
-    // opaque transaction.
-    const pending = tools.filter(
-      (t) => providerFor(t, p).kind !== "skip" && !isInstalled(t),
-    );
-    const aptPkgs = pending
-      .map((t) => providerFor(t, p))
-      .filter((pr): pr is { kind: "apt"; pkg: string } => pr.kind === "apt")
-      .map((pr) => pr.pkg);
-
-    let aptError: string | null = null;
-    if (!inv.dryRun && aptPkgs.length > 0) {
-      report.note(`apt: ${aptPkgs.length} packages in one transaction`);
-      try {
-        await aptInstall(aptPkgs);
-      } catch (err) {
-        aptError = (err as Error).message;
-      }
-    }
-
-    for (const tool of tools) {
-      const pr = providerFor(tool, p);
-      const label = describeProvider(pr);
-
-      if (pr.kind === "skip") {
-        report.begin(tool.name, "—")("skipped", pr.reason);
-        continue;
-      }
-      if (isInstalled(tool)) {
-        report.begin(tool.name, label)("present");
-        continue;
-      }
-      if (inv.dryRun) {
-        report.begin(tool.name, label)("skipped", "dry run");
-        continue;
-      }
-
-      const done = report.begin(tool.name, label);
-      if (pr.kind === "apt") {
-        // Already attempted in the batch above; report the real state
-        // rather than claiming a per-tool install that never ran.
-        if (aptError) done("failed", aptError);
-        else done(isInstalled(tool) ? "installed" : "failed", "apt reported success but the binary is absent");
-        continue;
-      }
-
-      try {
-        await applyProvider(pr, ctx);
-        // A managed builtin converges rather than installs, and on a
-        // second run legitimately changes nothing.
-        done(tool.managed ? "applied" : "installed");
-      } catch (err) {
-        // One tool failing must not abort the run: the point of a
-        // converge tool is that you re-run it and it picks up the rest.
-        done("failed", (err as Error).message);
-      }
-    }
-  }
-
-  const { failed } = report.finish();
+  report.finish();
 
   if (inv.dryRun) {
     log.ok("dry run — nothing changed");
@@ -512,8 +468,19 @@ async function cmdUi(p: Platform, inv: Invocation): Promise<number> {
   switch (result.action) {
     case "theme":
       return result.theme ? await cmdTheme(p, inv, result.theme) : 0;
-    case "install":
-      return await cmdInstall(p, inv);
+    case "install": {
+      // Converge inside a live view rather than dropping back to the
+      // line report: someone who came in through the fullscreen
+      // interface wants to watch it, and a fresh machine spends
+      // minutes inside apt with nothing else to look at.
+      const { runInstallTui } = await import("./tui-install.ts");
+      const { failed } = await runInstallTui({
+        platform: p,
+        ctx: contextFor(p, inv),
+        scopes: resolveScopes(p, inv.scope),
+      });
+      return failed > 0 ? 1 : 0;
+    }
     case "doctor":
       return await cmdDoctor(p, inv);
     case "apps":

@@ -110,6 +110,7 @@ export interface TuiResult {
   theme?: string;
 }
 
+
 export async function runTui(p: Platform): Promise<TuiResult> {
   let result: TuiResult = { action: null };
 
@@ -142,6 +143,10 @@ export async function runTui(p: Platform): Promise<TuiResult> {
         if (inThemes) {
           result = { action: "theme", theme: names[themeIndex()] };
           exit();
+          // exit() unwinds the render loop but does not stop this
+          // handler, so without returning the lines below would run and
+          // overwrite the theme that was just chosen.
+          return;
         }
         const section = SECTIONS[sectionIndex()];
         if (section?.key === "theme") setMode("themes");
