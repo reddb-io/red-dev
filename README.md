@@ -137,6 +137,17 @@ aspirational.
 `neovim` · `docker` · `delta` · `yazi` · `tldr` · `starship` · `atuin` ·
 `carapace` · `direnv`
 
+**Coding agents**, each by the path its publisher supports rather than one
+uniform mechanism: `claude-code`, `opencode`, `codex`.
+
+**Optional**, never installed by a plain converge — `red-dev apps` offers them:
+`just` · `duf` · `dust` · `hyperfine` · `glow` · `gitui`
+
+**Runtimes** are mise's, not the distro's, so `node` resolves the same way in
+WSL, on the desktop, and in Git Bash. `red-dev lang` chooses which. A version
+manager that manages nothing is how `pnpm` ends up working in one shell and not
+another on the same machine.
+
 ### The shell
 
 Aliases that normalise Debian's renames (`bat` → `batcat`, `fd` → `fdfind`), the
@@ -150,6 +161,16 @@ the tools above actually do something rather than merely exist:
 | `yazi` | a browser you must `cd` after |
 | `tldr` | "Page cache not found" |
 | `atuin`, `carapace`, `direnv` | binaries nothing is bound to |
+
+`ble.sh` — autosuggestions and syntax highlighting, the two things people most
+often miss from zsh — is installed but **not enabled**. It replaces bash's line
+editor rather than sitting beside it, and atuin, fzf and carapace all bind into
+what it replaces. Whether they survive is an empirical question that needs a
+real terminal, so turning it on is deliberate:
+
+```bash
+export RED_BLE=1
+```
 
 ---
 
@@ -165,10 +186,12 @@ red-dev update               # upgrade what the package managers own
 red-dev theme [name]         # tokyo-night | catppuccin | gruvbox
 red-dev apps                 # choose optional tools
 red-dev lang                 # choose runtimes for mise to manage
-red-dev doctor               # report drift
+red-dev shell                # Windows + WSL: where a terminal lands
+red-dev doctor               # report tool and configuration drift
 ```
 
-Global options: `--theme`, `--font`, `--opacity`.
+Global options: `--theme`, `--font`, `--opacity`. Scopes: `core`, `desktop`,
+`wsl`, `optional`.
 
 ### Nothing to install
 
@@ -199,9 +222,77 @@ deliberately:
 | `red-dev theme` | which theme, when given no name |
 | `red-dev apps` | which optional tools |
 | `red-dev lang` | which runtimes mise should manage |
+| `red-dev shell` | whether a terminal lands in WSL or Git Bash |
 
 Omakub asks these at first run; here they are re-runnable, because the answers
 change when a project does.
+
+---
+
+## Using it on each target
+
+The command is the same everywhere. What differs is which scopes apply and
+which machine the work lands on — `red-dev platform` will tell you before you
+commit to anything.
+
+### Ubuntu desktop — 24.04 or 26.04
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.sh | sh
+```
+
+Scopes: `core` + `desktop`. Everything installs locally; Alacritty and zellij
+run natively, and the wallpaper goes through `gsettings`.
+
+> [!WARNING]
+> This target is **implemented and unproven** — no bare-metal Ubuntu has run it.
+> Start with `red-dev install --dry-run`.
+
+### WSL — Ubuntu 24.04 or 26.04 under Windows
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.sh | sh
+```
+
+Scopes: `core` + `wsl`. The `core` half installs inside the distro; the `wsl`
+half deliberately reaches **out to Windows**, because that is where the terminal
+and the fonts live. It registers the Nerd Font in the Windows font store,
+configures Windows Terminal and Alacritty on the host, installs Alacritty via
+winget, and re-registers the WSL interop binfmt entry that enabling systemd
+silently removes.
+
+That crossing needs interop working. If `.exe` calls fail with an exec format
+error, `red-dev install wsl` repairs it.
+
+### Windows, native
+
+```powershell
+irm https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.ps1 | iex
+```
+
+Scopes: `core` + `desktop`, everything through winget. The shell is **Git Bash,
+not PowerShell** — that is what makes the shipped dotfiles apply, and it is why
+this project standardises on bash rather than treating Windows as a separate
+world.
+
+> [!NOTE]
+> `boot.ps1` has been syntax-checked and ASCII-gated in CI but has never run on
+> a clean Windows machine.
+
+### Both on one machine
+
+Installing on the Windows side and inside WSL is normal and supported — they
+converge different scopes and share the host's terminal configuration.
+
+One thing they cannot share: Alacritty has no profiles, so it opens exactly one
+shell. Which one is a recorded choice rather than whichever side converged last:
+
+```bash
+red-dev shell
+```
+
+Windows Terminal has profiles and does not need this; red-dev already sets its
+default to the distro, opening in your Linux home rather than under `/mnt/c`.
 
 ### Look before you touch
 
