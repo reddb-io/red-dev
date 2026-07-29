@@ -24,7 +24,10 @@ import promptSh from "../config/bash/prompt.sh" with { type: "text" };
 import inputrc from "../config/bash/inputrc.conf" with { type: "text" };
 import zellijConfig from "../config/zellij/config.kdl" with { type: "text" };
 
-const FILES: Record<string, string> = {
+/** Exported so `doctor` can compare what is deployed against what this
+ * binary would deploy — an upgraded red-dev with stale files on disk is
+ * invisible otherwise. */
+export const FILES: Record<string, string> = {
   "rc.sh": rcSh,
   "path.sh": pathSh,
   "init.sh": initSh,

@@ -425,6 +425,11 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
         await installDotfiles();
         return;
       }
+      if (pr.name === "blesh") {
+        const { installBlesh } = await import("./blesh.ts");
+        await installBlesh();
+        return;
+      }
       if (pr.name === "alacritty") {
         const { configureAlacritty } = await import("./alacritty.ts");
         const { THEMES } = await import("./themes.ts");

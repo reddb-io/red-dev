@@ -65,7 +65,8 @@ export type Provider =
         | "windows-terminal"
         | "dotfiles"
         | "alacritty"
-        | "wsl-interop";
+        | "wsl-interop"
+        | "blesh";
     }
   /** Not installed here, deliberately. The reason is required. */
   | { kind: "skip"; reason: string };
@@ -122,7 +123,8 @@ const builtin = (
     | "windows-terminal"
     | "dotfiles"
     | "alacritty"
-    | "wsl-interop",
+    | "wsl-interop"
+    | "blesh",
 ): Provider => ({ kind: "builtin", name });
 const skip = (reason: string): Provider => ({ kind: "skip", reason });
 
@@ -329,6 +331,16 @@ export const TOOLS: Tool[] = [
     managed: true,
     u24: builtin("alacritty"),
     win: builtin("alacritty"),
+  },
+  {
+    // Installed but not enabled: see the note in src/blesh.ts. Turning
+    // it on is RED_BLE=1, and the reason it is not the default is that
+    // it replaces the line editor atuin, fzf and carapace bind into.
+    name: "blesh",
+    scope: "core",
+    managed: true,
+    u24: builtin("blesh"),
+    win: builtin("blesh"),
   },
 
   // ------------------------------------------------------- desktop

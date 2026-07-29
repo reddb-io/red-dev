@@ -71,17 +71,19 @@ function cmdPlan(p: Platform, inv: Invocation): number {
   return 0;
 }
 
-function cmdDoctor(p: Platform, inv: Invocation): number {
+async function cmdDoctor(p: Platform, inv: Invocation): Promise<number> {
   let missing = 0;
+
+  log.plain("\n[tools]");
   for (const scope of resolveScopes(p, inv.scope)) {
     for (const tool of toolsInScope(scope)) {
       const pr = providerFor(tool, p);
       if (pr.kind === "skip") {
         log.skip(`${tool.name} — ${pr.reason}`);
       } else if (tool.managed) {
-        // Not a binary on PATH, so "missing" is the wrong word. The
-        // provider is idempotent; converging is how you find out.
-        log.plain(`     ${tool.name} — managed, run install to converge`);
+        // Not a binary on PATH; the configuration section below is what
+        // actually answers whether these did their job.
+        continue;
       } else if (isInstalled(tool)) {
         log.ok(tool.name);
       } else {
@@ -90,8 +92,29 @@ function cmdDoctor(p: Platform, inv: Invocation): number {
       }
     }
   }
-  if (missing > 0) {
-    log.warn(`${missing} missing — run: red-dev install`);
+
+  // Presence on PATH is the easy half. Everything that goes wrong after
+  // a successful install is configuration, and it is silent.
+  log.plain("\n[configuration]");
+  const { collectDrift } = await import("./drift.ts");
+  const checks = await collectDrift(p);
+  let drifted = 0;
+
+  for (const c of checks) {
+    if (c.status === "ok") {
+      log.ok(`${c.name} — ${c.detail}`);
+    } else if (c.status === "n/a") {
+      log.skip(`${c.name} — ${c.detail}`);
+    } else {
+      log.err(`${c.name} — ${c.detail}`);
+      if (c.fix) log.plain(`       fix: ${c.fix}`);
+      drifted++;
+    }
+  }
+
+  log.plain("");
+  if (missing > 0 || drifted > 0) {
+    log.warn(`${missing} tool(s) missing, ${drifted} config drift(s)`);
     return 1;
   }
   log.ok("no drift");
@@ -278,7 +301,7 @@ async function cmdMenu(p: Platform, inv: Invocation, cliHelp: string): Promise<n
     case "plan":
       return cmdPlan(p, inv);
     case "doctor":
-      return cmdDoctor(p, inv);
+      return await cmdDoctor(p, inv);
     case "platform":
       return cmdPlatform(p);
     default:
@@ -322,7 +345,7 @@ async function main(): Promise<number> {
     case "plan":
       return cmdPlan(p, inv);
     case "doctor":
-      return cmdDoctor(p, inv);
+      return await cmdDoctor(p, inv);
     case "install":
       return await cmdInstall(p, inv);
     case "update":

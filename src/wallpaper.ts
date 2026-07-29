@@ -177,6 +177,63 @@ export async function applyWallpaper(
   return false;
 }
 
+/**
+ * Which image the desktop is currently pointed at, as the OS records it.
+ * Read from the source of truth rather than from what red-dev last
+ * wrote, so a wallpaper changed by hand — or one left pointing at a
+ * deleted file — is visible to `doctor`.
+ */
+export async function wallpaperPathInUse(p: Platform): Promise<string | null> {
+  if (p.os === "windows") {
+    const proc = Bun.spawn(
+      [
+        "powershell.exe",
+        "-NoProfile",
+        "-Command",
+        "(Get-ItemProperty 'HKCU:\\Control Panel\\Desktop' -Name WallPaper).WallPaper",
+      ],
+      { stdout: "pipe", stderr: "ignore" },
+    );
+    const out = (await new Response(proc.stdout).text()).trim();
+    await proc.exited;
+    return out || null;
+  }
+
+  if (p.env === "wsl") {
+    const shell =
+      Bun.which("powershell.exe") ??
+      "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
+    const proc = Bun.spawn(
+      [
+        shell,
+        "-NoProfile",
+        "-Command",
+        "(Get-ItemProperty 'HKCU:\\Control Panel\\Desktop' -Name WallPaper).WallPaper",
+      ],
+      { stdout: "pipe", stderr: "ignore" },
+    );
+    const winPath = (await new Response(proc.stdout).text()).trim();
+    if ((await proc.exited) !== 0 || !winPath) return null;
+    // Translate back so existsSync can check it from this side.
+    const conv = Bun.spawn(["wslpath", "-u", winPath], { stdout: "pipe", stderr: "ignore" });
+    const unix = (await new Response(conv.stdout).text()).trim();
+    return (await conv.exited) === 0 && unix ? unix : null;
+  }
+
+  if (p.env === "desktop" && Bun.which("gsettings")) {
+    const proc = Bun.spawn(
+      ["gsettings", "get", "org.gnome.desktop.background", "picture-uri"],
+      { stdout: "pipe", stderr: "ignore" },
+    );
+    const raw = (await new Response(proc.stdout).text()).trim();
+    await proc.exited;
+    const uri = raw.replace(/^'|'$/g, "");
+    return uri.startsWith("file://") ? decodeURIComponent(uri.slice(7)) : null;
+  }
+
+  return null;
+}
+
 export async function applyWallpaperLogged(
   theme: Theme,
   key: string,

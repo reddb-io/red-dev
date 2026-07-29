@@ -33,6 +33,22 @@ if [ -z "${RED_ENV:-}" ]; then
   export RED_ENV
 fi
 
+# ble.sh, when opted in.
+#
+# It has to load before everything else and attach after everything
+# else: it replaces bash's line editor rather than sitting beside it, so
+# anything that binds keys must be in place between the two halves.
+#
+# Off by default because red-dev already ships atuin, fzf and carapace,
+# all of which bind into the editor ble.sh replaces. Whether they
+# survive is an empirical question answerable only from a real terminal.
+# Set RED_BLE=1, confirm Ctrl-R still reaches atuin, and this default is
+# worth flipping.
+if [ "${RED_BLE:-0}" = "1" ] && [ -r "$HOME/.local/share/blesh/ble.sh" ]; then
+  # shellcheck disable=SC1091
+  . "$HOME/.local/share/blesh/ble.sh" --noattach
+fi
+
 # Readline settings. INPUTRC has to be exported before bash builds its
 # line editor, which is why this sits ahead of the sourcing loop rather
 # than inside init.sh.
@@ -50,3 +66,9 @@ for _red_part in path init aliases functions prompt; do
   fi
 done
 unset _red_part _red_file
+
+# Attach last, after every keybinding above is registered. Guarded on
+# BLE_VERSION so this is inert when ble.sh was never loaded.
+if [ -n "${BLE_VERSION-}" ]; then
+  ble-attach
+fi
