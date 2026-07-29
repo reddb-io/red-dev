@@ -30,27 +30,16 @@ export type Provider =
   | { kind: "apt"; pkg: string }
   | { kind: "winget"; id: string }
   /**
-   * A global npm package. Used where the same package serves every
-   * target: one name, one version, no per-platform skew. The agent CLIs
-   * all exist in winget too, and all lag npm by a release or two, which
-   * would put a different version on Windows than on Linux for no gain.
-   *
-   * These live in the mise-managed node prefix, so a node major bump
-   * loses them — re-running install puts them back, which is the same
-   * contract every other provider here has.
-   */
-  /**
    * The vendor's own install script, fetched and run.
    *
-   * Used for tools whose publisher treats this as the supported path.
-   * It is `curl | sh` from a third party, which is a real trust
-   * decision, so it is spelled out in the manifest rather than hidden
-   * inside a helper: the URL is visible at the point of use.
+   * Preferred over npm for the tools whose publisher treats this as the
+   * supported path: npm 11 gates postinstall scripts by default, and
+   * several of them fetch the platform binary in exactly that hook —
+   * which installs cleanly and leaves a command that does not work.
    *
-   * Preferred over npm for these, because npm 11 gates postinstall
-   * scripts by default and several of them fetch the platform binary in
-   * exactly that hook — which installs cleanly and leaves a command that
-   * does not work.
+   * No manifest entry produces this today; the agents that did moved to
+   * src/agents.ts, which calls installerInstall directly. Kept because
+   * the kind is still the right answer for a tool that ships this way.
    */
   | { kind: "installer"; url: string; note: string }
   /**
@@ -135,11 +124,6 @@ export interface Tool {
 
 const apt = (pkg: string): Provider => ({ kind: "apt", pkg });
 const winget = (id: string): Provider => ({ kind: "winget", id });
-const installer =(url: string, note: string): Provider => ({
-  kind: "installer",
-  url,
-  note,
-});
 const gh = (repo: string, asset: string, bin?: string): Provider => ({
   kind: "gh",
   repo,
@@ -374,33 +358,12 @@ export const TOOLS: Tool[] = [
     u24: builtin("alacritty"),
     win: builtin("alacritty"),
   },
-  // Coding agents. Same package, same version, all five targets — which
-  // is the point: an agent that behaves differently depending on which
-  // machine you opened is worse than not having it there.
-  //
-  // Ordered after `runtimes` because they install into the node prefix
-  // mise provides; without that step there is no npm to install with.
-  {
-    name: "claude-code",
-    cmd: ["claude"],
-    scope: "core",
-    u24: installer("https://claude.ai/install.sh", "Anthropic's official installer"),
-    win: winget("Anthropic.ClaudeCode"),
-  },
-  {
-    name: "opencode",
-    scope: "core",
-    u24: installer("https://opencode.ai/install", "opencode's official installer"),
-    win: winget("SST.opencode"),
-  },
-  {
-    // No install script published; the release carries a static musl
-    // binary, which is the most portable of the three.
-    name: "codex",
-    scope: "core",
-    u24: gh("openai/codex", "codex-x86_64-unknown-linux-musl.tar.gz"),
-    win: winget("OpenAI.Codex"),
-  },
+  // Coding agents moved to src/agents.ts. They sat in this scope, which
+  // meant every machine got all three whether or not anyone wanted
+  // them — unconditional is not the same as chosen. They are offered
+  // pre-ticked now, so the default outcome is unchanged and the
+  // decision exists, and choosing any of them pulls in red-skills to
+  // wire them up.
   {
     // Installing mise without using it leaves the machine with a
     // version manager and no versions — which is how `pnpm` ends up

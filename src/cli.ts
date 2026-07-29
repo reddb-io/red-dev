@@ -106,6 +106,9 @@ export function buildCli(): CLI {
       apps: {
         description: "choose optional tools to install",
       },
+      agents: {
+        description: "choose coding agents, and wire red-skills into them",
+      },
       lang: {
         description: "choose language runtimes for mise to manage",
       },

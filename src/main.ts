@@ -505,6 +505,81 @@ async function cmdWsl(p: Platform): Promise<number> {
   return 0;
 }
 
+/**
+ * Choose coding agents, then wire them up.
+ *
+ * Pre-ticked with what `core` used to install unconditionally, so the
+ * default outcome is unchanged and the decision is now made rather than
+ * assumed.
+ */
+async function cmdAgents(p: Platform): Promise<number> {
+  // The pre-ticked list is a starting point for a human, not a default
+  // to act on unattended. checkbox() returns its fallback without a
+  // TTY, so leaving this unguarded meant `red-dev agents` in a script
+  // installed three agents having asked nobody.
+  if (!interactive()) {
+    log.err("choosing agents needs a terminal");
+    log.plain("     For unattended installs, name them explicitly:");
+    log.plain("       red-dev install core");
+    return 1;
+  }
+
+  const { checkbox, confirm } = await import("./ui.ts");
+  const { availableAgents, isAgentInstalled, installAgent, installRedSkills } = await import(
+    "./agents.ts"
+  );
+
+  const available = availableAgents(p);
+  const labels = available.map(
+    (a) => `${a.key} — ${a.label}, ${a.about}${isAgentInstalled(a) ? "  (installed)" : ""}`,
+  );
+  const preTicked = labels.filter((_, i) => available[i]?.recommended);
+
+  const picked = await checkbox("Which agents?", labels as [string, ...string[]], preTicked);
+  if (picked.length === 0) {
+    log.skip("nothing selected");
+    return 0;
+  }
+
+  const keys = picked.map((l) => l.split(" ")[0]!);
+  let failures = 0;
+
+  for (const key of keys) {
+    const agent = available.find((a) => a.key === key);
+    if (!agent) continue;
+    if (isAgentInstalled(agent)) {
+      log.skip(`${agent.label} already present`);
+      continue;
+    }
+    try {
+      await installAgent(agent, p);
+      log.ok(agent.label);
+    } catch (err) {
+      log.err(`${agent.label}: ${(err as Error).message}`);
+      failures++;
+    }
+  }
+
+  // red-skills configures whichever agents exist, so it only means
+  // anything once at least one does — and it is worth asking about
+  // rather than assuming, since it writes into each agent's own config.
+  const anyCli = keys.some((k) => k !== "claude-desktop");
+  if (anyCli) {
+    log.plain("");
+    if (await confirm("Install red-skills for these agents?", true)) {
+      try {
+        await installRedSkills();
+        log.ok("red-skills");
+      } catch (err) {
+        log.err(`red-skills: ${(err as Error).message}`);
+        failures++;
+      }
+    }
+  }
+
+  return failures > 0 ? 1 : 0;
+}
+
 /** Choose which language runtimes mise manages. */
 async function cmdLang(): Promise<number> {
   const { checkbox } = await import("./ui.ts");
@@ -614,6 +689,8 @@ async function main(): Promise<number> {
       return await cmdTheme(p, inv, inv.scope);
     case "apps":
       return await cmdApps(p, inv);
+    case "agents":
+      return await cmdAgents(p);
     case "lang":
       return await cmdLang();
     case "shell":
