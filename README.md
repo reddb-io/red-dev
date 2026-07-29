@@ -140,6 +140,8 @@ aspirational.
 **Coding agents**, each by the path its publisher supports rather than one
 uniform mechanism: `claude-code`, `opencode`, `codex`.
 
+**Web apps** — a page in its own window, its own icon and its own alt-tab entry, the way omakub's `web2app` does it. Desktop sessions only: a `.desktop` file needs a menu to appear in.
+
 **Optional**, never installed by a plain converge — `red-dev apps` offers them:
 `just` · `duf` · `dust` · `hyperfine` · `glow` · `gitui`
 
@@ -154,6 +156,11 @@ Aliases that normalise Debian's renames (`bat` → `batcat`, `fd` → `fdfind`),
 readline bindings that put history search on the arrow keys, `autocd`,
 `cdspell`, `globstar`, a curated git alias set — and the integrations that make
 the tools above actually do something rather than merely exist:
+
+**Docker** is one daemon, never two. Under WSL, if Docker Desktop already serves
+the distro, red-dev does not install `docker-ce` — a second daemon means
+containers started on one side are invisible to the other, on separate networks,
+with no error from either. `red-dev doctor` reports which daemon answers.
 
 | Tool | Without the integration it is |
 | --- | --- |
@@ -187,6 +194,7 @@ red-dev theme [name]         # tokyo-night | catppuccin | gruvbox
 red-dev apps                 # choose optional tools
 red-dev lang                 # choose runtimes for mise to manage
 red-dev shell                # Windows + WSL: where a terminal lands
+red-dev uninstall            # remove tools, or red-dev's own config
 red-dev doctor               # report tool and configuration drift
 ```
 
@@ -223,6 +231,7 @@ deliberately:
 | `red-dev apps` | which optional tools |
 | `red-dev lang` | which runtimes mise should manage |
 | `red-dev shell` | whether a terminal lands in WSL or Git Bash |
+| `red-dev uninstall` | what to remove — and confirms before removing it |
 
 Omakub asks these at first run; here they are re-runnable, because the answers
 change when a project does.
@@ -392,6 +401,10 @@ red-dev theme gruvbox
  ok  Windows Terminal configured (backup at .../settings.json.red-dev-backup)
  ok  theme: Gruvbox Dark — open a new terminal to see it
 ```
+
+Ten of them, the same set omakub ships: `tokyo-night` · `catppuccin` ·
+`gruvbox` · `everforest` · `kanagawa` · `matte-black` · `nord` ·
+`osaka-jade` · `ristretto` · `rose-pine`.
 
 A theme in Omakub is eight files, not a palette. Colouring only the terminal is
 what makes a switch feel half-done: the multiplexer keeps its old blue, the
