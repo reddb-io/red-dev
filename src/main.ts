@@ -122,11 +122,43 @@ async function cmdDoctor(p: Platform, inv: Invocation): Promise<number> {
 }
 
 async function cmdInstall(p: Platform, inv: Invocation): Promise<number> {
-  const ctx = contextFor(p, inv);
+  let ctx = contextFor(p, inv);
+  let extraScopes: Scope[] = [];
+
+  // Ask once, on a real terminal, when this machine is new. Every ui.ts
+  // primitive returns its fallback without a TTY, so this is inert in
+  // CI, in a pipe and over a non-interactive SSH — which is what makes
+  // asking safe rather than something to avoid entirely.
+  if (!inv.dryRun && !inv.yes && !inv.scope) {
+    const { isFirstRun, askFirstRun, writeShellEnv } = await import("./firstrun.ts");
+    if (await isFirstRun(p)) {
+      const choices = await askFirstRun(p);
+      if (choices) {
+        // The answers override the flag defaults for this run.
+        ctx = {
+          ...ctx,
+          theme: choices.theme ?? ctx.theme,
+          font: choices.font ?? ctx.font,
+        };
+        inv = { ...inv, themeName: choices.theme ?? inv.themeName, font: choices.font ?? inv.font };
+        if (choices.apps.length > 0) extraScopes = ["optional"];
+        await writeShellEnv(p, choices.blesh);
+        if (choices.runtimes.length > 0) {
+          const { useRuntimes } = await import("./runtimes.ts");
+          try {
+            await useRuntimes(choices.runtimes);
+          } catch (err) {
+            log.warn(`runtimes: ${(err as Error).message}`);
+          }
+        }
+      }
+    }
+  }
+
   log.step(summary(p).split("\n")[0] ?? "");
 
   let failures = 0;
-  for (const scope of resolveScopes(p, inv.scope)) {
+  for (const scope of [...resolveScopes(p, inv.scope), ...extraScopes]) {
     log.step(`scope: ${scope}`);
 
     const pending: Tool[] = toolsInScope(scope).filter((t) => {

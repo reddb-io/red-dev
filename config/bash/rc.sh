@@ -33,6 +33,17 @@ if [ -z "${RED_ENV:-}" ]; then
   export RED_ENV
 fi
 
+# Choices recorded by `red-dev install`, as plain shell.
+#
+# A separate file rather than a value baked into this one: this file is
+# regenerated on every converge, and an answer that a regeneration
+# discards is not a recorded answer. JSON would need a parser that is
+# not guaranteed to exist this early.
+if [ -r "$HOME/.config/red-dev/env.sh" ]; then
+  # shellcheck disable=SC1091
+  . "$HOME/.config/red-dev/env.sh"
+fi
+
 # ble.sh, when opted in.
 #
 # It has to load before everything else and attach after everything

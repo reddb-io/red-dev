@@ -25,6 +25,16 @@ export interface Preferences {
   terminalShell?: TerminalShell;
   /** WSL distro to open, when terminalShell is "wsl". */
   distro?: string;
+  /**
+   * Set once the first-run questions have been answered. Keyed on the
+   * answer rather than on installed tools, so a machine set up
+   * non-interactively still gets asked the first time someone runs it
+   * from a terminal.
+   */
+  setupCompleted?: boolean;
+  theme?: string;
+  font?: string;
+  blesh?: boolean;
 }
 
 const FILE = "red-dev.json";

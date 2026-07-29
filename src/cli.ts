@@ -80,6 +80,11 @@ export function buildCli(): CLI {
             description: "print what install would do, then stop",
             default: false,
           },
+          yes: {
+            type: "boolean",
+            description: "skip the first-run questions and take the defaults",
+            default: false,
+          },
         },
       },
       update: {
@@ -121,6 +126,8 @@ export interface Invocation {
   font: string;
   opacity: number;
   dryRun: boolean;
+  /** --yes: take defaults instead of asking on a first run. */
+  yes: boolean;
   /**
    * Parse and validation failures. Strict mode means an unrecognised
    * command lands here too, with the list of real ones — so there is no
@@ -174,6 +181,7 @@ export function parseArgs(cli: CLI, argv: string[]): Invocation {
     font: typeof opts["font"] === "string" ? opts["font"] : "firacode",
     opacity: clampOpacity(opts["opacity"], errors),
     dryRun: opts["dry-run"] === true,
+    yes: opts["yes"] === true,
     errors,
   };
 }
