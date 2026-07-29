@@ -118,7 +118,13 @@ function wingetBin(): string {
 
 export async function wingetInstall(id: string): Promise<void> {
   log.step(`winget: ${id}`);
-  const code = await run(
+
+  // Captured rather than inherited so the outcome can be read. winget
+  // signals "installed, nothing to upgrade" with a non-zero code, and
+  // treating every non-zero as a warning turns the steady state of an
+  // idempotent converge into something that reads like a problem —
+  // right underneath winget's own line saying it is fine.
+  const proc = Bun.spawn(
     [
       wingetBin(),
       "install",
@@ -129,11 +135,21 @@ export async function wingetInstall(id: string): Promise<void> {
       "--accept-package-agreements",
       "--accept-source-agreements",
     ],
-    { allowFailure: true },
+    { stdout: "pipe", stderr: "pipe" },
   );
-  // winget uses a distinct non-zero code for "already installed", which
-  // is success as far as a converge tool is concerned.
-  if (code !== 0) log.warn(`winget returned ${code} for ${id} (may already be present)`);
+  const out = await new Response(proc.stdout).text();
+  const code = await proc.exited;
+
+  if (code === 0) return;
+
+  if (/No available upgrade found|already installed|No newer package versions/i.test(out)) {
+    log.skip(`${id} already current`);
+    return;
+  }
+
+  log.warn(`winget returned ${code} for ${id}`);
+  const detail = out.trim().split("\n").filter(Boolean).slice(-2).join(" ");
+  if (detail) log.plain(`       ${detail}`);
 }
 
 // --------------------------------------------------- github release
