@@ -191,6 +191,53 @@ async function checkDelta(): Promise<DriftCheck> {
       };
 }
 
+/**
+ * Whether Windows can actually resolve the font the terminal is
+ * configured to use. Checking that the .ttf files exist is not enough:
+ * a font registered under the wrong name leaves the files in place and
+ * every application blind to them, which surfaces only as a terminal
+ * error box.
+ */
+async function checkFont(p: Platform): Promise<DriftCheck> {
+  if (p.os !== "windows" && p.env !== "wsl") {
+    return { name: "nerd font", status: "n/a", detail: "host font store not applicable" };
+  }
+
+  const shell =
+    p.os === "windows"
+      ? "powershell.exe"
+      : (Bun.which("powershell.exe") ??
+        "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe");
+
+  try {
+    const proc = Bun.spawn(
+      [
+        shell,
+        "-NoProfile",
+        "-Command",
+        "Add-Type -AssemblyName System.Drawing; " +
+          "(New-Object System.Drawing.Text.InstalledFontCollection).Families | " +
+          "Where-Object { $_.Name -like '*Nerd Font Mono' } | " +
+          "Select-Object -First 1 -ExpandProperty Name",
+      ],
+      { stdout: "pipe", stderr: "ignore" },
+    );
+    const found = (await new Response(proc.stdout).text()).trim();
+    await proc.exited;
+
+    return found
+      ? { name: "nerd font", status: "ok", detail: found }
+      : {
+          name: "nerd font",
+          status: "drift",
+          detail: "no Nerd Font Mono visible to Windows applications",
+          fix: "red-dev install wsl",
+        };
+  } catch (err) {
+    return { name: "nerd font", status: "n/a", detail: (err as Error).message };
+  }
+}
+
 async function checkBlesh(): Promise<DriftCheck> {
   const { isInstalled } = await import("./blesh.ts");
   if (!isInstalled()) {
@@ -212,6 +259,7 @@ export async function collectDrift(p: Platform): Promise<DriftCheck[]> {
   checks.push(...(await checkTheme(p)));
   checks.push(await checkWallpaper(p));
   checks.push(checkWslInterop(p));
+  checks.push(await checkFont(p));
   checks.push(await checkDelta());
   checks.push(await checkBlesh());
   return checks;

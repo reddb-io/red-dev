@@ -183,9 +183,14 @@ export async function installNerdFont(key: string): Promise<void> {
   // columns in a terminal grid.
   const wanted = /NerdFontMono-(Regular|Bold|Italic|BoldItalic)\.ttf$/;
 
+  // Files present is not the same as font usable: a mis-registered
+  // install leaves twelve .ttf files that no application can see. Skip
+  // the 26 MB download in that case, but always re-run registration,
+  // which is idempotent and costs a second.
   const installedProbe = `${fontDir}/${spec.asset}NerdFontMono-Regular.ttf`;
   if (existsSync(installedProbe)) {
-    log.skip(`${spec.family} already installed`);
+    log.skip(`${spec.family} files present — re-registering`);
+    await registerFontsOnWindows(spec.asset);
     return;
   }
 
@@ -212,26 +217,90 @@ export async function installNerdFont(key: string): Promise<void> {
   for (const face of faces) {
     const base = face.split("/").pop() ?? "";
     await run(["cp", "-f", face, `${fontDir}/${base}`]);
-
-    // The registry value must hold a Windows path, not a WSL one.
-    const winFontPath = await capture(["wslpath", "-w", `${fontDir}/${base}`]);
-    const faceName = base.replace(/\.ttf$/i, "");
-    await run([
-      "reg.exe",
-      "add",
-      "HKCU\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Fonts",
-      "/v",
-      `${faceName} (TrueType)`,
-      "/t",
-      "REG_SZ",
-      "/d",
-      winFontPath,
-      "/f",
-    ]);
   }
 
+  await registerFontsOnWindows(spec.asset);
   await run(["rm", "-rf", tmp]);
   log.ok(`${spec.family} installed (${faces.length} faces)`);
+}
+
+/**
+ * Register copied font files with Windows.
+ *
+ * Copying the .ttf into the per-user font directory is only half of an
+ * install, and the other half has two requirements that are easy to get
+ * wrong -- this got both wrong first, and the result was twelve files,
+ * twelve registry entries, and a font no application could see:
+ *
+ *  - The registry value name must be the font's own *family* name plus
+ *    style, read out of the file. Naming it after the filename produces
+ *    an entry that resolves to nothing.
+ *  - AddFontResourceW has to load it into the session, and WM_FONTCHANGE
+ *    has to tell running applications. Without those, nothing sees the
+ *    font until the next sign-in at best.
+ *
+ * The script goes to a file rather than a -Command string: it needs a
+ * here-string for the P/Invoke definition, and quoting that through two
+ * shells is how you get a syntax error that points at the wrong line.
+ * ASCII only, for the reason boot.ps1 documents.
+ */
+async function registerFontsOnWindows(assetPrefix: string): Promise<void> {
+  const script = `
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Drawing
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public class RedDevFont {
+    [DllImport("gdi32.dll", CharSet=CharSet.Unicode)]
+    public static extern int AddFontResourceW(string lpFileName);
+    [DllImport("user32.dll", CharSet=CharSet.Auto)]
+    public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, IntPtr wParam,
+        IntPtr lParam, uint fuFlags, uint uTimeout, out IntPtr lpdwResult);
+}
+'@
+
+$fontDir = "$env:LOCALAPPDATA\\Microsoft\\Windows\\Fonts"
+$regPath = "HKCU:\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Fonts"
+$count = 0
+
+foreach ($f in Get-ChildItem $fontDir -Filter "${assetPrefix}*.ttf") {
+    $pfc = New-Object System.Drawing.Text.PrivateFontCollection
+    $pfc.AddFontFile($f.FullName)
+    $family = $pfc.Families[0].Name
+    $pfc.Dispose()
+
+    $style = ''
+    if ($f.BaseName -match '-(\\w+)$') { $style = $Matches[1] }
+    if ($style -eq 'Regular') { $style = '' }
+    # Several weights carry the weight in the family name already;
+    # appending it again would register "Mono Light Light".
+    if ($style -and $family -notmatch [regex]::Escape($style)) {
+        $regName = "$family $style (TrueType)"
+    } else {
+        $regName = "$family (TrueType)"
+    }
+
+    [RedDevFont]::AddFontResourceW($f.FullName) | Out-Null
+    New-ItemProperty -Path $regPath -Name $regName -Value $f.FullName -PropertyType String -Force | Out-Null
+    $count++
+}
+
+$r = [IntPtr]::Zero
+# 0xFFFF = HWND_BROADCAST, 0x001D = WM_FONTCHANGE
+[RedDevFont]::SendMessageTimeout([IntPtr]0xFFFF, 0x001D, [IntPtr]::Zero, [IntPtr]::Zero, 2, 1000, [ref]$r) | Out-Null
+Write-Output "registered $count"
+`;
+
+  const scriptPath = "/tmp/red-dev-fonts.ps1";
+  await Bun.write(scriptPath, script);
+  const winScript = await capture(["wslpath", "-w", scriptPath]);
+  const shell =
+    Bun.which("powershell.exe") ??
+    "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
+
+  await run([shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", winScript]);
+  await run(["rm", "-f", scriptPath]);
 }
 
 // -------------------------------------------------- windows terminal
