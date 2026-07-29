@@ -203,6 +203,18 @@ async function cmdTheme(p: Platform, inv: Invocation, name?: string): Promise<nu
     failures++;
   }
 
+  // Everything that is not the terminal emulator: multiplexer, system
+  // monitor, editor. Colouring only the terminal is what makes a theme
+  // switch feel half-applied.
+  try {
+    const { applyThemeEverywhere } = await import("./theme-apply.ts");
+    const { applied, skipped } = await applyThemeEverywhere(theme, p);
+    if (applied.length > 0) log.ok(`themed: ${applied.join(", ")}`);
+    if (skipped.length > 0) log.skip(`not present: ${skipped.join(", ")}`);
+  } catch (err) {
+    log.warn(`theme surfaces: ${(err as Error).message}`);
+  }
+
   if (p.env === "wsl" || p.os === "windows") {
     try {
       await wsl.configureWindowsTerminal({

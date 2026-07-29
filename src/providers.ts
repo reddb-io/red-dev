@@ -426,6 +426,11 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
           fontFamily: spec.family,
           opacity: ctx.opacity,
         });
+        // Converging should leave the machine themed, not just the
+        // terminal emulator configured.
+        const { applyThemeEverywhere } = await import("./theme-apply.ts");
+        const { applied } = await applyThemeEverywhere(theme, ctx.platform);
+        if (applied.length > 0) log.ok(`themed: ${applied.join(", ")}`);
         return;
       }
       const wsl = await import("./wsl.ts");
