@@ -19,24 +19,12 @@ import { aptInstall, applyProvider, systemUpdate, type ApplyContext } from "./pr
 import { THEMES, themeNames } from "./themes.ts";
 import { banner, interactive, select } from "./ui.ts";
 
-/**
- * Where the shipped config lives. A compiled binary can run from
- * anywhere, so allow an explicit override; otherwise assume we sit in
- * <root>/bin, <root>/src or <root>/dist.
- */
-function findRoot(): string {
-  const override = process.env["RED_ROOT"];
-  if (override) return override;
-  return import.meta.dir.replace(/[\\/](src|bin|dist)$/, "");
-}
-
 function resolveScopes(p: Platform, arg?: string): Scope[] {
   return arg ? [arg as Scope] : applicableScopes(p);
 }
 
 function contextFor(p: Platform, inv: Invocation): ApplyContext {
   return {
-    root: findRoot(),
     platform: p,
     theme: inv.themeName,
     font: inv.font,

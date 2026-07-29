@@ -457,7 +457,10 @@ export async function systemUpdate(p: Platform): Promise<void> {
 // -------------------------------------------------------- dispatch
 
 export interface ApplyContext {
-  root: string;
+  // No `root`: there is nothing on disk to point at. Every config file
+  // this tool writes is either a text import compiled into the binary
+  // or generated from the theme, so a converge needs no checkout, no
+  // clone and no download beyond the executable itself.
   platform: Platform;
   /** Theme key from src/themes.ts. */
   theme: string;
