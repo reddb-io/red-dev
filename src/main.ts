@@ -12,7 +12,6 @@ import {
   providerFor,
   toolsInScope,
   type Scope,
-  type Tool,
 } from "./manifest.ts";
 import { detect, summary, type Platform } from "./platform.ts";
 import { aptInstall, applyProvider, systemUpdate, type ApplyContext } from "./providers.ts";
@@ -145,67 +144,82 @@ async function cmdInstall(p: Platform, inv: Invocation): Promise<number> {
 
   log.step(summary(p).split("\n")[0] ?? "");
 
-  let failures = 0;
+  const { Reporter } = await import("./report.ts");
+  const report = new Reporter();
+
   for (const scope of [...resolveScopes(p, inv.scope), ...extraScopes]) {
-    log.step(`scope: ${scope}`);
+    const tools = toolsInScope(scope);
+    report.scope(scope, tools.length);
 
-    const pending: Tool[] = toolsInScope(scope).filter((t) => {
-      const pr = providerFor(t, p);
-      if (pr.kind === "skip") {
-        log.skip(`${t.name} — ${pr.reason}`);
-        return false;
-      }
-      if (isInstalled(t)) {
-        log.skip(`${t.name} already present`);
-        return false;
-      }
-      return true;
-    });
-
-    if (inv.dryRun) {
-      for (const t of pending) {
-        log.plain(`  would install ${t.name} via ${describeProvider(providerFor(t, p))}`);
-      }
-      continue;
-    }
-
-    // apt is batched into one transaction; everything else runs per tool.
+    // Batched apt first, because twenty sequential apt-get calls is the
+    // slowest part of a fresh provision and each re-reads the package
+    // lists. Resolved up front so the per-tool loop below can report
+    // each one as its own step rather than hiding them all behind one
+    // opaque transaction.
+    const pending = tools.filter(
+      (t) => providerFor(t, p).kind !== "skip" && !isInstalled(t),
+    );
     const aptPkgs = pending
       .map((t) => providerFor(t, p))
       .filter((pr): pr is { kind: "apt"; pkg: string } => pr.kind === "apt")
       .map((pr) => pr.pkg);
 
-    if (aptPkgs.length > 0) {
+    let aptError: string | null = null;
+    if (!inv.dryRun && aptPkgs.length > 0) {
+      report.note(`apt: ${aptPkgs.length} packages in one transaction`);
       try {
         await aptInstall(aptPkgs);
       } catch (err) {
-        log.err(`apt batch failed: ${(err as Error).message}`);
-        failures++;
+        aptError = (err as Error).message;
       }
     }
 
-    for (const tool of pending) {
+    for (const tool of tools) {
       const pr = providerFor(tool, p);
-      if (pr.kind === "apt") continue;
+      const label = describeProvider(pr);
+
+      if (pr.kind === "skip") {
+        report.begin(tool.name, "—")("skipped", pr.reason);
+        continue;
+      }
+      if (isInstalled(tool)) {
+        report.begin(tool.name, label)("present");
+        continue;
+      }
+      if (inv.dryRun) {
+        report.begin(tool.name, label)("skipped", "dry run");
+        continue;
+      }
+
+      const done = report.begin(tool.name, label);
+      if (pr.kind === "apt") {
+        // Already attempted in the batch above; report the real state
+        // rather than claiming a per-tool install that never ran.
+        if (aptError) done("failed", aptError);
+        else done(isInstalled(tool) ? "installed" : "failed", "apt reported success but the binary is absent");
+        continue;
+      }
+
       try {
         await applyProvider(pr, ctx);
+        // A managed builtin converges rather than installs, and on a
+        // second run legitimately changes nothing.
+        done(tool.managed ? "applied" : "installed");
       } catch (err) {
         // One tool failing must not abort the run: the point of a
         // converge tool is that you re-run it and it picks up the rest.
-        log.err(`${tool.name}: ${(err as Error).message}`);
-        failures++;
+        done("failed", (err as Error).message);
       }
     }
   }
+
+  const { failed } = report.finish();
 
   if (inv.dryRun) {
     log.ok("dry run — nothing changed");
     return 0;
   }
-  if (failures > 0) {
-    log.warn(`${failures} step(s) failed — re-run 'red-dev install' after fixing`);
-    return 1;
-  }
+  if (failed > 0) return 1;
   log.ok("converged — restart your shell");
   return 0;
 }
