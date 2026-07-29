@@ -15,7 +15,11 @@
 
 import {
   Box,
+  HintBar,
+  ListItem,
+  LogViewer,
   MultiProgressBar,
+  Panel,
   ProgressBar,
   Text,
   render,
@@ -31,12 +35,19 @@ import type { Scope } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
 import type { ApplyContext } from "./providers.ts";
 
-const MARK: Record<string, { glyph: string; color?: string }> = {
-  installed: { glyph: "✓", color: "green" },
-  applied: { glyph: "✓", color: "green" },
-  present: { glyph: "·" },
-  skipped: { glyph: "·" },
-  failed: { glyph: "✗", color: "red" },
+/**
+ * Outcomes mapped onto tuiuiu's own status vocabulary rather than a
+ * private table of glyphs and colours. StatusIndicator and ListItem
+ * both understand these, so the icon, its colour and any animation come
+ * from the library instead of from a lookup here that would drift from
+ * everything else drawn with them.
+ */
+const STATUS: Record<string, "success" | "info" | "error" | "pending"> = {
+  installed: "success",
+  applied: "success",
+  present: "info",
+  skipped: "info",
+  failed: "error",
 };
 
 function human(ms: number): string {
@@ -57,12 +68,6 @@ function etaText(done: number, total: number, elapsedMs: number, finished: boole
   return `  ~${human(remaining * 1000)} left`;
 }
 
-/** One line in the log column. */
-interface LogLine {
-  text: string;
-  color?: string;
-  dim?: boolean;
-}
 
 export interface InstallTuiOptions {
   platform: Platform;
@@ -78,7 +83,7 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
     const { exit } = useApp();
     const size = useTerminalSize();
 
-    const [lines, setLines] = useState<LogLine[]>([]);
+    const [lines, setLines] = useState<string[]>([]);
     const [done, setDone] = useState<StepResult[]>([]);
     const [current, setCurrent] = useState("");
     const [scope, setScope] = useState("");
@@ -88,7 +93,7 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
     // without emitting anything, and a frozen clock reads as a hang.
     const [, setTick] = useState(0);
 
-    const push = (line: LogLine): void => setLines((prev) => [...prev, line]);
+    const push = (line: string): void => setLines((prev) => [...prev, line]);
 
     useEffect(() => {
       const timer = setInterval(() => setTick((n) => n + 1), 1000);
@@ -98,9 +103,9 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
         {
           scopeStart: (s, n) => {
             setScope(s);
-            push({ text: `── ${s} · ${n} items`, dim: true });
+            push(`-- ${s} · ${n} items`);
           },
-          note: (m) => push({ text: `   ${m}`, dim: true }),
+          note: (m) => push(`   ${m}`),
           stepStart: (e) => {
             setCurrent(e.tool);
             // Hold provider chatter so it lands under its own step
@@ -109,17 +114,19 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
           },
           stepEnd: (r) => {
             const held = captureStop();
-            const m = MARK[r.outcome] ?? { glyph: "·" };
-            push({
-              text: `${m.glyph} ${r.tool.padEnd(16)} ${r.outcome}${r.ms >= 1000 ? `  ${human(r.ms)}` : ""}`,
-              ...(m.color ? { color: m.color } : {}),
-            });
+            // LogViewer takes plain strings, so the glyph is chosen here
+            // rather than by a component. ListItem draws the same
+            // outcomes in the status column with the library's own
+            // icons; this is the one place a character is picked by
+            // hand, because a log line is text.
+            const glyph = r.outcome === "failed" ? "✗" : r.outcome === "present" || r.outcome === "skipped" ? "·" : "✓";
+            push(
+              `${glyph} ${r.tool.padEnd(16)} ${r.outcome}${r.ms >= 1000 ? `  ${human(r.ms)}` : ""}`,
+            );
             for (const h of held) {
-              push({ text: `    ${h.replace(/\x1b\[[0-9;]*m/g, "").trim()}`, dim: true });
+              push(`    ${h.replace(/\x1b\[[0-9;]*m/g, "").trim()}`);
             }
-            if (r.detail && r.outcome === "failed") {
-              push({ text: `    ${r.detail}`, color: "red" });
-            }
+            if (r.detail && r.outcome === "failed") push(`    ${r.detail}`);
             setDone((prev) => [...prev, r]);
           },
         },
@@ -169,13 +176,22 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
         { flexDirection: twoColumn ? "row" : "column" },
 
         // Left: the log. Wide, because this is what you read.
+        // LogViewer owns the tail and the auto-scroll; slicing the last
+        // N lines by hand is what it exists to replace.
         Box(
-          { flexDirection: "column", width: leftWidth, height: logRows + 2, borderStyle: "round", padding: 1 },
-          ...lines()
-            .slice(-logRows)
-            .map((l) =>
-              Text({ ...(l.color ? { color: l.color } : {}), ...(l.dim ? { dim: true } : {}) }, l.text),
-            ),
+          { width: leftWidth },
+          Panel(
+            { title: "log" },
+            LogViewer({
+              lines: lines(),
+              height: logRows,
+              autoScroll: true,
+              // Failures should catch the eye without a second pass
+              // over the list.
+              highlightPattern: /(✗|failed)/,
+              highlightColor: "red",
+            }),
+          ),
         ),
 
         // Right: the numbers. Narrow, and the position never shifts, so
@@ -220,26 +236,34 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
             failures.length > 0 ? { color: "red" } : { dim: true },
             `failed    ${failures.length}`,
           ),
+          // ListItem carries the status icon and colour, so the failed
+          // list uses the same vocabulary as everything else drawn with
+          // tuiuiu rather than a local red Text.
           ...(failures.length > 0
             ? [
                 Text({}, ""),
-                Text({ color: "red", dim: true }, "FAILED"),
-                ...failures.slice(0, 5).map((f) => Text({ dim: true }, `  ${f.tool}`)),
+                ...failures
+                  .slice(0, 5)
+                  .map((f) => ListItem({ primary: f.tool, status: STATUS["failed"] })),
               ]
             : []),
         ),
       ),
 
+      // HintBar formats the shortcuts; writing "enter to leave" as prose
+      // is what it replaces.
       Box(
         { marginTop: 1 },
-        Text(
-          { dim: true },
-          finished()
-            ? failures.length > 0
-              ? "enter to leave — re-running is safe, every provider is idempotent"
-              : "converged · enter to leave · restart your shell"
-            : "working…",
-        ),
+        finished()
+          ? HintBar({
+              hints: [
+                { shortcut: "enter", action: "leave" },
+                ...(failures.length > 0
+                  ? [{ shortcut: "re-run", action: "safe, every provider is idempotent" }]
+                  : [{ shortcut: "then", action: "restart your shell" }]),
+              ],
+            })
+          : Text({ dim: true }, "working…"),
       ),
     );
   }

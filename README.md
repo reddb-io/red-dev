@@ -137,8 +137,12 @@ aspirational.
 `neovim` · `docker` · `delta` · `yazi` · `tldr` · `starship` · `atuin` ·
 `carapace` · `direnv`
 
-**Coding agents**, each by the path its publisher supports rather than one
-uniform mechanism: `claude-code`, `opencode`, `codex`.
+**Coding agents** are chosen rather than assumed — `red-dev agents` offers
+`claude-code`, `codex` and `opencode` pre-ticked, plus `openclaw`, `hermes`,
+and the Claude and Codex desktop apps on Windows. Each installs by the path its
+publisher supports rather than one uniform mechanism. Picking any CLI agent then
+offers [red-skills](https://github.com/reddb-io/red-skills), which registers its
+marketplace in Claude Code and Codex and generates plugin modules for OpenCode.
 
 **Web apps** — a page in its own window, its own icon and its own alt-tab entry, the way omakub's `web2app` does it. Desktop sessions only: a `.desktop` file needs a menu to appear in.
 
@@ -194,7 +198,10 @@ red-dev theme [name]         # tokyo-night | catppuccin | gruvbox
 red-dev apps                 # choose optional tools
 red-dev lang                 # choose runtimes for mise to manage
 red-dev shell                # Windows + WSL: where a terminal lands
+red-dev agents               # choose coding agents, wire in red-skills
 red-dev uninstall            # remove tools, or red-dev's own config
+red-dev wsl                  # Windows: set up WSL
+red-dev ui                   # fullscreen, with live theme preview
 red-dev doctor               # report tool and configuration drift
 ```
 
@@ -231,7 +238,9 @@ deliberately:
 | `red-dev apps` | which optional tools |
 | `red-dev lang` | which runtimes mise should manage |
 | `red-dev shell` | whether a terminal lands in WSL or Git Bash |
+| `red-dev agents` | which coding agents — pre-ticked, then offers red-skills |
 | `red-dev uninstall` | what to remove — and confirms before removing it |
+| `red-dev wsl` | whether to set WSL up on a fresh Windows machine |
 
 Omakub asks these at first run; here they are re-runnable, because the answers
 change when a project does.

@@ -19,6 +19,9 @@
 
 import {
   Box,
+  HintBar,
+  ListItem,
+  Panel,
   Text,
   render,
   useApp,
@@ -184,23 +187,19 @@ export async function runTui(p: Platform): Promise<TuiResult> {
       Box(
         { flexDirection: "row" },
 
-        // Left: the list being browsed
+        // Left: the list being browsed. ListItem owns the selected
+        // state and its marker; hand-drawing "❯ " and a colour was
+        // reimplementing a component that already exists.
         Box(
-          { flexDirection: "column", width: leftWidth, borderStyle: "round", padding: 1 },
-          Text({ dim: true }, inThemes ? "THEME" : "SECTION"),
-          ...(inThemes
-            ? names.map((name, i) =>
-                Text(
-                  { color: i === themeIndex() ? "red" : undefined, bold: i === themeIndex() },
-                  `${i === themeIndex() ? "❯ " : "  "}${name}`,
-                ),
-              )
-            : SECTIONS.map((s, i) =>
-                Text(
-                  { color: i === sectionIndex() ? "red" : undefined, bold: i === sectionIndex() },
-                  `${i === sectionIndex() ? "❯ " : "  "}${s.label}`,
-                ),
-              )),
+          { width: leftWidth },
+          Panel(
+            { title: inThemes ? "theme" : "section" },
+            ...(inThemes
+              ? names.map((name, i) => ListItem({ primary: name, selected: i === themeIndex() }))
+              : SECTIONS.map((s, i) =>
+                  ListItem({ primary: s.label, selected: i === sectionIndex() }),
+                )),
+          ),
         ),
 
         // Right: notes, or the live palette preview
@@ -226,15 +225,24 @@ export async function runTui(p: Platform): Promise<TuiResult> {
         ),
       ),
 
-      // Footer
+      // Footer. HintBar formats and separates the shortcuts, which is
+      // the other thing this file used to spell out by hand.
       Box(
         { marginTop: 1 },
-        Text(
-          { dim: true },
-          inThemes
-            ? "↑↓ preview · enter apply · esc back · q quit"
-            : "↑↓ move · enter open · q quit",
-        ),
+        HintBar({
+          hints: inThemes
+            ? [
+                { shortcut: "up/down", action: "preview" },
+                { shortcut: "enter", action: "apply" },
+                { shortcut: "esc", action: "back" },
+                { shortcut: "q", action: "quit" },
+              ]
+            : [
+                { shortcut: "up/down", action: "move" },
+                { shortcut: "enter", action: "open" },
+                { shortcut: "q", action: "quit" },
+              ],
+        }),
       ),
     );
   }
