@@ -104,6 +104,9 @@ export function buildCli(): CLI {
       lang: {
         description: "choose language runtimes for mise to manage",
       },
+      shell: {
+        description: "choose whether the terminal opens WSL or Git Bash",
+      },
       menu: {
         description: "interactive menu",
       },

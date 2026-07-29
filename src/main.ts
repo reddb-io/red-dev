@@ -324,6 +324,69 @@ async function cmdApps(p: Platform, inv: Invocation): Promise<number> {
   return failures > 0 ? 1 : 0;
 }
 
+/**
+ * Choose where a terminal lands on a machine that has both Windows and
+ * WSL.
+ *
+ * Windows Terminal already has profiles for this and red-dev already
+ * sets its default. Alacritty has none — one config, one shell — so the
+ * choice has to be recorded somewhere both sides can read, which is
+ * what src/preferences.ts is for.
+ */
+async function cmdShell(p: Platform, inv: Invocation): Promise<number> {
+  if (p.os !== "windows" && p.env !== "wsl") {
+    log.skip("only Windows and WSL have two sides to choose between");
+    return 0;
+  }
+
+  const { select } = await import("./ui.ts");
+  const { readPreferences, writePreferences } = await import("./preferences.ts");
+  const current = await readPreferences(p);
+
+  const distro = current.distro ?? process.env["WSL_DISTRO_NAME"] ?? "Ubuntu-24.04";
+  const OPTIONS = [
+    `wsl — open ${distro}, in its own filesystem`,
+    "gitbash — stay on Windows, same dotfiles",
+  ] as const;
+
+  const picked = await select(
+    "When you open a terminal, where should it land?",
+    OPTIONS,
+    OPTIONS[0],
+  );
+  const choice = picked.startsWith("wsl") ? "wsl" : "gitbash";
+
+  await writePreferences(p, {
+    terminalShell: choice,
+    // Record the distro too: on native Windows there is no
+    // WSL_DISTRO_NAME to fall back on later.
+    ...(choice === "wsl" ? { distro } : {}),
+  });
+  log.ok(`terminal will open: ${choice === "wsl" ? distro : "Git Bash"}`);
+
+  // Rewrite the Alacritty config so the choice takes effect now rather
+  // than at the next converge.
+  try {
+    const { configureAlacritty } = await import("./alacritty.ts");
+    const wsl = await import("./wsl.ts");
+    const theme = THEMES[inv.themeName];
+    const spec = wsl.NERD_FONTS[inv.font];
+    if (theme && spec) {
+      await configureAlacritty({
+        platform: p,
+        theme,
+        fontFamily: spec.family,
+        opacity: inv.opacity,
+      });
+    }
+    log.plain("     open a new terminal window to see it");
+  } catch (err) {
+    log.warn(`alacritty: ${(err as Error).message}`);
+  }
+
+  return 0;
+}
+
 /** Choose which language runtimes mise manages. */
 async function cmdLang(): Promise<number> {
   const { checkbox } = await import("./ui.ts");
@@ -385,6 +448,8 @@ async function cmdMenu(p: Platform, inv: Invocation, cliHelp: string): Promise<n
       return await cmdApps(p, inv);
     case "lang":
       return await cmdLang();
+    case "shell":
+      return await cmdShell(p, inv);
     case "plan":
       return cmdPlan(p, inv);
     case "doctor":
@@ -443,6 +508,8 @@ async function main(): Promise<number> {
       return await cmdApps(p, inv);
     case "lang":
       return await cmdLang();
+    case "shell":
+      return await cmdShell(p, inv);
     case "menu":
     case null:
       return await cmdMenu(p, inv, cli.help());
