@@ -1,19 +1,32 @@
 /**
  * The converge, watched live.
  *
- * A fresh machine spends several minutes inside apt and a dozen
- * downloads. The line-based report answers "what is happening" well
- * enough when you are reading a log afterwards; while it runs, the
- * question is different — how far in am I, what is it on right now, and
- * has anything failed yet.
+ * Layout follows the shape the work actually has: the log is the thing
+ * you stare at, so it gets the wide left column, and the numbers you
+ * glance at — progress, counts, what failed — sit in a narrow right
+ * column that never moves. The first version of this had a hand-rolled
+ * bar and a single stacked column, which wasted both the screen and the
+ * ProgressBar tuiuiu already ships.
  *
  * Same loop as the text path. converge() emits events; this turns them
- * into signals and draws them, where main.ts turns them into lines.
- * Neither reimplements the ordering or the failure policy.
+ * into signals, main.ts turns them into lines. Neither reimplements the
+ * ordering or the failure policy.
  */
 
-import { Box, Text, render, useApp, useEffect, useInput, useState, useTerminalSize } from "tuiuiu.js";
+import {
+  Box,
+  MultiProgressBar,
+  ProgressBar,
+  Text,
+  render,
+  useApp,
+  useEffect,
+  useInput,
+  useState,
+  useTerminalSize,
+} from "tuiuiu.js";
 import { converge, countSteps, type StepResult } from "./converge.ts";
+import { captureStart, captureStop } from "./log.ts";
 import type { Scope } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
 import type { ApplyContext } from "./providers.ts";
@@ -31,13 +44,11 @@ function human(ms: number): string {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
-function Bar(done: number, total: number, width: number) {
-  const filled = total === 0 ? 0 : Math.round((done / total) * width);
-  return Box(
-    { flexDirection: "row" },
-    Text({ color: "red" }, "█".repeat(Math.max(0, filled))),
-    Text({ dim: true }, "░".repeat(Math.max(0, width - filled))),
-  );
+/** One line in the log column. */
+interface LogLine {
+  text: string;
+  color?: string;
+  dim?: boolean;
 }
 
 export interface InstallTuiOptions {
@@ -54,16 +65,17 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
     const { exit } = useApp();
     const size = useTerminalSize();
 
+    const [lines, setLines] = useState<LogLine[]>([]);
     const [done, setDone] = useState<StepResult[]>([]);
     const [current, setCurrent] = useState("");
-    const [provider, setProvider] = useState("");
     const [scope, setScope] = useState("");
-    const [note, setNote] = useState("");
     const [finished, setFinished] = useState(false);
     const [startedAt] = useState(Date.now());
-    // Re-render on a timer so the elapsed clock moves even while a
-    // single long step (apt, a 90 MB download) produces no events.
+    // A timer, not just events: a single apt step can run for minutes
+    // without emitting anything, and a frozen clock reads as a hang.
     const [, setTick] = useState(0);
+
+    const push = (line: LogLine): void => setLines((prev) => [...prev, line]);
 
     useEffect(() => {
       const timer = setInterval(() => setTick((n) => n + 1), 1000);
@@ -71,13 +83,32 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
       void converge(
         { platform: opts.platform, ctx: opts.ctx, scopes: opts.scopes, dryRun: false },
         {
-          scopeStart: (s) => setScope(s),
-          note: (m) => setNote(m),
+          scopeStart: (s, n) => {
+            setScope(s);
+            push({ text: `── ${s} · ${n} items`, dim: true });
+          },
+          note: (m) => push({ text: `   ${m}`, dim: true }),
           stepStart: (e) => {
             setCurrent(e.tool);
-            setProvider(e.provider);
+            // Hold provider chatter so it lands under its own step
+            // rather than interleaving with the next one.
+            captureStart();
           },
-          stepEnd: (r) => setDone((prev) => [...prev, r]),
+          stepEnd: (r) => {
+            const held = captureStop();
+            const m = MARK[r.outcome] ?? { glyph: "·" };
+            push({
+              text: `${m.glyph} ${r.tool.padEnd(16)} ${r.outcome}${r.ms >= 1000 ? `  ${human(r.ms)}` : ""}`,
+              ...(m.color ? { color: m.color } : {}),
+            });
+            for (const h of held) {
+              push({ text: `    ${h.replace(/\x1b\[[0-9;]*m/g, "").trim()}`, dim: true });
+            }
+            if (r.detail && r.outcome === "failed") {
+              push({ text: `    ${r.detail}`, color: "red" });
+            }
+            setDone((prev) => [...prev, r]);
+          },
         },
       ).then((summary) => {
         outcome = { failed: summary.failed };
@@ -89,19 +120,28 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
     });
 
     useInput((input, key) => {
-      // Only after it finishes: quitting mid-converge would leave the
-      // machine half-done with no report of where it stopped.
+      // Refused until it finishes: leaving halfway abandons the machine
+      // mid-converge with no report of where it stopped.
       if (finished() && (key.return || input === "q" || key.escape)) exit();
     });
 
     const results = done();
-    const width = Math.max(size.columns ?? 80, 60);
-    const barWidth = Math.min(width - 24, 40);
-    const failures = results.filter((r) => r.outcome === "failed");
+    const width = size.columns ?? 100;
+    const height = Math.max(size.rows ?? 24, 16);
 
-    // A window over the tail, so a 33-step run does not scroll the
-    // header off a short terminal.
-    const visible = results.slice(-10);
+    // Two columns need room for both. Below that the status column
+    // would be clipped mid-word, which is worse than not having it
+    // beside the log — so it moves above instead.
+    const rightWidth = 30;
+    const twoColumn = width >= 92;
+    const leftWidth = twoColumn ? width - rightWidth - 6 : width - 4;
+    // The log fills whatever is left after the frame, header and hint —
+    // less again when the status block sits above it.
+    const logRows = Math.max(5, height - (twoColumn ? 8 : 16));
+
+    const by = (o: string): number => results.filter((r) => r.outcome === o).length;
+    const failures = results.filter((r) => r.outcome === "failed");
+    const elapsedMs = Date.now() - startedAt();
 
     return Box(
       { flexDirection: "column", padding: 1 },
@@ -109,49 +149,68 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
       Box(
         { flexDirection: "row", justifyContent: "space-between", marginBottom: 1 },
         Text({ color: "red", bold: true }, "red-dev"),
-        Text({ dim: true }, finished() ? "done" : `scope: ${scope()}`),
+        Text({ dim: true }, finished() ? "done" : `${scope()} · ${current()}`),
       ),
 
       Box(
-        { flexDirection: "row", marginBottom: 1 },
-        Bar(results.length, total, barWidth),
-        Text({ dim: true }, `  ${results.length}/${total}  ·  ${human(Date.now() - startedAt())}`),
+        { flexDirection: twoColumn ? "row" : "column" },
+
+        // Left: the log. Wide, because this is what you read.
+        Box(
+          { flexDirection: "column", width: leftWidth, height: logRows + 2, borderStyle: "round", padding: 1 },
+          ...lines()
+            .slice(-logRows)
+            .map((l) =>
+              Text({ ...(l.color ? { color: l.color } : {}), ...(l.dim ? { dim: true } : {}) }, l.text),
+            ),
+        ),
+
+        // Right: the numbers. Narrow, and the position never shifts, so
+        // the eye can return to the same spot.
+        Box(
+          { flexDirection: "column", width: twoColumn ? rightWidth : leftWidth, borderStyle: "round", padding: 1, ...(twoColumn ? { marginLeft: 1 } : { marginTop: 1 }) },
+          Text({ dim: true }, "PROGRESS"),
+          Text({}, ""),
+          ProgressBar({
+            value: results.length,
+            max: total,
+            width: rightWidth - 6,
+            style: "block",
+            color: failures.length > 0 ? "yellow" : "red",
+            showValue: true,
+            showEta: !finished(),
+            eta:
+              results.length > 0 && !finished()
+                ? Math.round(((elapsedMs / results.length) * (total - results.length)) / 1000)
+                : 0,
+          }),
+          Text({}, ""),
+          MultiProgressBar({
+            segments: [
+              { value: by("installed") + by("applied"), color: "green", label: "new" },
+              { value: by("present"), color: "gray", label: "present" },
+              { value: by("failed"), color: "red", label: "failed" },
+            ],
+            total,
+            width: rightWidth - 6,
+          }),
+          Text({}, ""),
+          Text({ dim: true }, `elapsed   ${human(elapsedMs)}`),
+          Text({ dim: true }, `installed ${by("installed") + by("applied")}`),
+          Text({ dim: true }, `present   ${by("present")}`),
+          Text(
+            failures.length > 0 ? { color: "red" } : { dim: true },
+            `failed    ${failures.length}`,
+          ),
+          ...(failures.length > 0
+            ? [
+                Text({}, ""),
+                Text({ color: "red", dim: true }, "FAILED"),
+                ...failures.slice(0, 5).map((f) => Text({ dim: true }, `  ${f.tool}`)),
+              ]
+            : []),
+        ),
       ),
-
-      ...(note() ? [Text({ dim: true }, `  ${note()}`), Text({}, "")] : []),
-
-      Box(
-        { flexDirection: "column", borderStyle: "round", padding: 1 },
-        ...visible.map((r) => {
-          const m = MARK[r.outcome] ?? { glyph: "·" };
-          return Box(
-            { flexDirection: "row" },
-            Text({ color: m.color }, `${m.glyph} `),
-            Text({}, r.tool.padEnd(16)),
-            Text({ dim: true }, r.outcome.padEnd(10)),
-            Text({ dim: true }, r.ms >= 1000 ? human(r.ms) : ""),
-          );
-        }),
-        ...(finished()
-          ? []
-          : [
-              Box(
-                { flexDirection: "row" },
-                Text({ color: "yellow" }, "▸ "),
-                Text({ bold: true }, current().padEnd(16)),
-                Text({ dim: true }, provider().slice(0, 34)),
-              ),
-            ]),
-      ),
-
-      ...(failures.length > 0
-        ? [
-            Box({ marginTop: 1 }, Text({ color: "red", bold: true }, `${failures.length} failed`)),
-            ...failures
-              .slice(0, 3)
-              .map((f) => Text({ dim: true }, `  ${f.tool}: ${(f.detail ?? "").slice(0, 60)}`)),
-          ]
-        : []),
 
       Box(
         { marginTop: 1 },
