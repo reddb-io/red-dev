@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 150" width="1200" height="150" role="img" aria-label="Themes — tokyo-night, catppuccin and gruvbox applied to terminal, multiplexer, monitor, editor and wallpaper">
+  <defs>
+    <linearGradient id="tbg" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#0d1117"/>
+      <stop offset="100%" stop-color="#151a23"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="150" fill="url(#tbg)"/>
+  <rect width="4" height="150" fill="#ff2056"/>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+    <text x="44" y="52" font-size="13" fill="#ff2056" letter-spacing="2">THEMES</text>
+    <text x="44" y="90" font-size="30" fill="#e6edf3" font-weight="700">one palette, every surface</text>
+    <text x="44" y="120" font-size="15" fill="#8b949e">terminal &#183; multiplexer &#183; monitor &#183; editor &#183; wallpaper</text>
+
+    <!-- The three shipped palettes, values taken from src/themes.ts.
+         Each label sits directly above its own four swatches. -->
+    <g font-size="12" fill="#484f58">
+      <text x="700" y="48">tokyo-night</text>
+      <text x="866" y="48">catppuccin</text>
+      <text x="1032" y="48">gruvbox</text>
+    </g>
+    <g>
+      <rect x="700" y="60" width="34" height="34" rx="4" fill="#1A1B26"/>
+      <rect x="738" y="60" width="34" height="34" rx="4" fill="#7AA2F7"/>
+      <rect x="776" y="60" width="34" height="34" rx="4" fill="#9ECE6A"/>
+      <rect x="814" y="60" width="34" height="34" rx="4" fill="#F7768E"/>
+
+      <rect x="866" y="60" width="34" height="34" rx="4" fill="#24273A"/>
+      <rect x="904" y="60" width="34" height="34" rx="4" fill="#8AADF4"/>
+      <rect x="942" y="60" width="34" height="34" rx="4" fill="#A6DA95"/>
+      <rect x="980" y="60" width="34" height="34" rx="4" fill="#ED8796"/>
+
+      <rect x="1032" y="60" width="34" height="34" rx="4" fill="#282828"/>
+      <rect x="1070" y="60" width="34" height="34" rx="4" fill="#458588"/>
+      <rect x="1108" y="60" width="34" height="34" rx="4" fill="#98971A"/>
+      <rect x="1146" y="60" width="34" height="34" rx="4" fill="#CC241D"/>
+    </g>
+    <text x="700" y="120" font-size="12" fill="#484f58">wallpapers generated from the palette, not shipped as photographs</text>
+  </g>
+</svg>

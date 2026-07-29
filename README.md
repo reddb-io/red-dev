@@ -6,7 +6,7 @@
   <a href="https://github.com/reddb-io/red-dev/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/reddb-io/red-dev/release.yml?branch=main&style=for-the-badge&label=CI&labelColor=0d1117" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge&labelColor=0d1117" alt="License"></a>
   <a href="#the-support-matrix"><img src="https://img.shields.io/badge/targets-ubuntu%2024%20%7C%2026%20%7C%20wsl%20%7C%20windows-ff2056?style=for-the-badge&labelColor=0d1117" alt="Targets"></a>
-  <a href="#what-ships"><img src="https://img.shields.io/badge/stack-alacritty%20%7C%20zellij%20%7C%20bash-8b949e?style=for-the-badge&labelColor=0d1117" alt="Stack"></a>
+  <a href="#the-identical-layer"><img src="https://img.shields.io/badge/stack-alacritty%20%7C%20zellij%20%7C%20bash-8b949e?style=for-the-badge&labelColor=0d1117" alt="Stack"></a>
 </p>
 
 <strong>One development environment. Five targets. The same experience on each.</strong><br>
@@ -47,9 +47,30 @@ surface.
 | **WSL**                 | target 4     | target 5     |
 | **Windows, native**     | target 3 — no distro axis   ||
 
-Two axes, not five cases. Code branches on **where it runs** (`env`) and **what
-that place can do** (`caps`), never on a raw version string. Adding Ubuntu 28
-should mean touching `src/platform.ts` and the manifest, nothing else.
+Two axes, not five cases. Code branches on **where it runs** and **what that
+place can do**, never on a raw version string. Ask a machine what it is:
+
+```bash
+red-dev platform
+```
+
+```console
+os=linux distro=ubuntu version=24.04 env=wsl arch=x64
+caps: apt=1 gui=0 systemd=1 winget=1 flatpak=1
+```
+
+```console
+os=windows distro=n/a version=n/a env=windows arch=x64
+caps: apt=0 gui=1 systemd=0 winget=1 flatpak=0
+```
+
+Read the first as: a WSL distro with no display of its own, but able to reach
+the Windows host through `winget`. That single pair — `gui=0 winget=1` — is why
+the WSL target installs fonts and terminal configuration **on Windows** rather
+than inside Ubuntu, where they would accomplish nothing.
+
+Adding Ubuntu 28 should mean touching [`src/platform.ts`](src/platform.ts) and
+the manifest, nothing else.
 
 ---
 
@@ -78,9 +99,9 @@ for red-dev itself; individual packages may still ask for sudo.
 
 ---
 
-## What ships
+<img src="docs/stack.svg" alt="The identical layer — Alacritty, zellij and bash, one config each" width="100%">
 
-### The identical layer
+## The identical layer
 
 The terminal layer is the same on all five targets, because every piece of it
 has a real build on every one of them.
@@ -97,7 +118,9 @@ panes **inside** the terminal is what makes tiling identical everywhere, and it
 keeps working over SSH, which no window manager can offer.
 
 On native Windows the terminal launches **Git Bash, not PowerShell**. That is
-what makes the shipped dotfiles apply there at all.
+what makes the shipped dotfiles apply there at all, and it is why standardising
+on bash rather than PowerShell is what makes "same experience" true instead of
+aspirational.
 
 ### The tools
 
@@ -109,24 +132,16 @@ what makes the shipped dotfiles apply there at all.
 ### The shell
 
 Aliases that normalise Debian's renames (`bat` → `batcat`, `fd` → `fdfind`), the
-readline bindings that put history search on the arrow keys, `autocd`, `cdspell`,
-`globstar`, a curated git alias set, and the integrations that make the tools
-above actually do something: git pointed at `delta`, `y()` for yazi, `atuin`
-bound to history, `carapace` completions, `direnv` hooked.
+readline bindings that put history search on the arrow keys, `autocd`,
+`cdspell`, `globstar`, a curated git alias set — and the integrations that make
+the tools above actually do something rather than merely exist:
 
-### Themes
-
-`tokyo-night` · `catppuccin` · `gruvbox`
-
-A theme reaches the terminal, the multiplexer, the system monitor, the editor and
-the desktop wallpaper — not just the terminal background.
-
-```bash
-red-dev theme gruvbox
-```
-
-Wallpapers are **generated from the palette**, not shipped as photographs: no
-licensing question, an exact match to the theme, and no download.
+| Tool | Without the integration it is |
+| --- | --- |
+| `delta` | a pager git never calls |
+| `yazi` | a browser you must `cd` after |
+| `tldr` | "Page cache not found" |
+| `atuin`, `carapace`, `direnv` | binaries nothing is bound to |
 
 ---
 
@@ -143,27 +158,135 @@ red-dev theme <name>         # tokyo-night | catppuccin | gruvbox
 red-dev doctor               # report drift
 ```
 
-Scopes are `core` (every target), `desktop` (a machine with a display), and
-`wsl` (runs in the distro, acts on the Windows host). Global options: `--theme`,
-`--font`, `--opacity`.
+Global options: `--theme`, `--font`, `--opacity`.
+
+### Look before you touch
+
+`plan` names the provider that would satisfy each tool, and marks what is
+already there:
+
+```bash
+red-dev plan core
+```
+
+```console
+[core]
+  git              apt:git (present)
+  ripgrep          apt:ripgrep (present)
+  fd               apt:fd-find (present)
+  bat              apt:bat (present)
+  starship         gh:starship/starship:starship-x86_64-unknown-linux-gnu.tar.gz (present)
+  zellij           gh:zellij-org/zellij:zellij-x86_64-unknown-linux-musl.tar.gz
+  docker           aptrepo:docker-ce,docker-ce-cli,containerd.io,...
+```
+
+The `wsl` scope reads differently on each side of the boundary. From inside the
+distro:
+
+```console
+[wsl]
+  wsl-interop      builtin:wsl-interop (managed)
+  nerd-font        builtin:nerd-font (managed)
+  alacritty-host   winget:Alacritty.Alacritty (managed)
+  windows-terminal builtin:windows-terminal (managed)
+```
+
+From native Windows, the same scope is entirely skipped — and every skip says
+why:
+
+```console
+[wsl]
+  wsl-interop      skip (native Windows needs no interop shim)
+  nerd-font        skip (the Windows host provides this instead)
+  alacritty-host   skip (the Windows host provides this instead)
+  windows-terminal skip (the Windows host provides this instead)
+```
+
+A skip is a decision. One without a reason is an undocumented gap wearing a
+decision's clothes, so the manifest cannot express one.
+
+### Converge
+
+```bash
+red-dev install wsl --dry-run
+```
+
+```console
+:: os=linux distro=ubuntu version=24.04 env=wsl arch=x64
+:: scope: wsl
+  would install wsl-interop via builtin:wsl-interop
+  would install nerd-font via builtin:nerd-font
+  would install alacritty-host via winget:Alacritty.Alacritty
+  would install windows-terminal via builtin:windows-terminal
+ ok  dry run — nothing changed
+```
 
 Every provider is idempotent. Re-running after a partial failure is the normal
-recovery path, not an edge case.
+recovery path, not an edge case — one tool failing never aborts the rest:
+
+```console
+warn alacritty: ENOEXEC: unknown error, posix_spawn 'cmd.exe'
+ ok  themed: zellij, btop
+ ok  converged — restart your shell
+```
+
+Bad input is rejected before any provider runs, which is the cheapest possible
+place to fail:
+
+```console
+$ red-dev plan nonsense
+fail invalid scope 'nonsense' (expected: core, desktop, wsl)
+
+$ red-dev frobnicate
+fail Unknown command: frobnicate
+Available commands: platform, plan, install, update, doctor, theme, menu
+```
 
 ---
 
-## Navigation
+<img src="docs/themes.svg" alt="Themes — one palette applied to terminal, multiplexer, monitor, editor and wallpaper" width="100%">
 
-| Need | Go to |
+## Themes
+
+```bash
+red-dev theme gruvbox
+```
+
+```console
+ ok  themed: zellij, btop, neovim
+ ok  wallpaper set
+ ok  Windows Terminal configured (backup at .../settings.json.red-dev-backup)
+ ok  theme: Gruvbox Dark — open a new terminal to see it
+```
+
+A theme in Omakub is eight files, not a palette. Colouring only the terminal is
+what makes a switch feel half-done: the multiplexer keeps its old blue, the
+editor keeps its old background, and the seams show immediately. Here one
+palette reaches the terminal, the multiplexer, the system monitor, the editor
+and the desktop wallpaper.
+
+Each writer owns a generated file and **references** your config rather than
+rewriting it — your zellij keybindings and the rest of `btop.conf` are yours.
+
+Wallpapers are **generated from the palette**, not shipped as photographs: no
+licensing question, an exact match to the theme, and no download. The PNG
+encoder is [120 lines](src/png.ts) with no image library, so it works inside the
+compiled binary on every target.
+
+---
+
+## Known limitations, per target
+
+| Target | What does not work, and why |
 | --- | --- |
-| What gets installed, per platform | [`src/manifest.ts`](src/manifest.ts) |
-| Platform detection and capabilities | [`src/platform.ts`](src/platform.ts) |
-| apt, ppa, apt repos, winget, GitHub releases | [`src/providers.ts`](src/providers.ts) |
-| Shell configuration, shipped as-is | [`config/bash/`](config/bash/) |
-| Terminal and multiplexer config | [`src/alacritty.ts`](src/alacritty.ts), [`config/zellij/`](config/zellij/) |
-| Themes and where they are applied | [`src/themes.ts`](src/themes.ts), [`src/theme-apply.ts`](src/theme-apply.ts) |
-| The WSL-to-Windows boundary | [`src/wsl.ts`](src/wsl.ts) |
-| Wallpaper generation | [`src/wallpaper.ts`](src/wallpaper.ts), [`src/png.ts`](src/png.ts) |
+| **Ubuntu desktop** | The `desktop` scope is implemented and **has never run on real hardware**. GNOME hotkeys, extensions and dock settings are not ported at all. |
+| **Ubuntu 26.04** | The `u26` manifest column exists and **no 26.04 machine has exercised it**. Package-name drift is undiscovered. |
+| **WSL** | Windows interop cannot work under `sudo -u <other-user>`: `WSL_INTEROP` points at a per-session socket that sudo drops. Real invocations run as you, so this affects test harnesses only. |
+| **Native Windows** | No zellij session persistence across reboots. No `ble.sh`-style line editor. VS Code theming is not ported. |
+| **All** | No `uninstall`, no migrations. Both exist in Omakub. |
+
+Stated plainly because "implemented" and "known to work" are different claims,
+and a README that blurs them costs someone an afternoon.
 
 ---
 
@@ -180,9 +303,6 @@ which means the UI cannot be drawn until gum is installed — precisely why a
 broken gum download aborts the whole install before showing a single screen.
 Compiling the interface in removes that bootstrap dependency: red-dev can always
 draw its own interface, including the screen that reports a failed install.
-
-Every `skip` in the manifest carries a reason. A skip is a decision; one without
-a reason is an undocumented gap wearing a decision's clothes.
 
 ---
 
@@ -202,8 +322,8 @@ publishes**, and fail loudly listing the candidates.
 **PATH replacement kills WSL interop.** Upstream does
 `export PATH="<fixed list>"`, discarding the ~20 `/mnt/c` entries WSL injects.
 `winget.exe`, `explorer.exe` and `code.exe` stop resolving, which breaks the very
-host access the WSL target depends on. `config/bash/path.sh` prepends and dedupes
-instead of replacing.
+host access the WSL target depends on. [`config/bash/path.sh`](config/bash/path.sh)
+prepends and dedupes instead of replacing.
 
 **A prompt that is shipped but never loaded.** `defaults/bash/rc` sources
 `shell`, `aliases` and `init`, omitting `prompt`. The repo looks complete; the
@@ -226,6 +346,22 @@ build instead.
 
 ---
 
+## Navigation
+
+| Need | Go to |
+| --- | --- |
+| What gets installed, per platform | [`src/manifest.ts`](src/manifest.ts) |
+| Platform detection and capabilities | [`src/platform.ts`](src/platform.ts) |
+| apt, ppa, apt repos, winget, GitHub releases | [`src/providers.ts`](src/providers.ts) |
+| Shell configuration, shipped as-is | [`config/bash/`](config/bash/) |
+| Terminal and multiplexer config | [`src/alacritty.ts`](src/alacritty.ts), [`config/zellij/`](config/zellij/) |
+| Themes and where they are applied | [`src/themes.ts`](src/themes.ts), [`src/theme-apply.ts`](src/theme-apply.ts) |
+| The WSL-to-Windows boundary | [`src/wsl.ts`](src/wsl.ts) |
+| Wallpaper generation | [`src/wallpaper.ts`](src/wallpaper.ts), [`src/png.ts`](src/png.ts) |
+| Bootstrap scripts | [`boot.sh`](boot.sh), [`boot.ps1`](boot.ps1) |
+
+---
+
 ## Develop
 
 ```bash
@@ -238,11 +374,20 @@ bunx tsc --noEmit
 bun run build         # both binaries, cross-compiled from one host
 ```
 
-`bun run build` produces `dist/red-dev-linux-x64` and
-`dist/red-dev-windows-x64.exe` from the same source tree; the Windows target
-needs no Windows runner. Two smoke tests gate the release, because the whole
-distribution model rests on them: that the TUI and the embedded dotfiles both
-survive `bun build --compile`.
+```console
+$ bun run build
+[2.2s] compile  dist/red-dev-linux-x64
+[2.4s] compile  dist/red-dev-windows-x64.exe bun-windows-x64
+```
+
+The Windows target needs no Windows runner. Two smoke tests gate the release,
+because the whole distribution model rests on them: that the TUI and the
+embedded dotfiles both survive `bun build --compile`.
+
+The tests cover the decisions where a wrong answer is silent — which manifest
+column a release gets, which scopes apply to a platform, whether an asset glob
+matches the right file, and whether bad input is rejected. Cases come from bugs
+this project actually hit, not from chasing coverage.
 
 ---
 
@@ -255,17 +400,10 @@ Early, but the loop runs end to end.
   for dotfiles, fonts, Alacritty, Windows Terminal and WSL interop
 - Verified on WSL Ubuntu 24.04 and native Windows from one source tree, and on a
   freshly created user for the dotfiles path
+- **No release has been cut**, so the install commands above do not work yet
 
-Not done yet, in rough order of how much it matters:
-
-- **No release has been cut**, so the install commands above do not work yet.
-- **The `desktop` scope has never run.** It is implemented against bare-metal
-  Ubuntu and no bare-metal Ubuntu has executed it. That is unknown, not "nearly
-  done".
-- **Ubuntu 26.04 is likewise untested.** The `u26` column exists; no 26.04 target
-  has exercised it, so package-name drift is undiscovered.
-- GNOME hotkeys, VS Code theming, `uninstall` and migrations are not ported.
-- Native Windows gets no `ble.sh`-style line editor; that decision is open.
+See [Known limitations](#known-limitations-per-target) for what is implemented
+but unproven.
 
 ---
 

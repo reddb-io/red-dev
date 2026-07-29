@@ -54,7 +54,17 @@ function cmdPlan(p: Platform, inv: Invocation): number {
     log.plain(`\n[${scope}]`);
     for (const tool of toolsInScope(scope)) {
       const pr = providerFor(tool, p);
-      const state = tool.managed ? " (managed)" : isInstalled(tool) ? " (present)" : "";
+      // A skipped tool is not also "managed": the skip already says the
+      // provider will not run, and printing both reads as a
+      // contradiction.
+      const state =
+        pr.kind === "skip"
+          ? ""
+          : tool.managed
+            ? " (managed)"
+            : isInstalled(tool)
+              ? " (present)"
+              : "";
       log.plain(`  ${tool.name.padEnd(17)}${describeProvider(pr)}${state}`);
     }
   }
