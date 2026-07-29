@@ -281,6 +281,22 @@ async function checkRuntimes(): Promise<DriftCheck> {
       };
 }
 
+/**
+ * Which Docker daemon answers here, and whether there are two.
+ *
+ * Two daemons on one machine is the case worth catching: every command
+ * succeeds, `docker ps` works on both sides and shows different
+ * things, and a database started from Windows is simply unreachable
+ * from WSL with no error to explain it.
+ */
+async function checkDocker(p: Platform): Promise<DriftCheck> {
+  const { dockerHealth } = await import("./docker.ts");
+  const h = await dockerHealth(p);
+  return h.ok
+    ? { name: "docker", status: "ok", detail: h.detail }
+    : { name: "docker", status: "drift", detail: h.detail, ...(h.fix ? { fix: h.fix } : {}) };
+}
+
 async function checkBlesh(): Promise<DriftCheck> {
   const { isInstalled } = await import("./blesh.ts");
   if (!isInstalled()) {
@@ -305,6 +321,7 @@ export async function collectDrift(p: Platform): Promise<DriftCheck[]> {
   checks.push(await checkFont(p));
   checks.push(await checkDelta());
   checks.push(await checkRuntimes());
+  checks.push(await checkDocker(p));
   checks.push(await checkToolchainParity(p));
   checks.push(await checkBlesh());
   return checks;

@@ -528,9 +528,35 @@ export const TOOLS: Tool[] = [
 
 /** Pick the provider column that applies to this machine. */
 export function providerFor(tool: Tool, p: Platform): Provider {
+  // Docker is the one tool whose right answer depends on what the host
+  // is already doing, not on which platform this is. Docker Desktop
+  // shares one daemon with Windows and every integrated distro;
+  // installing docker-ce here would add a second, and containers under
+  // one are invisible to the other — with no error from either, which
+  // is a genuinely confusing afternoon to lose.
+  if (tool.name === "docker" && p.env === "wsl") {
+    const { shouldInstallDockerHere } = requireDocker();
+    const verdict = shouldInstallDockerHere(p);
+    if (!verdict.install) return { kind: "skip", reason: verdict.reason };
+  }
+
   if (p.os === "windows") return tool.win;
   if (versionAtLeast(p.version, "26.04")) return tool.u26 ?? tool.u24;
   return tool.u24;
+}
+
+/**
+ * providerFor is synchronous and called from the plan loop, so the
+ * docker check cannot be a dynamic import. Resolved lazily and cached
+ * to keep the module graph acyclic.
+ */
+let dockerModule: typeof import("./docker.ts") | null = null;
+function requireDocker(): typeof import("./docker.ts") {
+  if (!dockerModule) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    dockerModule = require("./docker.ts") as typeof import("./docker.ts");
+  }
+  return dockerModule;
 }
 
 /**
