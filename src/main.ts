@@ -275,7 +275,7 @@ async function cmdTheme(p: Platform, inv: Invocation, name?: string): Promise<nu
   // switch feel half-applied.
   try {
     const { applyThemeEverywhere } = await import("./theme-apply.ts");
-    const { applied, skipped } = await applyThemeEverywhere(theme, p);
+    const { applied, skipped } = await applyThemeEverywhere(theme, p, chosen);
     if (applied.length > 0) log.ok(`themed: ${applied.join(", ")}`);
     if (skipped.length > 0) log.skip(`not present: ${skipped.join(", ")}`);
   } catch (err) {

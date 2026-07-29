@@ -177,19 +177,30 @@ export interface ApplyThemeResult {
 export async function applyThemeEverywhere(
   theme: Theme,
   p: Platform,
+  slug?: string,
 ): Promise<ApplyThemeResult> {
   const applied: string[] = [];
   const skipped: string[] = [];
+
+  const { applyVsCodeTheme, applyGnomeTheme } = await import("./theme-editors.ts");
+  // Derive the slug from the display name when the caller did not pass
+  // one, so `theme gruvbox` and the menu both reach the same mapping.
+  const key = slug ?? theme.name.toLowerCase().replace(/\s+/g, "-");
 
   // These live in the Linux filesystem and mean nothing on native
   // Windows, where btop4win and zellij either differ or do not exist.
   const surfaces: [string, () => Promise<boolean>][] =
     p.os === "windows"
-      ? [["neovim", () => applyNeovim(theme)]]
+      ? [
+          ["neovim", () => applyNeovim(theme)],
+          ["vscode", () => applyVsCodeTheme(theme, p, key)],
+        ]
       : [
           ["zellij", () => applyZellij(theme)],
           ["btop", () => applyBtop(theme)],
           ["neovim", () => applyNeovim(theme)],
+          ["vscode", () => applyVsCodeTheme(theme, p, key)],
+          ["gnome", () => applyGnomeTheme(p, key)],
         ];
 
   for (const [name, fn] of surfaces) {
