@@ -170,4 +170,20 @@ case ":$PATH:" in
 esac
 
 say "converging"
+
+# Reconnect stdin to the terminal before handing over.
+#
+# The documented way to run this is `curl ... | sh`, which makes the
+# script's stdin the pipe carrying the script itself. Every child then
+# inherits a stdin that is at EOF, isatty() says no terminal, and the
+# first-run questions silently skip themselves — the install works and
+# quietly asks nothing, which looks like a missing feature rather than a
+# plumbing problem.
+#
+# /dev/tty is the controlling terminal regardless of what stdin was
+# redirected to. When there is none — CI, a container, a cron job — the
+# fallback is the current behaviour, which is what should happen there.
+if [ -r /dev/tty ]; then
+  exec "$BIN" install < /dev/tty
+fi
 exec "$BIN" install
