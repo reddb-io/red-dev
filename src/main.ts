@@ -16,7 +16,7 @@ import {
 import { detect, summary, type Platform } from "./platform.ts";
 import { aptInstall, applyProvider, systemUpdate, type ApplyContext } from "./providers.ts";
 import { THEMES, themeNames } from "./themes.ts";
-import { banner, interactive, select } from "./ui.ts";
+import { interactive, select } from "./ui.ts";
 
 function resolveScopes(p: Platform, arg?: string): Scope[] {
   return arg ? [arg as Scope] : applicableScopes(p);
@@ -448,18 +448,6 @@ async function cmdLang(): Promise<number> {
   }
 }
 
-const MENU = [
-  "install — converge this machine",
-  "update — upgrade installed packages",
-  "theme — change colour scheme",
-  "apps — choose optional tools",
-  "lang — choose language runtimes",
-  "plan — preview changes",
-  "doctor — report drift",
-  "platform — show detection",
-  "quit",
-] as const;
-
 async function cmdMenu(p: Platform, inv: Invocation, cliHelp: string): Promise<number> {
   if (!interactive()) {
     // Piped or redirected: a menu would block on input that is never
@@ -468,31 +456,32 @@ async function cmdMenu(p: Platform, inv: Invocation, cliHelp: string): Promise<n
     return 0;
   }
 
-  log.plain(banner(summary(p).split("\n")[0] ?? ""));
-  const choice = await select("What now?", MENU, "quit");
-
-  switch (choice.split(" ")[0]) {
-    case "install":
-      return await cmdInstall(p, inv);
-    case "update":
-      return await cmdUpdate(p, inv);
-    case "theme":
-      return await cmdTheme(p, inv);
-    case "apps":
-      return await cmdApps(p, inv);
-    case "lang":
-      return await cmdLang();
-    case "shell":
-      return await cmdShell(p, inv);
-    case "plan":
-      return cmdPlan(p, inv);
-    case "doctor":
-      return await cmdDoctor(p, inv);
-    case "platform":
-      return cmdPlatform(p);
-    default:
-      return 0;
-  }
+  const { runMenu } = await import("./menu.ts");
+  return await runMenu(p, inv, cliHelp, {
+    install: () => cmdInstall(p, inv),
+    update: () => cmdUpdate(p, inv),
+    doctor: () => cmdDoctor(p, inv),
+    plan: () => cmdPlan(p, inv),
+    platform: () => cmdPlatform(p),
+    apps: () => cmdApps(p, inv),
+    lang: () => cmdLang(),
+    shell: () => cmdShell(p, inv),
+    applyTheme: (name) => cmdTheme(p, inv, name),
+    applyFont: async (font, size) => {
+      const wsl = await import("./wsl.ts");
+      const spec = wsl.NERD_FONTS[font];
+      const theme = THEMES[inv.themeName];
+      if (!spec || !theme) return;
+      const { configureAlacritty } = await import("./alacritty.ts");
+      await configureAlacritty({
+        platform: p,
+        theme,
+        fontFamily: spec.family,
+        fontSize: size,
+        opacity: inv.opacity,
+      });
+    },
+  });
 }
 
 async function main(): Promise<number> {

@@ -34,6 +34,8 @@ export interface Preferences {
   setupCompleted?: boolean;
   theme?: string;
   font?: string;
+  /** Terminal font size in points. omakub offers 7 to 14. */
+  fontSize?: number;
   blesh?: boolean;
 }
 
