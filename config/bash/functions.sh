@@ -27,6 +27,24 @@ fcd() {
   [ -n "$dir" ] && cd "$dir" || return
 }
 
+# Open the file manager and land in whatever directory you left it in.
+#
+# This is the whole point of yazi as a shell integration rather than
+# just a binary: a child process cannot change its parent's directory,
+# so yazi writes the final path to a file and the shell reads it back.
+# Without this you browse somewhere and then have to cd there by hand.
+if command -v yazi >/dev/null 2>&1; then
+  y() {
+    local tmp cwd
+    tmp="$(mktemp -t yazi-cwd.XXXXXX)"
+    yazi "$@" --cwd-file="$tmp"
+    if cwd="$(cat -- "$tmp" 2>/dev/null)" && [ -n "$cwd" ] && [ "$cwd" != "$PWD" ]; then
+      builtin cd -- "$cwd" || return
+    fi
+    rm -f -- "$tmp"
+  }
+fi
+
 # Convert webm (what most screen recorders produce) to a widely playable mp4.
 webm2mp4() {
   local input_file="$1"

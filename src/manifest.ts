@@ -29,7 +29,17 @@ export type Provider =
    * upstream ships anything new. Matching real names fails loudly with
    * the available candidates instead.
    */
-  | { kind: "gh"; repo: string; asset: string }
+  | {
+      kind: "gh";
+      repo: string;
+      asset: string;
+      /**
+       * Install name, when the release publishes a bare binary whose
+       * asset name is not the command. tealdeer ships
+       * `tealdeer-linux-x86_64-musl` and the command is `tldr`.
+       */
+      bin?: string;
+    }
   /** A Launchpad PPA, then apt. */
   | { kind: "ppa"; ppa: string; pkgs: string[] }
   /**
@@ -88,7 +98,12 @@ export interface Tool {
 
 const apt = (pkg: string): Provider => ({ kind: "apt", pkg });
 const winget = (id: string): Provider => ({ kind: "winget", id });
-const gh = (repo: string, asset: string): Provider => ({ kind: "gh", repo, asset });
+const gh = (repo: string, asset: string, bin?: string): Provider => ({
+  kind: "gh",
+  repo,
+  asset,
+  ...(bin ? { bin } : {}),
+});
 const ppa =(name: string, ...pkgs: string[]): Provider => ({
   kind: "ppa",
   ppa: name,
@@ -173,6 +188,35 @@ export const TOOLS: Tool[] = [
     win: winget("rsteube.Carapace"),
   },
   { name: "direnv", scope: "core", u24: apt("direnv"), win: winget("direnv.direnv") },
+  {
+    // Every git diff, show and log -p goes through this, and lazygit
+    // picks it up too. The single largest quality change per byte
+    // installed.
+    name: "delta",
+    scope: "core",
+    u24: apt("git-delta"),
+    win: winget("dandavison.delta"),
+  },
+  {
+    // Not in the 24.04 archive; the release tarball is the only route.
+    name: "yazi",
+    scope: "core",
+    u24: gh("sxyazi/yazi", "yazi-x86_64-unknown-linux-gnu.zip"),
+    win: winget("sxyazi.yazi"),
+  },
+  {
+    // Not apt. The archive ships tealdeer 1.6.1 from 2023, which points
+    // at a page-cache URL whose format has since changed: every
+    // `tldr --update` fails with "Could not find central directory end",
+    // leaving a binary that answers every query with "Page cache not
+    // found". A tool that cannot fetch its own data is not installed in
+    // any sense that matters.
+    name: "tldr",
+    cmd: ["tldr"],
+    scope: "core",
+    u24: gh("dbrgn/tealdeer", "tealdeer-linux-x86_64-musl", "tldr"),
+    win: winget("dbrgn.tealdeer"),
+  },
   {
     name: "fastfetch",
     scope: "core",

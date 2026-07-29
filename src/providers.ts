@@ -183,7 +183,11 @@ export async function resolveGhAsset(repo: string, glob: string): Promise<string
   return hit.browser_download_url;
 }
 
-export async function ghInstall(repo: string, glob: string): Promise<void> {
+export async function ghInstall(
+  repo: string,
+  glob: string,
+  bin?: string,
+): Promise<void> {
   // Installing lands binaries in /usr/local/bin, so the same check has
   // to happen here and not only on the apt path.
   await requireSudo();
@@ -206,8 +210,16 @@ export async function ghInstall(repo: string, glob: string): Promise<void> {
   } else if (file.endsWith(".zip")) {
     await run(["unzip", "-qo", `${tmp}/${file}`, "-d", tmp]);
     await installBinariesFrom(tmp);
+  } else if (bin) {
+    // A bare binary. Several projects publish one rather than an
+    // archive, and its asset name usually encodes the platform rather
+    // than the command, so the caller names it.
+    await run(["chmod", "+x", `${tmp}/${file}`]);
+    await run(["sudo", "install", "-m", "0755", `${tmp}/${file}`, `/usr/local/bin/${bin}`]);
   } else {
-    throw new RedError(`don't know how to unpack ${file}`);
+    throw new RedError(
+      `don't know how to unpack ${file} — if it is a bare binary, give the provider a bin name`,
+    );
   }
 
   await run(["rm", "-rf", tmp], { allowFailure: true });
@@ -397,7 +409,7 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
       await wingetInstall(pr.id);
       return;
     case "gh":
-      await ghInstall(pr.repo, pr.asset);
+      await ghInstall(pr.repo, pr.asset, pr.bin);
       return;
     case "ppa":
       await ppaInstall(pr.ppa, pr.pkgs);

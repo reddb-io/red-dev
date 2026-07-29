@@ -111,6 +111,77 @@ export async function installDotfiles(): Promise<void> {
 
   await wireShellRc();
   await installZellijConfig();
+  await wireDelta();
+  await primeTldr();
+}
+
+/**
+ * tealdeer ships no pages: a fresh install answers every query with
+ * "Page cache not found". The cache is per-user, so this runs as part
+ * of the user's dotfiles rather than at package-install time.
+ */
+async function primeTldr(): Promise<void> {
+  const tldr = Bun.which("tldr");
+  if (!tldr) return;
+
+  // --list is cheap and fails when the cache is absent, which is a
+  // better test than looking for a directory whose path varies.
+  const probe = Bun.spawn([tldr, "--list"], { stdout: "ignore", stderr: "ignore" });
+  if ((await probe.exited) === 0) {
+    log.skip("tldr pages already cached");
+    return;
+  }
+
+  log.step("tldr: downloading page cache");
+  const update = Bun.spawn([tldr, "--update"], { stdout: "ignore", stderr: "ignore" });
+  if ((await update.exited) === 0) log.ok("tldr pages cached");
+  else log.warn("tldr cache download failed; run `tldr --update` yourself");
+}
+
+async function gitConfig(key: string): Promise<string> {
+  const proc = Bun.spawn(["git", "config", "--global", "--get", key], {
+    stdout: "pipe",
+    stderr: "ignore",
+  });
+  const out = await new Response(proc.stdout).text();
+  await proc.exited;
+  return out.trim();
+}
+
+async function setGitConfig(key: string, value: string): Promise<void> {
+  const proc = Bun.spawn(["git", "config", "--global", key, value], {
+    stdout: "ignore",
+    stderr: "ignore",
+  });
+  await proc.exited;
+}
+
+/**
+ * Point git at delta.
+ *
+ * Installing the binary accomplishes nothing on its own: delta is a
+ * pager, and git only uses it once told to. The keys are set only when
+ * the pager is unset or already delta — someone who has deliberately
+ * chosen `less -FRX` or diff-so-fancy keeps it.
+ */
+async function wireDelta(): Promise<void> {
+  if (!Bun.which("delta")) return;
+
+  const pager = await gitConfig("core.pager");
+  if (pager && !pager.includes("delta")) {
+    log.skip(`git pager is '${pager}' — leaving it alone`);
+    return;
+  }
+
+  await setGitConfig("core.pager", "delta");
+  await setGitConfig("interactive.diffFilter", "delta --color-only");
+  await setGitConfig("delta.navigate", "true");
+  await setGitConfig("delta.line-numbers", "true");
+  // zdiff3 shows the common ancestor in a conflict, which turns most
+  // "which side was right" questions into a glance.
+  await setGitConfig("merge.conflictStyle", "zdiff3");
+  await setGitConfig("diff.colorMoved", "default");
+  log.ok("git configured to use delta");
 }
 
 /**
