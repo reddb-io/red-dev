@@ -71,6 +71,15 @@ jobs:
           bun build scripts/tui-smoke.ts --compile --target=bun-linux-x64 --outfile /tmp/tui-smoke
           /tmp/tui-smoke | grep -q 'SMOKE OK'
 
+      - name: Smoke — the fullscreen layout renders with real colours
+        # The theme preview is the reason the fullscreen mode exists. If
+        # the swatches lose their background escapes they render as blank
+        # space and the feature is silently gone, so the frame is
+        # asserted rather than eyeballed.
+        run: |
+          set -euo pipefail
+          bun scripts/tui-render-smoke.ts | grep -q 'RENDER OK'
+
       - name: Smoke — the binary answers
         run: |
           set -euo pipefail

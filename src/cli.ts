@@ -118,6 +118,9 @@ export function buildCli(): CLI {
       wsl: {
         description: "set up WSL on this Windows machine",
       },
+      ui: {
+        description: "fullscreen interface, with live theme preview",
+      },
       menu: {
         description: "interactive menu",
       },

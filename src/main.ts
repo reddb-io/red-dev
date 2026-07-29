@@ -492,6 +492,38 @@ async function cmdUninstall(p: Platform): Promise<number> {
 }
 
 /**
+ * The fullscreen interface.
+ *
+ * Hands back an action rather than doing the work itself: the TUI owns
+ * the screen while it runs, and a converge printing thirty lines
+ * underneath a live layout would fight it for the terminal. It exits
+ * first, then the chosen command runs normally.
+ */
+async function cmdUi(p: Platform, inv: Invocation): Promise<number> {
+  if (!interactive()) {
+    log.err("the fullscreen interface needs a terminal");
+    log.plain("     Use `red-dev` for the menu, or a command directly.");
+    return 1;
+  }
+
+  const { runTui } = await import("./tui.ts");
+  const result = await runTui(p);
+
+  switch (result.action) {
+    case "theme":
+      return result.theme ? await cmdTheme(p, inv, result.theme) : 0;
+    case "install":
+      return await cmdInstall(p, inv);
+    case "doctor":
+      return await cmdDoctor(p, inv);
+    case "apps":
+      return await cmdApps(p, inv);
+    default:
+      return 0;
+  }
+}
+
+/**
  * Set WSL up from the Windows side, on demand rather than only during a
  * first run — someone who declined at setup should not have to reset
  * their preferences to change their mind.
@@ -623,6 +655,8 @@ async function main(): Promise<number> {
       return await cmdUninstall(p);
     case "wsl":
       return await cmdWsl(p);
+    case "ui":
+      return await cmdUi(p, inv);
     case "menu":
     case null:
       return await cmdMenu(p, inv, cli.help());
