@@ -22,6 +22,7 @@ import aliasesSh from "../config/bash/aliases.sh" with { type: "text" };
 import functionsSh from "../config/bash/functions.sh" with { type: "text" };
 import promptSh from "../config/bash/prompt.sh" with { type: "text" };
 import inputrc from "../config/bash/inputrc.conf" with { type: "text" };
+import zellijConfig from "../config/zellij/config.kdl" with { type: "text" };
 
 const FILES: Record<string, string> = {
   "rc.sh": rcSh,
@@ -109,4 +110,34 @@ export async function installDotfiles(): Promise<void> {
   }
 
   await wireShellRc();
+  await installZellijConfig();
+}
+
+/**
+ * Written once, never rewritten. The theme file next to it is
+ * regenerated on every switch, but keybindings and layout preferences
+ * are the user's.
+ */
+async function installZellijConfig(): Promise<void> {
+  const dir = `${home()}/.config/zellij`;
+  const path = `${dir}/config.kdl`;
+
+  // The config references theme "red-dev", so that theme has to exist
+  // even when the theme step has not run or failed. Writing a default
+  // here means the reference always resolves; a later theme switch
+  // overwrites this file with the chosen palette.
+  const { THEMES, DEFAULT_THEME } = await import("./themes.ts");
+  const fallback = THEMES[DEFAULT_THEME];
+  if (fallback && !existsSync(`${dir}/themes/red-dev.kdl`)) {
+    const { applyZellij } = await import("./theme-apply.ts");
+    await applyZellij(fallback);
+  }
+
+  if (existsSync(path)) {
+    log.skip("zellij config exists — left alone");
+    return;
+  }
+  mkdirSync(dir, { recursive: true });
+  await Bun.write(path, zellijConfig);
+  log.ok(`zellij config written to ${path}`);
 }

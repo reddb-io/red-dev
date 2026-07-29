@@ -37,8 +37,11 @@ export async function configDir(p: Platform): Promise<string> {
   }
 
   if (p.env === "wsl") {
-    // The terminal lives on the host, so its config does too.
-    const raw = await capture(["cmd.exe", "/c", "echo %APPDATA%"]);
+    // The terminal lives on the host, so its config does too. Resolve
+    // cmd.exe by absolute path when PATH has been stripped — `sudo -u`
+    // does exactly that.
+    const cmdExe = Bun.which("cmd.exe") ?? "/mnt/c/Windows/System32/cmd.exe";
+    const raw = await capture([cmdExe, "/c", "echo %APPDATA%"]);
     const winPath = raw.split("\n").pop()?.trim().replace(/\r$/, "") ?? "";
     if (!/^[A-Za-z]:\\/.test(winPath)) {
       throw new RedError(`could not read %APPDATA% from Windows (got: ${raw})`);

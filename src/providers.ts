@@ -421,14 +421,21 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
         const { NERD_FONTS } = await import("./wsl.ts");
         const spec = NERD_FONTS[ctx.font];
         if (!spec) throw new RedError(`unknown font '${ctx.font}'`);
-        await configureAlacritty({
-          platform: ctx.platform,
-          theme,
-          fontFamily: spec.family,
-          opacity: ctx.opacity,
-        });
-        // Converging should leave the machine themed, not just the
-        // terminal emulator configured.
+        // Alacritty's config may live on the Windows host, so this can
+        // fail for reasons that have nothing to do with zellij, btop or
+        // neovim. Keep the surfaces independent: one unreachable
+        // filesystem must not leave the machine unthemed.
+        try {
+          await configureAlacritty({
+            platform: ctx.platform,
+            theme,
+            fontFamily: spec.family,
+            opacity: ctx.opacity,
+          });
+        } catch (err) {
+          log.warn(`alacritty: ${(err as Error).message}`);
+        }
+
         const { applyThemeEverywhere } = await import("./theme-apply.ts");
         const { applied } = await applyThemeEverywhere(theme, ctx.platform);
         if (applied.length > 0) log.ok(`themed: ${applied.join(", ")}`);

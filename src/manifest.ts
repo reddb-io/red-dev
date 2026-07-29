@@ -206,12 +206,19 @@ export const TOOLS: Tool[] = [
     win: winget("JesseDuffield.lazydocker"),
   },
   {
+    // zellij is how tiling stays identical across all five targets.
+    // Alacritty deliberately has no panes, and the platform-native
+    // answers diverge completely — GNOME extensions on Linux,
+    // FancyZones on Windows. A multiplexer sidesteps that: the same
+    // panes, tabs, sessions and keybindings everywhere.
+    //
+    // Upstream ships an official windows-msvc build (0.44.3 has both a
+    // .zip and an .msi), which an earlier revision of this manifest
+    // wrongly claimed did not exist.
     name: "zellij",
     scope: "core",
     u24: gh("zellij-org/zellij", "zellij-x86_64-unknown-linux-musl.tar.gz"),
-    // zellij has no native Windows build; on Windows the equivalent
-    // panes/tabs come from Windows Terminal itself.
-    win: skip("no native Windows build; Windows Terminal provides panes"),
+    win: winget("Zellij.Zellij"),
   },
   {
     name: "mise",

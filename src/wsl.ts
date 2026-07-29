@@ -17,6 +17,21 @@ import { existsSync } from "node:fs";
 import { log, RedError } from "./log.ts";
 import { THEMES, type Theme } from "./themes.ts";
 
+/**
+ * Resolve a Windows interop binary without trusting PATH.
+ *
+ * PATH is not dependable here: `sudo -u` resets the environment and
+ * strips the /mnt/c entries WSL injects, and upstream omakub's config
+ * discards them outright. WSL always mounts the Windows drive at the
+ * same place, so fall back to the absolute path rather than failing on
+ * a machine that plainly has the binary.
+ */
+function interopBin(name: string): string {
+  if (Bun.which(name)) return name;
+  const absolute = `/mnt/c/Windows/System32/${name}`;
+  return existsSync(absolute) ? absolute : name;
+}
+
 async function capture(cmd: string[]): Promise<string> {
   const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
   const out = await new Response(proc.stdout).text();
@@ -45,7 +60,7 @@ export async function windowsLocalAppData(): Promise<string> {
     return local;
   }
 
-  const raw = await capture(["cmd.exe", "/c", "echo %LOCALAPPDATA%"]);
+  const raw = await capture([interopBin("cmd.exe"), "/c", "echo %LOCALAPPDATA%"]);
   // cmd emits CRLF and may prefix a warning when cwd is a UNC path.
   const winPath = raw.split("\n").pop()?.trim().replace(/\r$/, "") ?? "";
   if (!/^[A-Za-z]:\\/.test(winPath)) {

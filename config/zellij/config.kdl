@@ -1,0 +1,51 @@
+// red-dev — zellij.
+//
+// zellij is what makes tiling the same on all five targets. Alacritty
+// deliberately has no panes, and the platform-native answers share
+// nothing: GNOME extensions on Linux, FancyZones on Windows, Snap
+// Layouts elsewhere. Putting the panes inside the terminal instead
+// means one set of keybindings that works everywhere, including over
+// SSH — which no window manager can offer.
+//
+// This file is installed once and then left alone. The theme lives in
+// themes/red-dev.kdl, which red-dev regenerates on every theme switch.
+
+theme "red-dev"
+
+// Keep zellij's own defaults for pane and tab management rather than
+// inventing a scheme: Ctrl-p for panes, Ctrl-t for tabs, Ctrl-n for
+// resize, Ctrl-o for sessions. Anyone arriving from zellij docs or
+// another machine finds what they expect.
+
+// Do not spawn a login shell inside an already-login shell; it doubles
+// the dotfile load on every new pane.
+default_shell "bash"
+
+// A pane that exits leaves its output on screen instead of vanishing,
+// which matters when the thing that exited did so because it failed.
+on_force_close "quit"
+
+// Rounded corners and a single status bar. simplified_ui stays off
+// because red-dev installs a Nerd Font on every target, so the arrow
+// separators render.
+ui {
+    pane_frames {
+        rounded_corners true
+        hide_session_name false
+    }
+}
+
+// Copy on select to the system clipboard. Under WSL this crosses to
+// Windows through the interop layer, which is one more reason the
+// binfmt registration in the wsl scope matters.
+copy_on_select true
+
+// Sessions survive a closed terminal. Reattach with `zellij attach`.
+session_serialization true
+pane_viewport_serialization true
+
+// Scrollback deep enough to find the error you scrolled past.
+scroll_buffer_size 50000
+
+// Do not ask on exit; the session is serialized anyway.
+mouse_mode true
