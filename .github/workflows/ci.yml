@@ -85,13 +85,15 @@ jobs:
           fi
 
   shell:
-    name: shellcheck
+    name: shell and bootstrap
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
+
       - name: Lint the shipped shell
         # boot.sh runs on machines that have nothing installed, and the
         # dotfiles are sourced into every shell the user opens. Both are
@@ -100,3 +102,17 @@ jobs:
           set -euo pipefail
           shellcheck -s sh boot.sh
           shellcheck -s bash config/bash/*.sh
+
+      - name: boot.ps1 must be pure ASCII
+        # Windows PowerShell 5.1 reads a BOM-less file as ANSI, so a
+        # UTF-8 em-dash becomes three garbage bytes, breaks the enclosing
+        # string, and reports a parse error twenty lines further down.
+        # An em-dash in a comment cost exactly that once. A bootstrap
+        # script is the last place to depend on encoding negotiation.
+        run: |
+          set -euo pipefail
+          if LC_ALL=C grep -nP '[^\x00-\x7F]' boot.ps1; then
+            echo "boot.ps1 contains non-ASCII (lines above). Use plain ASCII."
+            exit 1
+          fi
+          echo "boot.ps1 is pure ASCII"

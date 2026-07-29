@@ -51,8 +51,23 @@ fi
 
 case "$STATUS" in
   200) ;;
-  404) rm -f "$BODY"; fail "$REPO has no published releases yet" ;;
+  404)
+    rm -f "$BODY"
+    # A 404 here is ambiguous by design: GitHub returns it both for a
+    # repository with no releases and for one the caller cannot see.
+    # Saying only the first sends someone with a private repo hunting a
+    # release that already exists.
+    if [ -n "${GITHUB_TOKEN:-}" ]; then
+      fail "$REPO has no published releases yet"
+    else
+      printf 'fail no release found for %s.\n' "$REPO" >&2
+      printf '     Either none has been published, or the repository is\n' >&2
+      printf '     private — in which case export GITHUB_TOKEN and retry.\n' >&2
+      exit 1
+    fi
+    ;;
   403) rm -f "$BODY"; fail "GitHub API rate limit reached — set GITHUB_TOKEN and retry" ;;
+  401) rm -f "$BODY"; fail "GITHUB_TOKEN was rejected — check that it can read $REPO" ;;
   000) rm -f "$BODY"; fail "could not reach github.com — check your network" ;;
   *)   rm -f "$BODY"; fail "GitHub API returned HTTP $STATUS" ;;
 esac
