@@ -92,18 +92,12 @@ Both resolve the binary for your platform from the latest release, install it
 under your own user, and converge. Neither needs administrator or root rights
 for red-dev itself; individual packages may still ask for sudo.
 
-> [!IMPORTANT]
-> **No stable release has been cut yet — only prereleases.** GitHub's
-> `/releases/latest` never returns a prerelease, so the commands above stop and
-> tell you so. Until the first `v*.*.*` tag, install from the `next` channel:
->
-> ```bash
-> RED_DEV_CHANNEL=next sh -c "$(curl -fsSL https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.sh)"
-> ```
->
-> ```powershell
-> $env:RED_DEV_CHANNEL='next'; irm https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.ps1 | iex
-> ```
+Every push to `main` also publishes a `next` prerelease, so the newest work is
+installable without waiting for a tag:
+
+```bash
+RED_DEV_CHANNEL=next sh -c "$(curl -fsSL https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.sh)"
+```
 
 | Variable | Effect |
 | --- | --- |
@@ -413,8 +407,8 @@ Early, but the loop runs end to end.
 - Providers: apt, ppa, apt repositories, winget, GitHub releases, and builtins
   for dotfiles, fonts, Alacritty, Windows Terminal and WSL interop
 - Verified on WSL Ubuntu 24.04 and native Windows from one source tree, and on a
-  freshly created user for the dotfiles path
-- **No release has been cut**, so the install commands above do not work yet
+  freshly created user for the dotfiles path — including the full install path
+  from the published release
 
 See [Known limitations](#known-limitations-per-target) for what is implemented
 but unproven.
