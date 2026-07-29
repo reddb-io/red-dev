@@ -38,7 +38,11 @@ CHANNEL="${RED_DEV_CHANNEL:-stable}"
 
 case "$CHANNEL" in
   stable) API="https://api.github.com/repos/$REPO/releases/latest" ;;
-  next)   API="https://api.github.com/repos/$REPO/releases?per_page=1" ;;
+  # /releases is not ordered the way you would hope: the newest
+  # prerelease is not reliably first, and taking [0] served the stable
+  # release to everyone who asked for `next`. Fetch a page and pick the
+  # first entry actually marked prerelease.
+  next)   API="https://api.github.com/repos/$REPO/releases?per_page=20" ;;
   *)      fail "RED_DEV_CHANNEL must be 'stable' or 'next' (got '$CHANNEL')" ;;
 esac
 
@@ -92,15 +96,38 @@ esac
 JSON=$(cat "$BODY")
 rm -f "$BODY"
 
-# The `next` channel returns an array, so this must take the first
-# matching asset across the newest release rather than assuming a single
-# object. Both shapes flatten the same way here.
-URL=$(printf '%s' "$JSON" \
-  | tr ',' '\n' \
-  | grep '"browser_download_url"' \
-  | sed 's/.*"\(https[^"]*\)".*/\1/' \
-  | grep "/$ASSET\$" \
-  | head -1)
+# On `next` the response is an array of releases and only some are
+# prereleases. Walk it in order, remember the most recent asset URL seen
+# for our platform, and commit to it the moment a "prerelease": true
+# closes that release's block. Picking by position instead served the
+# stable build to everyone who asked for next.
+if [ "$CHANNEL" = "next" ]; then
+  # Field order inside each release object is: tag_name, then
+  # prerelease, then assets. So the flag has to be set first and the
+  # asset matched after — accumulating the asset and checking the flag
+  # afterwards reads the previous release's marker, which is how the
+  # first attempt at this returned nothing at all.
+  URL=$(printf '%s' "$JSON" | tr '{},' '\n' | awk -v asset="$ASSET" '
+    /"prerelease"[[:space:]]*:[[:space:]]*true/  { pre = 1; next }
+    /"prerelease"[[:space:]]*:[[:space:]]*false/ { pre = 0; next }
+    pre && /"browser_download_url"/ {
+      # split on quotes rather than sub() with a backreference: POSIX
+      # awk has no \1 in the replacement, so that silently yields the
+      # literal string "\1" and every match is discarded. The line is
+      #   "browser_download_url": "https://..."
+      # so field 4 is the URL.
+      n = split($0, q, "\"")
+      if (n >= 4 && q[4] ~ ("/" asset "$")) { print q[4]; exit }
+    }
+  ')
+else
+  URL=$(printf '%s' "$JSON" \
+    | tr ',' '\n' \
+    | grep '"browser_download_url"' \
+    | sed 's/.*"\(https[^"]*\)".*/\1/' \
+    | grep "/$ASSET\$" \
+    | head -1)
+fi
 
 if [ -z "$URL" ]; then
   printf 'fail no asset named %s in the latest release. Available:\n' "$ASSET" >&2

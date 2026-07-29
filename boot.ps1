@@ -31,7 +31,10 @@ if ($Channel -notin @('stable', 'next')) {
 $api = if ($Channel -eq 'stable') {
     "https://api.github.com/repos/$Repo/releases/latest"
 } else {
-    "https://api.github.com/repos/$Repo/releases?per_page=1"
+    # Not per_page=1: /releases is not ordered so the newest prerelease
+    # comes first, and taking [0] handed the stable release to everyone
+    # who asked for next. Fetch a page and filter below.
+    "https://api.github.com/repos/$Repo/releases?per_page=20"
 }
 
 Say "resolving $Channel release of $Repo"
@@ -43,8 +46,12 @@ if ($env:GITHUB_TOKEN) { $headers['Authorization'] = "Bearer $env:GITHUB_TOKEN" 
 
 try {
     $release = Invoke-RestMethod $api -Headers $headers
-    # The 'next' endpoint returns an array; take the newest entry.
-    if ($release -is [array]) { $release = $release[0] }
+    if ($release -is [array]) {
+        # Filter, do not index: the array mixes stable and prerelease
+        # entries and is not ordered newest-prerelease-first.
+        $release = $release | Where-Object { $_.prerelease } | Select-Object -First 1
+        if (-not $release) { Fail "$Repo has no prerelease to install" }
+    }
 } catch {
     $code = $_.Exception.Response.StatusCode.value__
     # 404 is ambiguous: GitHub returns it both for "no releases" and for
