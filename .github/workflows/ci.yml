@@ -1,0 +1,102 @@
+name: CI
+
+# The fast correctness lane. Everything here runs on every push and every
+# PR, because with bun the whole thing finishes in well under a minute —
+# there is no expensive tier to defer post-merge the way reddb does.
+#
+# Runner: Blacksmith, 2 vCPU (the smallest tier; there is no "nano").
+# The Blacksmith GitHub App must be installed on the org, otherwise a
+# Blacksmith label leaves the job queued forever rather than failing.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: typecheck, test, build
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bunx tsc --noEmit
+
+      - name: Test
+        run: bun test
+
+      - name: Version consistency
+        # The binary reads its version from package.json, so drift is
+        # impossible by construction — this asserts that construction
+        # still holds rather than trusting it.
+        run: |
+          set -euo pipefail
+          MANIFEST="$(bun -e 'console.log(require("./package.json").version)')"
+          bun run build
+          REPORTED="$(./dist/red-dev-linux-x64 --version)"
+          [[ "$MANIFEST" == "$REPORTED" ]] || {
+            echo "package.json says ${MANIFEST}, the binary reports ${REPORTED}"
+            exit 1
+          }
+          echo "version ${MANIFEST} consistent"
+
+      - name: Smoke — embedded dotfiles survive compilation
+        # The distribution model rests on this: a binary that cannot
+        # carry config/ installs tools and no experience.
+        run: |
+          set -euo pipefail
+          bun build scripts/embed-smoke.ts --compile --target=bun-linux-x64 --outfile /tmp/embed-smoke
+          /tmp/embed-smoke | grep -q 'EMBED OK'
+
+      - name: Smoke — the TUI survives compilation
+        run: |
+          set -euo pipefail
+          bun build scripts/tui-smoke.ts --compile --target=bun-linux-x64 --outfile /tmp/tui-smoke
+          /tmp/tui-smoke | grep -q 'SMOKE OK'
+
+      - name: Smoke — the binary answers
+        run: |
+          set -euo pipefail
+          ./dist/red-dev-linux-x64 platform
+          ./dist/red-dev-linux-x64 plan core
+          # A rejected input must exit non-zero. Asserting the failure
+          # path matters more than the happy one: a parser that silently
+          # accepts nonsense looks fine in every green build.
+          if ./dist/red-dev-linux-x64 plan nonsense 2>/dev/null; then
+            echo "expected an invalid scope to fail"
+            exit 1
+          fi
+
+  shell:
+    name: shellcheck
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Lint the shipped shell
+        # boot.sh runs on machines that have nothing installed, and the
+        # dotfiles are sourced into every shell the user opens. Both are
+        # worth a linter even though neither is compiled.
+        run: |
+          set -euo pipefail
+          shellcheck -s sh boot.sh
+          shellcheck -s bash config/bash/*.sh

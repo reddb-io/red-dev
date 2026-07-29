@@ -10,9 +10,18 @@
  */
 
 import { createCLI, type CLI } from "cli-args-parser";
+import pkg from "../package.json" with { type: "json" };
 import { themeNames, DEFAULT_THEME } from "./themes.ts";
 
-export const VERSION = "0.2.0";
+/**
+ * One source of truth, inlined at build time.
+ *
+ * This was a hand-copied string, and package.json and the binary had
+ * already drifted apart — 0.1.0 against 0.2.0 — with nothing to notice.
+ * A release pipeline that checks the tag against a manifest the binary
+ * does not read would have happily shipped the wrong number.
+ */
+export const VERSION: string = pkg.version;
 
 const SCOPES = ["core", "desktop", "wsl"] as const;
 

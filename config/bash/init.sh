@@ -53,6 +53,7 @@ fi
 # This is the closest bash gets to zsh's completion system.
 if command -v carapace >/dev/null 2>&1; then
   export CARAPACE_BRIDGES='zsh,fish,bash,inshellisense'
+  # shellcheck disable=SC1090  # process substitution; nothing to follow
   source <(carapace _carapace bash) 2>/dev/null || true
 fi
 

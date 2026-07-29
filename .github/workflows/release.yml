@@ -1,21 +1,139 @@
-name: release
+name: Release
 
-# Both binaries are cross-compiled from one Linux runner. bun's
-# --target flag produces the Windows executable without needing a
-# Windows runner, which keeps the release reproducible from a single
-# job instead of two that can drift.
+# reddb-style release pipeline: a `plan` job resolving stable (tag
+# v*.*.*) versus `next` (push to main → prerelease), a build, a GitHub
+# Release with checksums and build attestations.
+#
+# One deliberate simplification against reddb and toon: there is no OS
+# matrix. bun cross-compiles the Windows executable from Linux, verified
+# on both targets, so a single runner produces every asset. A matrix
+# here would buy nothing and cost two more runners per release.
+#
+# Runner: Blacksmith. The GitHub App must be installed on the org — a
+# Blacksmith label without it leaves the job queued forever rather than
+# failing, which is a confusing way to discover the requirement.
 
 on:
   push:
-    tags: ["v*"]
+    tags: ["v*.*.*"]
+    branches: [main]
   workflow_dispatch:
+    inputs:
+      channel:
+        description: Release channel
+        required: true
+        default: stable
+        type: choice
+        options: [stable, next]
+      version:
+        description: Version for stable (e.g. 0.3.0)
+        required: false
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  # Never cancel a release mid-flight: a half-published release is worse
+  # than a queued one.
+  cancel-in-progress: false
+
 jobs:
+  plan:
+    name: Plan release
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 5
+    outputs:
+      should_skip: ${{ steps.plan.outputs.should_skip }}
+      release_channel: ${{ steps.plan.outputs.release_channel }}
+      release_tag: ${{ steps.plan.outputs.release_tag }}
+      package_version: ${{ steps.plan.outputs.package_version }}
+      github_prerelease: ${{ steps.plan.outputs.github_prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide release target
+        id: plan
+        env:
+          HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          EVENT="${{ github.event_name }}"
+          REF="${{ github.ref }}"
+          IN_CHANNEL="${{ github.event.inputs.channel || 'stable' }}"
+          IN_VERSION="${{ github.event.inputs.version || '' }}"
+
+          SHOULD_SKIP=false
+          CHANNEL=""
+          TAG=""
+          VERSION=""
+          PRERELEASE=false
+
+          manifest_version() { node -p "require('./package.json').version"; }
+          normalize() { echo "${1#v}"; }
+
+          if [[ "$EVENT" == "push" && "$REF" == refs/tags/v* ]]; then
+            CHANNEL="stable"
+            TAG="${REF#refs/tags/}"
+            VERSION="$(normalize "$TAG")"
+          elif [[ "$EVENT" == "push" && "$REF" == "refs/heads/main" ]]; then
+            # Every merge to main publishes a prerelease, so `next` always
+            # has something installable without waiting for a tag. Release
+            # commits are skipped or the tag push would double-publish.
+            if [[ "${HEAD_COMMIT_MESSAGE}" =~ ^chore:\ release ]]; then
+              SHOULD_SKIP=true
+            else
+              VERSION="$(manifest_version)-next.${GITHUB_RUN_NUMBER}"
+              CHANNEL="next"
+              TAG="v${VERSION}"
+              PRERELEASE=true
+            fi
+          elif [[ "$EVENT" == "workflow_dispatch" ]]; then
+            if [[ "$IN_CHANNEL" == "stable" ]]; then
+              [[ -z "$IN_VERSION" ]] && { echo "stable requires a version input"; exit 1; }
+              CHANNEL="stable"
+              VERSION="$(normalize "$IN_VERSION")"
+              TAG="v${VERSION}"
+            else
+              VERSION="${IN_VERSION:-$(manifest_version)-next.${GITHUB_RUN_NUMBER}}"
+              CHANNEL="next"
+              TAG="v${VERSION}"
+              PRERELEASE=true
+            fi
+          else
+            SHOULD_SKIP=true
+          fi
+
+          # A stable tag must match the committed manifest. The binary
+          # reads its version from package.json, so a mismatch here would
+          # ship a release whose contents disagree with its own name.
+          if [[ "$SHOULD_SKIP" != "true" && "$CHANNEL" == "stable" ]]; then
+            MANIFEST="$(manifest_version)"
+            if [[ "$MANIFEST" != "$VERSION" ]]; then
+              echo "${TAG} resolves to ${VERSION}, but package.json is ${MANIFEST}."
+              echo "Bump package.json, commit, then re-tag."
+              exit 1
+            fi
+          fi
+
+          {
+            echo "should_skip=${SHOULD_SKIP}"
+            echo "release_channel=${CHANNEL}"
+            echo "release_tag=${TAG}"
+            echo "package_version=${VERSION}"
+            echo "github_prerelease=${PRERELEASE}"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "channel=${CHANNEL} tag=${TAG} version=${VERSION} skip=${SHOULD_SKIP}"
+
   build:
-    runs-on: ubuntu-latest
+    name: Build binaries
+    needs: [plan]
+    if: needs.plan.outputs.should_skip != 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -23,7 +141,7 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Install dependencies
+      - name: Install
         run: bun install --frozen-lockfile
 
       - name: Typecheck
@@ -32,39 +150,156 @@ jobs:
       - name: Test
         run: bun test
 
-      - name: Verify embedded dotfiles survive compilation
-        # The distribution model depends on this: a binary that cannot
-        # carry config/ installs tools and no experience.
+      - name: Gate — embedded dotfiles survive compilation
         run: |
+          set -euo pipefail
           bun build scripts/embed-smoke.ts --compile --target=bun-linux-x64 --outfile /tmp/embed-smoke
           /tmp/embed-smoke | grep -q 'EMBED OK'
 
-      - name: Verify the TUI survives compilation
+      - name: Gate — the TUI survives compilation
         run: |
+          set -euo pipefail
           bun build scripts/tui-smoke.ts --compile --target=bun-linux-x64 --outfile /tmp/tui-smoke
           /tmp/tui-smoke | grep -q 'SMOKE OK'
+
+      - name: Set release version
+        # For a prerelease the manifest still holds the base version, so
+        # the binary would report the wrong one. Stable is already
+        # verified equal by the plan job.
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.plan.outputs.package_version }}"
+          node -e '
+            const fs = require("fs");
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            pkg.version = process.argv[1];
+            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
+          ' "$VERSION"
+          echo "package.json set to ${VERSION}"
 
       - name: Build
         run: bun run build
 
-      - name: Sanity-check the Linux binary
+      - name: Smoke the built binary
         run: |
-          ./dist/red-dev-linux-x64 --version
+          set -euo pipefail
+          EXPECTED="${{ needs.plan.outputs.package_version }}"
+          REPORTED="$(./dist/red-dev-linux-x64 --version)"
+          [[ "$REPORTED" == "$EXPECTED" ]] || {
+            echo "version smoke: expected ${EXPECTED}, got ${REPORTED}"
+            exit 1
+          }
           ./dist/red-dev-linux-x64 platform
           ./dist/red-dev-linux-x64 plan core
 
-      - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum red-dev-linux-x64 red-dev-windows-x64.exe > SHA256SUMS
+          cp SHA256SUMS checksums.txt
+          cat SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries
+          path: dist/*
+
+  publish:
+    name: GitHub Release
+    needs: [plan, build]
+    if: needs.plan.outputs.should_skip != 'true'
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: binaries
+          path: release
+
+      - name: Attest build provenance
+        # GitHub only persists attestations for public repos or paid org
+        # plans; on a private repo the API refuses. Non-blocking so the
+        # release still happens, and it starts working the moment the
+        # repo goes public.
+        continue-on-error: true
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-checksums: release/SHA256SUMS
+
+      - name: Compose release body
+        env:
+          TAG: ${{ needs.plan.outputs.release_tag }}
+          REPO: ${{ github.repository }}
+          CHANNEL: ${{ needs.plan.outputs.release_channel }}
+        run: |
+          set -euo pipefail
+          cat > release-body.md <<MARKDOWN
+          # red-dev ${TAG}
+
+          One development environment across Ubuntu 24.04, Ubuntu 26.04, WSL and native Windows.
+
+          ## Install
+
+          **Linux and WSL:**
+          \`\`\`bash
+          curl -fsSL https://raw.githubusercontent.com/${REPO}/main/boot.sh | sh
+          \`\`\`
+
+          **Native Windows:**
+          \`\`\`powershell
+          irm https://raw.githubusercontent.com/${REPO}/main/boot.ps1 | iex
+          \`\`\`
+
+          Both resolve the asset for your platform from this release, install under your own user, and converge. Neither needs administrator or root rights for red-dev itself.
+
+          ## Assets
+
+          | Platform | Asset |
+          | --- | --- |
+          | Linux x86_64 (also WSL) | \`red-dev-linux-x64\` |
+          | Windows x86_64 | \`red-dev-windows-x64.exe\` |
+
+          Both are cross-compiled from a single Linux runner; the Windows executable needs no Windows host to build.
+
+          ## Verification
+
+          \`\`\`bash
+          curl -fsSLO https://github.com/${REPO}/releases/download/${TAG}/SHA256SUMS
+          sha256sum -c SHA256SUMS
+
+          gh attestation verify red-dev-linux-x64 --repo ${REPO}
+          \`\`\`
+          MARKDOWN
+
+          if [[ "${CHANNEL}" == "next" ]]; then
+            cat >> release-body.md <<'MARKDOWN'
+
+          ---
+
+          > [!WARNING]
+          > This is a prerelease cut from `main`. It has passed CI but has not been
+          > through a stable tag. Use a `v*.*.*` release for anything you depend on.
+          MARKDOWN
+          fi
+
+          cat release-body.md
+
+      - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            dist/red-dev-linux-x64
-            dist/red-dev-windows-x64.exe
+          tag_name: ${{ needs.plan.outputs.release_tag }}
+          name: red-dev ${{ needs.plan.outputs.release_tag }}
+          body_path: release-body.md
+          prerelease: ${{ needs.plan.outputs.github_prerelease }}
           generate_release_notes: true
-
-      - name: Upload artifacts
-        if: "!startsWith(github.ref, 'refs/tags/v')"
-        uses: actions/upload-artifact@v4
-        with:
-          name: red-dev-binaries
-          path: dist/
+          files: release/*
+          token: ${{ secrets.GITHUB_TOKEN }}
