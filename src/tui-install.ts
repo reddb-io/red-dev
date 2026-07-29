@@ -44,6 +44,19 @@ function human(ms: number): string {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
+/**
+ * A remaining-time estimate, or nothing.
+ *
+ * Deliberately silent for the first few steps: a mean drawn from two
+ * samples, where one of them was a 90 MB download, produces a number
+ * confident enough to be believed and wrong by minutes.
+ */
+function etaText(done: number, total: number, elapsedMs: number, finished: boolean): string {
+  if (finished || done < 3 || done >= total) return "";
+  const remaining = Math.round(((elapsedMs / done) * (total - done)) / 1000);
+  return `  ~${human(remaining * 1000)} left`;
+}
+
 /** One line in the log column. */
 interface LogLine {
   text: string;
@@ -171,19 +184,24 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
           { flexDirection: "column", width: twoColumn ? rightWidth : leftWidth, borderStyle: "round", padding: 1, ...(twoColumn ? { marginLeft: 1 } : { marginTop: 1 }) },
           Text({ dim: true }, "PROGRESS"),
           Text({}, ""),
+          // ProgressBar draws the bar and a percentage, and nothing
+          // else: showValue, showEta and description are accepted and
+          // ignored in this version, so passing them looked like
+          // configuration and produced none. A percentage alone does
+          // not answer "how many left", so the count and the estimate
+          // are rendered here where they are actually under our
+          // control.
           ProgressBar({
             value: results.length,
             max: total,
-            width: rightWidth - 6,
+            width: rightWidth - 8,
             style: "block",
             color: failures.length > 0 ? "yellow" : "red",
-            showValue: true,
-            showEta: !finished(),
-            eta:
-              results.length > 0 && !finished()
-                ? Math.round(((elapsedMs / results.length) * (total - results.length)) / 1000)
-                : 0,
           }),
+          Text(
+            { dim: true },
+            `${results.length}/${total}${etaText(results.length, total, elapsedMs, finished())}`,
+          ),
           Text({}, ""),
           MultiProgressBar({
             segments: [

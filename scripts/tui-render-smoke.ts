@@ -9,7 +9,7 @@
  * visible in one frame.
  */
 
-import { Box, Text, renderToString } from "tuiuiu.js";
+import { Box, MultiProgressBar, ProgressBar, Text, renderToString } from "tuiuiu.js";
 import { THEMES, themeNames } from "../src/themes.ts";
 
 function Swatches(hexes: string[]) {
@@ -80,22 +80,30 @@ if (!frame.includes("❯ kanagawa")) problems.push("selection marker missing");
 
 
 // --- the install timeline -------------------------------------------
-// The progress view is the other reason for a fullscreen mode, and its
-// bar is the piece most likely to break silently: an off-by-one in the
-// fill maths renders as an empty or overflowing row, not an error.
-function Bar(done: number, total: number, width: number) {
-  const filled = total === 0 ? 0 : Math.round((done / total) * width);
-  return Box(
-    { flexDirection: "row" },
-    Text({ color: "red" }, "\u2588".repeat(Math.max(0, filled))),
-    Text({ dim: true }, "\u2591".repeat(Math.max(0, width - filled))),
-  );
-}
+//
+// This block used to render a `Bar` defined here in the smoke \u2014 a
+// hand-rolled one that the product stopped using when the layout moved
+// to tuiuiu's ProgressBar. The assertion passed the whole time, against
+// code no longer shipped. A smoke that reimplements its subject tests
+// the smoke.
+//
+// The components below are the ones tui-install.ts renders.
 
 const progress = renderToString(
   Box(
     { flexDirection: "column", padding: 1 },
-    Box({ flexDirection: "row" }, Bar(14, 33, 30), Text({ dim: true }, "  14/33  \u00b7  1m 12s")),
+    ProgressBar({ value: 14, max: 33, width: 24, style: "block", color: "yellow" }),
+    Text({ dim: true }, "14/33  ~2m 30s left"),
+    Text({}, ""),
+    MultiProgressBar({
+      segments: [
+        { value: 6, color: "green", label: "new" },
+        { value: 7, color: "gray", label: "present" },
+        { value: 1, color: "red", label: "failed" },
+      ],
+      total: 33,
+      width: 24,
+    }),
     Box(
       { flexDirection: "column", borderStyle: "round", padding: 1 },
       Box({ flexDirection: "row" }, Text({ color: "green" }, "\u2713 "), Text({}, "ripgrep".padEnd(16)), Text({ dim: true }, "installed")),
@@ -107,12 +115,21 @@ const progress = renderToString(
 
 console.log(progress);
 
-// 14 of 33 over 30 cells is 13 filled. A bar that is all-empty or
-// all-full means the maths broke, and both look plausible in isolation.
-const filledCount = (progress.match(/\u2588/g) ?? []).length;
-if (filledCount !== 13) problems.push(`progress bar filled ${filledCount} cells, expected 13`);
-if (!(progress.match(/\u2591/g) ?? []).length) problems.push("progress bar has no empty portion");
+// A bar that renders as all-empty or all-full means the value never
+// reached it, and both look plausible in isolation. 14 of 33 must show
+// as partially filled \u2014 some fill character and some empty one.
+const bars = (progress.match(/[\u2588\u2589\u258a\u258b\u258c\u258d\u258e\u258f]/g) ?? []).length;
+if (bars === 0) problems.push("progress bar drew no filled cells");
+if (!(progress.match(/[\u2591\u2592\u2593]/g) ?? []).length) {
+  problems.push("progress bar drew no empty portion \u2014 it looks complete at 42%");
+}
+// showValue is what turns a bar into a number anyone can act on.
 if (!progress.includes("14/33")) problems.push("counter missing");
+// The segment legend is the breakdown; without it the bar is one blob.
+const legend = progress.replace(/\x1b\[[0-9;]*m/g, "");
+if (!/new/.test(legend) || !/failed/.test(legend)) {
+  problems.push("MultiProgressBar legend missing its segments");
+}
 // Glyph and name are separate Text nodes, so an ANSI reset sits between
 // them: asserting on the raw frame tests the renderer's escape placement
 // rather than the content. Strip colour first and check what a human
