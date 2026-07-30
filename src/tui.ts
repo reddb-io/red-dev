@@ -32,8 +32,8 @@ import { VERSION } from "./cli.ts";
 import type { Platform } from "./platform.ts";
 import { summary } from "./platform.ts";
 import { THEMES, themeNames } from "./themes.ts";
-import { Header, StatusLine } from "./tui-chrome.ts";
-import { muted, wordmarkGradient } from "./tui-theme.ts";
+import { Header, Screen, StatusLine, Surface } from "./tui-chrome.ts";
+import { muted, text, wordmarkGradient } from "./tui-theme.ts";
 
 /**
  * A row of blocks in the palette's own colours.
@@ -182,11 +182,14 @@ export async function runTui(p: Platform): Promise<TuiResult> {
     // an 80-column window and a 200-column one should both look
     // deliberate.
     const width = Math.max(size.columns ?? 80, 60);
+    const height = Math.max(size.rows ?? 24, 16);
     const leftWidth = Math.max(22, Math.floor(width * 0.32));
     const rightWidth = width - leftWidth - 5;
+    const bodyRows = Math.max(8, height - 6);
 
-    return Box(
-      { flexDirection: "column", padding: 1 },
+    return Screen(
+      width,
+      height,
 
       Header("red-dev", inThemes ? "theme" : (section?.label.toLowerCase() ?? "")),
       Text({}, ""),
@@ -207,9 +210,14 @@ export async function runTui(p: Platform): Promise<TuiResult> {
               )),
         ),
 
-        // Right: the landing panel, notes, or the live palette preview
+        // Right: the landing panel, notes, or the live palette preview,
+        // on its own shade so the browsing column and the reading column
+        // are told apart by surface rather than by a border.
         Box(
-          { flexDirection: "column", width: rightWidth, marginLeft: 2 },
+          { marginLeft: 2 },
+          Surface(
+          rightWidth,
+          bodyRows,
           ...(!inThemes && section?.key === "home"
             ? [
                 // Centred, and the logo fades rather than sitting flat.
@@ -238,29 +246,30 @@ export async function runTui(p: Platform): Promise<TuiResult> {
                     letterSpacing: 1,
                   }),
                   Text({}, ""),
-                  Text({ dim: true }, summary(p).split("\n")[0] ?? ""),
-                  Text({ dim: true }, summary(p).split("\n")[1] ?? ""),
+                  Text({ color: muted }, summary(p).split("\n")[0] ?? ""),
+                  Text({ color: muted }, summary(p).split("\n")[1] ?? ""),
                   Text({}, ""),
-                  Text({ dim: true }, "Pick a section on the left."),
+                  Text({ color: muted }, "Pick a section on the left."),
                 ),
               ]
             : inThemes
             ? [
-                Text({ bold: true }, THEMES[activeTheme]?.name ?? activeTheme),
+                Text({ color: text, bold: true }, THEMES[activeTheme]?.name ?? activeTheme),
                 Text({}, ""),
                 Swatches(paletteOf(activeTheme)),
                 Text({}, ""),
-                Text({ dim: true }, "background · red · green · yellow"),
-                Text({ dim: true }, "blue · magenta · cyan · foreground"),
+                Text({ color: muted }, "background · red · green · yellow"),
+                Text({ color: muted }, "blue · magenta · cyan · foreground"),
                 Text({}, ""),
-                Text({ dim: true }, "Neovim colorscheme:"),
-                Text({}, `  ${THEMES[activeTheme]?.neovim ?? "—"}`),
+                Text({ color: muted }, "Neovim colorscheme:"),
+                Text({ color: text }, `  ${THEMES[activeTheme]?.neovim ?? "—"}`),
               ]
             : [
-                Text({ bold: true }, section?.label ?? ""),
+                Text({ color: text, bold: true }, section?.label ?? ""),
                 Text({}, ""),
-                ...(section?.notes ?? []).map((n) => Text({ dim: true }, n)),
+                ...(section?.notes ?? []).map((n) => Text({ color: muted }, n)),
               ]),
+          ),
         ),
       ),
 

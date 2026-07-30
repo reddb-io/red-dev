@@ -16,7 +16,6 @@ import {
   Box,
   HintBar,
   ListItem,
-  Panel,
   ProgressBar,
   Text,
   render,
@@ -31,7 +30,8 @@ import {
 import { createWizard } from "tuiuiu.js/hooks";
 import type { Platform } from "./platform.ts";
 import { summary } from "./platform.ts";
-import { ui } from "./tui-theme.ts";
+import { Screen, Surface } from "./tui-chrome.ts";
+import { muted, ui } from "./tui-theme.ts";
 import { THEMES, themeNames } from "./themes.ts";
 
 export interface SetupAnswers {
@@ -278,6 +278,8 @@ export async function runSetupTui(
 
     const q = step();
     const width = Math.max(size.columns ?? 90, 60);
+    const height = Math.max(size.rows ?? 24, 16);
+    const bodyRows = Math.max(10, height - 8);
     const twoColumn = width >= 86;
     // 26, not 22: at 22 the status dot pushed every title into an ellipsis
     // ("Termin…", "Runtim…"), which is worse than no timeline at all.
@@ -286,13 +288,14 @@ export async function runSetupTui(
     const isTheme = q.id === "theme";
     const activeKey = q.choices[cursor()]?.key ?? "";
 
-    return Box(
-      { flexDirection: "column", padding: 1 },
+    return Screen(
+      width,
+      height,
 
       Box(
         { flexDirection: "row", justifyContent: "space-between" },
         Text({ color: ui.accent, bold: true }, "red-dev setup"),
-        Text({ dim: true }, summary(p).split("\n")[0] ?? ""),
+        Text({ color: muted }, summary(p).split("\n")[0] ?? ""),
       ),
 
       Box(
@@ -310,29 +313,35 @@ export async function runSetupTui(
         { flexDirection: twoColumn ? "row" : "column" },
 
         // The timeline: every step, and which are behind you.
+        //
+        // A bold label over the list rather than Panel's rounded border.
+        // This screen was the last one still framing its regions, which
+        // meant the first thing anyone saw of red-dev looked like a
+        // different program from everything after it.
         ...(twoColumn
           ? [
               Box(
-                { width: leftWidth },
-                Panel(
-                  { title: "steps" },
-                  ...steps.map((s, i) =>
-                    ListItem({
-                      primary: s.title,
-                      selected: i === stepIndex(),
-                      status: wizard.isCompleted(i) ? "success" : i === stepIndex() ? "running" : "pending",
-                    }),
-                  ),
+                { flexDirection: "column", width: leftWidth },
+                Text({ color: muted, bold: true }, "Steps"),
+                ...steps.map((s, i) =>
+                  ListItem({
+                    primary: s.title,
+                    selected: i === stepIndex(),
+                    status: wizard.isCompleted(i) ? "success" : i === stepIndex() ? "running" : "pending",
+                  }),
                 ),
               ),
             ]
           : []),
 
         Box(
-          { width: rightWidth, ...(twoColumn ? { marginLeft: 1 } : {}) },
-          Panel(
-            { title: q.title.toLowerCase() },
-            Text({ dim: true }, q.description),
+          { ...(twoColumn ? { marginLeft: 1 } : {}) },
+          Surface(
+            rightWidth,
+            bodyRows,
+            Text({ color: ui.accent, bold: true }, q.title),
+            Text({}, ""),
+            Text({ color: muted }, q.description),
             Text({}, ""),
             ...q.choices.map((c, i) =>
               ListItem({

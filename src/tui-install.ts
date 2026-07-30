@@ -30,7 +30,7 @@ import {
 import { VERSION } from "./cli.ts";
 import { converge, countSteps, type StepResult } from "./converge.ts";
 import { captureStart, captureStop } from "./log.ts";
-import { Accented, Header, Section, StatusLine } from "./tui-chrome.ts";
+import { Accented, Header, Screen, Section, StatusLine, Surface } from "./tui-chrome.ts";
 import { muted, subtle, text, ui } from "./tui-theme.ts";
 import type { Scope } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
@@ -142,9 +142,16 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
     // wrapped onto the next line and the segment legend truncated to
     // "faile" — both of which read as a broken widget rather than a
     // narrow one.
+    //
+    // 37 on the outside, because Surface spends three columns on the
+    // padding that keeps the text off the edge of its own shade. The
+    // widgets are still sized against 34; widening the column is what
+    // keeps the padding from being taken out of them.
+    const rightPad = 3;
     const rightWidth = 34;
+    const rightOuter = rightWidth + rightPad;
     const twoColumn = width >= 92;
-    const leftWidth = twoColumn ? width - rightWidth - 6 : width - 4;
+    const leftWidth = twoColumn ? width - rightOuter - 6 : width - 4;
     // The log fills whatever is left after the frame, header and hint —
     // less again when the status block sits above it.
     const logRows = Math.max(5, height - (twoColumn ? 8 : 16));
@@ -153,8 +160,14 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
     const failures = results.filter((r) => r.outcome === "failed");
     const elapsedMs = Date.now() - startedAt();
 
-    return Box(
-      { flexDirection: "column", padding: 1 },
+    // Stacked, the shade is only as tall as the content that sits on it:
+    // the fixed rows, plus whatever the failure list and the closing
+    // note add once there is something to say.
+    const rightRows = 14 + Math.min(failures.length, 6) + (finished() ? 4 : 0);
+
+    return Screen(
+      width,
+      height,
 
       Header("red-dev", finished() ? "done" : `${scope()} · ${current()}`),
       Text({}, ""),
@@ -189,15 +202,19 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
           ),
         ),
 
-        // Right: labelled sections, no box. Position never shifts, so
-        // the eye can return to the same spot without hunting.
+        // Right: labelled sections on their own shade. No box — the
+        // change of background is what separates it, the way OpenCode
+        // separates its sidebar. Position never shifts, so the eye can
+        // return to the same spot without hunting.
         Box(
-          {
-            flexDirection: "column",
-            width: twoColumn ? rightWidth : leftWidth,
-            ...(twoColumn ? { marginLeft: 2 } : { marginTop: 1 }),
-          },
-          Text({ color: muted, bold: true }, finished() ? "Done" : "Progress"),
+          { ...(twoColumn ? { marginLeft: 2 } : { marginTop: 1 }) },
+          Surface(
+            twoColumn ? rightOuter : leftWidth,
+            // Beside the log it matches the log's height, so the two
+            // regions end on the same row. Stacked, it is only as tall
+            // as it needs to be.
+            twoColumn ? logRows + 2 : rightRows,
+            Text({ color: muted, bold: true }, finished() ? "Done" : "Progress"),
           // ProgressBar draws its own brackets and percentage around
           // the width given, so the width is what fits inside them.
           ProgressBar({
@@ -207,8 +224,13 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
             style: "block",
             color: failures.length > 0 ? ui.warn : ui.accent,
           }),
+          // An explicit colour, not `dim`. dim leaves the foreground to
+          // the terminal and asks it to darken whatever that was, so on
+          // a profile that is not ours the line lands somewhere between
+          // the palette and the user's own — which is how a screen full
+          // of deliberate colours still reads as generic.
           Text(
-            { dim: true },
+            { color: muted },
             `${results.length}/${total}${etaText(results.length, total, elapsedMs, finished())}`,
           ),
           Text({}, ""),
@@ -277,6 +299,7 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
                 ),
               ]
             : []),
+          ),
         ),
       ),
 

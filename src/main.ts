@@ -704,6 +704,21 @@ async function cmdMenu(p: Platform, inv: Invocation, cliHelp: string): Promise<n
   });
 }
 
+// This binary is production, and saying so is what silences tuiuiu's
+// development warnings.
+//
+// It printed "createSignal() was called during component render at
+// node:async_hooks:62" across the top of the interface — a warning about
+// a line of ours that does not exist. The check walks the stack for the
+// first frame outside the library, and decides "outside" by comparing
+// against a package root derived from import.meta.url. Inside a
+// `bun build --compile` binary there is no node_modules to compare
+// against, so tuiuiu's own frames fail the test and it reports itself,
+// pointing at a Node internal. Nothing in src/ creates a signal during
+// render; that was fixed, and this is a different bug wearing the same
+// message. Real warnings still appear when running from source.
+if (!process.env.NODE_ENV) process.env.NODE_ENV = "production";
+
 async function main(): Promise<number> {
   const cli = buildCli();
   const argv = process.argv.slice(2);

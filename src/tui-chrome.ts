@@ -18,6 +18,65 @@ import { Box, Text } from "tuiuiu.js";
 import { muted, subtle, text, ui } from "./tui-theme.ts";
 
 /**
+ * The screen itself, painted rather than assumed.
+ *
+ * Every colour in this interface was chosen against black, and then the
+ * black was never drawn — so on a terminal with its own background the
+ * whole identity is whatever the user's profile decided. The default
+ * Windows PowerShell profile is #012456, and red-dev ran inside a blue
+ * rectangle with grey text on it.
+ *
+ * All three of these are load-bearing. A Box with only a backgroundColor
+ * paints the rect its content happens to occupy, which is a few
+ * characters wide; the explicit width and height are what make the fill
+ * reach the edges and the empty rows below the content.
+ */
+export function Screen(width: number, height: number, ...children: Parameters<typeof Box>[1][]) {
+  return Box(
+    {
+      flexDirection: "column",
+      padding: 1,
+      width,
+      height,
+      backgroundColor: ui.bg0,
+    },
+    ...children,
+  );
+}
+
+/**
+ * One step up from the screen: the column that holds decisions.
+ *
+ * OpenCode separates its sidebar from its main region by a shade rather
+ * than a border, which is what lets the log stay the brightest thing on
+ * screen while the status column is still clearly its own surface. bg2
+ * over bg0 is a small difference deliberately — two steps read as a
+ * dialog floating over the app rather than part of it.
+ *
+ * minHeight, not height, and that distinction is the whole reason this
+ * takes a number at all. A fixed height shorter than its content does
+ * not clip it, it draws the overflow on top of what is already there:
+ * "it resumes from here." and "…and re-run;" came out of one render as
+ * "it resumes from here.run;". A minimum still paints the empty rows
+ * below short content — which is the point — without corrupting the
+ * screen on a terminal too short for the column.
+ */
+export function Surface(width: number, rows: number, ...children: Parameters<typeof Box>[1][]) {
+  return Box(
+    {
+      flexDirection: "column",
+      width,
+      minHeight: rows,
+      paddingLeft: 2,
+      paddingRight: 1,
+      paddingTop: 1,
+      backgroundColor: ui.bg2,
+    },
+    ...children,
+  );
+}
+
+/**
  * A labelled block in the right column.
  *
  * The column reads as a record of what was decided and what it cost, so
