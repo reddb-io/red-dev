@@ -16,7 +16,6 @@
 import {
   Box,
   ListItem,
-  LogViewer,
   MultiProgressBar,
   ProgressBar,
   Text,
@@ -36,19 +35,19 @@ import type { Platform } from "./platform.ts";
 import type { ApplyContext } from "./providers.ts";
 
 /**
- * Outcomes mapped onto tuiuiu's own status vocabulary rather than a
- * private table of glyphs and colours. StatusIndicator and ListItem
- * both understand these, so the icon, its colour and any animation come
- * from the library instead of from a lookup here that would drift from
- * everything else drawn with them.
+ * ListItem's `status` prop is deliberately unused.
+ *
+ * It renders a StatusIndicator, which calls createSignal in its body
+ * unconditionally — before the check for whether it will animate — so
+ * every ListItem carrying a status recreates that signal on every
+ * frame and tuiuiu prints `createSignal() was called during component
+ * render` across the interface. `trailing` takes a plain glyph and
+ * avoids the sub-component entirely.
+ *
+ * Worth fixing upstream: as written, both StatusIndicator and LogViewer
+ * are unusable inside a render loop, and they are the obvious
+ * components for these two jobs.
  */
-const STATUS: Record<string, "success" | "info" | "error" | "pending"> = {
-  installed: "success",
-  applied: "success",
-  present: "info",
-  skipped: "info",
-  failed: "error",
-};
 
 function human(ms: number): string {
   const s = Math.floor(ms / 1000);
@@ -181,17 +180,36 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
         // nothing the bar does not.
         Box(
           { width: leftWidth },
+          // The tail, drawn with Text rather than LogViewer.
+          //
+          // This breaks the rule about not rebuilding what the library
+          // ships, and does so knowingly. LogViewer calls
+          // createScrollArea in its body, which calls createSignal three
+          // times — so rendering it inside a component recreates that
+          // state every frame, and tuiuiu correctly prints
+          // "createSignal() was called during component render" across
+          // the top of the interface. A warning banner over the UI on
+          // every frame is worse than not using the component.
+          //
+          // What is lost is scrolling, which this never used: the view
+          // shows the last N lines and follows. Slicing a tail is not a
+          // reimplementation of a scroll area.
+          //
+          // Worth reporting upstream — LogViewer is unusable inside a
+          // render loop as written, and it is the obvious component for
+          // exactly this job.
           Accented(
             failures.length > 0 ? "yellow" : "red",
             logRows,
             leftWidth,
-            LogViewer({
-              lines: lines(),
-              height: logRows,
-              autoScroll: true,
-              highlightPattern: /(✗|failed)/,
-              highlightColor: "red",
-            }),
+            ...lines()
+              .slice(-logRows)
+              .map((l) =>
+                Text(
+                  /✗|failed/.test(l) ? { color: "red" } : l.startsWith("    ") ? { dim: true } : {},
+                  l.length > leftWidth - 3 ? `${l.slice(0, leftWidth - 4)}…` : l,
+                ),
+              ),
           ),
         ),
 
@@ -247,7 +265,7 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
                 Text({ color: "red", bold: true }, "Failed"),
                 ...failures
                   .slice(0, 6)
-                  .map((f) => ListItem({ primary: f.tool, status: STATUS["failed"] })),
+                  .map((f) => ListItem({ primary: f.tool, trailing: "✗" })),
               ]
             : []),
 

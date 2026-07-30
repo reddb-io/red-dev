@@ -10,7 +10,7 @@
  * releases against a function the product had deleted.
  */
 
-import { Box, ListItem, LogViewer, MultiProgressBar, ProgressBar, Text, renderToString } from "tuiuiu.js";
+import { Box, ListItem, MultiProgressBar, ProgressBar, Text, renderToString } from "tuiuiu.js";
 import { THEMES, themeNames } from "../src/themes.ts";
 import { Accented, Header, Section, StatusLine } from "../src/tui-chrome.ts";
 
@@ -37,7 +37,7 @@ const setup = renderToString(
         { flexDirection: "column", width: 24 },
         Text({ bold: true }, "Steps"),
         ...["Terminal", "Agents", "Runtimes", "Tools", "ble.sh", "Font", "Theme"].map((s, i) =>
-          ListItem({ primary: s, selected: i === 6, status: i < 6 ? "success" : "running" }),
+          ListItem({ primary: s, selected: i === 6, trailing: i < 6 ? "done" : "now" }),
         ),
       ),
       Box(
@@ -99,19 +99,16 @@ const install = renderToString(
           "red",
           8,
           58,
-          LogViewer({
-            lines: [
-              "-- core · 33 items",
-              "✓ ripgrep          installed  2s",
-              "✗ docker           failed",
-              "    aptrepo: gpg key fetch returned 502",
-              "· fd               present",
-            ],
-            height: 8,
-            autoScroll: true,
-            highlightPattern: /(✗|failed)/,
-            highlightColor: "red",
-          }),
+          // Plain Text, matching the product: LogViewer creates signals
+          // in its body, so inside a render loop it recreates them every
+          // frame and the library prints a warning across the screen.
+          ...[
+            "-- core · 33 items",
+            "✓ ripgrep          installed  2s",
+            "✗ docker           failed",
+            "    aptrepo: gpg key fetch returned 502",
+            "· fd               present",
+          ].map((l) => Text(/✗|failed/.test(l) ? { color: "red" } : {}, l)),
         ),
       ),
       Box(
@@ -134,7 +131,7 @@ const install = renderToString(
         Section("Counts", "installed  6", "present    7", "skipped    1"),
         Section("Elapsed", "1m 12s"),
         Text({ color: "red", bold: true }, "Failed"),
-        ListItem({ primary: "docker", status: "error" }),
+        ListItem({ primary: "docker", trailing: "✗" }),
         Text({}, ""),
         Section("Incomplete", "Fix the cause and re-run;", "it resumes from here."),
       ),
