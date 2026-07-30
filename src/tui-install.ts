@@ -31,6 +31,7 @@ import { VERSION } from "./cli.ts";
 import { converge, countSteps, type StepResult } from "./converge.ts";
 import { captureStart, captureStop } from "./log.ts";
 import { Accented, Header, Section, StatusLine } from "./tui-chrome.ts";
+import { ui } from "./tui-theme.ts";
 import type { Scope } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
 import type { ApplyContext } from "./providers.ts";
@@ -175,7 +176,7 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
           // ScrollArea in that file already used, so the component owns
           // the tail and the auto-scroll again and this owns neither.
           Accented(
-            failures.length > 0 ? "yellow" : "red",
+            failures.length > 0 ? ui.warning : ui.accent,
             logRows,
             leftWidth,
             LogViewer({
@@ -183,7 +184,7 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
               height: logRows,
               autoScroll: true,
               highlightPattern: /(✗|failed)/,
-              highlightColor: "red",
+              highlightColor: ui.danger,
             }),
           ),
         ),
@@ -196,7 +197,7 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
             width: twoColumn ? rightWidth : leftWidth,
             ...(twoColumn ? { marginLeft: 2 } : { marginTop: 1 }),
           },
-          Text({ bold: true }, finished() ? "Done" : "Progress"),
+          Text({ color: ui.muted, bold: true }, finished() ? "Done" : "Progress"),
           // ProgressBar draws its own brackets and percentage around
           // the width given, so the width is what fits inside them.
           ProgressBar({
@@ -204,7 +205,7 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
             max: total,
             width: rightWidth - 14,
             style: "block",
-            color: failures.length > 0 ? "yellow" : "red",
+            color: failures.length > 0 ? ui.warning : ui.accent,
           }),
           Text(
             { dim: true },
@@ -217,9 +218,9 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
           // any width this column can afford.
           MultiProgressBar({
             segments: [
-              { value: by("installed") + by("applied"), color: "green" },
-              { value: by("present"), color: "gray" },
-              { value: by("failed"), color: "red" },
+              { value: by("installed") + by("applied"), color: ui.success },
+              { value: by("present"), color: ui.subtle },
+              { value: by("failed"), color: ui.danger },
             ],
             total,
             width: rightWidth - 6,
@@ -227,17 +228,24 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
           }),
           Text({}, ""),
 
+          // What was decided, not just what happened.
+          //
+          // The column reads as a record: how much this run changed, how
+          // much it left alone, what it cost. The number that carries
+          // the decision is in the accent colour; the ones that are
+          // context stay quiet. Every line here being equally loud is
+          // what made the earlier version a wall of grey.
           Section(
-            "Counts",
-            `installed  ${by("installed") + by("applied")}`,
-            `present    ${by("present")}`,
-            `skipped    ${by("skipped")}`,
+            "Changed",
+            { text: `${by("installed") + by("applied")} installed`, color: ui.accent, bold: true },
+            `${by("present")} already present`,
+            `${by("skipped")} skipped`,
           ),
-          Section("Elapsed", human(elapsedMs)),
+          Section("Elapsed", { text: human(elapsedMs), color: ui.text }),
 
           ...(failures.length > 0
             ? [
-                Text({ color: "red", bold: true }, "Failed"),
+                Text({ color: ui.danger, bold: true }, "Failed"),
                 ...failures
                   .slice(0, 6)
                   .map((f) => ListItem({ primary: f.tool, status: "error" })),

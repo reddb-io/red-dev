@@ -31,6 +31,7 @@ import {
 import { createWizard } from "tuiuiu.js/hooks";
 import type { Platform } from "./platform.ts";
 import { summary } from "./platform.ts";
+import { ui } from "./tui-theme.ts";
 import { THEMES, themeNames } from "./themes.ts";
 
 export interface SetupAnswers {
@@ -290,7 +291,7 @@ export async function runSetupTui(
 
       Box(
         { flexDirection: "row", justifyContent: "space-between" },
-        Text({ color: "red", bold: true }, "red-dev setup"),
+        Text({ color: ui.accent, bold: true }, "red-dev setup"),
         Text({ dim: true }, summary(p).split("\n")[0] ?? ""),
       ),
 
@@ -301,7 +302,7 @@ export async function runSetupTui(
           max: steps.length,
           width: Math.min(width - 12, 48),
           style: "block",
-          color: "red",
+          color: ui.accent,
         }),
       ),
 

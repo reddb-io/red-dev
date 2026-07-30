@@ -15,13 +15,39 @@
  */
 
 import { Box, Text } from "tuiuiu.js";
+import { ui } from "./tui-theme.ts";
 
-/** Dim label above its values, the way the right column reads. */
-export function Section(label: string, ...lines: string[]) {
+/**
+ * A labelled block in the right column.
+ *
+ * The column reads as a record of what was decided and what it cost, so
+ * a value that carries a decision can be highlighted while the ones
+ * that are merely context stay quiet. `accent` on a line is what marks
+ * "this is the answer", not "this is important" — everything in a
+ * status column looks important, which is why the distinction has to be
+ * made by colour rather than by weight.
+ */
+export function Section(
+  label: string,
+  ...lines: (string | { text: string; color?: string; bold?: boolean })[]
+) {
   return Box(
     { flexDirection: "column", marginBottom: 1 },
-    Text({ bold: true }, label),
-    ...lines.map((l) => Text({ dim: true }, l)),
+    Text({ color: ui.muted, bold: true }, label),
+    ...lines.map((l) =>
+      typeof l === "string"
+        ? Text({ color: ui.subtle }, l)
+        : Text({ color: l.color ?? ui.text, ...(l.bold ? { bold: true } : {}) }, l.text),
+    ),
+  );
+}
+
+/** A decision and its answer, on one line, with the answer standing out. */
+export function Decision(label: string, value: string, color: string = ui.accent) {
+  return Box(
+    { flexDirection: "row" },
+    Text({ color: ui.subtle }, `${label.padEnd(11)}`),
+    Text({ color }, value),
   );
 }
 
@@ -68,8 +94,8 @@ export function Accented(
 export function Header(title: string, context: string) {
   return Box(
     { flexDirection: "row", justifyContent: "space-between" },
-    Text({ color: "red", bold: true }, title),
-    Text({ dim: true }, context),
+    Text({ color: ui.accent, bold: true }, title),
+    Text({ color: ui.subtle }, context),
   );
 }
 
@@ -77,7 +103,7 @@ export function Header(title: string, context: string) {
 export function StatusLine(left: string, right: string) {
   return Box(
     { flexDirection: "row", justifyContent: "space-between", marginTop: 1 },
-    Text({ dim: true }, left),
-    Text({ dim: true }, right),
+    Text({ color: ui.subtle }, left),
+    Text({ color: ui.subtle }, right),
   );
 }

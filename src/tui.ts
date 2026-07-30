@@ -33,6 +33,7 @@ import type { Platform } from "./platform.ts";
 import { summary } from "./platform.ts";
 import { THEMES, themeNames } from "./themes.ts";
 import { Header, StatusLine } from "./tui-chrome.ts";
+import { ui, wordmarkGradient } from "./tui-theme.ts";
 
 /**
  * A row of blocks in the palette's own colours.
@@ -198,7 +199,7 @@ export async function runTui(p: Platform): Promise<TuiResult> {
         // reimplementing a component that already exists.
         Box(
           { flexDirection: "column", width: leftWidth },
-          Text({ bold: true }, inThemes ? "Themes" : "Sections"),
+          Text({ color: ui.muted, bold: true }, inThemes ? "Themes" : "Sections"),
           ...(inThemes
             ? names.map((name, i) => ListItem({ primary: name, selected: i === themeIndex() }))
             : SECTIONS.map((s, i) =>
@@ -233,7 +234,7 @@ export async function runTui(p: Platform): Promise<TuiResult> {
                     // letter, and seven letters over five stops
                     // restarted at the darkest shade mid-word.
                     // Mirroring it makes the wrap invisible.
-                    gradient: ["#8b1533", "#c41e4a", "#ff2056", "#c41e4a", "#8b1533"],
+                    gradient: [...wordmarkGradient],
                     letterSpacing: 1,
                   }),
                   Text({}, ""),
