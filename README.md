@@ -159,12 +159,25 @@ developer works in:
 | [`tq`](https://github.com/reddb-io/toon) | query and convert TOON | every target |
 | [`red-request`](https://github.com/reddb-io/red-request) | API client, powered by recker | desktop sessions |
 | [`red-ui`](https://github.com/reddb-io/red-ui) | universal client for reddb | **Linux desktop only** — see below |
+| [`dit`](https://github.com/reddb-io/dit) | push-to-toggle voice dictation | desktop sessions |
 
 `red` and `tq` are CLIs, so they are `core` and land on all five targets.
-`red-request` and `red-ui` are GUI applications and therefore `desktop`, which
-also means WSL never attempts them: installing a Linux GUI app inside a distro
-with no display is the mistake this project exists to avoid, and the Windows
-target already covers that same machine.
+`red-request`, `red-ui` and `dit` are `desktop`, which also means WSL never
+attempts them: installing a Linux GUI app inside a distro with no display is the
+mistake this project exists to avoid, and the Windows target already covers that
+same machine.
+
+`dit` is a CLI and still `desktop`, for the same reason wearing different
+clothes — it types into the *focused application*, and under WSL there is
+neither one of those nor a `/dev/input` to read its hotkey from. On Linux it
+comes from the publisher's installer rather than the release binary, and not for
+the usual checksum reason: dit reads its hotkey from `/dev/input` and types
+through `/dev/uinput`, so it needs you in the `input` group and a udev rule.
+Dropping the binary in gives you a program that runs and cannot see a keypress.
+red-dev passes `--yes` to keep the converge non-interactive and `--no-service`
+to leave the autostart unit alone — a standing background service is a decision
+to make deliberately, and dit works without it. It also wants an
+`ELEVENLABS_API_KEY`, or `--engine local` for offline Whisper.
 
 **Coding agents** are chosen rather than assumed — `red-dev agents` offers
 `claude-code`, `codex` and `opencode` pre-ticked, plus `gemini`, `openclaw`,

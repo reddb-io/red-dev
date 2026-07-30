@@ -503,6 +503,35 @@ export const TOOLS: Tool[] = [
     u24: gh("reddb-io/red-ui", "red-ui_*_amd64.deb"),
     win: skip("red-ui publishes no Windows build yet — deb, AppImage, rpm and web only"),
   },
+  {
+    // A CLI, and still `desktop` rather than `core`, because what it
+    // does is type into the focused application. Under WSL there is no
+    // focused application to type into and no /dev/input to read the
+    // hotkey from — the binary would install cleanly and do nothing,
+    // which is the outcome this project exists to avoid.
+    //
+    // The publisher's installer on Linux, not the bare binary, and for
+    // once that is not about checksums. dit reads its hotkey from
+    // /dev/input and types through /dev/uinput, so it needs you in the
+    // `input` group and a udev rule; dropping the binary in gives you a
+    // program that runs and cannot see a keypress. install.sh sets both
+    // up. --yes keeps a converge non-interactive, and --no-service
+    // leaves the autostart unit alone: a standing background service is
+    // a decision to make deliberately, and dit works without it.
+    //
+    // Windows needs no equivalent — SendInput requires no permissions —
+    // so the release binary is enough there.
+    name: "dit",
+    about: "push-to-toggle voice dictation, typed into the focused app",
+    scope: "desktop",
+    u24: installer(
+      "https://raw.githubusercontent.com/reddb-io/dit/main/install.sh",
+      "reddb-io/dit — installs the binary and the /dev/uinput permissions it needs",
+      "--yes",
+      "--no-service",
+    ),
+    win: gh("reddb-io/dit", "dit-windows-x86_64.exe", "dit"),
+  },
 
   // ------------------------------------------------------ optional
   // Chosen, never assumed. `red-dev apps` offers these; a plain

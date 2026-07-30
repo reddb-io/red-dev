@@ -377,6 +377,21 @@ async function installBinariesFrom(dir: string): Promise<void> {
  * Writing it out first means a failed transfer fails before anything
  * executes.
  */
+/**
+ * Which shell a vendor script asked for.
+ *
+ * `#!/usr/bin/env bash` counts as bash, which is the form dit uses —
+ * matching only `#!/bin/bash` would have sent it to dash anyway.
+ * Anything else falls back to sh, because a script that does not say is
+ * a script that should not need more than POSIX.
+ */
+export function shellFor(body: string): "bash" | "sh" {
+  const m = /^#!\s*(\S+)(?:\s+(\S+))?/.exec(body);
+  if (!m?.[1]) return "sh";
+  const interpreter = m[1].endsWith("/env") && m[2] ? m[2] : m[1];
+  return /(^|\/)bash$/.test(interpreter) ? "bash" : "sh";
+}
+
 export async function installerInstall(
   url: string,
   note: string,
@@ -392,6 +407,16 @@ export async function installerInstall(
   if (body.trim().length === 0) throw new RedError(`installer at ${url} was empty`);
   await Bun.write(tmp, body);
 
+  // Run with the interpreter the script asks for, not with `sh`.
+  //
+  // red-request's installer is deliberately POSIX and says so in its
+  // header; dit's is `#!/usr/bin/env bash` and uses `[[ ]]` and `local`
+  // in its input-permission setup. On Ubuntu `sh` is dash, so running
+  // every vendor script through it would have failed that one with a
+  // syntax error partway through — after it had already installed the
+  // binary, which is the worst place to stop.
+  const shell = shellFor(body);
+
   // Primed before handing over, not after it blocks.
   //
   // A vendor script that installs a .deb calls sudo from inside itself,
@@ -401,7 +426,7 @@ export async function installerInstall(
   // and fails with an instruction instead.
   if (body.includes("sudo ")) await requireSudo();
 
-  const proc = Bun.spawn(["sh", tmp, ...args], {
+  const proc = Bun.spawn([shell, tmp, ...args], {
     stdout: "inherit",
     stderr: "inherit",
     stdin: stdinMode(),
