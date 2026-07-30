@@ -74,6 +74,35 @@ export const AGENTS: AgentSpec[] = [
     winget: "SST.opencode",
   },
   {
+    // npm only, and that is not an oversight: winget's repository has no
+    // Google entry for it, and searching it for "gemini" returns
+    // ChatALL, Chatbox and Nekot — third-party chat clients that happen
+    // to speak to Gemini. Same trap as the ChatGPT wrappers below.
+    //
+    // @google/gemini-cli is Google's own: published by google-wombot
+    // from google-gemini/gemini-cli, and its bin really is `gemini`.
+    key: "gemini",
+    label: "Gemini CLI",
+    about: "Google's CLI",
+    cmd: "gemini",
+    recommended: false,
+    npm: "@google/gemini-cli",
+  },
+  {
+    // The winget id is the publisher's: "T3 Tools Inc", support at
+    // pingdotgg/t3code. Checked, because npm's `t3code-cli` is a
+    // third-party wrapper by an unrelated author whose binary is not
+    // even called t3code — installing that under this name would be
+    // worse than installing nothing.
+    key: "t3code",
+    label: "T3 Code",
+    about: "T3 Tools' editor",
+    cmd: "",
+    recommended: false,
+    winget: "T3Tools.T3Code",
+    desktopOnly: true,
+  },
+  {
     key: "openclaw",
     label: "OpenClaw",
     about: "personal assistant, any platform",

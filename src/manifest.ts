@@ -232,6 +232,19 @@ export const TOOLS: Tool[] = [
     u24: gh("reddb-io/toon", "tq-linux-x86_64", "tq"),
     win: gh("reddb-io/toon", "tq-windows-x86_64.exe", "tq"),
   },
+  {
+    // The database this whole organisation is named after, and the one
+    // tool here whose absence would be strange. A CLI, so core: it is
+    // the same binary on the desktop, in WSL and on Windows.
+    //
+    // `red`, not `red_client` — the release publishes both and only the
+    // first is the command people run.
+    name: "red",
+    about: "the RedDB CLI — embedded, server, cluster",
+    scope: "core",
+    u24: gh("reddb-io/reddb", "red-linux-x86_64", "red"),
+    win: gh("reddb-io/reddb", "red-windows-x86_64.exe", "red"),
+  },
 
   // The bash answer to what people actually want from oh-my-zsh.
   // Every one of these is cross-shell and cross-platform, which is why
@@ -472,6 +485,23 @@ export const TOOLS: Tool[] = [
     // prompt. Checked against the published binary rather than inferred
     // from Tauri's defaults.
     win: ghInstaller("reddb-io/red-request", "red-request-windows-x86_64-setup.exe", "/S"),
+  },
+  {
+    // The other RedDB desktop app. Same shape as red-request and a
+    // different answer on Windows, because the release genuinely has no
+    // Windows asset — .deb, .AppImage, .rpm and a web bundle, nothing
+    // else. skip() with the real reason rather than pointing the
+    // provider at a name that does not exist, which is the failure the
+    // gh provider was written to make impossible.
+    //
+    // The glob carries a wildcard where the version goes:
+    // red-ui_0.1.0_amd64.deb. Anchoring it to today's version is exactly
+    // the 404-on-next-release bug documented on the provider.
+    name: "red-ui",
+    about: "universal client for reddb — embedded, server, docker, cluster",
+    scope: "desktop",
+    u24: gh("reddb-io/red-ui", "red-ui_*_amd64.deb"),
+    win: skip("red-ui publishes no Windows build yet — deb, AppImage, rpm and web only"),
   },
 
   // ------------------------------------------------------ optional

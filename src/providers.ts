@@ -8,7 +8,7 @@
  * lost one to a full host disk while writing this.
  */
 
-import { existsSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { log, RedError } from "./log.ts";
 import type { Provider } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
@@ -295,8 +295,13 @@ export async function ghInstallWindows(
   const file = url.split("/").pop() ?? "asset";
   log.step(`github: ${repo} -> ${file}`);
 
+  // node:fs rather than cmd.exe for the file work. `mkdir` and `copy`
+  // print "A subdirectory or file already exists." and "1 file(s)
+  // copied." on success, and both landed in the middle of the converge
+  // log — chatter from a shell we only invoked because it was the first
+  // thing to hand.
   const tmp = `${process.env["TEMP"] ?? "C:\\Windows\\Temp"}\\red-dev-${Date.now()}`;
-  await run(["cmd.exe", "/c", "mkdir", tmp]);
+  mkdirSync(tmp, { recursive: true });
   const downloaded = `${tmp}\\${file}`;
 
   const res = await fetch(url);
@@ -312,10 +317,10 @@ export async function ghInstallWindows(
     await run([downloaded, ...silentArgs]);
   } else if (bin) {
     const dir = windowsBinDir();
-    await run(["cmd.exe", "/c", "mkdir", dir], { allowFailure: true });
+    mkdirSync(dir, { recursive: true });
     // Copied rather than moved: the download and the destination can be
     // on different volumes, where a rename fails.
-    await run(["cmd.exe", "/c", "copy", "/y", downloaded, `${dir}\\${bin}.exe`]);
+    copyFileSync(downloaded, `${dir}\\${bin}.exe`);
     log.step(`installed ${dir}\\${bin}.exe`);
   } else {
     throw new RedError(
@@ -323,7 +328,7 @@ export async function ghInstallWindows(
     );
   }
 
-  await run(["cmd.exe", "/c", "rmdir", "/s", "/q", tmp], { allowFailure: true });
+  rmSync(tmp, { recursive: true, force: true });
 }
 
 /**
