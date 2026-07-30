@@ -247,7 +247,7 @@ export async function runTui(p: Platform): Promise<TuiResult> {
     );
   }
 
-  const { waitUntilExit } = render(App);
+  const { waitUntilExit } = render(App, { fullHeight: true });
   await waitUntilExit();
   return result;
 }

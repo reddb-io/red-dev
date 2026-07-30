@@ -179,21 +179,20 @@ export async function runSetupTui(
   const steps = questions(p, agents, apps, runtimes);
   let result: SetupAnswers | null = null;
 
+  // Built here, outside the component, and deliberately so.
+  //
+  // createWizard creates signals. Calling it inside App() ran it on
+  // every frame, which recreated that state thirty times a second and
+  // made tuiuiu print a warning across the top of the screen — the
+  // library telling me exactly what I had done wrong, in the middle of
+  // the interface it was drawing.
+  const wizard = createWizard(
+    steps.map((s) => ({ id: s.id, title: s.title, description: s.description })),
+  );
+
   function App() {
     const { exit } = useApp();
     const size = useTerminalSize();
-
-    // createWizard owns which step we are on, how far through we are and
-    // which ones are done — all of which this would otherwise keep in
-    // three separate signals that can disagree.
-    // useState(fn) stores the function itself here rather than calling
-    // it, so the wizard has to be built once outside the signal and
-    // read directly — wrapping it produced `() => any` and every method
-    // came back undefined.
-    const [wizardRef] = useState(
-      createWizard(steps.map((s) => ({ id: s.id, title: s.title, description: s.description }))),
-    );
-    const wizard = wizardRef();
 
     const [stepIndex, setStepIndex] = useState(0);
     const [cursor, setCursor] = useState(0);
@@ -371,7 +370,10 @@ export async function runSetupTui(
     );
   }
 
-  const { waitUntilExit } = render(App);
+  // fullHeight defaults to false, which is why the first version left a
+  // dead band below the panels: the layout was drawn at its content
+  // height and the rest of the terminal kept whatever was there before.
+  const { waitUntilExit } = render(App, { fullHeight: true });
   await waitUntilExit();
   return result;
 }

@@ -152,7 +152,11 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
     // Two columns need room for both. Below that the status column
     // would be clipped mid-word, which is worse than not having it
     // beside the log — so it moves above instead.
-    const rightWidth = 30;
+    // 34, not 30. At 30 the ProgressBar's own brackets and percentage
+    // wrapped onto the next line and the segment legend truncated to
+    // "faile" — both of which read as a broken widget rather than a
+    // narrow one.
+    const rightWidth = 34;
     const twoColumn = width >= 92;
     const leftWidth = twoColumn ? width - rightWidth - 6 : width - 4;
     // The log fills whatever is left after the frame, header and hint —
@@ -207,10 +211,13 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
           // not answer "how many left", so the count and the estimate
           // are rendered here where they are actually under our
           // control.
+          // width is the bar itself; ProgressBar adds "[ ", " ]" and a
+          // percentage around it, so the usable panel width minus those
+          // is what fits.
           ProgressBar({
             value: results.length,
             max: total,
-            width: rightWidth - 8,
+            width: rightWidth - 14,
             style: "block",
             color: failures.length > 0 ? "yellow" : "red",
           }),
@@ -219,14 +226,19 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
             `${results.length}/${total}${etaText(results.length, total, elapsedMs, finished())}`,
           ),
           Text({}, ""),
+          // Legend off: it rendered as "· new: 6 · present: 24 · faile"
+          // — cut mid-word — and the counts are already listed below in
+          // full. The bar carries the proportions, the list carries the
+          // numbers, and neither repeats the other badly.
           MultiProgressBar({
             segments: [
-              { value: by("installed") + by("applied"), color: "green", label: "new" },
-              { value: by("present"), color: "gray", label: "present" },
-              { value: by("failed"), color: "red", label: "failed" },
+              { value: by("installed") + by("applied"), color: "green" },
+              { value: by("present"), color: "gray" },
+              { value: by("failed"), color: "red" },
             ],
             total,
             width: rightWidth - 6,
+            showLegend: false,
           }),
           Text({}, ""),
           Text({ dim: true }, `elapsed   ${human(elapsedMs)}`),
@@ -268,7 +280,10 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
     );
   }
 
-  const { waitUntilExit } = render(App);
+  // fullHeight: the panels are drawn to the terminal's height instead of
+  // to their content, so the log fills the window rather than ending
+  // partway down with the previous screen showing underneath.
+  const { waitUntilExit } = render(App, { fullHeight: true });
   await waitUntilExit();
   return outcome;
 }
