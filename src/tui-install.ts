@@ -249,6 +249,32 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
                   .map((f) => ListItem({ primary: f.tool, status: STATUS["failed"] })),
               ]
             : []),
+
+          // Said once, at the end, and in the same voice as everything
+          // else in this column.
+          //
+          // AlertBox was the obvious component and the wrong one: it
+          // draws its own rounded border, which is what this restyle
+          // removed, and at 34 columns it clipped its own title to
+          // "⚠ Finished with f". The smoke caught both, which is the
+          // first time an assertion here has stopped a regression I was
+          // in the middle of committing.
+          // Wrapped by hand to the column, not by hope. The first
+          // attempt read "Finished with failures" and rendered
+          // "Finished with failu" — the same clipping the borders were
+          // removed to avoid, reintroduced by a label two words too
+          // long.
+          ...(finished()
+            ? [
+                Text({}, ""),
+                Section(
+                  failures.length > 0 ? "Incomplete" : "Converged",
+                  ...(failures.length > 0
+                    ? ["Fix the cause and re-run;", "it resumes from here."]
+                    : ["Restart your shell to", "pick up the changes."]),
+                ),
+              ]
+            : []),
         ),
       ),
 

@@ -57,6 +57,7 @@ const setup = renderToString(
     ),
     StatusLine("up/down move · enter next · q skip", "red-dev 0.7.0"),
   ),
+  100,
 );
 
 console.log(setup);
@@ -80,6 +81,10 @@ if (!setup.includes("│")) problems.push("accent bar missing — nothing marks 
 
 // -------------------------------------------------------------- install
 const rightWidth = 34;
+// Rendered at 100 columns, not the 80-column default: the two-column
+// layout only activates at 92, so a narrower fixture asserts a layout
+// the product never draws — and gave the right column 19 columns where
+// it really has 34.
 const install = renderToString(
   Box(
     { flexDirection: "column", padding: 1 },
@@ -128,10 +133,13 @@ const install = renderToString(
         Section("Elapsed", "1m 12s"),
         Text({ color: "red", bold: true }, "Failed"),
         ListItem({ primary: "docker", status: "error" }),
+        Text({}, ""),
+        Section("Incomplete", "Fix the cause and re-run;", "it resumes from here."),
       ),
     ),
     StatusLine("working…", "red-dev 0.7.0"),
   ),
+  100,
 );
 
 console.log(install);
@@ -148,6 +156,13 @@ if (!plain.includes("✓ ripgrep")) problems.push("completed step marker missing
 if (!plain.includes("✗ docker")) problems.push("failed step marker missing");
 if (!plain.includes("Counts")) problems.push("counts section missing");
 if (/[╭╮╰╯]/.test(install)) problems.push("install view is drawing a border");
+
+// Clipping inside a column is invisible to the total-width check: the
+// line fits the terminal, the words do not fit their panel. These are
+// the strings the right column has to hold whole.
+for (const s of ["Incomplete", "Fix the cause and re-run;", "installed", "Elapsed"]) {
+  if (!plain.includes(s)) problems.push(`right column truncated: "${s}" is cut`);
+}
 
 if (problems.length > 0) {
   console.error("\nRENDER SMOKE FAILED");
