@@ -18,10 +18,9 @@
  */
 
 import {
+  BigText,
   Box,
-  HintBar,
   ListItem,
-  Panel,
   Text,
   render,
   useApp,
@@ -29,9 +28,11 @@ import {
   useState,
   useTerminalSize,
 } from "tuiuiu.js";
+import { VERSION } from "./cli.ts";
 import type { Platform } from "./platform.ts";
 import { summary } from "./platform.ts";
 import { THEMES, themeNames } from "./themes.ts";
+import { Header, Section, StatusLine } from "./tui-chrome.ts";
 
 /**
  * A row of blocks in the palette's own colours.
@@ -47,14 +48,23 @@ function Swatches(hexes: string[]) {
   );
 }
 
-interface Section {
+interface MenuSection {
   key: string;
   label: string;
   /** Shown in the right-hand panel while this section is highlighted. */
   notes: string[];
 }
 
-const SECTIONS: Section[] = [
+const SECTIONS: MenuSection[] = [
+  {
+    // First, and it is not filler. The right panel was empty until a
+    // section was highlighted, which meant the landing screen of the
+    // whole interface was a list beside dead space. This is what that
+    // space is for: what this machine is, and what red-dev thinks of it.
+    key: "home",
+    label: "Home",
+    notes: [],
+  },
   {
     key: "theme",
     label: "Theme",
@@ -177,12 +187,8 @@ export async function runTui(p: Platform): Promise<TuiResult> {
     return Box(
       { flexDirection: "column", padding: 1 },
 
-      // Header
-      Box(
-        { flexDirection: "row", justifyContent: "space-between", marginBottom: 1 },
-        Text({ color: "red", bold: true }, "red-dev"),
-        Text({ dim: true }, summary(p).split("\n")[0] ?? ""),
-      ),
+      Header("red-dev", inThemes ? "theme" : (section?.label.toLowerCase() ?? "")),
+      Text({}, ""),
 
       Box(
         { flexDirection: "row" },
@@ -191,21 +197,33 @@ export async function runTui(p: Platform): Promise<TuiResult> {
         // state and its marker; hand-drawing "❯ " and a colour was
         // reimplementing a component that already exists.
         Box(
-          { width: leftWidth },
-          Panel(
-            { title: inThemes ? "theme" : "section" },
-            ...(inThemes
-              ? names.map((name, i) => ListItem({ primary: name, selected: i === themeIndex() }))
-              : SECTIONS.map((s, i) =>
-                  ListItem({ primary: s.label, selected: i === sectionIndex() }),
-                )),
-          ),
+          { flexDirection: "column", width: leftWidth },
+          Text({ bold: true }, inThemes ? "Themes" : "Sections"),
+          ...(inThemes
+            ? names.map((name, i) => ListItem({ primary: name, selected: i === themeIndex() }))
+            : SECTIONS.map((s, i) =>
+                ListItem({ primary: s.label, selected: i === sectionIndex() }),
+              )),
         ),
 
-        // Right: notes, or the live palette preview
+        // Right: the landing panel, notes, or the live palette preview
         Box(
-          { flexDirection: "column", width: rightWidth, borderStyle: "round", padding: 1, marginLeft: 1 },
-          ...(inThemes
+          { flexDirection: "column", width: rightWidth, marginLeft: 2 },
+          ...(!inThemes && section?.key === "home"
+            ? [
+                BigText({ text: "red-dev", font: "block", color: "red" }),
+                Text({}, ""),
+                Text({ dim: true }, summary(p).split("\n")[0] ?? ""),
+                Text({ dim: true }, summary(p).split("\n")[1] ?? ""),
+                Text({}, ""),
+                Section(
+                  "This machine",
+                  `${themeNames().length} themes available`,
+                  `terminal opens ${p.env === "wsl" ? "inside WSL" : p.os === "windows" ? "Git Bash or WSL" : "your login shell"}`,
+                ),
+                Text({ dim: true }, "Pick a section on the left."),
+              ]
+            : inThemes
             ? [
                 Text({ bold: true }, THEMES[activeTheme]?.name ?? activeTheme),
                 Text({}, ""),
@@ -225,24 +243,13 @@ export async function runTui(p: Platform): Promise<TuiResult> {
         ),
       ),
 
-      // Footer. HintBar formats and separates the shortcuts, which is
-      // the other thing this file used to spell out by hand.
-      Box(
-        { marginTop: 1 },
-        HintBar({
-          hints: inThemes
-            ? [
-                { shortcut: "up/down", action: "preview" },
-                { shortcut: "enter", action: "apply" },
-                { shortcut: "esc", action: "back" },
-                { shortcut: "q", action: "quit" },
-              ]
-            : [
-                { shortcut: "up/down", action: "move" },
-                { shortcut: "enter", action: "open" },
-                { shortcut: "q", action: "quit" },
-              ],
-        }),
+      // The bottom edge: hints on the left, version on the right, the
+      // same shape every screen here uses.
+      StatusLine(
+        inThemes
+          ? "up/down preview · enter apply · esc back · q quit"
+          : "up/down move · enter open · q quit",
+        `red-dev ${VERSION}`,
       ),
     );
   }
