@@ -16,6 +16,7 @@
 import {
   Box,
   ListItem,
+  LogViewer,
   MultiProgressBar,
   ProgressBar,
   Text,
@@ -33,21 +34,6 @@ import { Accented, Header, Section, StatusLine } from "./tui-chrome.ts";
 import type { Scope } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
 import type { ApplyContext } from "./providers.ts";
-
-/**
- * ListItem's `status` prop is deliberately unused.
- *
- * It renders a StatusIndicator, which calls createSignal in its body
- * unconditionally — before the check for whether it will animate — so
- * every ListItem carrying a status recreates that signal on every
- * frame and tuiuiu prints `createSignal() was called during component
- * render` across the interface. `trailing` takes a plain glyph and
- * avoids the sub-component entirely.
- *
- * Worth fixing upstream: as written, both StatusIndicator and LogViewer
- * are unusable inside a render loop, and they are the obvious
- * components for these two jobs.
- */
 
 function human(ms: number): string {
   const s = Math.floor(ms / 1000);
@@ -180,36 +166,25 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
         // nothing the bar does not.
         Box(
           { width: leftWidth },
-          // The tail, drawn with Text rather than LogViewer.
+          // LogViewer again, now that it can be used.
           //
-          // This breaks the rule about not rebuilding what the library
-          // ships, and does so knowingly. LogViewer calls
-          // createScrollArea in its body, which calls createSignal three
-          // times — so rendering it inside a component recreates that
-          // state every frame, and tuiuiu correctly prints
-          // "createSignal() was called during component render" across
-          // the top of the interface. A warning banner over the UI on
-          // every frame is worse than not using the component.
-          //
-          // What is lost is scrolling, which this never used: the view
-          // shows the last N lines and follows. Slicing a tail is not a
-          // reimplementation of a scroll area.
-          //
-          // Worth reporting upstream — LogViewer is unusable inside a
-          // render loop as written, and it is the obvious component for
-          // exactly this job.
+          // It was drawing the tail by hand here because LogViewer
+          // called createScrollArea in its body — three signals rebuilt
+          // every frame, and a warning banner across the interface.
+          // 1.0.75 routes it through useFactoryState, the same helper
+          // ScrollArea in that file already used, so the component owns
+          // the tail and the auto-scroll again and this owns neither.
           Accented(
             failures.length > 0 ? "yellow" : "red",
             logRows,
             leftWidth,
-            ...lines()
-              .slice(-logRows)
-              .map((l) =>
-                Text(
-                  /✗|failed/.test(l) ? { color: "red" } : l.startsWith("    ") ? { dim: true } : {},
-                  l.length > leftWidth - 3 ? `${l.slice(0, leftWidth - 4)}…` : l,
-                ),
-              ),
+            LogViewer({
+              lines: lines(),
+              height: logRows,
+              autoScroll: true,
+              highlightPattern: /(✗|failed)/,
+              highlightColor: "red",
+            }),
           ),
         ),
 
@@ -265,7 +240,7 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
                 Text({ color: "red", bold: true }, "Failed"),
                 ...failures
                   .slice(0, 6)
-                  .map((f) => ListItem({ primary: f.tool, trailing: "✗" })),
+                  .map((f) => ListItem({ primary: f.tool, status: "error" })),
               ]
             : []),
 

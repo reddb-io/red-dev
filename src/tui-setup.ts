@@ -319,7 +319,7 @@ export async function runSetupTui(
                     ListItem({
                       primary: s.title,
                       selected: i === stepIndex(),
-                      trailing: wizard.isCompleted(i) ? "done" : i === stepIndex() ? "now" : "",
+                      status: wizard.isCompleted(i) ? "success" : i === stepIndex() ? "running" : "pending",
                     }),
                   ),
                 ),

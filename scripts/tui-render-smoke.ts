@@ -37,7 +37,7 @@ const setup = renderToString(
         { flexDirection: "column", width: 24 },
         Text({ bold: true }, "Steps"),
         ...["Terminal", "Agents", "Runtimes", "Tools", "ble.sh", "Font", "Theme"].map((s, i) =>
-          ListItem({ primary: s, selected: i === 6, trailing: i < 6 ? "done" : "now" }),
+          ListItem({ primary: s, selected: i === 6, status: i < 6 ? "success" : "running" }),
         ),
       ),
       Box(
@@ -131,7 +131,7 @@ const install = renderToString(
         Section("Counts", "installed  6", "present    7", "skipped    1"),
         Section("Elapsed", "1m 12s"),
         Text({ color: "red", bold: true }, "Failed"),
-        ListItem({ primary: "docker", trailing: "✗" }),
+        ListItem({ primary: "docker", status: "error" }),
         Text({}, ""),
         Section("Incomplete", "Fix the cause and re-run;", "it resumes from here."),
       ),

@@ -20,6 +20,6 @@
   },
   "dependencies": {
     "cli-args-parser": "^1.0.6",
-    "tuiuiu.js": "1.0.74"
+    "tuiuiu.js": "1.0.75"
   }
 }
