@@ -92,11 +92,18 @@ Both resolve the binary for your platform from the latest release, install it
 under your own user, and converge. Neither needs administrator or root rights
 for red-dev itself; individual packages may still ask for sudo.
 
+On Windows, open a new terminal after installing — the `PATH` entry does not
+reach shells that were already running.
+
 Every push to `main` also publishes a `next` prerelease, so the newest work is
 installable without waiting for a tag:
 
 ```bash
 RED_DEV_CHANNEL=next sh -c "$(curl -fsSL https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.sh)"
+```
+
+```powershell
+$env:RED_DEV_CHANNEL='next'; irm https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.ps1 | iex
 ```
 
 | Variable | Effect |
@@ -137,11 +144,32 @@ aspirational.
 `neovim` · `docker` · `delta` · `yazi` · `tldr` · `starship` · `atuin` ·
 `carapace` · `direnv`
 
+**The RedDB tools** come with it, because this is the environment a RedDB
+developer works in:
+
+| | | |
+| --- | --- | --- |
+| [`red`](https://github.com/reddb-io/reddb) | the RedDB CLI | every target |
+| [`tq`](https://github.com/reddb-io/toon) | query and convert TOON | every target |
+| [`red-request`](https://github.com/reddb-io/red-request) | API client, powered by recker | desktop sessions |
+| [`red-ui`](https://github.com/reddb-io/red-ui) | universal client for reddb | **Linux desktop only** — see below |
+
+`red` and `tq` are CLIs, so they are `core` and land on all five targets.
+`red-request` and `red-ui` are GUI applications and therefore `desktop`, which
+also means WSL never attempts them: installing a Linux GUI app inside a distro
+with no display is the mistake this project exists to avoid, and the Windows
+target already covers that same machine.
+
 **Coding agents** are chosen rather than assumed — `red-dev agents` offers
-`claude-code`, `codex` and `opencode` pre-ticked, plus `openclaw`, `hermes`,
-and the Claude and Codex desktop apps on Windows. Each installs by the path its
-publisher supports rather than one uniform mechanism. Picking any CLI agent then
-offers [red-skills](https://github.com/reddb-io/red-skills), which registers its
+`claude-code`, `codex` and `opencode` pre-ticked, plus `gemini`, `openclaw`,
+`hermes`, and the Claude, Codex and T3 Code desktop apps on Windows. Each
+installs by the path its publisher supports rather than one uniform mechanism,
+and *whose* path it is gets checked: winget has no Google entry for Gemini —
+searching it returns third-party chat clients that merely speak to Gemini — so
+that one is npm, while T3 Code went the other way, because npm's `t3code-cli` is
+a third-party wrapper and winget's `T3Tools.T3Code` is the publisher's own.
+Picking any CLI agent then offers
+[red-skills](https://github.com/reddb-io/red-skills), which registers its
 marketplace in Claude Code and Codex and generates plugin modules for OpenCode.
 
 **Web apps** — a page in its own window, its own icon and its own alt-tab entry, the way omakub's `web2app` does it. Desktop sessions only: a `.desktop` file needs a menu to appear in.
@@ -233,7 +261,7 @@ deliberately:
 
 | Command | Asks |
 | --- | --- |
-| `red-dev` | the menu, then whatever you pick |
+| `red-dev` | the fullscreen interface, then whatever you pick — a line-based menu below 60 columns, and `--help` with no terminal at all |
 | `red-dev theme` | which theme, when given no name |
 | `red-dev apps` | which optional tools |
 | `red-dev lang` | which runtimes mise should manage |
@@ -288,10 +316,30 @@ error, `red-dev install wsl` repairs it.
 irm https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.ps1 | iex
 ```
 
-Scopes: `core` + `desktop`, everything through winget. The shell is **Git Bash,
-not PowerShell** — that is what makes the shipped dotfiles apply, and it is why
-this project standardises on bash rather than treating Windows as a separate
-world.
+Run it in PowerShell — Windows PowerShell 5.1 or 7, elevated or not. It needs no
+administrator: the binary lands in `%LOCALAPPDATA%\red-dev\bin` and winget
+installs per-user where the package allows it.
+
+`irm`, not `curl`. In Windows PowerShell 5.1 `curl` is an alias for
+`Invoke-WebRequest`, which returns a response object rather than the script text;
+`iex` happens to work on it only because `ToString()` yields the body, and the
+alias does not exist at all in PowerShell 7. `irm` returns a `String` directly.
+And `curl.exe … | bash` is not an alternative on Windows: `bash` there resolves
+to the WSL launcher, so it would install the *Linux* build into your distro while
+looking like it installed on Windows.
+
+Scopes: `core` + `desktop`, everything through winget except the RedDB tools,
+which come from their own releases. The shell is **Git Bash, not PowerShell** —
+that is what makes the shipped dotfiles apply, and it is why this project
+standardises on bash rather than treating Windows as a separate world.
+
+> [!IMPORTANT]
+> **Open a new terminal afterwards.** The installer adds
+> `%LOCALAPPDATA%\red-dev\bin` to your user `PATH`, and Windows does not push
+> that into processes that are already running — so any shell that was open
+> before will keep reporting `red-dev` as not found while every other shell finds
+> it. This is the single most common "it did not install" report, and it is not
+> an install failure.
 
 > [!NOTE]
 > `boot.ps1` has been syntax-checked and ASCII-gated in CI but has never run on
@@ -438,11 +486,41 @@ compiled binary on every target.
 | **Ubuntu desktop** | The `desktop` scope is implemented and **has never run on real hardware**. GNOME hotkeys, extensions and dock settings are not ported at all. |
 | **Ubuntu 26.04** | The `u26` manifest column exists and **no 26.04 machine has exercised it**. Package-name drift is undiscovered. |
 | **WSL** | Windows interop cannot work under `sudo -u <other-user>`: `WSL_INTEROP` points at a per-session socket that sudo drops. Real invocations run as you, so this affects test harnesses only. |
-| **Native Windows** | No zellij session persistence across reboots. No `ble.sh`-style line editor. VS Code theming is not ported. |
-| **All** | No `uninstall`, no migrations. Both exist in Omakub. |
+| **Native Windows** | Choosing a section from the fullscreen interface has been reported to crash and take the console with it. Not reproduced yet — see below. No zellij session persistence across reboots. No `ble.sh`-style line editor. |
+| **All** | `red-ui` installs on Linux desktop only, because that release has no Windows or macOS asset to install. |
 
 Stated plainly because "implemented" and "known to work" are different claims,
 and a README that blurs them costs someone an afternoon.
+
+### The Windows crash
+
+Picking `install`, `doctor` or `apps` from the fullscreen interface has been
+reported to kill the process and close the console with it. Picking a theme, from
+the same screen, works.
+
+It has not reproduced. On Linux the whole path completes cleanly, driven through
+a sized pty. On Windows, in a real console with `isTTY` true, none of the
+candidate mechanisms reproduce either: two `render()` calls in one process,
+`exit()` called from inside a key handler, and a wall of ordinary output after
+the fullscreen tears down all survive, with raw mode restored and no leaked
+listeners. `doctor` run directly, without the fullscreen, also completes.
+
+So instead of guessing, red-dev now records it. Uncaught exceptions and
+rejections are written to `%LOCALAPPDATA%\red-dev\crash.log` before the process
+exits — the console may not survive, the file does.
+
+### `red-ui` on Windows
+
+Not an oversight on either side. That release publishes a `.deb`, an
+`.AppImage`, an `.rpm` and a web bundle, and nothing else — so red-dev skips it
+there with that as the stated reason, rather than pointing a provider at a
+filename nobody published.
+
+It is two commented lines away in `red-ui`'s own `release.yml`: the staging step
+for `red-ui-windows-x86_64-setup.exe` and the `WINDOWS_CERTIFICATE` secrets are
+already wired, and the matrix entry is commented out with "intentionally
+commented out until the Linux pipeline is green end-to-end". When it comes back,
+this end is one line.
 
 ---
 
@@ -551,12 +629,17 @@ this project actually hit, not from chasing coverage.
 
 Early, but the loop runs end to end.
 
-- Working: `platform`, `plan`, `doctor`, `menu`, `install`, `update`, `theme`
-- Providers: apt, ppa, apt repositories, winget, GitHub releases, and builtins
-  for dotfiles, fonts, Alacritty, Windows Terminal and WSL interop
+- Working: `platform`, `plan`, `doctor`, `menu`, `install`, `update`, `theme`,
+  `apps`, `agents`, `lang`, `shell`, `uninstall`, `ui`
+- Providers: apt, ppa, apt repositories, winget, vendor install scripts, GitHub
+  releases on **both** Linux and Windows, and builtins for dotfiles, fonts,
+  Alacritty, Windows Terminal and WSL interop
 - Verified on WSL Ubuntu 24.04 and native Windows from one source tree, and on a
   freshly created user for the dotfiles path — including the full install path
   from the published release
+- `red` and `tq` installed and run from the published releases on native
+  Windows; `red-request`'s installer verified to be NSIS asking for `asInvoker`,
+  so `/S` installs per-user without a UAC prompt
 
 See [Known limitations](#known-limitations-per-target) for what is implemented
 but unproven.
