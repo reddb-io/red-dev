@@ -7,6 +7,22 @@
 
 $ErrorActionPreference = 'Stop'
 
+# Silence Invoke-WebRequest's progress bar.
+#
+# Not cosmetic. With $ProgressPreference at its default, PowerShell
+# redraws that bar for every block it reads, which turns a 90 MB
+# download into minutes of work spent on the console rather than the
+# network -- a long-standing and well-documented slowdown. The bar also
+# renders as a smear of half-written lines over a piped `iex`, and its
+# text says "Writing request stream", which belongs to uploads and is
+# simply wrong here.
+#
+# Saved and restored: this script is dot-sourced into the caller's
+# session by `irm | iex`, so leaving the preference changed would
+# silence progress bars in a shell the user keeps using afterwards.
+$PreviousProgressPreference = $ProgressPreference
+$ProgressPreference = 'SilentlyContinue'
+
 $Repo   = 'reddb-io/red-dev'
 $Asset  = 'red-dev-windows-x64.exe'
 $BinDir = if ($env:RED_DEV_BIN_DIR) { $env:RED_DEV_BIN_DIR } else { "$env:LOCALAPPDATA\red-dev\bin" }
@@ -86,10 +102,33 @@ if (-not $match) {
     exit 1
 }
 
-Say "downloading $Asset ($([math]::Round($match.size / 1MB, 1)) MB)"
+$SizeMb = [math]::Round($match.size / 1MB, 1)
+Say "downloading $Asset ($SizeMb MB)"
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
-Invoke-WebRequest -Uri $match.browser_download_url -OutFile $Bin -UseBasicParsing
-Say "installed $Bin"
+
+# Downloaded to a temporary file and moved into place: an interrupted
+# transfer that wrote straight to $Bin would leave a truncated
+# executable on PATH, which fails in a far more confusing way than not
+# being there at all.
+$Tmp = "$Bin.download"
+try {
+    Invoke-WebRequest -Uri $match.browser_download_url -OutFile $Tmp -UseBasicParsing
+} catch {
+    if (Test-Path $Tmp) { Remove-Item $Tmp -Force }
+    Fail "download failed: $($_.Exception.Message)"
+}
+
+# A silenced progress bar means no feedback during the transfer, so
+# confirm the size afterwards instead. A wrong one here is a truncated
+# or redirected download, not a working install.
+$Got = [math]::Round((Get-Item $Tmp).Length / 1MB, 1)
+if ((Get-Item $Tmp).Length -ne $match.size) {
+    Remove-Item $Tmp -Force
+    Fail "downloaded $Got MB, expected $SizeMb MB -- transfer was incomplete"
+}
+
+Move-Item -Path $Tmp -Destination $Bin -Force
+Say "installed $Bin ($Got MB)"
 
 # Put the bin directory on the user's PATH permanently. Read the stored
 # user value rather than $env:PATH, which is the merged machine+user
@@ -104,4 +143,9 @@ if ($userPath -notlike "*$BinDir*") {
 $env:Path = "$env:Path;$BinDir"
 
 Say 'converging'
+
+# Restore what we changed before handing over: the converge draws its own
+# output, and the caller's session keeps this preference afterwards.
+$ProgressPreference = $PreviousProgressPreference
+
 & $Bin install

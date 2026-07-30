@@ -56,50 +56,26 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
   log.plain("     Every one of these is changeable later; nothing here is final.");
   log.plain("");
 
-  const theme = await select(
-    "Colour scheme?",
-    themeNames() as [string, ...string[]],
-    "tokyo-night",
-  );
+  // ---------------------------------------------------------------
+  // Order: structural first, cosmetic last.
+  //
+  // This asked the colour scheme first and whether the machine gets a
+  // Linux side at all near the end, which is exactly backwards. On a
+  // fresh Windows the WSL answer changes what every later question even
+  // means — which shell the terminal opens, where the tools land — and
+  // a palette changes nothing. Anyone can abandon the sequence after
+  // the decisions that matter and lose only the paint.
+  // ---------------------------------------------------------------
 
-  const fontLabel = await select("Terminal font?", FONTS, FONTS[0]);
-  const font = fontLabel.split(" ")[0]!;
-
-  // Optional tools, offered by name and one-line purpose. Empty is a
-  // perfectly good answer and the default.
-  const { toolsInScope, providerFor } = await import("./manifest.ts");
-  const optional = toolsInScope("optional").filter((t) => providerFor(t, p).kind !== "skip");
-  const appLabels = optional.map((t) => `${t.name} — ${t.about ?? ""}`);
-  const pickedApps =
-    appLabels.length > 0
-      ? await checkbox("Optional tools? (space to select, enter for none)", appLabels as [string, ...string[]], [])
-      : [];
-
-  const { OFFERED_RUNTIMES } = await import("./runtimes.ts");
-  const runtimeLabels = OFFERED_RUNTIMES.map((r) => `${r.id} — ${r.about}`);
-  const pickedRuntimes = await checkbox(
-    "Language runtimes for mise to manage?",
-    runtimeLabels as [string, ...string[]],
-    [],
-  );
-
-  // A boolean, and the one question with a real caveat attached.
-  log.plain("");
-  log.plain("     ble.sh adds autosuggestions and syntax highlighting to bash.");
-  log.plain("     It replaces the line editor that atuin, fzf and carapace bind");
-  log.plain("     into, so it is off by default until you confirm Ctrl-R still");
-  log.plain("     reaches atuin.");
-  const blesh = await confirm("Enable ble.sh?", false);
-
-  // On a fresh Windows the biggest question is not the theme: it is
-  // whether this machine gets a Linux side at all. Asked before the
-  // terminal question, because the answer changes what that one means.
+  // 1. Does this machine get a Linux side? Nothing else reframes the
+  //    rest of the run the way this does.
   if (p.os === "windows") {
     const { offerWsl } = await import("./wsl-provision.ts");
     await offerWsl(p);
   }
 
-  // The Windows/WSL question, asked only where both sides exist.
+  // 2. Where a terminal lands, now that we know whether both sides
+  //    exist.
   let terminalShell: Preferences["terminalShell"];
   if (p.env === "wsl" || p.os === "windows") {
     const distro = process.env["WSL_DISTRO_NAME"] ?? "your WSL distro";
@@ -110,6 +86,43 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
     );
     terminalShell = picked.startsWith("wsl") ? "wsl" : "gitbash";
   }
+
+  // 3. What you build with.
+  const { OFFERED_RUNTIMES } = await import("./runtimes.ts");
+  const runtimeLabels = OFFERED_RUNTIMES.map((r) => `${r.id} — ${r.about}`);
+  const pickedRuntimes = await checkbox(
+    "Language runtimes for mise to manage?",
+    runtimeLabels as [string, ...string[]],
+    [runtimeLabels[0]!],
+  );
+
+  // 4. Extra tools. Empty is a perfectly good answer and the default.
+  const { toolsInScope, providerFor } = await import("./manifest.ts");
+  const optional = toolsInScope("optional").filter((t) => providerFor(t, p).kind !== "skip");
+  const appLabels = optional.map((t) => `${t.name} — ${t.about ?? ""}`);
+  const pickedApps =
+    appLabels.length > 0
+      ? await checkbox("Optional tools? (space to select, enter for none)", appLabels as [string, ...string[]], [])
+      : [];
+
+  // 5. The one question with a real caveat, so it gets stated before
+  //    the question rather than after.
+  log.plain("");
+  log.plain("     ble.sh adds autosuggestions and syntax highlighting to bash.");
+  log.plain("     It replaces the line editor that atuin, fzf and carapace bind");
+  log.plain("     into, so it is off by default until you confirm Ctrl-R still");
+  log.plain("     reaches atuin.");
+  const blesh = await confirm("Enable ble.sh?", false);
+
+  // 6. Paint. Last, because it is the only thing here that changes
+  //    nothing but how it looks — and `red-dev theme` previews these
+  //    live, which this linear prompt cannot.
+  const font = (await select("Terminal font?", FONTS, FONTS[0])).split(" ")[0]!;
+  const theme = await select(
+    "Colour scheme?  (red-dev ui previews these)",
+    themeNames() as [string, ...string[]],
+    "tokyo-night",
+  );
 
   const choices: FirstRunChoices = {
     theme,
