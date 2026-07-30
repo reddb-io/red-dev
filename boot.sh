@@ -169,21 +169,33 @@ case ":$PATH:" in
   *) printf 'warn %s is not on PATH yet; red-dev will add it to your shell config\n' "$BIN_DIR" >&2 ;;
 esac
 
-say "converging"
+# Hand over to red-dev itself, with no command.
+#
+# Not `install`. The one-liner and the binary have to arrive at the same
+# place, and they did not: typing `red-dev` opens the interface that lets
+# you choose between a first install and maintenance, while the bootstrap
+# went straight to converging. Someone who ran the documented one-liner
+# never saw the screen the product is built around, and had no way to
+# reach it except by knowing to run the binary again afterwards.
+#
+# With no arguments red-dev opens that interface when there is a
+# terminal, falls back to a line menu in a narrow one, and prints help
+# when there is no terminal at all — so CI still gets something sane out
+# of the same command.
+say "starting red-dev"
 
 # Reconnect stdin to the terminal before handing over.
 #
 # The documented way to run this is `curl ... | sh`, which makes the
 # script's stdin the pipe carrying the script itself. Every child then
 # inherits a stdin that is at EOF, isatty() says no terminal, and the
-# first-run questions silently skip themselves — the install works and
-# quietly asks nothing, which looks like a missing feature rather than a
-# plumbing problem.
+# interface silently declines to open — which now matters much more than
+# it did when this only skipped a few questions.
 #
 # /dev/tty is the controlling terminal regardless of what stdin was
 # redirected to. When there is none — CI, a container, a cron job — the
 # fallback is the current behaviour, which is what should happen there.
 if [ -r /dev/tty ]; then
-  exec "$BIN" install < /dev/tty
+  exec "$BIN" < /dev/tty
 fi
-exec "$BIN" install
+exec "$BIN"

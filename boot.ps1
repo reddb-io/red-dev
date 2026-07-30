@@ -142,10 +142,21 @@ if ($userPath -notlike "*$BinDir*") {
 }
 $env:Path = "$env:Path;$BinDir"
 
-Say 'converging'
+Say 'starting red-dev'
 
-# Restore what we changed before handing over: the converge draws its own
+# Restore what we changed before handing over: the interface draws its own
 # output, and the caller's session keeps this preference afterwards.
 $ProgressPreference = $PreviousProgressPreference
 
-& $Bin install
+# Hand over to red-dev itself, with no command.
+#
+# Not 'install'. The one-liner and the binary have to arrive at the same
+# place, and they did not: typing red-dev opens the interface that lets
+# you choose between a first install and maintenance, while this went
+# straight to converging. Someone who ran the documented one-liner never
+# saw the screen the product is built around.
+#
+# With no arguments red-dev opens that interface when there is a terminal,
+# falls back to a line menu in a narrow one, and prints help when there is
+# no terminal at all.
+& $Bin

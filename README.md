@@ -89,8 +89,14 @@ irm https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.ps1 | iex
 ```
 
 Both resolve the binary for your platform from the latest release, install it
-under your own user, and converge. Neither needs administrator or root rights
-for red-dev itself; individual packages may still ask for sudo.
+under your own user, and then **open red-dev's own interface** — the same screen
+you get by typing `red-dev`, where you choose between a first install and
+maintenance. The bootstrap and the binary arrive at the same place on purpose;
+running the one-liner is how you get the product, not a different, shorter
+version of it.
+
+Neither needs administrator or root rights for red-dev itself; individual
+packages may still ask for sudo.
 
 On Windows, open a new terminal after installing — the `PATH` entry does not
 reach shells that were already running.
@@ -216,7 +222,7 @@ export RED_BLE=1
 ## Usage
 
 ```bash
-red-dev                      # interactive menu
+red-dev                      # the fullscreen interface — and what the one-liner opens
 red-dev platform             # what red-dev thinks this machine is
 red-dev plan [scope]         # what would change, changes nothing
 red-dev install [scope]      # converge toward the manifest
@@ -429,6 +435,22 @@ warn alacritty: ENOEXEC: unknown error, posix_spawn 'cmd.exe'
  ok  themed: zellij, btop
  ok  converged — restart your shell
 ```
+
+### Reading the log while it is being written
+
+A converge inside the fullscreen interface follows the tail, which is right until
+the moment something fails — at which point the thing you want to read is the
+line that just scrolled past. So the log scrolls:
+
+| | |
+| --- | --- |
+| `↑` `↓` / `k` `j` | a line at a time; moving up stops following the tail |
+| `PgUp` `PgDn` | a screen at a time |
+| `g` / `G` | the top; the bottom, which resumes following |
+
+Reaching the bottom re-arms the follow on its own, so there is no mode to
+remember. The status line says `paused` whenever it is off — a log that stops
+moving during a live converge otherwise reads as a hang.
 
 Bad input is rejected before any provider runs, which is the cheapest possible
 place to fail:

@@ -27,6 +27,9 @@ import {
   useState,
   useTerminalSize,
 } from "tuiuiu.js";
+// createScrollArea lives under the organisms subpath's own export, the
+// same place LogViewer comes from.
+import { createScrollArea } from "tuiuiu.js";
 import { VERSION } from "./cli.ts";
 import { converge, countSteps, type StepResult } from "./converge.ts";
 import { captureStart, captureStop } from "./log.ts";
@@ -65,6 +68,20 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
   const total = countSteps(opts.scopes);
   let outcome = { failed: 0 };
 
+  // The log's scroll position, owned here rather than by the component.
+  //
+  // LogViewer creates this itself when it is not given one, and then
+  // nothing can reach it: the component registers no key handling of its
+  // own — ScrollArea does, LogViewer does not — so the log scrolled
+  // itself to the bottom forever and every key went to the handler
+  // below, which only listened for the exit. There was no scrolling to
+  // be broken; there was none.
+  //
+  // Built outside the component for the same reason createWizard is in
+  // tui-setup: calling it during render recreates its signals every
+  // frame.
+  const logScroll = createScrollArea({ height: 10, content: [], autoScroll: true });
+
   function App() {
     const { exit } = useApp();
     const size = useTerminalSize();
@@ -74,6 +91,9 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
     const [current, setCurrent] = useState("");
     const [scope, setScope] = useState("");
     const [finished, setFinished] = useState(false);
+    // Whether the log is pinned to the tail. Starts true, and the arrow
+    // keys are what turn it off.
+    const [following, setFollowing] = useState(true);
     const [startedAt] = useState(Date.now());
     // A timer, not just events: a single apt step can run for minutes
     // without emitting anything, and a frozen clock reads as a hang.
@@ -126,6 +146,44 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
     });
 
     useInput((input, key) => {
+      // Scrolling the log.
+      //
+      // Following the tail is the right default while a converge runs,
+      // but it makes the one thing you would want to do — read the error
+      // that scrolled past — impossible. Moving up stops the follow;
+      // reaching the bottom again resumes it, so there is no mode to
+      // remember or key to press to get back.
+      if (key.upArrow || input === "k") {
+        logScroll.scrollBy(-1);
+        setFollowing(false);
+        return;
+      }
+      if (key.downArrow || input === "j") {
+        logScroll.scrollBy(1);
+        setFollowing(logScroll.scrollTop() >= logScroll.maxScroll());
+        return;
+      }
+      if (key.pageUp) {
+        logScroll.pageUp();
+        setFollowing(false);
+        return;
+      }
+      if (key.pageDown) {
+        logScroll.pageDown();
+        setFollowing(logScroll.scrollTop() >= logScroll.maxScroll());
+        return;
+      }
+      if (input === "g") {
+        logScroll.scrollToTop();
+        setFollowing(false);
+        return;
+      }
+      if (input === "G") {
+        logScroll.scrollToBottom();
+        setFollowing(true);
+        return;
+      }
+
       // Refused until it finishes: leaving halfway abandons the machine
       // mid-converge with no report of where it stopped.
       if (finished() && (key.return || input === "q" || key.escape)) exit();
@@ -195,7 +253,14 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
             LogViewer({
               lines: lines(),
               height: logRows,
-              autoScroll: true,
+              // Follow the tail only while nobody has scrolled away from
+              // it. Passing `true` unconditionally is what made the
+              // scroll position unreachable: LogViewer calls
+              // scrollToBottom() on every render when autoScroll is set,
+              // so a keypress moved the view and the next frame — of
+              // which there are thirty a second — put it straight back.
+              autoScroll: following(),
+              state: logScroll,
               highlightPattern: /(✗|failed)/,
               highlightColor: ui.danger,
             }),
@@ -304,11 +369,12 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
       ),
 
       StatusLine(
+        // The hint says what the keys do, and says when following is
+        // off — otherwise a log that has stopped moving during a live
+        // converge reads as a hang rather than as a scrollback.
         finished()
-          ? failures.length > 0
-            ? "enter leave · re-running is safe"
-            : "enter leave · restart your shell"
-          : "working…",
+          ? `${following() ? "" : "paused · G follows · "}up/down scroll · enter leave`
+          : `${following() ? "working…" : "paused · G follows · "}up/down scroll`,
         `red-dev ${VERSION}`,
       ),
     );
