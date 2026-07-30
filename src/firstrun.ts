@@ -26,6 +26,8 @@ export interface FirstRunChoices {
   apps: string[];
   /** mise runtime ids. */
   runtimes: string[];
+  /** Agent keys chosen, when the fullscreen setup ran. */
+  agents?: string[];
   blesh: boolean;
 }
 
@@ -50,6 +52,59 @@ export async function isFirstRun(p: Platform): Promise<boolean> {
 
 export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> {
   if (!interactive()) return null;
+
+  // Fullscreen when the terminal will take it, which is what was asked
+  // for: the theme step previews the palette while the cursor moves, and
+  // a linear prompt cannot. The prompt sequence below stays as the
+  // fallback for terminals too small to lay out two columns and for
+  // anything that reports no size at all.
+  const columns = process.stdout.columns ?? 0;
+  if (columns >= 60) {
+    const { runSetupTui } = await import("./tui-setup.ts");
+    const { availableAgents, isAgentInstalled } = await import("./agents.ts");
+    const { toolsInScope, providerFor } = await import("./manifest.ts");
+    const { OFFERED_RUNTIMES } = await import("./runtimes.ts");
+
+    const answers = await runSetupTui(
+      p,
+      availableAgents(p).map((a) => ({
+        key: a.key,
+        label: a.label,
+        note: isAgentInstalled(a) ? `${a.about} — installed` : a.about,
+      })),
+      toolsInScope("optional")
+        .filter((t) => providerFor(t, p).kind !== "skip")
+        .map((t) => ({ key: t.name, label: t.name, note: t.about ?? "" })),
+      OFFERED_RUNTIMES.map((r) => ({ key: r.id, label: r.id, note: r.about })),
+    );
+
+    if (!answers) {
+      // Left early: no answers recorded, so the next run asks again
+      // rather than silently keeping half a set.
+      log.skip("setup skipped — run `red-dev` when you want to choose");
+      return null;
+    }
+
+    await writePreferences(p, {
+      setupCompleted: true,
+      theme: answers.theme,
+      font: answers.font,
+      blesh: answers.blesh,
+      ...(answers.terminalShell ? { terminalShell: answers.terminalShell } : {}),
+      ...(answers.terminalShell === "wsl" && process.env["WSL_DISTRO_NAME"]
+        ? { distro: process.env["WSL_DISTRO_NAME"] }
+        : {}),
+    });
+
+    return {
+      theme: answers.theme,
+      font: answers.font,
+      apps: answers.apps,
+      runtimes: answers.runtimes,
+      agents: answers.agents,
+      blesh: answers.blesh,
+    };
+  }
 
   log.plain("");
   log.step("First run on this machine — a few choices, then it stays quiet.");
