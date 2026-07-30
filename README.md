@@ -3,10 +3,10 @@
 <img src="docs/hero.svg" alt="red-dev — one development environment across Ubuntu 24.04, Ubuntu 26.04, WSL and native Windows" width="100%">
 
 <p>
-  <a href="https://github.com/reddb-io/red-dev/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/reddb-io/red-dev/release.yml?branch=main&style=for-the-badge&label=CI&labelColor=0d1117" alt="CI"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge&labelColor=0d1117" alt="License"></a>
-  <a href="#the-support-matrix"><img src="https://img.shields.io/badge/targets-ubuntu%2024%20%7C%2026%20%7C%20wsl%20%7C%20windows-ff2056?style=for-the-badge&labelColor=0d1117" alt="Targets"></a>
-  <a href="#the-identical-layer"><img src="https://img.shields.io/badge/stack-alacritty%20%7C%20zellij%20%7C%20bash-8b949e?style=for-the-badge&labelColor=0d1117" alt="Stack"></a>
+  <a href="https://github.com/reddb-io/red-dev/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/reddb-io/red-dev/release.yml?branch=main&style=for-the-badge&label=CI&labelColor=07080a" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge&labelColor=07080a" alt="License"></a>
+  <a href="#the-support-matrix"><img src="https://img.shields.io/badge/targets-ubuntu%2024%20%7C%2026%20%7C%20wsl%20%7C%20windows-ff2056?style=for-the-badge&labelColor=07080a" alt="Targets"></a>
+  <a href="#the-identical-layer"><img src="https://img.shields.io/badge/stack-alacritty%20%7C%20zellij%20%7C%20bash-7a8088?style=for-the-badge&labelColor=07080a" alt="Stack"></a>
 </p>
 
 <strong>One development environment. Five targets. The same experience on each.</strong><br>

@@ -1,12 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 340" width="1200" height="340" role="img" aria-label="red-dev — one development environment across Ubuntu 24.04, Ubuntu 26.04, WSL and Windows">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#0d1117"/>
-      <stop offset="100%" stop-color="#12161f"/>
+      <stop offset="0%" stop-color="#07080a"/>
+      <stop offset="100%" stop-color="#0c0e11"/>
     </linearGradient>
     <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0%" stop-color="#ff2056"/>
-      <stop offset="100%" stop-color="#ff6b8a"/>
+      <stop offset="100%" stop-color="#ff5470"/>
     </linearGradient>
     <linearGradient id="rule" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0%" stop-color="#ff2056" stop-opacity="0.9"/>
@@ -17,7 +17,7 @@
   <rect width="1200" height="340" fill="url(#bg)"/>
 
   <!-- subtle grid, echoing the two-axis support matrix -->
-  <g stroke="#8b949e" stroke-opacity="0.07">
+  <g stroke="#7a8088" stroke-opacity="0.07">
     <path d="M0 85H1200M0 170H1200M0 255H1200"/>
     <path d="M300 0V340M600 0V340M900 0V340"/>
   </g>
@@ -25,20 +25,20 @@
   <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
     <!-- prompt glyph, the one the shell actually ships -->
     <text x="72" y="128" font-size="46" fill="url(#accent)" font-weight="700">&#8250;_</text>
-    <text x="130" y="128" font-size="62" fill="#e6edf3" font-weight="700">red-dev</text>
+    <text x="130" y="128" font-size="62" fill="#f4f5f7" font-weight="700">red-dev</text>
 
     <rect x="74" y="152" width="420" height="3" fill="url(#rule)"/>
 
-    <text x="74" y="196" font-size="21" fill="#8b949e">One development environment. Five targets. Same experience.</text>
+    <text x="74" y="196" font-size="21" fill="#7a8088">One development environment. Five targets. Same experience.</text>
 
     <!-- the matrix, as the README states it -->
     <g font-size="15">
-      <text x="74" y="252" fill="#6e7681">desktop</text>
-      <text x="74" y="284" fill="#6e7681">wsl</text>
-      <text x="74" y="316" fill="#6e7681">windows</text>
+      <text x="74" y="252" fill="#7a8088">desktop</text>
+      <text x="74" y="284" fill="#7a8088">wsl</text>
+      <text x="74" y="316" fill="#7a8088">windows</text>
 
-      <text x="210" y="224" fill="#8b949e">ubuntu 24.04</text>
-      <text x="380" y="224" fill="#8b949e">ubuntu 26.04</text>
+      <text x="210" y="224" fill="#7a8088">ubuntu 24.04</text>
+      <text x="380" y="224" fill="#7a8088">ubuntu 26.04</text>
 
       <g fill="#ff2056">
         <text x="210" y="252">&#9679;</text>
@@ -47,15 +47,15 @@
         <text x="380" y="284">&#9679;</text>
         <text x="210" y="316">&#9679;</text>
       </g>
-      <text x="238" y="316" fill="#6e7681">native</text>
+      <text x="238" y="316" fill="#7a8088">native</text>
     </g>
 
     <!-- the stack, right aligned -->
     <g font-size="16" text-anchor="end">
-      <text x="1128" y="232" fill="#6e7681">alacritty</text>
-      <text x="1128" y="262" fill="#6e7681">zellij</text>
-      <text x="1128" y="292" fill="#6e7681">bash</text>
-      <text x="1128" y="196" fill="#484f58" font-size="13">ONE CONFIG EACH</text>
+      <text x="1128" y="232" fill="#7a8088">alacritty</text>
+      <text x="1128" y="262" fill="#7a8088">zellij</text>
+      <text x="1128" y="292" fill="#7a8088">bash</text>
+      <text x="1128" y="196" fill="#4a4f57" font-size="13">ONE CONFIG EACH</text>
     </g>
     <rect x="1140" y="180" width="3" height="120" fill="#ff2056" fill-opacity="0.5"/>
   </g>
