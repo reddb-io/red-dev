@@ -50,7 +50,14 @@ function home(): string {
   // exactly where the shell that reads them will look.
   const h = process.env["HOME"] ?? process.env["USERPROFILE"];
   if (!h) throw new Error("neither HOME nor USERPROFILE is set");
-  return h;
+
+  // Normalised to forward slashes. Every path built from this is joined
+  // with "/", so a Windows HOME produced `C:\Users\filip/.local/...` —
+  // which works, because Windows accepts both, but reads as a mistake
+  // in every log line. The files are read by Git Bash, whose own paths
+  // are POSIX-style, so one separator throughout is also the more
+  // correct answer.
+  return h.replace(/\\/g, "/");
 }
 
 async function writeIfChanged(path: string, content: string): Promise<boolean> {

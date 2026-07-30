@@ -167,9 +167,20 @@ export async function wingetInstall(id: string): Promise<void> {
     return;
   }
 
-  log.warn(`winget returned ${code} for ${id}`);
-  const detail = out.trim().split("\n").filter(Boolean).slice(-2).join(" ");
-  if (detail) log.plain(`       ${detail}`);
+  // Everything else is a failure and has to be reported as one.
+  //
+  // This used to warn and return, so a converge that could not install
+  // anything still reported success. A mistyped id is the case that
+  // matters: winget exits 20 with "No package found matching input
+  // criteria", and `JesseDuffield.lazydocker` — lowercase L, where the
+  // real package is `Lazydocker` — sat in the manifest being reported
+  // as installed. A silent wrong result is worse than a loud failure.
+  const detail = out.trim().split("\n").filter(Boolean).slice(-2).join(" ").trim();
+  throw new RedError(
+    /No package found/i.test(out)
+      ? `winget has no package '${id}' — check the exact id, it is case-sensitive`
+      : `winget exited ${code} for ${id}${detail ? `: ${detail}` : ""}`,
+  );
 }
 
 // --------------------------------------------------- github release

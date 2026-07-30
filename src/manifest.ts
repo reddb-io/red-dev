@@ -275,7 +275,10 @@ export const TOOLS: Tool[] = [
     name: "lazydocker",
     scope: "core",
     u24: gh("jesseduffield/lazydocker", "lazydocker_*_Linux_x86_64.tar.gz"),
-    win: winget("JesseDuffield.lazydocker"),
+    // Capital L. winget's --exact is case-sensitive, and the lowercase
+    // form exits 20 ("no package found") -- which this reported as a
+    // successful install for as long as non-zero was only a warning.
+    win: winget("JesseDuffield.Lazydocker"),
   },
   {
     // zellij is how tiling stays identical across all five targets.

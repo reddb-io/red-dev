@@ -143,6 +143,24 @@ async function shellToml(p: Platform): Promise<string> {
 }
 
 /**
+ * The distro WSL would open by default.
+ *
+ * `wsl -l -q` writes UTF-16, so the output arrives with NUL bytes
+ * between characters; stripping them is the difference between parsing
+ * a name and parsing nothing.
+ */
+async function defaultWslDistro(): Promise<string | null> {
+  try {
+    const proc = Bun.spawn(["wsl.exe", "-l", "-q"], { stdout: "pipe", stderr: "ignore" });
+    const out = (await new Response(proc.stdout).text()).replace(/\0/g, "");
+    if ((await proc.exited) !== 0) return null;
+    return out.split(/\r?\n/).map((l) => l.trim()).find(Boolean) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Which shell to launch, from the recorded preference rather than from
  * whichever side of the WSL boundary happens to be running.
  */
@@ -152,9 +170,15 @@ async function shellSectionFor(p: Platform): Promise<string> {
 
   if (choice === "wsl") {
     const prefs = await readPreferences(p);
-    const distro = prefs.distro ?? process.env["WSL_DISTRO_NAME"];
+    // WSL_DISTRO_NAME only exists inside a distro, so on native Windows
+    // — where this choice is most likely to be made — both sources were
+    // empty and the config silently fell back to Alacritty's default
+    // shell after the user had explicitly asked for WSL. Ask WSL itself
+    // as the last resort.
+    let distro = prefs.distro ?? process.env["WSL_DISTRO_NAME"] ?? undefined;
+    if (!distro) distro = (await defaultWslDistro()) ?? undefined;
     if (!distro) {
-      log.warn("no WSL distro recorded; leaving Alacritty on its default shell");
+      log.warn("no WSL distro found; leaving Alacritty on its default shell");
       return "";
     }
     // Start in the distro's home rather than the Windows working

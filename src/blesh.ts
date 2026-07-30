@@ -50,6 +50,20 @@ async function run(cmd: string[]): Promise<void> {
  * live in the user's own data directory.
  */
 export async function installBlesh(): Promise<void> {
+  // Native Windows has no tar, rm or find on PATH for a spawned
+  // process, so this failed with `Executable not found in $PATH: "rm"`
+  // partway through — after downloading 2.6 MB, which is the worst
+  // possible place to discover it. Git Bash ships those tools but they
+  // are not visible to a process started outside it.
+  //
+  // The value here is low enough not to be worth shelling through Git
+  // Bash: ble.sh only matters in an interactive bash session, and on
+  // this target that session can install it itself.
+  if (process.platform === "win32") {
+    log.skip("ble.sh needs a Unix toolchain; install it from inside Git Bash");
+    return;
+  }
+
   if (isInstalled()) {
     log.skip("ble.sh already installed");
     return;
