@@ -31,7 +31,7 @@ import { VERSION } from "./cli.ts";
 import { converge, countSteps, type StepResult } from "./converge.ts";
 import { captureStart, captureStop } from "./log.ts";
 import { Accented, Header, Section, StatusLine } from "./tui-chrome.ts";
-import { ui } from "./tui-theme.ts";
+import { muted, subtle, text, ui } from "./tui-theme.ts";
 import type { Scope } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
 import type { ApplyContext } from "./providers.ts";
@@ -176,7 +176,7 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
           // ScrollArea in that file already used, so the component owns
           // the tail and the auto-scroll again and this owns neither.
           Accented(
-            failures.length > 0 ? ui.warning : ui.accent,
+            failures.length > 0 ? ui.warn : ui.accent,
             logRows,
             leftWidth,
             LogViewer({
@@ -197,7 +197,7 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
             width: twoColumn ? rightWidth : leftWidth,
             ...(twoColumn ? { marginLeft: 2 } : { marginTop: 1 }),
           },
-          Text({ color: ui.muted, bold: true }, finished() ? "Done" : "Progress"),
+          Text({ color: muted, bold: true }, finished() ? "Done" : "Progress"),
           // ProgressBar draws its own brackets and percentage around
           // the width given, so the width is what fits inside them.
           ProgressBar({
@@ -205,7 +205,7 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
             max: total,
             width: rightWidth - 14,
             style: "block",
-            color: failures.length > 0 ? ui.warning : ui.accent,
+            color: failures.length > 0 ? ui.warn : ui.accent,
           }),
           Text(
             { dim: true },
@@ -218,8 +218,8 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
           // any width this column can afford.
           MultiProgressBar({
             segments: [
-              { value: by("installed") + by("applied"), color: ui.success },
-              { value: by("present"), color: ui.subtle },
+              { value: by("installed") + by("applied"), color: ui.ok },
+              { value: by("present"), color: subtle },
               { value: by("failed"), color: ui.danger },
             ],
             total,
@@ -241,7 +241,7 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
             `${by("present")} already present`,
             `${by("skipped")} skipped`,
           ),
-          Section("Elapsed", { text: human(elapsedMs), color: ui.text }),
+          Section("Elapsed", { text: human(elapsedMs), color: text }),
 
           ...(failures.length > 0
             ? [

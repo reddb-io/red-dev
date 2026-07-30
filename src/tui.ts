@@ -33,7 +33,7 @@ import type { Platform } from "./platform.ts";
 import { summary } from "./platform.ts";
 import { THEMES, themeNames } from "./themes.ts";
 import { Header, StatusLine } from "./tui-chrome.ts";
-import { ui, wordmarkGradient } from "./tui-theme.ts";
+import { muted, wordmarkGradient } from "./tui-theme.ts";
 
 /**
  * A row of blocks in the palette's own colours.
@@ -199,7 +199,7 @@ export async function runTui(p: Platform): Promise<TuiResult> {
         // reimplementing a component that already exists.
         Box(
           { flexDirection: "column", width: leftWidth },
-          Text({ color: ui.muted, bold: true }, inThemes ? "Themes" : "Sections"),
+          Text({ color: muted, bold: true }, inThemes ? "Themes" : "Sections"),
           ...(inThemes
             ? names.map((name, i) => ListItem({ primary: name, selected: i === themeIndex() }))
             : SECTIONS.map((s, i) =>

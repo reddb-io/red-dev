@@ -15,7 +15,7 @@
  */
 
 import { Box, Text } from "tuiuiu.js";
-import { ui } from "./tui-theme.ts";
+import { muted, subtle, text, ui } from "./tui-theme.ts";
 
 /**
  * A labelled block in the right column.
@@ -33,11 +33,11 @@ export function Section(
 ) {
   return Box(
     { flexDirection: "column", marginBottom: 1 },
-    Text({ color: ui.muted, bold: true }, label),
+    Text({ color: muted, bold: true }, label),
     ...lines.map((l) =>
       typeof l === "string"
-        ? Text({ color: ui.subtle }, l)
-        : Text({ color: l.color ?? ui.text, ...(l.bold ? { bold: true } : {}) }, l.text),
+        ? Text({ color: subtle }, l)
+        : Text({ color: l.color ?? text, ...(l.bold ? { bold: true } : {}) }, l.text),
     ),
   );
 }
@@ -46,7 +46,7 @@ export function Section(
 export function Decision(label: string, value: string, color: string = ui.accent) {
   return Box(
     { flexDirection: "row" },
-    Text({ color: ui.subtle }, `${label.padEnd(11)}`),
+    Text({ color: subtle }, `${label.padEnd(11)}`),
     Text({ color }, value),
   );
 }
@@ -95,7 +95,7 @@ export function Header(title: string, context: string) {
   return Box(
     { flexDirection: "row", justifyContent: "space-between" },
     Text({ color: ui.accent, bold: true }, title),
-    Text({ color: ui.subtle }, context),
+    Text({ color: subtle }, context),
   );
 }
 
@@ -103,7 +103,7 @@ export function Header(title: string, context: string) {
 export function StatusLine(left: string, right: string) {
   return Box(
     { flexDirection: "row", justifyContent: "space-between", marginTop: 1 },
-    Text({ color: ui.subtle }, left),
-    Text({ color: ui.subtle }, right),
+    Text({ color: subtle }, left),
+    Text({ color: subtle }, right),
   );
 }

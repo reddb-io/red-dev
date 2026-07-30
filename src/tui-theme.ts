@@ -1,68 +1,82 @@
 /**
- * The interface palette.
+ * The interface palette, taken from the RedDB design system.
  *
- * Not the terminal themes in themes.ts — those are what red-dev applies
- * to *your* machine. These are the colours red-dev draws *itself* in,
- * and they do not change with the theme you pick, for the same reason
- * an installer does not repaint itself to match what it installs.
+ * Values and names both come from red-ui's
+ * `packages/ui-kit/src/tokens/tokens.css`, so a terminal drawn by
+ * red-dev and a page drawn by red-ui are the same black and the same
+ * red rather than two people's idea of them. The ramp names — bg-0
+ * through bg-3, fg-0 through fg-3 — are theirs too: someone moving
+ * between the repositories should recognise the vocabulary, not have to
+ * translate it.
  *
- * Taken from the identity already in this repository rather than
- * invented: docs/hero.svg, the section banners and the README badges
- * have been using #ff2056 on #0d1117 since the first commit today. This
- * gives those values names so a fourth surface cannot drift from the
- * other three.
+ * Not the terminal themes in themes.ts. Those are what red-dev applies
+ * to *your* machine; this is what red-dev draws *itself* in, and it does
+ * not change with the theme you pick, for the same reason an installer
+ * does not repaint itself to match what it installs.
  *
- * RedDB is black and red. Everything here is a shade of one, the other,
- * or the grey between them — with exactly two exceptions, both earned:
- * a green for what succeeded and an amber for what needs attention,
- * because a red that means "brand" cannot also mean "failure".
+ * Everything a terminal cannot use is dropped: radii, shadows, easing
+ * curves and the sans stack have no meaning in a cell grid.
  */
 
 export const ui = {
-  /** Page background. Near-black rather than pure, so borders can sit under it. */
-  bg: "#0d1117",
-  /** A panel or row lifted off the background. */
-  surface: "#151a23",
+  /** Deepest background. RedDB is near-black, not grey. */
+  bg0: "#07080a",
+  bg1: "#0c0e11",
+  bg2: "#14171c",
+  /** Most-raised surface. */
+  bg3: "#1c2027",
 
   /** Primary text. */
-  text: "#e6edf3",
-  /** Secondary text: labels, units, anything read second. */
-  muted: "#8b949e",
-  /** Tertiary: separators, placeholders, things read only if hunted for. */
-  subtle: "#484f58",
-
-  /** The brand red. Accent bars, the wordmark, the selected row. */
-  accent: "#ff2056",
-  /** Lighter red, for a gradient ramp or a hover state. */
-  accentLight: "#ff6b8a",
-  /** Darker red, for the far end of a ramp. */
-  accentDark: "#8b1533",
+  fg0: "#f4f5f7",
+  /** Secondary: values, body copy read after the label. */
+  fg1: "#c8ccd4",
+  /** Labels, units, anything read second. */
+  fg2: "#7a8088",
+  /** Separators and placeholders: read only if hunted for. */
+  fg3: "#4a4f57",
 
   /**
-   * Status colours, and only these three.
+   * The brand red, identical in both repositories.
    *
-   * `accent` is the brand and must not double as an error, or a screen
-   * with one failure looks the same as a screen with none.
+   * Reserved for identity and for the one value on a screen that
+   * carries the answer. It is deliberately *not* the error colour —
+   * `danger` is a separate, lighter red, so a screen with a failure
+   * cannot look like a screen without one.
    */
-  success: "#3fb950",
-  warning: "#d29922",
-  danger: "#f85149",
+  accent: "#ff2056",
+
+  ok: "#4ade80",
+  warn: "#fbbf24",
+  danger: "#ff5470",
+  info: "#60a5fa",
 } as const;
 
-/** The wordmark ramp. Symmetric, because BigText cycles it per letter. */
-export const wordmarkGradient = [
-  ui.accentDark,
-  ui.accent,
-  ui.accentLight,
-  ui.accent,
-  ui.accentDark,
-] as const;
+/**
+ * Aliases for the names this codebase already used.
+ *
+ * Kept so the call sites read as intent rather than as a position on a
+ * ramp — `ui.muted` says why, `ui.fg2` says where.
+ */
+export const text = ui.fg0;
+export const muted = ui.fg2;
+export const subtle = ui.fg3;
 
-/** Outcome to colour, in one place so the two views cannot disagree. */
+/**
+ * The wordmark ramp.
+ *
+ * Symmetric because BigText cycles it per letter, and seven letters over
+ * five stops restarted at the darkest shade mid-word. The ends are
+ * mixed toward the background rather than being a second brand red:
+ * there is one accent in this system and inventing shades of it is how
+ * a palette stops being one.
+ */
+export const wordmarkGradient = ["#8b1533", "#c41e4a", ui.accent, "#c41e4a", "#8b1533"] as const;
+
+/** Outcome to colour, in one place so the views cannot disagree. */
 export const outcomeColor: Record<string, string> = {
-  installed: ui.success,
-  applied: ui.success,
-  present: ui.subtle,
-  skipped: ui.subtle,
+  installed: ui.ok,
+  applied: ui.ok,
+  present: ui.fg3,
+  skipped: ui.fg3,
   failed: ui.danger,
 };
