@@ -32,7 +32,7 @@ import { VERSION } from "./cli.ts";
 import type { Platform } from "./platform.ts";
 import { summary } from "./platform.ts";
 import { THEMES, themeNames } from "./themes.ts";
-import { Header, Section, StatusLine } from "./tui-chrome.ts";
+import { Header, StatusLine } from "./tui-chrome.ts";
 
 /**
  * A row of blocks in the palette's own colours.
@@ -211,17 +211,37 @@ export async function runTui(p: Platform): Promise<TuiResult> {
           { flexDirection: "column", width: rightWidth, marginLeft: 2 },
           ...(!inThemes && section?.key === "home"
             ? [
-                BigText({ text: "red-dev", font: "block", color: "red" }),
-                Text({}, ""),
-                Text({ dim: true }, summary(p).split("\n")[0] ?? ""),
-                Text({ dim: true }, summary(p).split("\n")[1] ?? ""),
-                Text({}, ""),
-                Section(
-                  "This machine",
-                  `${themeNames().length} themes available`,
-                  `terminal opens ${p.env === "wsl" ? "inside WSL" : p.os === "windows" ? "Git Bash or WSL" : "your login shell"}`,
+                // Centred, and the logo fades rather than sitting flat.
+                //
+                // Both taken from tuiuiu's own opencode-lab example:
+                // justifyContent and alignItems on a box with an
+                // explicit height do the centring, and a gradient from
+                // dim to bright is what gives the wordmark depth. A
+                // single colour reads as ASCII art; the ramp reads as a
+                // logo.
+                Box(
+                  {
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    height: Math.max(8, (size.rows ?? 24) - 8),
+                  },
+                  BigText({
+                    text: "red-dev",
+                    font: "small",
+                    // Symmetric on purpose: BigText cycles the ramp per
+                    // letter, and seven letters over five stops
+                    // restarted at the darkest shade mid-word.
+                    // Mirroring it makes the wrap invisible.
+                    gradient: ["#8b1533", "#c41e4a", "#ff2056", "#c41e4a", "#8b1533"],
+                    letterSpacing: 1,
+                  }),
+                  Text({}, ""),
+                  Text({ dim: true }, summary(p).split("\n")[0] ?? ""),
+                  Text({ dim: true }, summary(p).split("\n")[1] ?? ""),
+                  Text({}, ""),
+                  Text({ dim: true }, "Pick a section on the left."),
                 ),
-                Text({ dim: true }, "Pick a section on the left."),
               ]
             : inThemes
             ? [
