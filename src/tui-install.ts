@@ -15,11 +15,9 @@
 
 import {
   Box,
-  HintBar,
   ListItem,
   LogViewer,
   MultiProgressBar,
-  Panel,
   ProgressBar,
   Text,
   render,
@@ -29,8 +27,10 @@ import {
   useState,
   useTerminalSize,
 } from "tuiuiu.js";
+import { VERSION } from "./cli.ts";
 import { converge, countSteps, type StepResult } from "./converge.ts";
 import { captureStart, captureStop } from "./log.ts";
+import { Accented, Header, Section, StatusLine } from "./tui-chrome.ts";
 import type { Scope } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
 import type { ApplyContext } from "./providers.ts";
@@ -170,50 +170,41 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
     return Box(
       { flexDirection: "column", padding: 1 },
 
-      Box(
-        { flexDirection: "row", justifyContent: "space-between", marginBottom: 1 },
-        Text({ color: "red", bold: true }, "red-dev"),
-        Text({ dim: true }, finished() ? "done" : `${scope()} · ${current()}`),
-      ),
+      Header("red-dev", finished() ? "done" : `${scope()} · ${current()}`),
+      Text({}, ""),
 
       Box(
         { flexDirection: twoColumn ? "row" : "column" },
 
-        // Left: the log. Wide, because this is what you read.
-        // LogViewer owns the tail and the auto-scroll; slicing the last
-        // N lines by hand is what it exists to replace.
+        // Left: the log, unframed. An accent bar marks it as the live
+        // region; a border around it would cost four lines and say
+        // nothing the bar does not.
         Box(
           { width: leftWidth },
-          Panel(
-            { title: "log" },
+          Accented(
+            failures.length > 0 ? "yellow" : "red",
+            logRows,
             LogViewer({
               lines: lines(),
               height: logRows,
               autoScroll: true,
-              // Failures should catch the eye without a second pass
-              // over the list.
               highlightPattern: /(✗|failed)/,
               highlightColor: "red",
             }),
           ),
         ),
 
-        // Right: the numbers. Narrow, and the position never shifts, so
-        // the eye can return to the same spot.
+        // Right: labelled sections, no box. Position never shifts, so
+        // the eye can return to the same spot without hunting.
         Box(
-          { flexDirection: "column", width: twoColumn ? rightWidth : leftWidth, borderStyle: "round", padding: 1, ...(twoColumn ? { marginLeft: 1 } : { marginTop: 1 }) },
-          Text({ dim: true }, "PROGRESS"),
-          Text({}, ""),
-          // ProgressBar draws the bar and a percentage, and nothing
-          // else: showValue, showEta and description are accepted and
-          // ignored in this version, so passing them looked like
-          // configuration and produced none. A percentage alone does
-          // not answer "how many left", so the count and the estimate
-          // are rendered here where they are actually under our
-          // control.
-          // width is the bar itself; ProgressBar adds "[ ", " ]" and a
-          // percentage around it, so the usable panel width minus those
-          // is what fits.
+          {
+            flexDirection: "column",
+            width: twoColumn ? rightWidth : leftWidth,
+            ...(twoColumn ? { marginLeft: 2 } : { marginTop: 1 }),
+          },
+          Text({ bold: true }, finished() ? "Done" : "Progress"),
+          // ProgressBar draws its own brackets and percentage around
+          // the width given, so the width is what fits inside them.
           ProgressBar({
             value: results.length,
             max: total,
@@ -226,10 +217,10 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
             `${results.length}/${total}${etaText(results.length, total, elapsedMs, finished())}`,
           ),
           Text({}, ""),
-          // Legend off: it rendered as "· new: 6 · present: 24 · faile"
-          // — cut mid-word — and the counts are already listed below in
-          // full. The bar carries the proportions, the list carries the
-          // numbers, and neither repeats the other badly.
+
+          // The proportions, without a legend: the counts are spelled
+          // out immediately below, and the legend truncated mid-word at
+          // any width this column can afford.
           MultiProgressBar({
             segments: [
               { value: by("installed") + by("applied"), color: "green" },
@@ -241,41 +232,33 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
             showLegend: false,
           }),
           Text({}, ""),
-          Text({ dim: true }, `elapsed   ${human(elapsedMs)}`),
-          Text({ dim: true }, `installed ${by("installed") + by("applied")}`),
-          Text({ dim: true }, `present   ${by("present")}`),
-          Text(
-            failures.length > 0 ? { color: "red" } : { dim: true },
-            `failed    ${failures.length}`,
+
+          Section(
+            "Counts",
+            `installed  ${by("installed") + by("applied")}`,
+            `present    ${by("present")}`,
+            `skipped    ${by("skipped")}`,
           ),
-          // ListItem carries the status icon and colour, so the failed
-          // list uses the same vocabulary as everything else drawn with
-          // tuiuiu rather than a local red Text.
+          Section("Elapsed", human(elapsedMs)),
+
           ...(failures.length > 0
             ? [
-                Text({}, ""),
+                Text({ color: "red", bold: true }, "Failed"),
                 ...failures
-                  .slice(0, 5)
+                  .slice(0, 6)
                   .map((f) => ListItem({ primary: f.tool, status: STATUS["failed"] })),
               ]
             : []),
         ),
       ),
 
-      // HintBar formats the shortcuts; writing "enter to leave" as prose
-      // is what it replaces.
-      Box(
-        { marginTop: 1 },
+      StatusLine(
         finished()
-          ? HintBar({
-              hints: [
-                { shortcut: "enter", action: "leave" },
-                ...(failures.length > 0
-                  ? [{ shortcut: "re-run", action: "safe, every provider is idempotent" }]
-                  : [{ shortcut: "then", action: "restart your shell" }]),
-              ],
-            })
-          : Text({ dim: true }, "working…"),
+          ? failures.length > 0
+            ? "enter leave · re-running is safe"
+            : "enter leave · restart your shell"
+          : "working…",
+        `red-dev ${VERSION}`,
       ),
     );
   }

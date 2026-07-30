@@ -1,20 +1,21 @@
 #!/usr/bin/env bun
 /**
- * Renders the fullscreen layout once and asserts what came out.
+ * Renders each fullscreen surface once and asserts what came out.
  *
- * An interactive session cannot be driven from here, but the part most
- * likely to be wrong is not the key handling — it is whether the layout
- * composes at all, whether the palette strip carries real colours, and
- * whether the panel text survives the width calculation. All three are
- * visible in one frame.
+ * An interactive session cannot be driven from here, but the parts most
+ * likely to be wrong are visible in one frame: whether the layout
+ * composes, whether the palette strip carries real colours, whether a
+ * component's own chrome overflows the column it was given. The last one
+ * is what a screenshot caught after this file had been passing for two
+ * releases against a function the product had deleted.
  */
 
-import { Box, MultiProgressBar, ProgressBar, Text, renderToString } from "tuiuiu.js";
+import { Box, ListItem, LogViewer, MultiProgressBar, ProgressBar, Text, renderToString } from "tuiuiu.js";
 import { THEMES, themeNames } from "../src/themes.ts";
+import { Accented, Header, Section, StatusLine } from "../src/tui-chrome.ts";
 
-function Swatches(hexes: string[]) {
-  return Box({ flexDirection: "row" }, ...hexes.map((h) => Text({ backgroundColor: h }, "    ")));
-}
+const problems: string[] = [];
+const strip = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "");
 
 function paletteOf(slug: string): string[] {
   const t = THEMES[slug];
@@ -23,121 +24,131 @@ function paletteOf(slug: string): string[] {
   return [c.background, c.red, c.green, c.yellow, c.blue, c.purple, c.cyan, c.foreground];
 }
 
+// ---------------------------------------------------------------- setup
 const active = "kanagawa";
-
-const frame = renderToString(
+const setup = renderToString(
   Box(
     { flexDirection: "column", padding: 1 },
-    Box(
-      { flexDirection: "row", justifyContent: "space-between", marginBottom: 1 },
-      Text({ color: "red", bold: true }, "red-dev"),
-      Text({ dim: true }, "os=linux env=wsl"),
-    ),
+    Header("red-dev setup", "os=windows env=windows"),
+    Text({}, ""),
     Box(
       { flexDirection: "row" },
       Box(
-        { flexDirection: "column", width: 24, borderStyle: "round", padding: 1 },
-        Text({ dim: true }, "THEME"),
-        ...themeNames().map((n) =>
-          Text({ color: n === active ? "red" : undefined, bold: n === active }, `${n === active ? "❯ " : "  "}${n}`),
+        { flexDirection: "column", width: 24 },
+        Text({ bold: true }, "Steps"),
+        ...["Terminal", "Agents", "Runtimes", "Tools", "ble.sh", "Font", "Theme"].map((s, i) =>
+          ListItem({ primary: s, selected: i === 6, status: i < 6 ? "success" : "running" }),
         ),
       ),
       Box(
-        { flexDirection: "column", width: 44, borderStyle: "round", padding: 1, marginLeft: 1 },
-        Text({ bold: true }, THEMES[active]?.name ?? active),
-        Text({}, ""),
-        Swatches(paletteOf(active)),
-        Text({}, ""),
-        Text({ dim: true }, "background · red · green · yellow"),
+        { flexDirection: "column", width: 52, marginLeft: 2 },
+        Accented(
+          "red",
+          9,
+          Text({ dim: true }, "One palette reaches eight surfaces."),
+          Text({}, ""),
+          ...themeNames()
+            .slice(2, 6)
+            .map((n, i) => ListItem({ primary: THEMES[n]?.name ?? n, selected: i === 2 })),
+          Text({}, ""),
+          Box({ flexDirection: "row" }, ...paletteOf(active).map((h) => Text({ backgroundColor: h }, "    "))),
+        ),
       ),
     ),
+    StatusLine("up/down move · enter next · q skip", "red-dev 0.7.0"),
   ),
 );
 
-console.log(frame);
+console.log(setup);
 
-const problems: string[] = [];
-
-// Every theme has to appear in the list, or the selector is lying about
-// what is available.
-for (const name of themeNames()) {
-  if (!frame.includes(name)) problems.push(`missing theme in list: ${name}`);
+for (const name of themeNames().slice(2, 6)) {
+  const label = THEMES[name]?.name ?? name;
+  if (!strip(setup).includes(label)) problems.push(`theme missing from setup list: ${label}`);
 }
-
-// The swatch row is the entire point. Without a background escape
-// sequence it rendered as blank space and nobody would know.
-if (!/\x1b\[48;2;\d+;\d+;\d+m/.test(frame)) {
+// The swatches are the reason this screen exists; without a background
+// escape they render as blank space and nobody would notice.
+if (!/\x1b\[48;2;\d+;\d+;\d+m/.test(setup)) {
   problems.push("no truecolor background escapes — swatches did not render as colour");
 }
-
-// The kanagawa background is #1F1F28 = 31,31,40.
-if (!frame.includes("\x1b[48;2;31;31;40m")) {
-  problems.push("kanagawa background swatch missing its actual colour");
+if (!setup.includes("\x1b[48;2;31;31;40m")) {
+  problems.push("kanagawa background swatch missing its actual colour (#1F1F28)");
 }
+// No boxes: the whole point of the restyle. A round border here means a
+// Panel crept back in.
+if (/[╭╮╰╯]/.test(setup)) problems.push("a rounded border is being drawn — regions should separate by whitespace");
+if (!setup.includes("│")) problems.push("accent bar missing — nothing marks the focused region");
 
-if (!frame.includes("Kanagawa")) problems.push("panel title missing");
-if (!frame.includes("❯ kanagawa")) problems.push("selection marker missing");
-
-
-// --- the install timeline -------------------------------------------
-//
-// This block used to render a `Bar` defined here in the smoke \u2014 a
-// hand-rolled one that the product stopped using when the layout moved
-// to tuiuiu's ProgressBar. The assertion passed the whole time, against
-// code no longer shipped. A smoke that reimplements its subject tests
-// the smoke.
-//
-// The components below are the ones tui-install.ts renders.
-
-const progress = renderToString(
+// -------------------------------------------------------------- install
+const rightWidth = 34;
+const install = renderToString(
   Box(
     { flexDirection: "column", padding: 1 },
-    ProgressBar({ value: 14, max: 33, width: 24, style: "block", color: "yellow" }),
-    Text({ dim: true }, "14/33  ~2m 30s left"),
+    Header("red-dev", "core · zellij"),
     Text({}, ""),
-    MultiProgressBar({
-      segments: [
-        { value: 6, color: "green", label: "new" },
-        { value: 7, color: "gray", label: "present" },
-        { value: 1, color: "red", label: "failed" },
-      ],
-      total: 33,
-      width: 24,
-    }),
     Box(
-      { flexDirection: "column", borderStyle: "round", padding: 1 },
-      Box({ flexDirection: "row" }, Text({ color: "green" }, "\u2713 "), Text({}, "ripgrep".padEnd(16)), Text({ dim: true }, "installed")),
-      Box({ flexDirection: "row" }, Text({ color: "red" }, "\u2717 "), Text({}, "docker".padEnd(16)), Text({ dim: true }, "failed")),
-      Box({ flexDirection: "row" }, Text({ color: "yellow" }, "\u25b8 "), Text({ bold: true }, "zellij".padEnd(16)), Text({ dim: true }, "gh:zellij-org")),
+      { flexDirection: "row" },
+      Box(
+        { width: 58 },
+        Accented(
+          "red",
+          8,
+          LogViewer({
+            lines: [
+              "-- core · 33 items",
+              "✓ ripgrep          installed  2s",
+              "✗ docker           failed",
+              "    aptrepo: gpg key fetch returned 502",
+              "· fd               present",
+            ],
+            height: 8,
+            autoScroll: true,
+            highlightPattern: /(✗|failed)/,
+            highlightColor: "red",
+          }),
+        ),
+      ),
+      Box(
+        { flexDirection: "column", width: rightWidth, marginLeft: 2 },
+        Text({ bold: true }, "Progress"),
+        ProgressBar({ value: 14, max: 33, width: rightWidth - 14, style: "block", color: "yellow" }),
+        Text({ dim: true }, "14/33  ~2m 30s left"),
+        Text({}, ""),
+        MultiProgressBar({
+          segments: [
+            { value: 6, color: "green" },
+            { value: 7, color: "gray" },
+            { value: 1, color: "red" },
+          ],
+          total: 33,
+          width: rightWidth - 6,
+          showLegend: false,
+        }),
+        Text({}, ""),
+        Section("Counts", "installed  6", "present    7", "skipped    1"),
+        Section("Elapsed", "1m 12s"),
+        Text({ color: "red", bold: true }, "Failed"),
+        ListItem({ primary: "docker", status: "error" }),
+      ),
     ),
+    StatusLine("working…", "red-dev 0.7.0"),
   ),
 );
 
-console.log(progress);
+console.log(install);
 
-// A bar that renders as all-empty or all-full means the value never
-// reached it, and both look plausible in isolation. 14 of 33 must show
-// as partially filled \u2014 some fill character and some empty one.
-const bars = (progress.match(/[\u2588\u2589\u258a\u258b\u258c\u258d\u258e\u258f]/g) ?? []).length;
-if (bars === 0) problems.push("progress bar drew no filled cells");
-if (!(progress.match(/[\u2591\u2592\u2593]/g) ?? []).length) {
-  problems.push("progress bar drew no empty portion \u2014 it looks complete at 42%");
-}
-// showValue is what turns a bar into a number anyone can act on.
-if (!progress.includes("14/33")) problems.push("counter missing");
-// The segment legend is the breakdown; without it the bar is one blob.
-const legend = progress.replace(/\x1b\[[0-9;]*m/g, "");
-if (!/new/.test(legend) || !/failed/.test(legend)) {
-  problems.push("MultiProgressBar legend missing its segments");
-}
-// Glyph and name are separate Text nodes, so an ANSI reset sits between
-// them: asserting on the raw frame tests the renderer's escape placement
-// rather than the content. Strip colour first and check what a human
-// actually reads.
-const plain = progress.replace(/\x1b\[[0-9;]*m/g, "");
-if (!plain.includes("\u2713 ripgrep")) problems.push("completed step marker missing");
-if (!plain.includes("\u2717 docker")) problems.push("failed step marker missing");
-if (!plain.includes("\u25b8 zellij")) problems.push("running step marker missing");
+const plain = strip(install);
+// Every line has to fit the terminal: a component drawing its own
+// brackets and percentage outside the width it was given is what put
+// "100" on a line of its own and truncated a legend to "faile".
+const widest = Math.max(...plain.split("\n").map((l) => l.length));
+if (widest > 100) problems.push(`a line is ${widest} columns wide — something overflowed its column`);
+
+if (!plain.includes("14/33")) problems.push("counter missing");
+if (!plain.includes("✓ ripgrep")) problems.push("completed step marker missing");
+if (!plain.includes("✗ docker")) problems.push("failed step marker missing");
+if (!plain.includes("Counts")) problems.push("counts section missing");
+if (/[╭╮╰╯]/.test(install)) problems.push("install view is drawing a border");
+
 if (problems.length > 0) {
   console.error("\nRENDER SMOKE FAILED");
   for (const p of problems) console.error(`  ${p}`);
@@ -145,3 +156,8 @@ if (problems.length > 0) {
 }
 
 console.log("\nRENDER OK");
+
+// Explicit exit: the components register effects that keep the event
+// loop alive after a one-shot renderToString, so without this the
+// script prints everything, passes, and then hangs until CI kills it.
+process.exit(0);
