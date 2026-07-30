@@ -29,7 +29,7 @@ import {
 } from "tuiuiu.js";
 // createScrollArea lives under the organisms subpath's own export, the
 // same place LogViewer comes from.
-import { createScrollArea } from "tuiuiu.js";
+import { createScrollArea, type ScrollAreaState } from "tuiuiu.js";
 import { VERSION } from "./cli.ts";
 import { converge, countSteps, type StepResult } from "./converge.ts";
 import { captureStart, captureStop } from "./log.ts";
@@ -64,264 +64,280 @@ export interface InstallTuiOptions {
   scopes: Scope[];
 }
 
-export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: number }> {
+/**
+ * Everything the converge view needs, and nothing about how it is drawn.
+ *
+ * Split out because the menu and the converge have to live inside one
+ * `render()`. They did not, and it crashed: picking Install from the
+ * fullscreen interface tore the first app down and started a second one,
+ * and on Windows the second `initializeApp` failed and its own cleanup
+ * wrote to a stdout that was already gone —
+ *
+ *     Error: EPIPE: broken pipe, write
+ *         at dispose → initializeApp → render → runInstallTui
+ *
+ * — which killed the process and took the console with it. Three
+ * separate experiments failed to reproduce that from a synthetic double
+ * render; the crash log from a real run named it in one stack.
+ *
+ * So: hooks here, layout below, and the menu owns both by calling this
+ * unconditionally and drawing the layout only when it is showing.
+ * Unconditionally matters — a hook called behind an `if` changes the
+ * hook order between frames.
+ */
+export interface InstallModel {
+  lines: () => string[];
+  results: () => StepResult[];
+  current: () => string;
+  scope: () => string;
+  finished: () => boolean;
+  following: () => boolean;
+  elapsedMs: () => number;
+  total: number;
+  logScroll: ScrollAreaState;
+  /** Start converging. Idempotent; the menu calls it when you pick Install. */
+  begin: () => void;
+  /** True when the key was a scroll key and the caller should stop. */
+  handleKey: (input: string, key: KeyPress) => boolean;
+}
+
+interface KeyPress {
+  upArrow?: boolean;
+  downArrow?: boolean;
+  pageUp?: boolean;
+  pageDown?: boolean;
+}
+
+export function useInstallModel(
+  opts: InstallTuiOptions,
+  logScroll: ScrollAreaState,
+  onFinish: (failed: number) => void,
+): InstallModel {
   const total = countSteps(opts.scopes);
-  let outcome = { failed: 0 };
 
-  // The log's scroll position, owned here rather than by the component.
+  const [lines, setLines] = useState<string[]>([]);
+  const [results, setResults] = useState<StepResult[]>([]);
+  const [current, setCurrent] = useState("");
+  const [scope, setScope] = useState("");
+  const [finished, setFinished] = useState(false);
+  // Whether the log is pinned to the tail. Starts true, and the arrow
+  // keys are what turn it off.
+  const [following, setFollowing] = useState(true);
+  const [startedAt, setStartedAt] = useState(0);
+  const [started, setStarted] = useState(false);
+  // A timer, not just events: a single apt step can run for minutes
+  // without emitting anything, and a frozen clock reads as a hang.
+  const [, setTick] = useState(0);
+
+  // The scroll state is the caller's, built outside the component.
   //
-  // LogViewer creates this itself when it is not given one, and then
-  // nothing can reach it: the component registers no key handling of its
-  // own — ScrollArea does, LogViewer does not — so the log scrolled
-  // itself to the bottom forever and every key went to the handler
-  // below, which only listened for the exit. There was no scrolling to
-  // be broken; there was none.
-  //
-  // Built outside the component for the same reason createWizard is in
-  // tui-setup: calling it during render recreates its signals every
-  // frame.
-  const logScroll = createScrollArea({ height: 10, content: [], autoScroll: true });
+  // Not useState(() => createScrollArea(...)): tuiuiu's useState has no
+  // lazy initialiser, so the function itself becomes the value and every
+  // scroll call lands on a closure instead of a scroll area. And
+  // creating it during render is the mistake createWizard already taught
+  // — signals rebuilt thirty times a second.
 
-  function App() {
-    const { exit } = useApp();
-    const size = useTerminalSize();
+  const push = (line: string): void => setLines((prev) => [...prev, line]);
 
-    const [lines, setLines] = useState<string[]>([]);
-    const [done, setDone] = useState<StepResult[]>([]);
-    const [current, setCurrent] = useState("");
-    const [scope, setScope] = useState("");
-    const [finished, setFinished] = useState(false);
-    // Whether the log is pinned to the tail. Starts true, and the arrow
-    // keys are what turn it off.
-    const [following, setFollowing] = useState(true);
-    const [startedAt] = useState(Date.now());
-    // A timer, not just events: a single apt step can run for minutes
-    // without emitting anything, and a frozen clock reads as a hang.
-    const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!started()) return;
+    const timer = setInterval(() => setTick((n) => n + 1), 1000);
 
-    const push = (line: string): void => setLines((prev) => [...prev, line]);
-
-    useEffect(() => {
-      const timer = setInterval(() => setTick((n) => n + 1), 1000);
-
-      void converge(
-        { platform: opts.platform, ctx: opts.ctx, scopes: opts.scopes, dryRun: false },
-        {
-          scopeStart: (s, n) => {
-            setScope(s);
-            push(`-- ${s} · ${n} items`);
-          },
-          note: (m) => push(`   ${m}`),
-          stepStart: (e) => {
-            setCurrent(e.tool);
-            // Hold provider chatter so it lands under its own step
-            // rather than interleaving with the next one.
-            captureStart();
-          },
-          stepEnd: (r) => {
-            const held = captureStop();
-            // LogViewer takes plain strings, so the glyph is chosen here
-            // rather than by a component. ListItem draws the same
-            // outcomes in the status column with the library's own
-            // icons; this is the one place a character is picked by
-            // hand, because a log line is text.
-            const glyph = r.outcome === "failed" ? "✗" : r.outcome === "present" || r.outcome === "skipped" ? "·" : "✓";
-            push(
-              `${glyph} ${r.tool.padEnd(16)} ${r.outcome}${r.ms >= 1000 ? `  ${human(r.ms)}` : ""}`,
-            );
-            for (const h of held) {
-              push(`    ${h.replace(/\x1b\[[0-9;]*m/g, "").trim()}`);
-            }
-            if (r.detail && r.outcome === "failed") push(`    ${r.detail}`);
-            setDone((prev) => [...prev, r]);
-          },
+    void converge(
+      { platform: opts.platform, ctx: opts.ctx, scopes: opts.scopes, dryRun: false },
+      {
+        scopeStart: (s, n) => {
+          setScope(s);
+          push(`-- ${s} · ${n} items`);
         },
-      ).then((summary) => {
-        outcome = { failed: summary.failed };
-        setFinished(true);
-        clearInterval(timer);
-      });
-
-      return () => clearInterval(timer);
+        note: (m) => push(`   ${m}`),
+        stepStart: (e) => {
+          setCurrent(e.tool);
+          // Hold provider chatter so it lands under its own step rather
+          // than interleaving with the next one.
+          captureStart();
+        },
+        stepEnd: (r) => {
+          const held = captureStop();
+          // LogViewer takes plain strings, so the glyph is chosen here
+          // rather than by a component.
+          const glyph =
+            r.outcome === "failed" ? "✗" : r.outcome === "present" || r.outcome === "skipped" ? "·" : "✓";
+          push(`${glyph} ${r.tool.padEnd(16)} ${r.outcome}${r.ms >= 1000 ? `  ${human(r.ms)}` : ""}`);
+          for (const h of held) push(`    ${h.replace(/\x1b\[[0-9;]*m/g, "").trim()}`);
+          if (r.detail && r.outcome === "failed") push(`    ${r.detail}`);
+          setResults((prev) => [...prev, r]);
+        },
+      },
+    ).then((summary) => {
+      setFinished(true);
+      clearInterval(timer);
+      onFinish(summary.failed);
     });
 
-    useInput((input, key) => {
-      // Scrolling the log.
-      //
-      // Following the tail is the right default while a converge runs,
-      // but it makes the one thing you would want to do — read the error
-      // that scrolled past — impossible. Moving up stops the follow;
-      // reaching the bottom again resumes it, so there is no mode to
-      // remember or key to press to get back.
+    return () => clearInterval(timer);
+  });
+
+  return {
+    lines,
+    results,
+    current,
+    scope,
+    finished,
+    following,
+    elapsedMs: () => (startedAt() === 0 ? 0 : Date.now() - startedAt()),
+    total,
+    logScroll,
+    begin: () => {
+      if (started()) return;
+      setStartedAt(Date.now());
+      setStarted(true);
+    },
+    handleKey: (input, key) => {
+      // Following the tail is right while a converge runs, but it makes
+      // the one thing you would want to do — read the error that
+      // scrolled past — impossible. Moving up stops the follow; reaching
+      // the bottom resumes it, so there is no mode to remember.
       if (key.upArrow || input === "k") {
         logScroll.scrollBy(-1);
         setFollowing(false);
-        return;
+        return true;
       }
       if (key.downArrow || input === "j") {
         logScroll.scrollBy(1);
         setFollowing(logScroll.scrollTop() >= logScroll.maxScroll());
-        return;
+        return true;
       }
       if (key.pageUp) {
         logScroll.pageUp();
         setFollowing(false);
-        return;
+        return true;
       }
       if (key.pageDown) {
         logScroll.pageDown();
         setFollowing(logScroll.scrollTop() >= logScroll.maxScroll());
-        return;
+        return true;
       }
       if (input === "g") {
         logScroll.scrollToTop();
         setFollowing(false);
-        return;
+        return true;
       }
       if (input === "G") {
         logScroll.scrollToBottom();
         setFollowing(true);
-        return;
+        return true;
       }
+      return false;
+    },
+  };
+}
 
-      // Refused until it finishes: leaving halfway abandons the machine
-      // mid-converge with no report of where it stopped.
-      if (finished() && (key.return || input === "q" || key.escape)) exit();
-    });
+/**
+ * The converge view, as a function of the model and nothing else.
+ *
+ * No hooks in here on purpose: whoever owns the state decides when to
+ * draw this, and a conditional hook call would shift the hook order
+ * between frames.
+ */
+export function InstallLayout(m: InstallModel, width: number, height: number) {
+  const results = m.results();
+  const finished = m.finished();
 
-    const results = done();
-    const width = size.columns ?? 100;
-    const height = Math.max(size.rows ?? 24, 16);
+  // Two columns need room for both. Below that the status column would
+  // be clipped mid-word, which is worse than not having it beside the
+  // log — so it moves above instead.
+  //
+  // 34, not 30. At 30 the ProgressBar's own brackets and percentage
+  // wrapped onto the next line and the segment legend truncated to
+  // "faile". 37 on the outside, because Surface spends three columns on
+  // the padding that keeps text off the edge of its own shade.
+  const rightWidth = 34;
+  const rightOuter = rightWidth + 3;
+  const twoColumn = width >= 92;
+  const leftWidth = twoColumn ? width - rightOuter - 6 : width - 4;
+  const logRows = Math.max(5, height - (twoColumn ? 8 : 16));
 
-    // Two columns need room for both. Below that the status column
-    // would be clipped mid-word, which is worse than not having it
-    // beside the log — so it moves above instead.
-    // 34, not 30. At 30 the ProgressBar's own brackets and percentage
-    // wrapped onto the next line and the segment legend truncated to
-    // "faile" — both of which read as a broken widget rather than a
-    // narrow one.
-    //
-    // 37 on the outside, because Surface spends three columns on the
-    // padding that keeps the text off the edge of its own shade. The
-    // widgets are still sized against 34; widening the column is what
-    // keeps the padding from being taken out of them.
-    const rightPad = 3;
-    const rightWidth = 34;
-    const rightOuter = rightWidth + rightPad;
-    const twoColumn = width >= 92;
-    const leftWidth = twoColumn ? width - rightOuter - 6 : width - 4;
-    // The log fills whatever is left after the frame, header and hint —
-    // less again when the status block sits above it.
-    const logRows = Math.max(5, height - (twoColumn ? 8 : 16));
+  const by = (o: string): number => results.filter((r) => r.outcome === o).length;
+  const failures = results.filter((r) => r.outcome === "failed");
+  const elapsedMs = m.elapsedMs();
+  const rightRows = 14 + Math.min(failures.length, 6) + (finished ? 4 : 0);
 
-    const by = (o: string): number => results.filter((r) => r.outcome === o).length;
-    const failures = results.filter((r) => r.outcome === "failed");
-    const elapsedMs = Date.now() - startedAt();
+  return Screen(
+    width,
+    height,
 
-    // Stacked, the shade is only as tall as the content that sits on it:
-    // the fixed rows, plus whatever the failure list and the closing
-    // note add once there is something to say.
-    const rightRows = 14 + Math.min(failures.length, 6) + (finished() ? 4 : 0);
+    Header("red-dev", finished ? "done" : `${m.scope()} · ${m.current()}`),
+    Text({}, ""),
 
-    return Screen(
-      width,
-      height,
+    Box(
+      { flexDirection: twoColumn ? "row" : "column" },
 
-      Header("red-dev", finished() ? "done" : `${scope()} · ${current()}`),
-      Text({}, ""),
-
+      // Left: the log, unframed. An accent bar marks it as the live
+      // region; a border would cost four lines and say nothing the bar
+      // does not.
       Box(
-        { flexDirection: twoColumn ? "row" : "column" },
-
-        // Left: the log, unframed. An accent bar marks it as the live
-        // region; a border around it would cost four lines and say
-        // nothing the bar does not.
-        Box(
-          { width: leftWidth },
-          // LogViewer again, now that it can be used.
-          //
-          // It was drawing the tail by hand here because LogViewer
-          // called createScrollArea in its body — three signals rebuilt
-          // every frame, and a warning banner across the interface.
-          // 1.0.75 routes it through useFactoryState, the same helper
-          // ScrollArea in that file already used, so the component owns
-          // the tail and the auto-scroll again and this owns neither.
-          Accented(
-            failures.length > 0 ? ui.warn : ui.accent,
-            logRows,
-            leftWidth,
-            LogViewer({
-              lines: lines(),
-              height: logRows,
-              // Follow the tail only while nobody has scrolled away from
-              // it. Passing `true` unconditionally is what made the
-              // scroll position unreachable: LogViewer calls
-              // scrollToBottom() on every render when autoScroll is set,
-              // so a keypress moved the view and the next frame — of
-              // which there are thirty a second — put it straight back.
-              autoScroll: following(),
-              state: logScroll,
-              highlightPattern: /(✗|failed)/,
-              highlightColor: ui.danger,
-            }),
-          ),
+        { width: leftWidth },
+        Accented(
+          failures.length > 0 ? ui.warn : ui.accent,
+          logRows,
+          leftWidth,
+          LogViewer({
+            lines: m.lines(),
+            height: logRows,
+            // Follow the tail only while nobody has scrolled away from
+            // it. Passing `true` unconditionally is what made the scroll
+            // position unreachable: LogViewer calls scrollToBottom() on
+            // every render when autoScroll is set, so a keypress moved
+            // the view and the next frame put it straight back.
+            autoScroll: m.following(),
+            state: m.logScroll,
+            highlightPattern: /(✗|failed)/,
+            highlightColor: ui.danger,
+          }),
         ),
+      ),
 
-        // Right: labelled sections on their own shade. No box — the
-        // change of background is what separates it, the way OpenCode
-        // separates its sidebar. Position never shifts, so the eye can
-        // return to the same spot without hunting.
-        Box(
-          { ...(twoColumn ? { marginLeft: 2 } : { marginTop: 1 }) },
-          Surface(
-            twoColumn ? rightOuter : leftWidth,
-            // Beside the log it matches the log's height, so the two
-            // regions end on the same row. Stacked, it is only as tall
-            // as it needs to be.
-            twoColumn ? logRows + 2 : rightRows,
-            Text({ color: muted, bold: true }, finished() ? "Done" : "Progress"),
-          // ProgressBar draws its own brackets and percentage around
-          // the width given, so the width is what fits inside them.
+      // Right: labelled sections on their own shade. The change of
+      // background is what separates it, the way OpenCode separates its
+      // sidebar. Position never shifts, so the eye can return to the
+      // same spot without hunting.
+      Box(
+        { ...(twoColumn ? { marginLeft: 2 } : { marginTop: 1 }) },
+        Surface(
+          twoColumn ? rightOuter : leftWidth,
+          twoColumn ? logRows + 2 : rightRows,
+          Text({ color: muted, bold: true }, finished ? "Done" : "Progress"),
           ProgressBar({
             value: results.length,
-            max: total,
+            max: m.total,
             width: rightWidth - 14,
             style: "block",
             color: failures.length > 0 ? ui.warn : ui.accent,
           }),
           // An explicit colour, not `dim`. dim leaves the foreground to
-          // the terminal and asks it to darken whatever that was, so on
-          // a profile that is not ours the line lands somewhere between
-          // the palette and the user's own — which is how a screen full
-          // of deliberate colours still reads as generic.
+          // the terminal and asks it to darken whatever that was.
           Text(
             { color: muted },
-            `${results.length}/${total}${etaText(results.length, total, elapsedMs, finished())}`,
+            `${results.length}/${m.total}${etaText(results.length, m.total, elapsedMs, finished)}`,
           ),
           Text({}, ""),
 
-          // The proportions, without a legend: the counts are spelled
-          // out immediately below, and the legend truncated mid-word at
-          // any width this column can afford.
           MultiProgressBar({
             segments: [
               { value: by("installed") + by("applied"), color: ui.ok },
               { value: by("present"), color: subtle },
               { value: by("failed"), color: ui.danger },
             ],
-            total,
+            total: m.total,
             width: rightWidth - 6,
             showLegend: false,
           }),
           Text({}, ""),
 
-          // What was decided, not just what happened.
-          //
-          // The column reads as a record: how much this run changed, how
-          // much it left alone, what it cost. The number that carries
-          // the decision is in the accent colour; the ones that are
-          // context stay quiet. Every line here being equally loud is
-          // what made the earlier version a wall of grey.
+          // What was decided, not just what happened. The number that
+          // carries the decision is in the accent colour; the ones that
+          // are context stay quiet.
           Section(
             "Changed",
             { text: `${by("installed") + by("applied")} installed`, color: ui.accent, bold: true },
@@ -333,27 +349,13 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
           ...(failures.length > 0
             ? [
                 Text({ color: ui.danger, bold: true }, "Failed"),
-                ...failures
-                  .slice(0, 6)
-                  .map((f) => ListItem({ primary: f.tool, status: "error" })),
+                ...failures.slice(0, 6).map((f) => ListItem({ primary: f.tool, status: "error" })),
               ]
             : []),
 
-          // Said once, at the end, and in the same voice as everything
-          // else in this column.
-          //
-          // AlertBox was the obvious component and the wrong one: it
-          // draws its own rounded border, which is what this restyle
-          // removed, and at 34 columns it clipped its own title to
-          // "⚠ Finished with f". The smoke caught both, which is the
-          // first time an assertion here has stopped a regression I was
-          // in the middle of committing.
-          // Wrapped by hand to the column, not by hope. The first
-          // attempt read "Finished with failures" and rendered
-          // "Finished with failu" — the same clipping the borders were
-          // removed to avoid, reintroduced by a label two words too
-          // long.
-          ...(finished()
+          // Wrapped by hand to the column, not by hope: "Finished with
+          // failures" rendered as "Finished with failu".
+          ...(finished
             ? [
                 Text({}, ""),
                 Section(
@@ -364,24 +366,52 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
                 ),
               ]
             : []),
-          ),
         ),
       ),
+    ),
 
-      StatusLine(
-        // The hint says what the keys do, and says when following is
-        // off — otherwise a log that has stopped moving during a live
-        // converge reads as a hang rather than as a scrollback.
-        finished()
-          ? `${following() ? "" : "paused · G follows · "}up/down scroll · enter leave`
-          : `${following() ? "working…" : "paused · G follows · "}up/down scroll`,
-        `red-dev ${VERSION}`,
-      ),
-    );
+    StatusLine(
+      // The hint says what the keys do, and says when following is off —
+      // otherwise a log that stopped moving during a live converge reads
+      // as a hang rather than as a scrollback.
+      finished
+        ? `${m.following() ? "" : "paused · G follows · "}up/down scroll · enter leave`
+        : `${m.following() ? "working…" : "paused · G follows · "}up/down scroll`,
+      `red-dev ${VERSION}`,
+    ),
+  );
+}
+
+/**
+ * `red-dev install` on its own: one render, which is the only case this
+ * still owns. Reaching the converge from the menu no longer comes
+ * through here — see useInstallModel for why that mattered.
+ */
+export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: number }> {
+  let outcome = { failed: 0 };
+  const logScroll = createScrollArea({ height: 10, content: [], autoScroll: true });
+
+  function App() {
+    const { exit } = useApp();
+    const size = useTerminalSize();
+    const model = useInstallModel(opts, logScroll, (failed) => {
+      outcome = { failed };
+    });
+
+    useEffect(() => model.begin());
+
+    useInput((input, key) => {
+      if (model.handleKey(input, key)) return;
+      // Refused until it finishes: leaving halfway abandons the machine
+      // mid-converge with no report of where it stopped.
+      if (model.finished() && (key.return || input === "q" || key.escape)) exit();
+    });
+
+    return InstallLayout(model, size.columns ?? 100, Math.max(size.rows ?? 24, 16));
   }
 
-  // fullHeight: the panels are drawn to the terminal's height instead of
-  // to their content, so the log fills the window rather than ending
+  // fullHeight: the panels are drawn to the terminal's height rather
+  // than to their content, so the log fills the window instead of ending
   // partway down with the previous screen showing underneath.
   const { waitUntilExit } = render(App, { fullHeight: true });
   await waitUntilExit();

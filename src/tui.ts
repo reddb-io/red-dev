@@ -28,11 +28,13 @@ import {
   useState,
   useTerminalSize,
 } from "tuiuiu.js";
+import { createScrollArea } from "tuiuiu.js";
 import { VERSION } from "./cli.ts";
 import type { Platform } from "./platform.ts";
 import { summary } from "./platform.ts";
 import { THEMES, themeNames } from "./themes.ts";
 import { Header, Screen, StatusLine, Surface } from "./tui-chrome.ts";
+import { InstallLayout, useInstallModel, type InstallTuiOptions } from "./tui-install.ts";
 import { muted, text, wordmarkGradient } from "./tui-theme.ts";
 
 /**
@@ -122,11 +124,16 @@ export interface TuiResult {
   action: string | null;
   /** Theme they settled on, when they chose one. */
   theme?: string;
+  /** Failures, when the converge ran inside the interface. */
+  failed?: number;
 }
 
 
-export async function runTui(p: Platform): Promise<TuiResult> {
+export async function runTui(p: Platform, install?: InstallTuiOptions): Promise<TuiResult> {
   let result: TuiResult = { action: null };
+  // Built out here, once: createScrollArea makes signals, and the model
+  // that uses it has to be created inside the component.
+  const logScroll = createScrollArea({ height: 10, content: [], autoScroll: true });
 
   function App() {
     // exit() from useApp, never process.exit: the latter kills the
@@ -136,13 +143,38 @@ export async function runTui(p: Platform): Promise<TuiResult> {
     const size = useTerminalSize();
     // "sections" browses the left column; "themes" browses the palette
     // list, with the panel previewing whatever is highlighted.
-    const [mode, setMode] = useState<"sections" | "themes">("sections");
+    const [mode, setMode] = useState<"sections" | "themes" | "install">("sections");
     const [sectionIndex, setSectionIndex] = useState(0);
     const [themeIndex, setThemeIndex] = useState(0);
 
     const names = themeNames();
 
+    // Called on every frame regardless of which view is showing.
+    //
+    // This is the whole fix for the crash. Picking Install used to leave
+    // this render entirely and start a second one, and on Windows the
+    // second app's initialisation failed and its cleanup wrote to a
+    // stdout that was already gone — EPIPE, process dead, console closed
+    // with it. One render, two views.
+    //
+    // Unconditional because a hook behind an `if` changes the hook order
+    // between frames; the converge does not begin until begin() is
+    // called, which is what the Enter key does.
+    const model = install
+      ? useInstallModel(install, logScroll, (failed) => {
+          result = { action: "installed", failed };
+        })
+      : null;
+
     useInput((input, key) => {
+      if (mode() === "install" && model) {
+        if (model.handleKey(input, key)) return;
+        // Refused until it finishes: leaving halfway abandons the machine
+        // mid-converge with no report of where it stopped.
+        if (model.finished() && (key.return || input === "q" || key.escape)) exit();
+        return;
+      }
+
       const inThemes = mode() === "themes";
       const max = inThemes ? names.length - 1 : SECTIONS.length - 1;
       const index = inThemes ? themeIndex : sectionIndex;
@@ -164,7 +196,12 @@ export async function runTui(p: Platform): Promise<TuiResult> {
         }
         const section = SECTIONS[sectionIndex()];
         if (section?.key === "theme") setMode("themes");
-        else {
+        else if (section?.key === "install" && model) {
+          // Stays inside this render rather than leaving and starting
+          // another one.
+          setMode("install");
+          model.begin();
+        } else {
           result = { action: section?.key ?? null };
           exit();
         }
@@ -174,6 +211,12 @@ export async function runTui(p: Platform): Promise<TuiResult> {
       }
     });
 
+    const width = Math.max(size.columns ?? 80, 60);
+    const height = Math.max(size.rows ?? 24, 16);
+
+    // The converge takes the whole screen once it starts.
+    if (mode() === "install" && model) return InstallLayout(model, width, height);
+
     const inThemes = mode() === "themes";
     const activeTheme = names[themeIndex()] ?? names[0]!;
     const section = SECTIONS[sectionIndex()];
@@ -181,8 +224,6 @@ export async function runTui(p: Platform): Promise<TuiResult> {
     // Two columns, sized from the real terminal rather than assumed:
     // an 80-column window and a 200-column one should both look
     // deliberate.
-    const width = Math.max(size.columns ?? 80, 60);
-    const height = Math.max(size.rows ?? 24, 16);
     const leftWidth = Math.max(22, Math.floor(width * 0.32));
     const rightWidth = width - leftWidth - 5;
     const bodyRows = Math.max(8, height - 6);

@@ -509,24 +509,23 @@ async function cmdUi(p: Platform, inv: Invocation): Promise<number> {
   }
 
   const { runTui } = await import("./tui.ts");
-  const result = await runTui(p);
+  // The converge is handed to the interface rather than run after it.
+  //
+  // It used to return here and start a second render, which is what
+  // crashed on Windows: the second initializeApp failed and its cleanup
+  // wrote to a stdout that was already gone, so the process died and
+  // took the console with it. One render now owns both views.
+  const result = await runTui(p, {
+    platform: p,
+    ctx: contextFor(p, inv),
+    scopes: resolveScopes(p, inv.scope),
+  });
 
   switch (result.action) {
     case "theme":
       return result.theme ? await cmdTheme(p, inv, result.theme) : 0;
-    case "install": {
-      // Converge inside a live view rather than dropping back to the
-      // line report: someone who came in through the fullscreen
-      // interface wants to watch it, and a fresh machine spends
-      // minutes inside apt with nothing else to look at.
-      const { runInstallTui } = await import("./tui-install.ts");
-      const { failed } = await runInstallTui({
-        platform: p,
-        ctx: contextFor(p, inv),
-        scopes: resolveScopes(p, inv.scope),
-      });
-      return failed > 0 ? 1 : 0;
-    }
+    case "installed":
+      return (result.failed ?? 0) > 0 ? 1 : 0;
     case "doctor":
       return await cmdDoctor(p, inv);
     case "apps":
