@@ -3,6 +3,7 @@
  * red-dev — one dev environment across Ubuntu 24, Ubuntu 26, WSL and Windows.
  */
 
+import { appendFileSync, mkdirSync } from "node:fs";
 import { buildCli, parseArgs, VERSION, type Invocation } from "./cli.ts";
 import type { StepOutcome } from "./converge.ts";
 import { log } from "./log.ts";
@@ -718,6 +719,47 @@ async function cmdMenu(p: Platform, inv: Invocation, cliHelp: string): Promise<n
 // render; that was fixed, and this is a different bug wearing the same
 // message. Real warnings still appear when running from source.
 if (!process.env.NODE_ENV) process.env.NODE_ENV = "production";
+
+/**
+ * Leave a trace when the process dies.
+ *
+ * A fullscreen app that crashes on Windows takes the console with it,
+ * so the stack scrolls past inside a window that is already closing and
+ * there is nothing left to report but "it crashed". Writing it to a file
+ * first turns that into something diagnosable — and the file is the only
+ * copy that survives the window.
+ *
+ * Deliberately synchronous: an async write loses the race with process
+ * death, which is the one case this exists for.
+ */
+function recordCrash(kind: string, err: unknown): void {
+  const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
+  const dir =
+    process.platform === "win32"
+      ? `${process.env["LOCALAPPDATA"] ?? "."}\\red-dev`
+      : `${process.env["HOME"] ?? "."}/.local/state/red-dev`;
+  const path = `${dir}${process.platform === "win32" ? "\\" : "/"}crash.log`;
+  const entry = `\n=== ${new Date().toISOString()} ${kind} red-dev ${VERSION} ${process.platform} ===\n${detail}\n`;
+  try {
+    mkdirSync(dir, { recursive: true });
+    appendFileSync(path, entry);
+  } catch {
+    // Nothing useful to do if even this fails; the console copy below
+    // is the fallback.
+  }
+  // stderr as well as the file: on a terminal that survives, the user
+  // should not have to know a log file exists.
+  process.stderr.write(`\x1b[?1049l${entry}\nrecorded to ${path}\n`);
+}
+
+process.on("uncaughtException", (err) => {
+  recordCrash("uncaughtException", err);
+  process.exit(70);
+});
+process.on("unhandledRejection", (err) => {
+  recordCrash("unhandledRejection", err);
+  process.exit(70);
+});
 
 async function main(): Promise<number> {
   const cli = buildCli();

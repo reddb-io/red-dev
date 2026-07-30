@@ -16,23 +16,57 @@ import type { Platform } from "./platform.ts";
 import type { Theme } from "./themes.ts";
 
 /**
+ * A batch file is not an executable, and CreateProcess knows it.
+ *
+ * VS Code's CLI on Windows is `code.cmd` — a shell script — so spawning
+ * it directly fails the same way spawning `winget` did before it was
+ * wrapped: the call returns non-zero without ever reaching the program.
+ * That is why every theme change on Windows reported "could not install
+ * <extension>" on a machine with VS Code plainly installed, and then
+ * listed it as "not present".
+ *
+ * Exported for the test: the wrapping is the whole fix, and it is
+ * invisible in any run where the spawn merely fails quietly.
+ */
+export function codeArgv(argv: string[], platform: string = process.platform): string[] {
+  const [bin, ...rest] = argv;
+  if (platform !== "win32" || !bin) return argv;
+  if (!/\.(cmd|bat)$/i.test(bin)) return argv;
+  return ["cmd.exe", "/c", bin, ...rest];
+}
+
+/**
  * VS Code theme extensions, by our theme slug.
  *
  * The extension id matters as much as the display name: setting
  * `workbench.colorTheme` to a theme that is not installed leaves VS
  * Code on its default with a notification nobody reads.
  */
-const VSCODE_THEMES: Record<string, { extension: string; label: string }> = {
+export const VSCODE_THEMES: Record<string, { extension: string; label: string }> = {
   "tokyo-night": { extension: "enkia.tokyo-night", label: "Tokyo Night" },
   catppuccin: { extension: "Catppuccin.catppuccin-vsc", label: "Catppuccin Macchiato" },
   gruvbox: { extension: "jdinhlife.gruvbox", label: "Gruvbox Dark Medium" },
   everforest: { extension: "sainnhe.everforest", label: "Everforest Dark" },
   kanagawa: { extension: "qufiwefefwoyn.kanagawa", label: "Kanagawa" },
-  "matte-black": { extension: "AndreiVoronkov.matte-black", label: "Matte Black" },
+  // Was AndreiVoronkov.matte-black, which the marketplace has never
+  // published. Label taken from the extension's own contributes.themes
+  // rather than from its display name — "Matte Black Theme", not
+  // "Matte Black", and workbench.colorTheme wants the former.
+  "matte-black": { extension: "CleanThemes.matte-black-theme", label: "Matte Black Theme" },
   nord: { extension: "arcticicestudio.nord-visual-studio-code", label: "Nord" },
-  "osaka-jade": { extension: "solomonhyt.osaka-jade", label: "Osaka Jade" },
-  ristretto: { extension: "kaiwood.monokai-pro", label: "Monokai Pro (Filter Ristretto)" },
+  // Was kaiwood.monokai-pro, which does not exist; this is the
+  // publisher's own.
+  ristretto: {
+    extension: "monokai.theme-monokai-pro-vscode",
+    label: "Monokai Pro (Filter Ristretto)",
+  },
   "rose-pine": { extension: "mvllow.rose-pine", label: "Rosé Pine" },
+  // osaka-jade is deliberately absent. solomonhyt.osaka-jade does not
+  // exist either, and no VS Code theme of that name does — the nearest
+  // matches are Solarized Osaka, which is a different palette. Falling
+  // through to "no VS Code theme mapped" leaves the editor alone, which
+  // is honest; pointing at a plausible-looking neighbour would theme it
+  // wrong and say it succeeded.
 };
 
 /**
@@ -98,13 +132,17 @@ export async function applyVsCodeTheme(theme: Theme, p: Platform, slug: string):
 
   // Installing the extension first: setting a theme that is not there
   // leaves the editor on its default.
-  const code = Bun.which("code") ?? "code.cmd";
-  const install = Bun.spawn([code, "--install-extension", spec.extension, "--force"], {
+  const code = Bun.which("code") ?? Bun.which("code.cmd") ?? "code.cmd";
+  const install = Bun.spawn(codeArgv([code, "--install-extension", spec.extension, "--force"]), {
     stdout: "ignore",
     stderr: "ignore",
   });
   if ((await install.exited) !== 0) {
-    log.warn(`could not install ${spec.extension}; leaving the theme alone`);
+    // Deliberately not "not installed": VS Code is here, its CLI ran,
+    // and the marketplace call is what failed. Reporting the two as the
+    // same thing sent someone looking for an editor that was already on
+    // their machine.
+    log.warn(`VS Code is here but installing ${spec.extension} failed; leaving the theme alone`);
     return false;
   }
 

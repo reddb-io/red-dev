@@ -272,6 +272,73 @@ export async function ghInstall(
   await run(["rm", "-rf", tmp], { allowFailure: true });
 }
 
+/**
+ * The same release, onto Windows.
+ *
+ * Neither of the two RedDB tools is on winget, and every other `gh`
+ * entry in the manifest falls back to a winget id — so without this the
+ * only honest Windows column for them would be skip(), on a target
+ * where the publisher does ship a build. That is precisely the gap this
+ * project exists to close.
+ *
+ * No sudo equivalent and no admin: a bare binary lands in the same
+ * per-user bin directory boot.ps1 already created and put on PATH, and
+ * an installer is the vendor's own, run with the flags it documents.
+ */
+export async function ghInstallWindows(
+  repo: string,
+  glob: string,
+  bin?: string,
+  silentArgs?: string[],
+): Promise<void> {
+  const url = await resolveGhAsset(repo, glob);
+  const file = url.split("/").pop() ?? "asset";
+  log.step(`github: ${repo} -> ${file}`);
+
+  const tmp = `${process.env["TEMP"] ?? "C:\\Windows\\Temp"}\\red-dev-${Date.now()}`;
+  await run(["cmd.exe", "/c", "mkdir", tmp]);
+  const downloaded = `${tmp}\\${file}`;
+
+  const res = await fetch(url);
+  if (!res.ok) throw new RedError(`download failed ${res.status}: ${url}`);
+  await Bun.write(downloaded, res);
+
+  if (silentArgs) {
+    // An installer, run the way its publisher documents. Verified
+    // against the asset rather than assumed: red-request's is NSIS and
+    // its PE manifest asks for asInvoker, so /S installs per-user with
+    // no UAC prompt — which is what lets a converge stay unattended.
+    log.step(`running ${file} ${silentArgs.join(" ")}`);
+    await run([downloaded, ...silentArgs]);
+  } else if (bin) {
+    const dir = windowsBinDir();
+    await run(["cmd.exe", "/c", "mkdir", dir], { allowFailure: true });
+    // Copied rather than moved: the download and the destination can be
+    // on different volumes, where a rename fails.
+    await run(["cmd.exe", "/c", "copy", "/y", downloaded, `${dir}\\${bin}.exe`]);
+    log.step(`installed ${dir}\\${bin}.exe`);
+  } else {
+    throw new RedError(
+      `don't know what to do with ${file} on Windows — give the provider a bin name, or silentArgs if it is an installer`,
+    );
+  }
+
+  await run(["cmd.exe", "/c", "rmdir", "/s", "/q", tmp], { allowFailure: true });
+}
+
+/**
+ * Where boot.ps1 puts red-dev, and therefore somewhere already on the
+ * user's PATH. Anything installed beside it is reachable without a
+ * second PATH entry to explain.
+ */
+export function windowsBinDir(): string {
+  const override = process.env["RED_DEV_BIN_DIR"];
+  if (override) return override;
+  const local = process.env["LOCALAPPDATA"];
+  if (!local) throw new RedError("LOCALAPPDATA is not set — cannot place a binary");
+  return `${local}\\red-dev\\bin`;
+}
+
 async function installBinariesFrom(dir: string): Promise<void> {
   const listing = await capture([
     "find",
@@ -305,7 +372,11 @@ async function installBinariesFrom(dir: string): Promise<void> {
  * Writing it out first means a failed transfer fails before anything
  * executes.
  */
-export async function installerInstall(url: string, note: string): Promise<void> {
+export async function installerInstall(
+  url: string,
+  note: string,
+  args: string[] = [],
+): Promise<void> {
   log.step(`installer: ${url}`);
   log.plain(`       ${note}`);
 
@@ -316,7 +387,16 @@ export async function installerInstall(url: string, note: string): Promise<void>
   if (body.trim().length === 0) throw new RedError(`installer at ${url} was empty`);
   await Bun.write(tmp, body);
 
-  const proc = Bun.spawn(["sh", tmp], {
+  // Primed before handing over, not after it blocks.
+  //
+  // A vendor script that installs a .deb calls sudo from inside itself,
+  // where none of our own guards apply — so an unprimed timestamp turns
+  // into a password prompt against a converge whose output the TUI is
+  // capturing. requireSudo answers "would this block?" without blocking
+  // and fails with an instruction instead.
+  if (body.includes("sudo ")) await requireSudo();
+
+  const proc = Bun.spawn(["sh", tmp, ...args], {
     stdout: "inherit",
     stderr: "inherit",
     stdin: stdinMode(),
@@ -491,10 +571,18 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
       await wingetInstall(pr.id);
       return;
     case "installer":
-      await installerInstall(pr.url, pr.note);
+      await installerInstall(pr.url, pr.note, pr.args);
       return;
     case "gh":
-      await ghInstall(pr.repo, pr.asset, pr.bin);
+      // Two implementations, one provider: the manifest names a release
+      // asset and the platform decides how it lands. Splitting this
+      // into two provider kinds would put the same repo in two places
+      // and let them drift.
+      if (ctx.platform.os === "windows") {
+        await ghInstallWindows(pr.repo, pr.asset, pr.bin, pr.silentArgs);
+      } else {
+        await ghInstall(pr.repo, pr.asset, pr.bin);
+      }
       return;
     case "ppa":
       await ppaInstall(pr.ppa, pr.pkgs);

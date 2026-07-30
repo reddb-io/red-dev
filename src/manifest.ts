@@ -37,11 +37,12 @@ export type Provider =
    * several of them fetch the platform binary in exactly that hook —
    * which installs cleanly and leaves a command that does not work.
    *
-   * No manifest entry produces this today; the agents that did moved to
-   * src/agents.ts, which calls installerInstall directly. Kept because
-   * the kind is still the right answer for a tool that ships this way.
+   * `args` is passed to the script. red-request's takes --deb/--appimage
+   * and --no-color, and a converge that inherits stdout wants the last
+   * one whether or not the script's own TTY detection would have found
+   * it.
    */
-  | { kind: "installer"; url: string; note: string }
+  | { kind: "installer"; url: string; note: string; args?: string[] }
   /**
    * Resolve a release asset by *matching a glob against the names the
    * release actually has*, never by building a filename from a pinned
@@ -61,6 +62,16 @@ export type Provider =
        * `tealdeer-linux-x86_64-musl` and the command is `tldr`.
        */
       bin?: string;
+      /**
+       * Windows only: the asset is an installer, and these are the flags
+       * that make it run unattended.
+       *
+       * Present rather than guessed from the filename. `tq-windows-x86_64.exe`
+       * is a binary and `red-request-windows-x86_64-setup.exe` is an
+       * installer, and the only thing separating them is a naming
+       * convention the publisher is free to change.
+       */
+      silentArgs?: string[];
     }
   /** A Launchpad PPA, then apt. */
   | { kind: "ppa"; ppa: string; pkgs: string[] }
@@ -130,6 +141,19 @@ const gh = (repo: string, asset: string, bin?: string): Provider => ({
   asset,
   ...(bin ? { bin } : {}),
 });
+/** A release asset that is an installer rather than a binary. */
+const ghInstaller = (repo: string, asset: string, ...silentArgs: string[]): Provider => ({
+  kind: "gh",
+  repo,
+  asset,
+  silentArgs,
+});
+const installer = (url: string, note: string, ...args: string[]): Provider => ({
+  kind: "installer",
+  url,
+  note,
+  ...(args.length > 0 ? { args } : {}),
+});
 const ppa =(name: string, ...pkgs: string[]): Provider => ({
   kind: "ppa",
   ppa: name,
@@ -193,6 +217,21 @@ export const TOOLS: Tool[] = [
   { name: "fzf", scope: "core", u24: apt("fzf"), win: winget("junegunn.fzf") },
   { name: "btop", scope: "core", u24: apt("btop"), win: winget("aristocratos.btop4win") },
   { name: "jq", scope: "core", u24: apt("jq"), win: winget("jqlang.jq") },
+  {
+    // Beside jq rather than instead of it: the same shape of tool for a
+    // different format, and the reason it is core is that a data tool
+    // you cannot rely on being present is one you stop reaching for.
+    //
+    // The glob is anchored, which matters here more than for most: the
+    // release also publishes tq-linux-x86_64-static and
+    // tq-linux-x86_64.sha256, and a substring match would have picked
+    // whichever the API happened to list first.
+    name: "tq",
+    about: "query and convert TOON, the token-oriented notation",
+    scope: "core",
+    u24: gh("reddb-io/toon", "tq-linux-x86_64", "tq"),
+    win: gh("reddb-io/toon", "tq-windows-x86_64.exe", "tq"),
+  },
 
   // The bash answer to what people actually want from oh-my-zsh.
   // Every one of these is cross-shell and cross-platform, which is why
@@ -404,6 +443,36 @@ export const TOOLS: Tool[] = [
     win: winget("Alacritty.Alacritty"),
   },
   { name: "flatpak", scope: "desktop", u24: apt("flatpak"), win: skip(NO_GUI) },
+  {
+    // A GUI app, so `desktop` — which also means WSL never attempts it,
+    // because applicableScopes gates that scope on caps.gui. That is the
+    // right answer rather than an omission: a Linux GUI app installed
+    // inside a distro with no display is the exact mistake this project
+    // exists to avoid, and the Windows target already installs it for
+    // the same machine.
+    //
+    // Two different routes on purpose. On Linux the publisher's own
+    // install.sh is the supported path — it verifies the asset against
+    // checksums.txt, writes the .desktop entry, adds the `rr` shortcut
+    // and knows how to upgrade itself, none of which dropping the .deb
+    // in by hand would do. On Windows that same script says it "hands
+    // the installer to you to open", so a converge cannot use it; the
+    // release asset runs unattended instead.
+    name: "red-request",
+    about: "open-source API client, powered by recker",
+    cmd: ["red-request", "rr"],
+    scope: "desktop",
+    u24: installer(
+      "https://raw.githubusercontent.com/reddb-io/red-request/main/install.sh",
+      "reddb-io/red-request — installs the .deb and verifies its checksum",
+      "--no-color",
+    ),
+    // /S is NSIS's silent flag, and this asset really is NSIS: its PE
+    // manifest asks for asInvoker, so it installs per-user with no UAC
+    // prompt. Checked against the published binary rather than inferred
+    // from Tauri's defaults.
+    win: ghInstaller("reddb-io/red-request", "red-request-windows-x86_64-setup.exe", "/S"),
+  },
 
   // ------------------------------------------------------ optional
   // Chosen, never assumed. `red-dev apps` offers these; a plain
