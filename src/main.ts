@@ -182,6 +182,19 @@ async function cmdInstall(p: Platform, inv: Invocation): Promise<number> {
     await runPendingMigrations(p);
   }
 
+  const scopes = [...resolveScopes(p, inv.scope), ...extraScopes];
+
+  // Fullscreen when there is a terminal wide enough for it: the live
+  // view is the default experience, and the line report is what runs in
+  // CI, in a pipe, over a dumb SSH session and on a narrow window.
+  if (!inv.dryRun && interactive() && (process.stdout.columns ?? 0) >= 60) {
+    const { runInstallTui } = await import("./tui-install.ts");
+    const { failed } = await runInstallTui({ platform: p, ctx, scopes });
+    if (failed > 0) return 1;
+    log.ok("converged — restart your shell");
+    return 0;
+  }
+
   log.step(summary(p).split("\n")[0] ?? "");
 
   const { Reporter } = await import("./report.ts");
@@ -194,7 +207,7 @@ async function cmdInstall(p: Platform, inv: Invocation): Promise<number> {
   // policy, two presentations.
   let close: ((outcome: StepOutcome, detail?: string) => void) | null = null;
   const { failed } = await converge(
-    { platform: p, ctx, scopes: [...resolveScopes(p, inv.scope), ...extraScopes], dryRun: inv.dryRun },
+    { platform: p, ctx, scopes: scopes, dryRun: inv.dryRun },
     {
       scopeStart: (scope, total) => report.scope(scope, total),
       note: (message) => report.note(message),
@@ -639,12 +652,27 @@ async function cmdLang(): Promise<number> {
   }
 }
 
+/**
+ * Bare `red-dev`.
+ *
+ * Fullscreen is the default now, not a separate `ui` command. That was
+ * the ask, and putting the richer interface behind a verb meant almost
+ * nobody would see it: someone typing `red-dev` gets the thing the
+ * project actually builds.
+ *
+ * Two fallbacks, both narrower than they look. No terminal prints help,
+ * because a menu waiting on input that is never coming is a hang. Under
+ * 60 columns falls back to the line-based menu, because two columns
+ * cannot lay out there and a clipped panel is worse than a plain list.
+ */
 async function cmdMenu(p: Platform, inv: Invocation, cliHelp: string): Promise<number> {
   if (!interactive()) {
-    // Piped or redirected: a menu would block on input that is never
-    // coming. Print help, which is what a script most likely wants.
     log.plain(cliHelp);
     return 0;
+  }
+
+  if ((process.stdout.columns ?? 0) >= 60) {
+    return await cmdUi(p, inv);
   }
 
   const { runMenu } = await import("./menu.ts");
