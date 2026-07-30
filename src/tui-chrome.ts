@@ -146,6 +146,46 @@ export function Accented(
 }
 
 /**
+ * One command's output, inside the interface rather than after it.
+ *
+ * Picking a theme used to leave the fullscreen, apply it, and print six
+ * lines to the console you had just been taken out of — which reads as
+ * the application quitting on you, because that is what it did. The
+ * converge moved inside first and made the inconsistency louder: one
+ * choice kept you, the others threw you out.
+ */
+export function Task(
+  title: string,
+  lines: string[],
+  rows: number,
+  width: number,
+  done: boolean,
+  accent: string = ui.accent,
+) {
+  // Truncated, not wrapped. The accent bar is one glyph per row, so a
+  // line that wraps produces content the bar does not reach and the edge
+  // stops lining up — a backup path with a long directory in it was
+  // enough to bend it.
+  const room = Math.max(8, width - 4);
+  const fit = (l: string): string => (l.length > room ? `${l.slice(0, room - 1)}…` : l);
+  const visible = lines.slice(-rows);
+  return Box(
+    { flexDirection: "column" },
+    Text({ color: muted, bold: true }, title),
+    Text({}, ""),
+    Accented(
+      done ? ui.ok : accent,
+      Math.max(1, rows),
+      width,
+      ...visible.map((l) => Text({ color: text }, fit(l))),
+      // Held open at full height so the block does not grow line by
+      // line and push the hint around underneath it.
+      ...Array.from({ length: Math.max(0, rows - visible.length) }, () => Text({}, "")),
+    ),
+  );
+}
+
+/**
  * Title on the left, context on the right, nothing between them.
  *
  * justifyContent does the work a border would otherwise be asked to do.

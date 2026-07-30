@@ -30,8 +30,11 @@ describe("the fullscreen path", () => {
     const cmdUi = main.slice(main.indexOf("async function cmdUi"));
     const body = cmdUi.slice(0, cmdUi.indexOf("\n}\n"));
     expect(body).not.toContain("runInstallTui");
-    // It hands the converge in instead.
-    expect(body).toContain("runTui(p, {");
+    // It hands the converge in instead — along with the other commands,
+    // which now also run inside the interface rather than after it.
+    expect(body).toContain("runTui(");
+    expect(body).toContain("applyTheme:");
+    expect(body).toContain("doctor:");
   });
 
   test("the menu hosts the converge rather than returning to it", () => {

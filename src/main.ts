@@ -515,11 +515,31 @@ async function cmdUi(p: Platform, inv: Invocation): Promise<number> {
   // crashed on Windows: the second initializeApp failed and its cleanup
   // wrote to a stdout that was already gone, so the process died and
   // took the console with it. One render now owns both views.
-  const result = await runTui(p, {
-    platform: p,
-    ctx: contextFor(p, inv),
-    scopes: resolveScopes(p, inv.scope),
-  });
+  const result = await runTui(
+    p,
+    {
+      platform: p,
+      ctx: contextFor(p, inv),
+      scopes: resolveScopes(p, inv.scope),
+    },
+    // Every one of these runs inside the interface now. Choosing a theme
+    // used to leave the fullscreen, apply it, and print to the console
+    // you had just been taken out of — which reads as the program
+    // quitting on you. Only `install` had been moved in, which made the
+    // inconsistency worse rather than better.
+    // Theme and doctor only. Both are pure output, which is what makes
+    // them safe to run inside a live render.
+    //
+    // `apps` is deliberately not here: it opens a selection prompt,
+    // which draws its own interface — a second one, on top of this one,
+    // which is the shape that crashed. It still leaves the fullscreen
+    // first, and making that stop requires the prompt to become a view
+    // in here rather than a separate UI.
+    {
+      applyTheme: (slug) => cmdTheme(p, inv, slug),
+      doctor: () => cmdDoctor(p, inv),
+    },
+  );
 
   switch (result.action) {
     case "theme":

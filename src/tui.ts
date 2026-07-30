@@ -30,10 +30,11 @@ import {
 } from "tuiuiu.js";
 import { createScrollArea } from "tuiuiu.js";
 import { VERSION } from "./cli.ts";
+import { captureTo } from "./log.ts";
 import type { Platform } from "./platform.ts";
 import { summary } from "./platform.ts";
 import { THEMES, themeNames } from "./themes.ts";
-import { Header, Screen, StatusLine, Surface } from "./tui-chrome.ts";
+import { Header, Screen, StatusLine, Surface, Task } from "./tui-chrome.ts";
 import { InstallLayout, useInstallModel, type InstallTuiOptions } from "./tui-install.ts";
 import { muted, text, wordmarkGradient } from "./tui-theme.ts";
 
@@ -129,7 +130,26 @@ export interface TuiResult {
 }
 
 
-export async function runTui(p: Platform, install?: InstallTuiOptions): Promise<TuiResult> {
+/**
+ * What a menu entry does when you press Enter.
+ *
+ * Handed in rather than imported so this file keeps knowing nothing
+ * about theming, doctoring or apps — and so every one of them runs
+ * *inside* the render instead of after it. The log lines they emit are
+ * captured and drawn here; without that they would paint over the frame
+ * the renderer owns.
+ */
+export interface TuiActions {
+  applyTheme?: (slug: string) => Promise<unknown>;
+  doctor?: () => Promise<unknown>;
+  apps?: () => Promise<unknown>;
+}
+
+export async function runTui(
+  p: Platform,
+  install?: InstallTuiOptions,
+  actions: TuiActions = {},
+): Promise<TuiResult> {
   let result: TuiResult = { action: null };
   // Built out here, once: createScrollArea makes signals, and the model
   // that uses it has to be created inside the component.
@@ -143,11 +163,40 @@ export async function runTui(p: Platform, install?: InstallTuiOptions): Promise<
     const size = useTerminalSize();
     // "sections" browses the left column; "themes" browses the palette
     // list, with the panel previewing whatever is highlighted.
-    const [mode, setMode] = useState<"sections" | "themes" | "install">("sections");
+    const [mode, setMode] = useState<"sections" | "themes" | "install" | "task">("sections");
     const [sectionIndex, setSectionIndex] = useState(0);
     const [themeIndex, setThemeIndex] = useState(0);
+    const [taskTitle, setTaskTitle] = useState("");
+    const [taskLines, setTaskLines] = useState<string[]>([]);
+    const [taskDone, setTaskDone] = useState(false);
 
     const names = themeNames();
+
+    /**
+     * Run one command without leaving the screen.
+     *
+     * captureTo is what makes this possible: the command writes through
+     * `log`, which would otherwise go straight to the console and tear a
+     * hole in the frame. Redirected into a signal instead, it becomes
+     * content this can draw.
+     */
+    const runTask = (title: string, fn: () => Promise<unknown>): void => {
+      setTaskTitle(title);
+      setTaskLines([]);
+      setTaskDone(false);
+      setMode("task");
+      const release = captureTo((line) =>
+        setTaskLines((prev) => [...prev, line.replace(/\x1b\[[0-9;]*m/g, "")]),
+      );
+      void fn()
+        .catch((err: unknown) =>
+          setTaskLines((prev) => [...prev, `failed: ${(err as Error).message}`]),
+        )
+        .finally(() => {
+          release();
+          setTaskDone(true);
+        });
+    };
 
     // Called on every frame regardless of which view is showing.
     //
@@ -167,6 +216,14 @@ export async function runTui(p: Platform, install?: InstallTuiOptions): Promise<
       : null;
 
     useInput((input, key) => {
+      if (mode() === "task") {
+        // Back to the menu rather than out of the program. The whole
+        // point of running it in here is that finishing a command
+        // returns you to where you chose it.
+        if (taskDone() && (key.return || key.escape || input === "q")) setMode("sections");
+        return;
+      }
+
       if (mode() === "install" && model) {
         if (model.handleKey(input, key)) return;
         // Refused until it finishes: leaving halfway abandons the machine
@@ -187,11 +244,17 @@ export async function runTui(p: Platform, install?: InstallTuiOptions): Promise<
         else result = { action: null };
       } else if (key.return) {
         if (inThemes) {
-          result = { action: "theme", theme: names[themeIndex()] };
-          exit();
-          // exit() unwinds the render loop but does not stop this
-          // handler, so without returning the lines below would run and
-          // overwrite the theme that was just chosen.
+          const slug = names[themeIndex()]!;
+          if (actions.applyTheme) {
+            // Applied in place. This used to exit the interface and
+            // print its six lines to the console you had just been
+            // taken out of, which reads as the program quitting rather
+            // than as a theme being applied.
+            runTask(`theme: ${THEMES[slug]?.name ?? slug}`, () => actions.applyTheme!(slug));
+          } else {
+            result = { action: "theme", theme: slug };
+            exit();
+          }
           return;
         }
         const section = SECTIONS[sectionIndex()];
@@ -201,6 +264,10 @@ export async function runTui(p: Platform, install?: InstallTuiOptions): Promise<
           // another one.
           setMode("install");
           model.begin();
+        } else if (section?.key === "doctor" && actions.doctor) {
+          runTask("doctor", actions.doctor);
+        } else if (section?.key === "apps" && actions.apps) {
+          runTask("apps", actions.apps);
         } else {
           result = { action: section?.key ?? null };
           exit();
@@ -216,6 +283,20 @@ export async function runTui(p: Platform, install?: InstallTuiOptions): Promise<
 
     // The converge takes the whole screen once it starts.
     if (mode() === "install" && model) return InstallLayout(model, width, height);
+
+    if (mode() === "task") {
+      return Screen(
+        width,
+        height,
+        Header("red-dev", taskDone() ? "done" : "working"),
+        Text({}, ""),
+        Task(taskTitle(), taskLines(), Math.max(6, height - 8), width - 4, taskDone()),
+        StatusLine(
+          taskDone() ? "enter back to the menu" : "working…",
+          `red-dev ${VERSION}`,
+        ),
+      );
+    }
 
     const inThemes = mode() === "themes";
     const activeTheme = names[themeIndex()] ?? names[0]!;

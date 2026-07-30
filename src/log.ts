@@ -21,8 +21,30 @@ export function captureStop(): string[] {
   return held;
 }
 
+/**
+ * A live sink, for when the interface is the terminal.
+ *
+ * Different from `buffer` on purpose. Buffering holds lines and hands
+ * them over at the end, which is right for provider chatter that must
+ * land under its own step. This one forwards each line as it happens,
+ * because inside the fullscreen interface a command's output is the
+ * thing being watched — and writing it to the console directly would
+ * paint over the frame the renderer owns.
+ */
+let stream: ((line: string) => void) | null = null;
+
+/** Redirect log output to `sink` until the returned function is called. */
+export function captureTo(sink: (line: string) => void): () => void {
+  const previous = stream;
+  stream = sink;
+  return () => {
+    stream = previous;
+  };
+}
+
 const emit = (line: string, sink: (s: string) => void): void => {
   if (buffer) buffer.push(line);
+  else if (stream) stream(line);
   else sink(line);
 };
 
