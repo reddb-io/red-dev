@@ -184,6 +184,7 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: 
           Accented(
             failures.length > 0 ? "yellow" : "red",
             logRows,
+            leftWidth,
             LogViewer({
               lines: lines(),
               height: logRows,

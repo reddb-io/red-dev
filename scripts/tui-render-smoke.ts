@@ -45,6 +45,7 @@ const setup = renderToString(
         Accented(
           "red",
           9,
+          52,
           Text({ dim: true }, "One palette reaches eight surfaces."),
           Text({}, ""),
           ...themeNames()
@@ -97,6 +98,7 @@ const install = renderToString(
         Accented(
           "red",
           8,
+          58,
           LogViewer({
             lines: [
               "-- core · 33 items",

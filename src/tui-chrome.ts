@@ -35,14 +35,28 @@ export function Section(label: string, ...lines: string[]) {
  * The first version emitted a single `│` and left the rest of the block
  * unmarked, which reads as a stray character rather than an edge.
  */
-export function Accented(color: string, rows: number, ...children: Parameters<typeof Box>[1][]) {
+export function Accented(
+  color: string,
+  rows: number,
+  width: number,
+  ...children: Parameters<typeof Box>[1][]
+) {
   return Box(
     { flexDirection: "row" },
+    // flexShrink: 0 and an explicit width on both sides, neither of
+    // which is decoration.
+    //
+    // On tuiuiu 1.0.64 a bare column of bars beside auto-width content
+    // worked. On 1.0.74 a ListItem or LogViewer child expands to fill
+    // and the bar column collapses to nothing — the bars simply stop
+    // being drawn, silently, with the text shifted one column left.
+    // Pinning the bar at 1 and giving the content the remaining width
+    // keeps the child from taking the column it does not own.
     Box(
-      { flexDirection: "column" },
+      { flexDirection: "column", width: 1, flexShrink: 0 },
       ...Array.from({ length: Math.max(1, rows) }, () => Text({ color }, "│")),
     ),
-    Box({ flexDirection: "column", marginLeft: 1 }, ...children),
+    Box({ flexDirection: "column", width: Math.max(1, width - 2), marginLeft: 1 }, ...children),
   );
 }
 
