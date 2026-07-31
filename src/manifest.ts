@@ -7,6 +7,7 @@
  * for months without anything failing loudly.
  */
 
+import { existsSync } from "node:fs";
 import { commandExists, versionAtLeast, type Platform } from "./platform.ts";
 
 export type Scope =
@@ -571,7 +572,8 @@ export const TOOLS: Tool[] = [
     // asserted: there is no Linux PowerToys to skip toward.
     name: "powertoys",
     about: "FancyZones window tiling, launcher, key remapping — Microsoft's own",
-    cmd: ["PowerToys"],
+    // A location, not a name: PowerToys never touches PATH.
+    cmd: ["%LOCALAPPDATA%\\PowerToys\\PowerToys.exe"],
     scope: "optional",
     u24: skip("PowerToys is Windows-only; zellij is the tiling answer here"),
     win: winget("Microsoft.PowerToys"),
@@ -734,9 +736,30 @@ export function applicableScopes(p: Platform): Scope[] {
 export function isInstalled(tool: Tool): boolean {
   if (tool.managed) return false; // the provider decides; see Tool.managed
   const candidates = tool.cmd ?? [tool.name];
-  if (!candidates.some(commandExists)) return false;
+  if (!candidates.some(present)) return false;
   // A name on PATH is not proof it is the right program — see Tool.signature.
   return tool.signature ? identify(candidates, tool.signature) : true;
+}
+
+/**
+ * On PATH, or at a path.
+ *
+ * Not everything installed is a command. PowerToys puts PowerToys.exe in
+ * %LOCALAPPDATA%\PowerToys and never touches PATH, so probing for the
+ * name answered "missing" on a machine that had just installed it — the
+ * same shape of wrong answer as the `red` collision, arrived at from the
+ * opposite direction.
+ *
+ * A candidate containing a separator is a location; anything else is a
+ * name. Environment variables in it are expanded, because the location
+ * differs per user and hardcoding one profile helps nobody.
+ */
+function present(candidate: string): boolean {
+  if (!/[\\/]/.test(candidate)) return commandExists(candidate);
+  const expanded = candidate.replace(/%([A-Za-z_][A-Za-z0-9_]*)%/g, (m, name: string) =>
+    process.env[name] ?? m,
+  );
+  return existsSync(expanded);
 }
 
 /**
