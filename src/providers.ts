@@ -183,6 +183,15 @@ export async function wingetInstall(id: string): Promise<void> {
   );
 }
 
+/**
+ * How long a release download may take before it is a failure.
+ *
+ * Ninety seconds is generous for the largest asset here (33 MB, which
+ * curl pulls in one second) and short enough that a wedged step is
+ * something you watch fail rather than something you kill.
+ */
+const DOWNLOAD_TIMEOUT_MS = 90_000;
+
 // --------------------------------------------------- github release
 
 /** Exported for tests: asset matching is where a silent bug costs most. */
@@ -206,8 +215,18 @@ export async function resolveGhAsset(repo: string, glob: string): Promise<string
   const token = process.env["GITHUB_TOKEN"];
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
+  // The same deadline the download has, and for a sharper reason: this
+  // is where a converge actually stopped. `red` printed its step header
+  // and nothing else — never even the "github: …" line, which is logged
+  // after this call returns — so the API request was where it sat, with
+  // no child process to notice and no error to report.
   const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
     headers,
+    signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+  }).catch((err: unknown) => {
+    throw new RedError(
+      `GitHub API did not answer within ${DOWNLOAD_TIMEOUT_MS / 1000}s for ${repo} (${(err as Error).name})`,
+    );
   });
   if (!res.ok) {
     throw new RedError(
@@ -235,9 +254,6 @@ export async function ghInstall(
   glob: string,
   bin?: string,
 ): Promise<void> {
-  // Installing lands binaries in /usr/local/bin, so the same check has
-  // to happen here and not only on the apt path.
-  await requireSudo();
   const url = await resolveGhAsset(repo, glob);
   const file = url.split("/").pop() ?? "asset";
   log.step(`github: ${repo} -> ${file}`);
@@ -245,11 +261,26 @@ export async function ghInstall(
   const tmp = `/tmp/red-${Date.now()}`;
   await run(["mkdir", "-p", tmp]);
 
-  const res = await fetch(url);
+  // A download with no deadline can wedge a converge forever, and one
+  // did: `red` stopped at step 13 with no child process, no output and
+  // no end. Whatever the cause — and it is still unexplained, the same
+  // asset fetches in a second with curl — a step that cannot finish
+  // must at least be able to fail. One tool failing never aborts the
+  // rest; one tool hanging aborts everything.
+  const res = await fetch(url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) }).catch(
+    (err: unknown) => {
+      throw new RedError(
+        `download did not finish within ${DOWNLOAD_TIMEOUT_MS / 1000}s: ${url} (${(err as Error).name})`,
+      );
+    },
+  );
   if (!res.ok) throw new RedError(`download failed ${res.status}: ${url}`);
   await Bun.write(`${tmp}/${file}`, res);
 
   if (file.endsWith(".deb")) {
+    // The only branch that genuinely needs it: dpkg writes system-wide
+    // and there is no user-level equivalent.
+    await requireSudo();
     await run(["sudo", "apt-get", "install", "-y", `${tmp}/${file}`]);
   } else if (file.endsWith(".tar.gz") || file.endsWith(".tgz")) {
     await run(["tar", "-xzf", `${tmp}/${file}`, "-C", tmp]);
@@ -261,8 +292,11 @@ export async function ghInstall(
     // A bare binary. Several projects publish one rather than an
     // archive, and its asset name usually encodes the platform rather
     // than the command, so the caller names it.
+    const dir = userBinDir();
+    mkdirSync(dir, { recursive: true });
     await run(["chmod", "+x", `${tmp}/${file}`]);
-    await run(["sudo", "install", "-m", "0755", `${tmp}/${file}`, `/usr/local/bin/${bin}`]);
+    await run(["install", "-m", "0755", `${tmp}/${file}`, `${dir}/${bin}`]);
+    log.step(`installed ${dir}/${bin}`);
   } else {
     throw new RedError(
       `don't know how to unpack ${file} — if it is a bare binary, give the provider a bin name`,
@@ -344,7 +378,28 @@ export function windowsBinDir(): string {
   return `${local}\\red-dev\\bin`;
 }
 
+/**
+ * Where a binary goes when nothing forces it system-wide.
+ *
+ * ~/.local/bin, and the reason it is not /usr/local/bin is that the
+ * latter bought nothing and cost a password. Every gh install called
+ * requireSudo before doing anything, so installing tq inside the
+ * fullscreen converge failed with "sudo needs a password and nothing
+ * here can supply one" — a prompt has nowhere to appear when a render
+ * owns the screen.
+ *
+ * The directory is already first on the PATH red-dev builds, it is what
+ * red-dev installs *itself* into, and it is where herdr's own installer
+ * puts its binary. A tool one user runs does not belong to root.
+ */
+export function userBinDir(): string {
+  const home = process.env["HOME"] ?? process.env["USERPROFILE"] ?? "";
+  return `${home}/.local/bin`;
+}
+
 async function installBinariesFrom(dir: string): Promise<void> {
+  const dest = userBinDir();
+  mkdirSync(dest, { recursive: true });
   const listing = await capture([
     "find",
     dir,
@@ -362,7 +417,7 @@ async function installBinariesFrom(dir: string): Promise<void> {
   for (const path of listing.split("\n").filter(Boolean)) {
     const base = path.split("/").pop() ?? "";
     if (/\.(md|txt)$/i.test(base) || /^(LICENSE|README)/i.test(base)) continue;
-    await run(["sudo", "install", "-m", "0755", path, "/usr/local/bin/"]);
+    await run(["install", "-m", "0755", path, `${dest}/`]);
   }
 }
 

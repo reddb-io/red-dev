@@ -119,6 +119,19 @@ export interface Tool {
    * "is it already here".
    */
   cmd?: string[];
+  /**
+   * Proof that the command on PATH is the tool we mean.
+   *
+   * A name is not an identity. Ubuntu ships /usr/bin/red — GNU ed's
+   * restricted mode — so probing for `red` found it, reported the RedDB
+   * CLI as present, and the real one was never installed on any Linux
+   * machine. The doctor said `ok red` about GNU ed 1.20.1.
+   *
+   * Only needed where a name genuinely collides; everywhere else the
+   * name is enough and running every tool to ask its version would cost
+   * a process per check.
+   */
+  signature?: RegExp;
   scope: Scope;
   /**
    * True when presence cannot be answered by probing for a command —
@@ -243,6 +256,10 @@ export const TOOLS: Tool[] = [
     // first is the command people run.
     name: "red",
     about: "the RedDB CLI — embedded, server, cluster",
+    // The name collides with GNU ed's restricted mode, which Ubuntu
+    // installs at /usr/bin/red. Without this the probe found that,
+    // called it present, and the RedDB CLI never installed at all.
+    signature: /reddb/i,
     scope: "core",
     u24: gh("reddb-io/reddb", "red-linux-x86_64", "red"),
     win: gh("reddb-io/reddb", "red-windows-x86_64.exe", "red"),
@@ -683,7 +700,42 @@ export function applicableScopes(p: Platform): Scope[] {
 export function isInstalled(tool: Tool): boolean {
   if (tool.managed) return false; // the provider decides; see Tool.managed
   const candidates = tool.cmd ?? [tool.name];
-  return candidates.some(commandExists);
+  if (!candidates.some(commandExists)) return false;
+  // A name on PATH is not proof it is the right program — see Tool.signature.
+  return tool.signature ? identify(candidates, tool.signature) : true;
+}
+
+/**
+ * Is the command on PATH actually the tool we mean?
+ *
+ * Runs it and matches its own output, because there is nothing else to
+ * go on. Failure to run at all counts as "not ours": a program that
+ * cannot answer `--version` is not one we can claim is installed.
+ */
+function identify(candidates: string[], signature: RegExp): boolean {
+  for (const c of candidates) {
+    if (!commandExists(c)) continue;
+    try {
+      // stdin detached, and that is not defensive tidiness.
+      //
+      // The command being probed is by definition one whose name we do
+      // not trust. /usr/bin/red is GNU ed, and an editor handed a
+      // terminal it can read will sit on it forever — which is exactly
+      // what happened: the converge stopped dead at step 13 with no
+      // child process and no output, because the probe itself was
+      // waiting for someone to type.
+      const proc = Bun.spawnSync([c, "--version"], {
+        stdout: "pipe",
+        stderr: "pipe",
+        stdin: "ignore",
+      });
+      const out = `${proc.stdout?.toString() ?? ""}${proc.stderr?.toString() ?? ""}`;
+      if (signature.test(out)) return true;
+    } catch {
+      // Unrunnable; try the next candidate.
+    }
+  }
+  return false;
 }
 
 export function toolsInScope(scope: Scope): Tool[] {
