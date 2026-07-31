@@ -15,7 +15,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { log } from "./log.ts";
 import { configHome } from "./shared-root.ts";
-import { applyBat, applyDelta, applyLazygit, applyOpencode } from "./theme-cli.ts";
+import { applyBat, applyDelta, applyHerdr, applyLazygit, applyOpencode } from "./theme-cli.ts";
 import type { Platform } from "./platform.ts";
 import type { Theme } from "./themes.ts";
 
@@ -198,6 +198,7 @@ function cliSurfaces(
     ["delta", () => applyDelta(theme, key)],
     ["lazygit", () => applyLazygit(theme, p)],
     ["opencode", () => applyOpencode(p)],
+    ["herdr", () => applyHerdr(p, key)],
   ];
 }
 

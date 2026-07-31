@@ -724,6 +724,11 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
         await applyWallpaperLogged(theme, ctx.theme, ctx.platform);
         return;
       }
+      if (pr.name === "hotkeys") {
+        const { installWindowsHotkeys } = await import("./hotkeys.ts");
+        await installWindowsHotkeys(ctx.platform);
+        return;
+      }
       if (pr.name === "shared-root") {
         const { ensureSharedRoot } = await import("./shared-root.ts");
         await ensureSharedRoot(ctx.platform);
