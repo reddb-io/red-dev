@@ -746,10 +746,16 @@ async function cmdMenu(p: Platform, inv: Invocation, cliHelp: string): Promise<n
 // it was meant to silence came back the moment anyone looked, which is
 // how it was found.
 //
-// RED_DEV_DEBUG is the way back to development behaviour, because a
-// released binary cannot tell bun's default apart from a deliberate
-// NODE_ENV and should not try.
-process.env.NODE_ENV = process.env["RED_DEV_DEBUG"] ? "development" : "production";
+// There is no runtime escape hatch, and claiming one was the second
+// mistake in this area. `--define` substitutes the value into every
+// module at build time, so tuiuiu's check is already decided before this
+// program starts — an env var cannot reach it, and neither can this
+// assignment. It stays only so the value is right when running from
+// source, where nothing is substituted.
+//
+// To see the warnings: bun run build:debug, which is the same build
+// without the define.
+process.env.NODE_ENV = "production";
 
 /**
  * Leave a trace when the process dies.

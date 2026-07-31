@@ -32,10 +32,21 @@ describe("NODE_ENV", () => {
     expect(src).toMatch(/process\.env\.NODE_ENV\s*=/);
   });
 
-  test("there is a way back to development behaviour", () => {
-    // Forcing production unconditionally would leave no way to see a
-    // real warning while working on the interface.
-    expect(raw).toContain("RED_DEV_DEBUG");
+  test("the way back is a build, not an environment variable", () => {
+    // RED_DEV_DEBUG was advertised as the escape hatch and never worked:
+    // --define substitutes the value into every module at build time, so
+    // the check is decided before the program starts. Verified by
+    // running a compiled binary with NODE_ENV=production set in the
+    // environment — it still took the development path.
+    expect(raw).not.toContain("RED_DEV_DEBUG");
+    const pkg = JSON.parse(readFileSync("package.json", "utf8")) as {
+      scripts: Record<string, string>;
+    };
+    expect(pkg.scripts["build:debug"]).toBeDefined();
+    expect(pkg.scripts["build:debug"]).not.toContain("--define");
+    // And the shipped builds must carry it, or the warnings come back.
+    expect(pkg.scripts["build:linux"]).toContain("--define");
+    expect(pkg.scripts["build:windows"]).toContain("--define");
   });
 
   test("bun really does bake in development, which is the whole reason", () => {
