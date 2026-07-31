@@ -509,6 +509,22 @@ async function cmdUi(p: Platform, inv: Invocation): Promise<number> {
   }
 
   const { runTui } = await import("./tui.ts");
+
+  // The interview, built here and answered inside the interface.
+  //
+  // Picking Install used to converge the whole manifest immediately.
+  // The questions existed and were unreachable from this path — gated on
+  // a first run and on there being no scope argument — so the one-liner,
+  // which is how anyone actually arrives, never asked anything.
+  const { buildSetupSteps, applySetupAnswers } = await import("./firstrun.ts");
+  const { steps, wizard } = await buildSetupSteps(p);
+  const setup = {
+    steps,
+    wizard,
+    apply: (answers: Awaited<ReturnType<typeof applySetupAnswers>>["answers"]) =>
+      applySetupAnswers(p, inv, answers),
+  };
+
   // The converge is handed to the interface rather than run after it.
   //
   // It used to return here and start a second render, which is what
@@ -538,6 +554,7 @@ async function cmdUi(p: Platform, inv: Invocation): Promise<number> {
     {
       applyTheme: (slug) => cmdTheme(p, inv, slug),
       doctor: () => cmdDoctor(p, inv),
+      setup,
     },
   );
 

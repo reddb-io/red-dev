@@ -15,6 +15,7 @@
 
 import { log } from "./log.ts";
 import type { Platform } from "./platform.ts";
+import type { SetupAnswers } from "./tui-setup-model.ts";
 import { readPreferences, writePreferences, type Preferences } from "./preferences.ts";
 import { themeNames } from "./themes.ts";
 import { checkbox, confirm, interactive, select } from "./ui.ts";
@@ -48,6 +49,69 @@ const FONTS = [
 export async function isFirstRun(p: Platform): Promise<boolean> {
   const prefs = await readPreferences(p);
   return prefs.setupCompleted !== true;
+}
+
+/**
+ * The interview's questions, built once and handed to the interface.
+ *
+ * Split out because the fullscreen menu hosts the interview itself now.
+ * It used to live only inside `red-dev install`, behind a first-run gate
+ * and a no-scope gate — and the menu is the path the one-liner takes, so
+ * choosing Install converged the whole manifest having asked nothing.
+ */
+export async function buildSetupSteps(p: Platform) {
+  const { setupSteps } = await import("./tui-setup-model.ts");
+  const { availableAgents, isAgentInstalled } = await import("./agents.ts");
+  const { toolsInScope, providerFor } = await import("./manifest.ts");
+  const { OFFERED_RUNTIMES } = await import("./runtimes.ts");
+
+  return setupSteps(
+    p,
+    availableAgents(p).map((a) => ({
+      key: a.key,
+      label: a.label,
+      note: isAgentInstalled(a) ? `${a.about} — installed` : a.about,
+    })),
+    toolsInScope("optional")
+      .filter((t) => providerFor(t, p).kind !== "skip")
+      .map((t) => ({ key: t.name, label: t.name, note: t.about ?? "" })),
+    OFFERED_RUNTIMES.map((r) => ({ key: r.id, label: r.id, note: r.about })),
+  );
+}
+
+/**
+ * Carry out what the interview decided, before the converge starts.
+ *
+ * The same body askFirstRun runs after its own wizard, reachable from
+ * the fullscreen menu — which is where the questions were missing.
+ */
+export async function applySetupAnswers(
+  p: Platform,
+  inv: { scope?: string | undefined },
+  answers: SetupAnswers,
+): Promise<{ answers: SetupAnswers }> {
+  if (answers.share) {
+    const { chooseSharedRoot } = await import("./shared-root.ts");
+    try {
+      await chooseSharedRoot(p);
+    } catch (err) {
+      log.warn(`shared root: ${(err as Error).message}`);
+    }
+  }
+
+  await writePreferences(p, {
+    setupCompleted: true,
+    theme: answers.theme,
+    font: answers.font,
+    blesh: answers.blesh,
+    ...(answers.terminalShell ? { terminalShell: answers.terminalShell } : {}),
+    ...(answers.terminalShell === "wsl" && process.env["WSL_DISTRO_NAME"]
+      ? { distro: process.env["WSL_DISTRO_NAME"] }
+      : {}),
+  });
+  await writeShellEnv(p, answers.blesh);
+  void inv;
+  return { answers };
 }
 
 export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> {

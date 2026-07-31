@@ -36,6 +36,12 @@ import { summary } from "./platform.ts";
 import { THEMES, themeNames } from "./themes.ts";
 import { Header, Screen, StatusLine, Surface, Task } from "./tui-chrome.ts";
 import { InstallLayout, useInstallModel, type InstallTuiOptions } from "./tui-install.ts";
+import {
+  SetupLayout,
+  useSetupModel,
+  type SetupAnswers,
+  type SetupModel,
+} from "./tui-setup-model.ts";
 import { muted, text, wordmarkGradient } from "./tui-theme.ts";
 
 /**
@@ -143,6 +149,20 @@ export interface TuiActions {
   applyTheme?: (slug: string) => Promise<unknown>;
   doctor?: () => Promise<unknown>;
   apps?: () => Promise<unknown>;
+  /**
+   * The interview, and what to do with its answers.
+   *
+   * Install used to converge the whole manifest the moment it was
+   * picked. The questions existed — theme, font, agents, runtimes,
+   * tools — and lived only inside `red-dev install`, behind two gates:
+   * first run, and no scope argument. The fullscreen menu is the path
+   * the one-liner takes, so in practice nothing was ever asked.
+   */
+  setup?: {
+    steps: SetupModel["steps"];
+    wizard: SetupModel["wizard"];
+    apply: (answers: SetupAnswers) => Promise<unknown>;
+  };
 }
 
 export async function runTui(
@@ -163,7 +183,9 @@ export async function runTui(
     const size = useTerminalSize();
     // "sections" browses the left column; "themes" browses the palette
     // list, with the panel previewing whatever is highlighted.
-    const [mode, setMode] = useState<"sections" | "themes" | "install" | "task">("sections");
+    const [mode, setMode] = useState<"sections" | "themes" | "setup" | "install" | "task">(
+      "sections",
+    );
     const [sectionIndex, setSectionIndex] = useState(0);
     const [themeIndex, setThemeIndex] = useState(0);
     const [taskTitle, setTaskTitle] = useState("");
@@ -215,12 +237,32 @@ export async function runTui(
         })
       : null;
 
+    // Unconditional, like the converge model and for the same reason: a
+    // hook behind an `if` changes the hook order between frames.
+    const setup = actions.setup
+      ? useSetupModel(actions.setup.steps, actions.setup.wizard)
+      : null;
+
     useInput((input, key) => {
       if (mode() === "task") {
         // Back to the menu rather than out of the program. The whole
         // point of running it in here is that finishing a command
         // returns you to where you chose it.
         if (taskDone() && (key.return || key.escape || input === "q")) setMode("sections");
+        return;
+      }
+
+      if (mode() === "setup" && setup && actions.setup) {
+        const verdict = setup.handleKey(input, key);
+        if (verdict === "quit") {
+          // Backing out of the interview goes back to the menu, not into
+          // a converge nobody asked for.
+          setMode("sections");
+        } else if (verdict === "done") {
+          const answers = setup.answers();
+          setMode("install");
+          void actions.setup.apply(answers).then(() => model?.begin());
+        }
         return;
       }
 
@@ -260,10 +302,16 @@ export async function runTui(
         const section = SECTIONS[sectionIndex()];
         if (section?.key === "theme") setMode("themes");
         else if (section?.key === "install" && model) {
-          // Stays inside this render rather than leaving and starting
-          // another one.
-          setMode("install");
-          model.begin();
+          // The interview first, every time — not once on a first run.
+          // Choosing Install is how you say what you want installed, and
+          // answering is the point of choosing it. Previous answers come
+          // back as the presets, so agreeing again is enter, enter,
+          // enter.
+          if (setup) setMode("setup");
+          else {
+            setMode("install");
+            model.begin();
+          }
         } else if (section?.key === "doctor" && actions.doctor) {
           runTask("doctor", actions.doctor);
         } else if (section?.key === "apps" && actions.apps) {
@@ -280,6 +328,8 @@ export async function runTui(
 
     const width = Math.max(size.columns ?? 80, 60);
     const height = Math.max(size.rows ?? 24, 16);
+
+    if (mode() === "setup" && setup) return SetupLayout(setup, p, width, height);
 
     // The converge takes the whole screen once it starts.
     if (mode() === "install" && model) return InstallLayout(model, width, height);
