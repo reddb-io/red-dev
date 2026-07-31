@@ -14,6 +14,7 @@
 
 import { existsSync, mkdirSync } from "node:fs";
 import { log } from "./log.ts";
+import type { Platform } from "./platform.ts";
 
 import rcSh from "../config/bash/rc.sh" with { type: "text" };
 import pathSh from "../config/bash/path.sh" with { type: "text" };
@@ -106,7 +107,7 @@ async function wireShellRc(): Promise<void> {
   log.ok("~/.bashrc now sources red-dev");
 }
 
-export async function installDotfiles(): Promise<void> {
+export async function installDotfiles(p: Platform): Promise<void> {
   const dest = `${home()}/.local/share/red-dev/config/bash`;
   // node:fs rather than shelling out to mkdir, which native Windows
   // does not have. Git Bash understands the forward-slash HOME it
@@ -125,7 +126,7 @@ export async function installDotfiles(): Promise<void> {
   }
 
   await wireShellRc();
-  await installZellijConfig();
+  await installZellijConfig(p);
   await wireDelta();
   await primeTldr();
 }
@@ -204,7 +205,7 @@ async function wireDelta(): Promise<void> {
  * regenerated on every switch, but keybindings and layout preferences
  * are the user's.
  */
-async function installZellijConfig(): Promise<void> {
+async function installZellijConfig(p: Platform): Promise<void> {
   const dir = `${home()}/.config/zellij`;
   const path = `${dir}/config.kdl`;
 
@@ -216,7 +217,7 @@ async function installZellijConfig(): Promise<void> {
   const fallback = THEMES[DEFAULT_THEME];
   if (fallback && !existsSync(`${dir}/themes/red-dev.kdl`)) {
     const { applyZellij } = await import("./theme-apply.ts");
-    await applyZellij(fallback);
+    await applyZellij(fallback, p);
   }
 
   if (existsSync(path)) {

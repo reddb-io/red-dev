@@ -14,7 +14,7 @@
  * helpful. `red-dev share adopt <tool>` is the deliberate act.
  */
 
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { log, RedError } from "./log.ts";
 import type { Platform } from "./platform.ts";
 
@@ -47,9 +47,38 @@ export function localPath(windowsPath: string, env: Platform["env"]): string {
   return `/mnt/${m[1].toLowerCase()}/${(m[2] ?? "").replace(/\\/g, "/")}`;
 }
 
+/**
+ * The recorded root, from the environment or from the file.
+ *
+ * Reading only the environment variable was wrong twice over. env.sh is
+ * sourced by rc.sh, so the variable exists in an interactive shell that
+ * has loaded the dotfiles and nowhere else — which meant `red-dev theme`
+ * wrote into the share from a terminal and wrote locally from a script,
+ * from CI, and from the installer, reporting success either way. The
+ * binary wrote the record; it can read it.
+ */
+export function recordedShareRoot(): string | null {
+  const fromEnv = process.env["RED_SHARE_WIN"];
+  if (fromEnv) return fromEnv;
+
+  const home = process.env["HOME"] ?? process.env["USERPROFILE"];
+  if (!home) return null;
+  const path = `${home}/.config/red-dev/env.sh`;
+  if (!existsSync(path)) return null;
+  try {
+    const m = /^export\s+RED_SHARE_WIN=(.*)$/m.exec(readFileSync(path, "utf8"));
+    const raw = m?.[1]?.trim();
+    if (!raw) return null;
+    // Written quoted, because a Windows path is mostly backslashes.
+    return raw.replace(/^'(.*)'$/, "$1").replace(/^"(.*)"$/, "$1");
+  } catch {
+    return null;
+  }
+}
+
 /** Where the shared root lives, when one has been chosen. */
 export function sharedRootFor(p: Platform): SharedRoot | null {
-  const windows = process.env["RED_SHARE_WIN"];
+  const windows = recordedShareRoot();
   if (!windows) return null;
   return { windows, local: localPath(windows, p.env) };
 }
@@ -78,7 +107,7 @@ export async function chooseSharedRoot(p: Platform, requested?: string): Promise
     return 0;
   }
 
-  const current = process.env["RED_SHARE_WIN"];
+  const current = recordedShareRoot();
   if (!requested && current) {
     log.ok(`shared root is ${current}`);
     log.plain(`       here that is ${localPath(current, p.env)}`);
@@ -178,6 +207,49 @@ const ADOPTABLE: Record<string, { from: string; to: string; dir?: boolean }> = {
 
 export function adoptableTools(): string[] {
   return Object.keys(ADOPTABLE);
+}
+
+/**
+ * Where a tool's configuration should be written.
+ *
+ * The correction this function exists for: every writer had
+ * `${home()}/.config/...` hardcoded, so configuration was always written
+ * locally and the share was somewhere you migrated *into* afterwards.
+ * That makes the shared root an accessory bolted onto the end, when it
+ * is supposed to be the foundation — one directory both environments
+ * read, established at install rather than adopted later.
+ *
+ * So this is the single place that decides, and it answers ~/.config
+ * whenever there is no share, which is every machine that has not opted
+ * in and every machine that cannot: bare-metal Ubuntu and servers have
+ * no second environment, and sharing with a machine that is not there is
+ * not a thing.
+ *
+ * `adopt` keeps its job for installs that predate this — the configs
+ * already sitting in ~/.config do not move themselves.
+ */
+export function configHome(p: Platform, tool?: string): string {
+  const win = recordedShareRoot();
+  const home = process.env["HOME"] ?? process.env["USERPROFILE"] ?? "";
+  if (!win) return `${home}/.config`;
+
+  // Resolved here rather than read from RED_SHARE.
+  //
+  // RED_SHARE is exported by rc.sh, so trusting it made this work only
+  // inside an interactive shell that had sourced the dotfiles — and
+  // `red-dev theme` run any other way wrote locally while reporting
+  // success. The binary has RED_SHARE_WIN and knows its own platform,
+  // which is everything it needs to answer this itself.
+  const share = localPath(win, p.env);
+  if (!existsSync(share)) return `${home}/.config`;
+
+  // Only the tools whose configuration is genuinely portable. The rest
+  // stay local, and the reason is per-tool rather than general: btop's
+  // config names /home/<user>/.config/btop/themes/... and a gitconfig on
+  // this machine calls /usr/bin/gh, both of which exist on exactly one
+  // of the two sides.
+  if (tool && !(tool in ADOPTABLE)) return `${home}/.config`;
+  return `${share}/config`;
 }
 
 /**

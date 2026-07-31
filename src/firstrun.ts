@@ -85,6 +85,20 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
       return null;
     }
 
+    // Established before the converge writes anything, which is the
+    // whole point of asking it first: configuration should be born in
+    // the share rather than written locally and migrated afterwards.
+    if (answers.share) {
+      const { chooseSharedRoot } = await import("./shared-root.ts");
+      try {
+        await chooseSharedRoot(p);
+      } catch (err) {
+        // Never fatal. A first run that cannot reach the Windows side is
+        // a first run that should still finish.
+        log.warn(`shared root: ${(err as Error).message}`);
+      }
+    }
+
     await writePreferences(p, {
       setupCompleted: true,
       theme: answers.theme,

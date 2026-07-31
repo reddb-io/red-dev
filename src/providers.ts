@@ -625,7 +625,7 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
       // code into a target that can never reach a WSL host.
       if (pr.name === "dotfiles") {
         const { installDotfiles } = await import("./dotfiles.ts");
-        await installDotfiles();
+        await installDotfiles(ctx.platform);
         return;
       }
       if (pr.name === "blesh") {

@@ -42,6 +42,8 @@ export interface SetupAnswers {
   agents: string[];
   blesh: boolean;
   terminalShell?: "wsl" | "gitbash";
+  /** Whether to set up the one directory both environments read. */
+  share: boolean;
   /** False when the user left before finishing. */
   completed: boolean;
 }
@@ -74,6 +76,37 @@ const FONTS: Choice[] = [
 
 function questions(p: Platform, agents: Choice[], apps: Choice[], runtimes: Choice[]): Question[] {
   return [
+    {
+      // First, and before anything that writes a file.
+      //
+      // This was an afterthought — a separate command you ran once the
+      // converge had already written every configuration into ~/.config,
+      // leaving `share adopt` to move them one at a time. That makes the
+      // shared root an accessory. It is meant to be the foundation, so
+      // it is asked before there is anything to migrate.
+      //
+      // Gated exactly like Terminal below: bare-metal Ubuntu and servers
+      // have no second environment, and sharing with a machine that is
+      // not there is not a thing.
+      id: "share",
+      title: "Shared",
+      description:
+        "One directory both WSL and Windows read configuration from, so a setting " +
+        "applied on one side is the same setting on the other. Binaries cannot be " +
+        "shared — the formats differ — so it holds one directory each. Source code " +
+        "should not be: a build costs eight times more across the boundary.",
+      multi: false,
+      choices: [
+        {
+          key: "yes",
+          label: "Share configuration",
+          note: "%LOCALAPPDATA%\\..\\.reddev — 43ms per shell, measured",
+        },
+        { key: "no", label: "Keep each side separate", note: "every config stays local" },
+      ],
+      preset: ["yes"],
+      applies: (pl: Platform) => pl.env === "wsl" || pl.os === "windows",
+    },
     {
       id: "shell",
       title: "Terminal",
@@ -215,6 +248,7 @@ export async function runSetupTui(
           runtimes: get("runtimes"),
           agents: get("agents"),
           blesh: get("blesh")[0] === "yes",
+          share: get("share")[0] === "yes",
           ...(get("shell")[0] ? { terminalShell: get("shell")[0] as "wsl" | "gitbash" } : {}),
           completed: true,
         };
