@@ -558,6 +558,25 @@ export const TOOLS: Tool[] = [
   // Chosen, never assumed. `red-dev apps` offers these; a plain
   // converge ignores them entirely.
   {
+    // Microsoft's own, and the closest Windows gets to the desktop half
+    // of omakub. FancyZones is the analogue of tactile — a keyboard-
+    // driven window grid — and Command Palette is the analogue of the
+    // Ulauncher omakub binds to Super+Space.
+    //
+    // Optional rather than desktop, because it is a program that stays
+    // running. Offering it is right; installing it as part of a theme
+    // switch is not, which is why nothing else here reaches for it.
+    //
+    // Windows only, and that falls out of the provider rather than being
+    // asserted: there is no Linux PowerToys to skip toward.
+    name: "powertoys",
+    about: "FancyZones window tiling, launcher, key remapping — Microsoft's own",
+    cmd: ["PowerToys"],
+    scope: "optional",
+    u24: skip("PowerToys is Windows-only; zellij is the tiling answer here"),
+    win: winget("Microsoft.PowerToys"),
+  },
+  {
     name: "just",
     about: "command runner; a Makefile without the Make",
     scope: "optional",
