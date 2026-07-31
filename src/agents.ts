@@ -103,6 +103,29 @@ export const AGENTS: AgentSpec[] = [
     desktopOnly: true,
   },
   {
+    // Not an agent — the thing agents run inside. It multiplexes them
+    // into one terminal and keeps them alive on the far side of an SSH
+    // connection, so it belongs in this list even though it does not
+    // answer prompts itself.
+    //
+    // Linux and WSL only, and that falls out of having no winget entry
+    // rather than being asserted: availableAgents requires winget,
+    // msstore or npm on Windows, and herdr has none. Which is correct
+    // — the stable manifest at herdr.dev/latest.json publishes linux
+    // and macos assets and no windows one. A Windows build exists only
+    // in the preview channel, as a dated .zip, and pulling a preview
+    // into a converge is a decision rather than a default.
+    //
+    // The installer is POSIX sh and lands in ~/.local/bin, which needs
+    // no sudo and is already on the PATH red-dev builds.
+    key: "herdr",
+    label: "Herdr",
+    about: "run several coding agents in one terminal, alive over SSH",
+    cmd: "herdr",
+    recommended: false,
+    installer: "https://herdr.dev/install.sh",
+  },
+  {
     key: "openclaw",
     label: "OpenClaw",
     about: "personal assistant, any platform",
