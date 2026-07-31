@@ -15,6 +15,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { log } from "./log.ts";
 import { configHome } from "./shared-root.ts";
+import { applyBat, applyDelta, applyLazygit, applyOpencode } from "./theme-cli.ts";
 import type { Platform } from "./platform.ts";
 import type { Theme } from "./themes.ts";
 
@@ -179,6 +180,27 @@ return {
 
 // --------------------------------------------------------- entrypoint
 
+/**
+ * The command-line surfaces, which omakub leaves alone.
+ *
+ * A Kanagawa terminal showing a Monokai diff is the seam this closes.
+ * Every one of these is a config file, so unlike the GNOME layer they
+ * work on all five targets — including native Windows, where they are
+ * the *only* surfaces there are.
+ */
+function cliSurfaces(
+  theme: Theme,
+  p: Platform,
+  key: string,
+): [string, () => Promise<boolean>][] {
+  return [
+    ["bat", () => applyBat(theme, p, key)],
+    ["delta", () => applyDelta(theme, key)],
+    ["lazygit", () => applyLazygit(theme, p)],
+    ["opencode", () => applyOpencode(p)],
+  ];
+}
+
 export interface ApplyThemeResult {
   applied: string[];
   skipped: string[];
@@ -210,6 +232,7 @@ export async function applyThemeEverywhere(
           ["btop", () => applyBtop(theme)],
           ["neovim", () => applyNeovim(theme)],
           ["vscode", () => applyVsCodeTheme(theme, p, key)],
+          ...cliSurfaces(theme, p, key),
           ["gnome", () => applyGnomeTheme(p, key)],
         ];
 
