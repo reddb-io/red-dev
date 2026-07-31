@@ -28,6 +28,65 @@ async function capture(cmd: string[]): Promise<string> {
   return out.trim();
 }
 
+/**
+ * Write a file on the Windows side, from inside WSL.
+ *
+ * Base64 through PowerShell rather than a here-string: the content is
+ * TOML full of quotes, backslashes and box-drawing characters, and every
+ * quoting scheme that tries to survive both shells eventually meets one
+ * it cannot. Encoding sidesteps the question, and UTF-8 without a BOM is
+ * what Alacritty expects.
+ */
+async function writeThroughHost(winPath: string, content: string): Promise<void> {
+  const b64 = Buffer.from(content, "utf8").toString("base64");
+  const script = [
+    `$p = '${winPath.replace(/'/g, "''")}'`,
+    `$d = Split-Path $p -Parent`,
+    `New-Item -ItemType Directory -Force -Path $d | Out-Null`,
+    `$b = [Convert]::FromBase64String('${b64}')`,
+    `[IO.File]::WriteAllBytes($p, $b)`,
+  ].join("; ");
+  const proc = Bun.spawn(["powershell.exe", "-NoProfile", "-Command", script], {
+    stdout: "ignore",
+    stderr: "pipe",
+    stdin: "ignore",
+  });
+  if ((await proc.exited) !== 0) {
+    const err = (await new Response(proc.stderr).text()).trim();
+    throw new RedError(`could not write ${winPath} through Windows: ${err.split("\n")[0] ?? ""}`);
+  }
+}
+
+/**
+ * Does the host see this file?
+ *
+ * Asked of Windows rather than of /mnt/c, because on this machine those
+ * two answer differently about the same path — which is the whole reason
+ * the writes moved.
+ */
+async function hostFileExists(winPath: string): Promise<boolean> {
+  const script = `if (Test-Path -LiteralPath '${winPath.replace(/'/g, "''")}') { 'yes' } else { 'no' }`;
+  const proc = Bun.spawn(["powershell.exe", "-NoProfile", "-Command", script], {
+    stdout: "pipe",
+    stderr: "ignore",
+    stdin: "ignore",
+  });
+  const out = (await new Response(proc.stdout).text()).trim();
+  if ((await proc.exited) !== 0) return false;
+  return out.includes("yes");
+}
+
+/** The Windows spelling of the Alacritty config directory. */
+async function windowsConfigDir(): Promise<string> {
+  const cmdExe = Bun.which("cmd.exe") ?? "/mnt/c/Windows/System32/cmd.exe";
+  const raw = await capture([cmdExe, "/c", "echo %APPDATA%"]);
+  const winPath = raw.split("\n").pop()?.trim().replace(/\r$/, "") ?? "";
+  if (!/^[A-Za-z]:\\/.test(winPath)) {
+    throw new RedError(`could not read %APPDATA% from Windows (got: ${raw})`);
+  }
+  return `${winPath}\\alacritty`;
+}
+
 /** Where Alacritty reads its config on the machine that will run it. */
 export async function configDir(p: Platform): Promise<string> {
   if (p.os === "windows") {
@@ -292,21 +351,46 @@ export async function configureAlacritty(opts: AlacrittyOptions): Promise<void> 
   const sep = opts.platform.os === "windows" ? "\\" : "/";
   const main = `${dir}${sep}alacritty.toml`;
 
+  // Under WSL these files are written through Windows, not through
+  // /mnt/c, and that is not caution — it is a bug this project can
+  // otherwise not see.
+  //
+  // On this machine %APPDATA%\alacritty\alacritty.toml has two distinct
+  // NTFS records: Windows FileId 0x1a00000007ebc6, WSL inode
+  // 0x1100000007ebf3. Same directory, same name, per-directory case
+  // sensitivity disabled, and a full `wsl --shutdown` does not merge
+  // them — so it is not a cache, which is what I assumed for two days.
+  // A marker appended from Windows was invisible to WSL a second later.
+  //
+  // Each side reads and writes its own. That means a theme applied from
+  // the distro reached a file the Windows Alacritty never opens, and
+  // reported success. Writing through the host puts the bytes where the
+  // terminal actually looks.
+  const viaHost = opts.platform.env === "wsl";
+
+  const winDir = viaHost ? await windowsConfigDir() : null;
+  const put = async (name: string, content: string): Promise<void> => {
+    if (winDir) await writeThroughHost(`${winDir}\\${name}`, content);
+    else await Bun.write(`${dir}${sep}${name}`, content);
+  };
+
   // theme and font are regenerated; the main file is written once so a
   // user who tunes padding or bindings does not lose it on every run.
-  await Bun.write(`${dir}${sep}theme.toml`, colorsToml(opts.theme.terminal));
-  await Bun.write(
-    `${dir}${sep}font.toml`,
-    fontToml(opts.fontFamily, opts.fontSize ?? 11),
-  );
+  await put("theme.toml", colorsToml(opts.theme.terminal));
+  await put("font.toml", fontToml(opts.fontFamily, opts.fontSize ?? 11));
   // Regenerated, not written-once: which shell to launch is red-dev's
   // decision, not a user preference we would be clobbering.
-  await Bun.write(`${dir}${sep}shell.toml`, await shellToml(opts.platform));
+  await put("shell.toml", await shellToml(opts.platform));
 
-  if (!existsSync(main)) {
-    await Bun.write(main, mainToml(opts.opacity));
-    log.ok(`alacritty: config written to ${dir}`);
-  } else if (await migrateImportKey(main)) {
+  // Existence is asked of the host too, for the same reason: from the
+  // distro this file can look absent while Windows has one, or the
+  // reverse.
+  const mainExists = winDir ? await hostFileExists(`${winDir}\\alacritty.toml`) : existsSync(main);
+
+  if (!mainExists) {
+    await put("alacritty.toml", mainToml(opts.opacity));
+    log.ok(`alacritty: config written to ${winDir ?? dir}`);
+  } else if (!winDir && (await migrateImportKey(main))) {
     log.ok(`alacritty.toml: import block repaired — theme, font and shell now imported`);
   } else {
     log.skip(`alacritty.toml exists — theme and font updated, yours left alone`);
