@@ -4,7 +4,8 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { defaultRoot, localPath } from "./shared-root.ts";
+import { readFileSync } from "node:fs";
+import { adoptableTools, defaultRoot, localPath } from "./shared-root.ts";
 
 describe("localPath", () => {
   const win = "C:\\Users\\filip\\.reddev";
@@ -36,6 +37,24 @@ describe("localPath", () => {
 
   test("something that is not a Windows path is returned unchanged", () => {
     expect(localPath("/home/cyber/share", "wsl")).toBe("/home/cyber/share");
+  });
+});
+
+describe("the share tree", () => {
+  test("does not pre-create the per-tool config directories", () => {
+    // Creating them empty made "does it exist" meaningless in two
+    // places at once: a brand new root reported five tools as shared,
+    // and `share adopt zellij` refused with "already shared" over an
+    // empty directory. A tool's directory appears when its config does.
+    const src = readFileSync("src/shared-root.ts", "utf8");
+    const tree = /const TREE = \[([^\]]*)\]/.exec(src)?.[1] ?? "";
+    for (const tool of adoptableTools()) {
+      expect(tree).not.toContain(`config/${tool}`);
+    }
+    expect(tree).toContain('"config"');
+    // bin stays split by format, because that part is not optional.
+    expect(tree).toContain("bin/linux");
+    expect(tree).toContain("bin/windows");
   });
 });
 

@@ -832,10 +832,17 @@ async function main(): Promise<number> {
     case "shell":
       return await cmdShell(p, inv);
     case "share": {
-      const { chooseSharedRoot } = await import("./shared-root.ts");
-      // The scope argument doubles as the path here: `red-dev share` with
-      // nothing reports what is recorded, with a path sets it.
-      return await chooseSharedRoot(p, inv.scope || undefined);
+      const mod = await import("./shared-root.ts");
+      // The positional doubles as both: `red-dev share` reports, a path
+      // sets the root, and `adopt <tool>` moves one config in.
+      if (inv.shareTarget === "adopt") {
+        if (!inv.shareTool) {
+          log.plain(`shareable: ${mod.adoptableTools().join(", ")}`);
+          return 0;
+        }
+        return await mod.adoptConfig(p, inv.shareTool);
+      }
+      return await mod.chooseSharedRoot(p, inv.shareTarget);
     }
     case "uninstall":
       return await cmdUninstall(p);

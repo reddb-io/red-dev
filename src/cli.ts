@@ -117,6 +117,23 @@ export function buildCli(): CLI {
       },
       share: {
         description: "one directory both WSL and Windows read configuration from",
+        // Two positionals with names of their own, and both halves of
+        // that mattered. One would have swallowed only the first word of
+        // `share adopt zellij`, and reusing `scope` would have rejected
+        // `adopt` as an invalid scope — a confusing way to learn that a
+        // subcommand exists.
+        positional: [
+          {
+            name: "target",
+            description: "a Windows path to set the root, or `adopt`",
+            required: false,
+          },
+          {
+            name: "tool",
+            description: "with `adopt`: which tool's configuration to move in",
+            required: false,
+          },
+        ],
       },
       uninstall: {
         description: "remove tools or red-dev's own configuration",
@@ -143,6 +160,9 @@ export interface Invocation {
   dryRun: boolean;
   /** --yes: take defaults instead of asking on a first run. */
   yes: boolean;
+  /** `share <target> [tool]` — its own positionals, see the note in buildCli. */
+  shareTarget: string | undefined;
+  shareTool: string | undefined;
   /**
    * Parse and validation failures. Strict mode means an unrecognised
    * command lands here too, with the list of real ones — so there is no
@@ -197,6 +217,8 @@ export function parseArgs(cli: CLI, argv: string[]): Invocation {
     opacity: clampOpacity(opts["opacity"], errors),
     dryRun: opts["dry-run"] === true,
     yes: opts["yes"] === true,
+    shareTarget: typeof pos["target"] === "string" ? pos["target"] : undefined,
+    shareTool: typeof pos["tool"] === "string" ? pos["tool"] : undefined,
     errors,
   };
 }

@@ -98,8 +98,47 @@ export async function chooseSharedRoot(p: Platform, requested?: string): Promise
   process.env["RED_SHARE_WIN"] = root;
   await ensureSharedRoot(p);
 
+  if (p.os === "windows") await addWindowsBinToPath(root);
+
   log.ok(`recorded — open a new shell, or: export RED_SHARE_WIN='${root}'`);
   return 0;
+}
+
+/**
+ * Put the shared Windows bin on the user PATH.
+ *
+ * The shell gets it from path.sh, which covers Git Bash and WSL. This
+ * covers everything else on Windows — PowerShell, and anything launched
+ * from Explorer — which read the environment from the registry and never
+ * see a shell variable.
+ *
+ * Reads the stored user value rather than %PATH%, which is the merged
+ * machine+user string: writing that back copies every machine entry into
+ * the user scope, and boot.ps1 learned that the hard way.
+ */
+async function addWindowsBinToPath(root: string): Promise<void> {
+  const dir = `${root}\\bin\\windows`;
+  const script = [
+    `$d = '${dir.replace(/'/g, "''")}'`,
+    `$u = [Environment]::GetEnvironmentVariable('Path','User')`,
+    `if ($u -notlike "*$d*") {`,
+    `  $n = if ([string]::IsNullOrEmpty($u)) { $d } else { "$u;$d" }`,
+    `  [Environment]::SetEnvironmentVariable('Path', $n, 'User')`,
+    `  'added'`,
+    `} else { 'present' }`,
+  ].join("; ");
+
+  const proc = Bun.spawn(["powershell.exe", "-NoProfile", "-Command", script], {
+    stdout: "pipe",
+    stderr: "ignore",
+  });
+  const out = (await new Response(proc.stdout).text()).trim();
+  if ((await proc.exited) !== 0) {
+    log.warn(`could not add ${dir} to your user PATH; add it by hand`);
+    return;
+  }
+  if (out.includes("added")) log.ok(`${dir} added to your user PATH (new terminals only)`);
+  else log.skip(`${dir} already on your user PATH`);
 }
 
 /** The Windows profile directory, whichever side we are asking from. */
@@ -113,8 +152,98 @@ async function windowsHome(p: Platform): Promise<string> {
   return await windowsUserProfile();
 }
 
-/** Directories the share is made of. `bin` is split by format on purpose. */
-const TREE = ["config", "config/zellij", "config/yazi", "config/atuin", "bin", "bin/linux", "bin/windows"];
+/**
+ * The tools whose configuration can genuinely be shared.
+ *
+ * Membership was decided by testing, not by reading documentation: each
+ * of these was verified by pointing the tool at a config file and
+ * checking that it obeyed. `--help` failed to mention three of the four
+ * that do support it, so it is not an oracle.
+ *
+ * `dir` marks the ones that want a directory rather than a file, which
+ * changes both what gets copied and which variable shared.sh exports.
+ */
+const ADOPTABLE: Record<string, { from: string; to: string; dir?: boolean }> = {
+  starship: { from: ".config/starship.toml", to: "starship.toml" },
+  mise: { from: ".config/mise/config.toml", to: "mise.toml" },
+  zellij: { from: ".config/zellij", to: "zellij", dir: true },
+  yazi: { from: ".config/yazi", to: "yazi", dir: true },
+  atuin: { from: ".config/atuin", to: "atuin", dir: true },
+  bat: { from: ".config/bat/config", to: "bat.conf" },
+  // git is an include rather than a replacement — see shared.sh. There
+  // is nothing to copy: you write the shared half yourself, and the
+  // per-platform half stays in ~/.gitconfig where it belongs.
+  git: { from: "", to: "gitconfig" },
+};
+
+export function adoptableTools(): string[] {
+  return Object.keys(ADOPTABLE);
+}
+
+/**
+ * Copy a tool's configuration into the share.
+ *
+ * Copied and not moved, and the original is left where it is. On a
+ * boundary this fiddly, a command that deletes the file you had been
+ * editing — in the one place you would look for it — is the wrong kind
+ * of tidy. It stops being read, and this says so rather than leaving you
+ * to discover it.
+ */
+export async function adoptConfig(p: Platform, tool: string): Promise<number> {
+  const spec = ADOPTABLE[tool];
+  if (!spec) {
+    throw new RedError(
+      `cannot share ${tool}'s configuration — try one of: ${adoptableTools().join(", ")}`,
+    );
+  }
+
+  const root = sharedRootFor(p);
+  if (!root) {
+    throw new RedError("no shared root chosen yet — run `red-dev share` first");
+  }
+
+  const dest = `${root.local}/config/${spec.to}`;
+  if (!spec.from) {
+    if (!existsSync(dest)) {
+      const { writeFileSync } = await import("node:fs");
+      writeFileSync(dest, `# Shared git settings, included from ~/.gitconfig by red-dev.\n`);
+      log.ok(`created ${root.windows}\\config\\${spec.to} — put shared git settings in it`);
+    } else {
+      log.skip(`${tool} already shared`);
+    }
+    return 0;
+  }
+
+  const home = process.env["HOME"] ?? process.env["USERPROFILE"];
+  if (!home) throw new RedError("HOME is not set");
+  const src = `${home}/${spec.from}`;
+
+  if (!existsSync(src)) {
+    log.skip(`${tool} has no configuration here yet (${spec.from})`);
+    return 0;
+  }
+  if (existsSync(dest)) {
+    log.skip(`${tool} already shared — ${root.windows}\\config\\${spec.to}`);
+    return 0;
+  }
+
+  const { cpSync } = await import("node:fs");
+  cpSync(src, dest, { recursive: !!spec.dir });
+  log.ok(`${tool} shared at ${root.windows}\\config\\${spec.to}`);
+  log.plain(`       ~/${spec.from} is left in place and is no longer read`);
+  return 0;
+}
+
+/**
+ * Directories the share is made of.
+ *
+ * `bin` is split by format because it has to be. The per-tool config
+ * directories are deliberately *not* here: creating them empty made
+ * "does it exist" meaningless, so a brand new root reported five tools
+ * as shared and `adopt zellij` refused with "already shared" over an
+ * empty directory. A tool's directory now appears when its config does.
+ */
+const TREE = ["config", "bin", "bin/linux", "bin/windows"];
 
 export async function ensureSharedRoot(p: Platform): Promise<void> {
   const root = sharedRootFor(p);

@@ -324,5 +324,84 @@ export async function collectDrift(p: Platform): Promise<DriftCheck[]> {
   checks.push(await checkDocker(p));
   checks.push(await checkToolchainParity(p));
   checks.push(await checkBlesh());
+  checks.push(await checkSharedRoot(p));
   return checks;
+}
+
+/**
+ * Are both sides looking at the same directory?
+ *
+ * The question you ask when a setting applied on one side does not show
+ * up on the other, and it has three distinct wrong answers: no root
+ * recorded, a root recorded that is not there, and a root that is there
+ * but empty. Reporting them as one "shared root: no" would send you
+ * looking in the wrong place for two of the three.
+ */
+async function checkSharedRoot(p: Platform): Promise<DriftCheck> {
+  const name = "shared root";
+
+  if (p.env !== "wsl" && p.env !== "windows") {
+    return { name, status: "n/a", detail: "spans WSL and Windows; this machine is neither" };
+  }
+
+  const { sharedRootFor, adoptableTools } = await import("./shared-root.ts");
+  const root = sharedRootFor(p);
+  if (!root) {
+    return {
+      name,
+      status: "n/a",
+      detail: "not set up — configuration stays local to each side",
+      fix: "red-dev share",
+    };
+  }
+
+  if (!existsSync(root.local)) {
+    // Recorded but unreachable: a drive that did not mount, a profile
+    // that moved. rc.sh drops RED_SHARE in this case, so every tool
+    // quietly falls back to its own config and nothing says why.
+    return {
+      name,
+      status: "drift",
+      detail: `${root.windows} is recorded but not reachable at ${root.local}`,
+      fix: "red-dev share <windows-path>",
+    };
+  }
+
+  // Content, not existence.
+  //
+  // The first version counted a directory as adopted if it was there —
+  // and the share is created with empty zellij/, yazi/ and atuin/
+  // directories, so a brand new root reported "sharing starship, mise,
+  // zellij, yazi, atuin" when two files had been put in it by hand. A
+  // check that answers yes before anything has happened is worse than
+  // no check.
+  const { readdirSync, statSync } = await import("node:fs");
+  const hasContent = (path: string): boolean => {
+    if (!existsSync(path)) return false;
+    try {
+      return statSync(path).isDirectory() ? readdirSync(path).length > 0 : true;
+    } catch {
+      return false;
+    }
+  };
+
+  const cfg = `${root.local}/config`;
+  const shared = adoptableTools().filter(
+    (t) =>
+      hasContent(`${cfg}/${t}`) ||
+      hasContent(`${cfg}/${t}.toml`) ||
+      hasContent(`${cfg}/${t}.conf`) ||
+      (t === "git" && hasContent(`${cfg}/gitconfig`)),
+  );
+
+  if (shared.length === 0) {
+    return {
+      name,
+      status: "ok",
+      detail: `${root.windows} — ready, nothing shared yet`,
+      fix: "red-dev share adopt <tool>",
+    };
+  }
+
+  return { name, status: "ok", detail: `${root.windows} — sharing ${shared.join(", ")}` };
 }

@@ -33,6 +33,31 @@ _red_path_dedupe() {
 # Later calls win, so list these lowest-priority first.
 _red_path_prepend "/snap/bin"
 _red_path_prepend "$RED_ROOT/bin"
+
+# The shared bin, split by format because it has to be.
+#
+# This is the part of "one directory for both" that a directory cannot
+# actually deliver: a Linux ELF does not run on Windows and a Windows PE
+# does not run in a distro. So the share holds both and each side takes
+# only its own — which is why this is bin/linux or bin/windows and never
+# just bin.
+#
+# WSL is the asymmetric case and gets both. Interop means a distro can
+# execute a Windows .exe directly, so putting bin/windows on the path
+# there is free reach rather than a mistake; Windows has no equivalent
+# and would only find files it cannot run.
+if [ -n "${RED_SHARE:-}" ]; then
+  case "${RED_ENV:-}" in
+    windows)
+      _red_path_prepend "$RED_SHARE/bin/windows"
+      ;;
+    wsl)
+      _red_path_prepend "$RED_SHARE/bin/windows"
+      _red_path_prepend "$RED_SHARE/bin/linux"
+      ;;
+  esac
+fi
+
 _red_path_prepend "$HOME/.local/bin"
 
 # Project-local binstubs (./bin/rails and friends). This is upstream
