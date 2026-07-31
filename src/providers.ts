@@ -669,6 +669,11 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
         await applyWallpaperLogged(theme, ctx.theme, ctx.platform);
         return;
       }
+      if (pr.name === "shared-root") {
+        const { ensureSharedRoot } = await import("./shared-root.ts");
+        await ensureSharedRoot(ctx.platform);
+        return;
+      }
       const wsl = await import("./wsl.ts");
       if (pr.name === "wsl-interop") {
         await wsl.ensureWslInterop();

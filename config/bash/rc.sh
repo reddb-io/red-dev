@@ -69,7 +69,43 @@ if [ -r "$RED_ROOT/config/bash/inputrc" ]; then
   bind -f "$INPUTRC" 2>/dev/null || true
 fi
 
-for _red_part in path init aliases functions prompt; do
+# The shared root: one directory, reachable from both sides.
+#
+# RED_SHARE_WIN holds it the way Windows spells it — `C:\Users\me\.reddev`
+# — because that is the only spelling both environments can agree to
+# store. Each side then translates, and there are three spellings rather
+# than the two you would expect:
+#
+#   C:\Users\me\.reddev       PowerShell, and any GUI application
+#   /c/Users/me/.reddev       Git Bash on native Windows
+#   /mnt/c/Users/me/.reddev   WSL
+#
+# Translated here in shell rather than by calling wslpath, because this
+# runs before PATH is built and cannot assume any binary exists yet.
+if [ -n "${RED_SHARE_WIN:-}" ]; then
+  _red_drive=$(printf '%s' "$RED_SHARE_WIN" | cut -c1 | tr '[:upper:]' '[:lower:]')
+  _red_rest=$(printf '%s' "$RED_SHARE_WIN" | cut -c3- | tr '\\' '/')
+  case "$RED_ENV" in
+    windows) RED_SHARE="/${_red_drive}${_red_rest}" ;;
+    wsl) RED_SHARE="/mnt/${_red_drive}${_red_rest}" ;;
+    # A Linux desktop has no Windows drive to reach. Sharing with a
+    # machine that is not there is not a thing, so this simply keeps
+    # whatever was recorded and lets the guard below drop it.
+    *) RED_SHARE="${RED_SHARE:-}" ;;
+  esac
+  unset _red_drive _red_rest
+fi
+
+# Dropped unless it is really there. A stale recorded root — a drive that
+# did not mount, a distro moved — would otherwise point every tool below
+# at a directory that does not exist, and each one fails differently.
+if [ -n "${RED_SHARE:-}" ] && [ -d "$RED_SHARE" ]; then
+  export RED_SHARE
+else
+  unset RED_SHARE
+fi
+
+for _red_part in path shared init aliases functions prompt; do
   _red_file="$RED_ROOT/config/bash/${_red_part}.sh"
   if [ -r "$_red_file" ]; then
     # shellcheck disable=SC1090

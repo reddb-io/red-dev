@@ -21,6 +21,7 @@ import initSh from "../config/bash/init.sh" with { type: "text" };
 import aliasesSh from "../config/bash/aliases.sh" with { type: "text" };
 import functionsSh from "../config/bash/functions.sh" with { type: "text" };
 import promptSh from "../config/bash/prompt.sh" with { type: "text" };
+import sharedSh from "../config/bash/shared.sh" with { type: "text" };
 import inputrc from "../config/bash/inputrc.conf" with { type: "text" };
 import zellijConfig from "../config/zellij/config.kdl" with { type: "text" };
 
@@ -34,6 +35,7 @@ export const FILES: Record<string, string> = {
   "aliases.sh": aliasesSh,
   "functions.sh": functionsSh,
   "prompt.sh": promptSh,
+  "shared.sh": sharedSh,
   // Deployed without the .conf suffix: the repo needs an extension for
   // the text import to resolve, readline does not care what it is
   // called, and INPUTRC points straight at it.

@@ -100,7 +100,8 @@ export type Provider =
         | "alacritty"
         | "wsl-interop"
         | "blesh"
-        | "runtimes";
+        | "runtimes"
+        | "shared-root";
     }
   /** Not installed here, deliberately. The reason is required. */
   | { kind: "skip"; reason: string };
@@ -174,7 +175,8 @@ const builtin = (
     | "alacritty"
     | "wsl-interop"
     | "blesh"
-    | "runtimes",
+    | "runtimes"
+    | "shared-root",
 ): Provider => ({ kind: "builtin", name });
 const skip = (reason: string): Provider => ({ kind: "skip", reason });
 
@@ -588,6 +590,18 @@ export const TOOLS: Tool[] = [
     // First in the wsl scope: everything after it calls a .exe, and
     // without the binfmt entry every one of those fails with a message
     // that points nowhere near the cause.
+    // Only where there are two environments to span. On bare-metal
+    // Ubuntu there is no Windows side to share with, and on a server
+    // there is no second anything — the provider says so rather than
+    // creating a directory nothing will ever read.
+    name: "shared-root",
+    about: "one directory for configuration both environments read",
+    scope: "core",
+    managed: true,
+    u24: builtin("shared-root"),
+    win: builtin("shared-root"),
+  },
+  {
     name: "wsl-interop",
     scope: "wsl",
     managed: true,
