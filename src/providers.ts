@@ -275,7 +275,16 @@ export async function ghInstall(
     },
   );
   if (!res.ok) throw new RedError(`download failed ${res.status}: ${url}`);
-  await Bun.write(`${tmp}/${file}`, res);
+  // The body is read before it is written, and that is the whole fix for
+  // a converge that stopped dead.
+  //
+  // `Bun.write(path, res)` — handing the Response straight to the writer
+  // — never returns for a large asset. `red` is 33 MB and hung there
+  // forever with no child process, no output and no error; `tq` at
+  // 4.6 MB went through, which is what made it look like a network
+  // problem rather than a streaming one. Reading the body first takes
+  // 790ms for the same file.
+  await Bun.write(`${tmp}/${file}`, await res.arrayBuffer());
 
   if (file.endsWith(".deb")) {
     // The only branch that genuinely needs it: dpkg writes system-wide
@@ -340,7 +349,9 @@ export async function ghInstallWindows(
 
   const res = await fetch(url);
   if (!res.ok) throw new RedError(`download failed ${res.status}: ${url}`);
-  await Bun.write(downloaded, res);
+  // Same as the Linux path: a streamed Response handed straight to
+  // Bun.write never returns for a large asset.
+  await Bun.write(downloaded, await res.arrayBuffer());
 
   if (silentArgs) {
     // An installer, run the way its publisher documents. Verified
