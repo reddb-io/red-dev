@@ -16,6 +16,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { log } from "./log.ts";
 import { configHome } from "./shared-root.ts";
 import { applyBat, applyDelta, applyHerdr, applyLazygit, applyOpencode } from "./theme-cli.ts";
+import { applyWindowsDesktopTheme } from "./windows-theme.ts";
 import type { Platform } from "./platform.ts";
 import type { Theme } from "./themes.ts";
 
@@ -199,6 +200,7 @@ function cliSurfaces(
     ["lazygit", () => applyLazygit(theme, p)],
     ["opencode", () => applyOpencode(p)],
     ["herdr", () => applyHerdr(p, key)],
+    ...(p.env === "wsl" ? [["windows", () => applyWindowsDesktopTheme(theme, p, key)] as [string, () => Promise<boolean>]] : []),
   ];
 }
 
@@ -227,6 +229,7 @@ export async function applyThemeEverywhere(
       ? [
           ["neovim", () => applyNeovim(theme)],
           ["vscode", () => applyVsCodeTheme(theme, p, key)],
+          ["windows", () => applyWindowsDesktopTheme(theme, p, key)],
         ]
       : [
           ["zellij", () => applyZellij(theme, p)],
