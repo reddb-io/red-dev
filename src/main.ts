@@ -737,7 +737,19 @@ async function cmdMenu(p: Platform, inv: Invocation, cliHelp: string): Promise<n
 // pointing at a Node internal. Nothing in src/ creates a signal during
 // render; that was fixed, and this is a different bug wearing the same
 // message. Real warnings still appear when running from source.
-if (!process.env.NODE_ENV) process.env.NODE_ENV = "production";
+// Set, not defaulted — the guard that used to be here never fired.
+//
+// `if (!process.env.NODE_ENV)` assumed the variable would be empty in a
+// shipped binary. It is not: bun build --compile bakes in
+// NODE_ENV="development", so the condition was false on every run and
+// the suppression released in 0.9.5 never once took effect. The warning
+// it was meant to silence came back the moment anyone looked, which is
+// how it was found.
+//
+// RED_DEV_DEBUG is the way back to development behaviour, because a
+// released binary cannot tell bun's default apart from a deliberate
+// NODE_ENV and should not try.
+process.env.NODE_ENV = process.env["RED_DEV_DEBUG"] ? "development" : "production";
 
 /**
  * Leave a trace when the process dies.
