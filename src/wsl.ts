@@ -69,6 +69,30 @@ export async function windowsLocalAppData(): Promise<string> {
   return await capture(["wslpath", "-u", winPath]);
 }
 
+/**
+ * The Windows profile, spelled the way Windows spells it.
+ *
+ * Deliberately not translated to a unix path the way
+ * windowsLocalAppData is: the shared root is stored in the one form both
+ * environments can agree on, and each side translates for itself. Handing
+ * a /mnt/c path to the thing whose whole job is to be OS-neutral would
+ * bake one side's view into the record.
+ */
+export async function windowsUserProfile(): Promise<string> {
+  if (process.platform === "win32") {
+    const home = process.env["USERPROFILE"];
+    if (!home) throw new RedError("USERPROFILE is not set");
+    return home;
+  }
+
+  const raw = await capture([interopBin("cmd.exe"), "/c", "echo %USERPROFILE%"]);
+  const winPath = raw.split("\n").pop()?.trim().replace(/\r$/, "") ?? "";
+  if (!/^[A-Za-z]:\\/.test(winPath)) {
+    throw new RedError(`could not read %USERPROFILE% from Windows (got: ${raw})`);
+  }
+  return winPath;
+}
+
 // ---------------------------------------------------------- interop
 
 /**

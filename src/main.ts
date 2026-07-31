@@ -831,6 +831,12 @@ async function main(): Promise<number> {
       return await cmdLang();
     case "shell":
       return await cmdShell(p, inv);
+    case "share": {
+      const { chooseSharedRoot } = await import("./shared-root.ts");
+      // The scope argument doubles as the path here: `red-dev share` with
+      // nothing reports what is recorded, with a path sets it.
+      return await chooseSharedRoot(p, inv.scope || undefined);
+    }
     case "uninstall":
       return await cmdUninstall(p);
     case "wsl":

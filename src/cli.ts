@@ -115,6 +115,9 @@ export function buildCli(): CLI {
       shell: {
         description: "choose whether the terminal opens WSL or Git Bash",
       },
+      share: {
+        description: "one directory both WSL and Windows read configuration from",
+      },
       uninstall: {
         description: "remove tools or red-dev's own configuration",
       },

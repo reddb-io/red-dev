@@ -65,6 +65,54 @@ export function defaultRoot(windowsHome: string): string {
   return `${windowsHome.replace(/[\\/]$/, "")}\\.reddev`;
 }
 
+/**
+ * Choose the shared root, and record it so a shell can find it.
+ *
+ * The switch this feature was missing. Everything else was reachable
+ * only by exporting RED_SHARE_WIN by hand, which meant it worked in
+ * testing and was invisible to anyone actually using it.
+ */
+export async function chooseSharedRoot(p: Platform, requested?: string): Promise<number> {
+  if (p.env !== "wsl" && p.env !== "windows") {
+    log.skip("a shared root spans WSL and Windows; this machine is neither");
+    return 0;
+  }
+
+  const current = process.env["RED_SHARE_WIN"];
+  if (!requested && current) {
+    log.ok(`shared root is ${current}`);
+    log.plain(`       here that is ${localPath(current, p.env)}`);
+    log.plain(`       change it with: red-dev share <windows-path>`);
+    return 0;
+  }
+
+  const root = requested ?? defaultRoot(await windowsHome(p));
+  if (!/^[A-Za-z]:[\\/]/.test(root)) {
+    throw new RedError(
+      `the shared root is stored the way Windows spells it, so it needs a drive letter — got '${root}'`,
+    );
+  }
+
+  const { recordShellEnv } = await import("./firstrun.ts");
+  await recordShellEnv({ RED_SHARE_WIN: root });
+  process.env["RED_SHARE_WIN"] = root;
+  await ensureSharedRoot(p);
+
+  log.ok(`recorded — open a new shell, or: export RED_SHARE_WIN='${root}'`);
+  return 0;
+}
+
+/** The Windows profile directory, whichever side we are asking from. */
+async function windowsHome(p: Platform): Promise<string> {
+  if (p.env === "windows") {
+    const h = process.env["USERPROFILE"];
+    if (h) return h;
+    throw new RedError("USERPROFILE is not set");
+  }
+  const { windowsUserProfile } = await import("./wsl.ts");
+  return await windowsUserProfile();
+}
+
 /** Directories the share is made of. `bin` is split by format on purpose. */
 const TREE = ["config", "config/zellij", "config/yazi", "config/atuin", "bin", "bin/linux", "bin/windows"];
 
