@@ -261,7 +261,23 @@ export async function runTui(
         } else if (verdict === "done") {
           const answers = setup.answers();
           setMode("install");
-          void actions.setup.apply(answers).then(() => model?.begin());
+          // Captured, like every other command that runs in here.
+          //
+          // Recording the shared root speaks through `log`, and without
+          // this it wrote to the console mid-render: "ok shared root
+          // is…" and "change it with: red-dev share…" printed over the
+          // status line while a second, stale copy of the progress
+          // column stayed on screen beside the live one. The frame is
+          // the renderer's; anything writing to it has to go through a
+          // signal.
+          const release = captureTo((line) => model?.note(line));
+          void actions.setup
+            .apply(answers)
+            .catch((err: unknown) => model?.note(`failed: ${(err as Error).message}`))
+            .finally(() => {
+              release();
+              model?.begin();
+            });
         }
         return;
       }

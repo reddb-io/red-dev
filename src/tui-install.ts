@@ -97,6 +97,16 @@ export interface InstallModel {
   logScroll: ScrollAreaState;
   /** Start converging. Idempotent; the menu calls it when you pick Install. */
   begin: () => void;
+  /**
+   * Add a line to the log from outside the converge.
+   *
+   * For the work that happens between answering the interview and the
+   * first step — recording the shared root, writing preferences. Those
+   * speak through `log`, and without somewhere to put their output they
+   * write straight to the console and tear a hole in the frame the
+   * renderer owns.
+   */
+  note: (line: string) => void;
   /** True when the key was a scroll key and the caller should stop. */
   handleKey: (input: string, key: KeyPress) => boolean;
 }
@@ -193,6 +203,7 @@ export function useInstallModel(
       setStartedAt(Date.now());
       setStarted(true);
     },
+    note: (line) => push(line.replace(/\x1b\[[0-9;]*m/g, "").trimEnd()),
     handleKey: (input, key) => {
       // Following the tail is right while a converge runs, but it makes
       // the one thing you would want to do — read the error that
