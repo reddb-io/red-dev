@@ -160,6 +160,7 @@ developer works in:
 | [`red-request`](https://github.com/reddb-io/red-request) | API client, powered by recker | desktop sessions |
 | [`red-ui`](https://github.com/reddb-io/red-ui) | universal client for reddb | **Linux desktop only** — see below |
 | [`dit`](https://github.com/reddb-io/dit) | push-to-toggle voice dictation | desktop sessions |
+| [`herdr`](https://herdr.dev) | several agents in one terminal, alive over SSH | Linux and WSL |
 
 `red` and `tq` are CLIs, so they are `core` and land on all five targets.
 `red-request`, `red-ui` and `dit` are `desktop`, which also means WSL never
@@ -180,8 +181,11 @@ to make deliberately, and dit works without it. It also wants an
 `ELEVENLABS_API_KEY`, or `--engine local` for offline Whisper.
 
 **Coding agents** are chosen rather than assumed — `red-dev agents` offers
-`claude-code`, `codex` and `opencode` pre-ticked, plus `gemini`, `openclaw`,
-`hermes`, and the Claude, Codex and T3 Code desktop apps on Windows. Each
+`claude-code`, `codex` and `opencode` pre-ticked, plus `gemini`, `herdr`,
+`openclaw`, `hermes`, and the Claude, Codex and T3 Code desktop apps on
+Windows. `herdr` is not an agent but the thing agents run inside — it
+multiplexes several into one terminal and keeps them alive across an SSH
+disconnect. Each
 installs by the path its publisher supports rather than one uniform mechanism,
 and *whose* path it is gets checked: winget has no Google entry for Gemini —
 searching it returns third-party chat clients that merely speak to Gemini — so
@@ -193,8 +197,9 @@ marketplace in Claude Code and Codex and generates plugin modules for OpenCode.
 
 **Web apps** — a page in its own window, its own icon and its own alt-tab entry, the way omakub's `web2app` does it. Desktop sessions only: a `.desktop` file needs a menu to appear in.
 
-**Optional**, never installed by a plain converge — `red-dev apps` offers them:
-`just` · `duf` · `dust` · `hyperfine` · `glow` · `gitui`
+**Optional**, never installed by a plain converge — `red-dev apps` offers them,
+and so does the interview: `just` · `duf` · `dust` · `hyperfine` · `glow` ·
+`gitui`, plus `powertoys` on Windows.
 
 **Runtimes** are mise's, not the distro's, so `node` resolves the same way in
 WSL, on the desktop, and in Git Bash. `red-dev lang` chooses which. A version
@@ -246,6 +251,8 @@ red-dev apps                 # choose optional tools
 red-dev lang                 # choose runtimes for mise to manage
 red-dev shell                # Windows + WSL: where a terminal lands
 red-dev agents               # choose coding agents, wire in red-skills
+red-dev share [path]         # one directory both WSL and Windows read
+red-dev share adopt <tool>   # move that tool's configuration into it
 red-dev uninstall            # remove tools, or red-dev's own config
 red-dev wsl                  # Windows: set up WSL
 red-dev ui                   # fullscreen, with live theme preview
@@ -352,6 +359,54 @@ which come from their own releases. The shell is **Git Bash, not PowerShell** �
 that is what makes the shipped dotfiles apply, and it is why this project
 standardises on bash rather than treating Windows as a separate world.
 
+#### What the one-liner opens
+
+It hands over to `red-dev` itself, so you land in the fullscreen interface
+rather than in a converge that already started. Choosing **Install** asks first:
+where to share configuration, which shell the terminal opens, which agents,
+which runtimes, which optional tools, ble.sh, the font, and the theme — with
+the palette previewed while the cursor moves. Previous answers come back
+pre-ticked, so agreeing again is enter, enter, enter, and `q` returns to the
+menu rather than starting anything.
+
+#### Global hotkeys
+
+Three shortcuts land in the Start Menu, which is where Windows requires them
+to be for the key to fire. No AutoHotkey, no PowerToys — a `.lnk` carries a
+hotkey natively, and byte 21 of the file format carries the elevation flag.
+
+| | |
+| --- | --- |
+| `Ctrl+Alt+T` | the terminal, on the shell you chose |
+| `Ctrl+Alt+Shift+T` | the same terminal running Git Bash instead |
+| `Ctrl+Shift+T` | PowerShell, elevated — it will prompt for consent |
+
+Alacritty is used where it exists, since it is the terminal red-dev themes. The
+elevated one is deliberately not Alacritty: elevation belongs to the process
+the shortcut starts, and an elevated terminal would make every pane admin
+rather than giving one admin shell.
+
+#### The desktop, not just the terminal
+
+A theme switch also sets Windows' dark mode and accent colour, from the same
+per-theme intent GNOME uses — so "gruvbox is orange" means one thing on both
+sides. Windows shows the accent on title bars and the taskbar only when colour
+prevalence is on, so that is set too. **Already-open windows keep their old
+colour until reopened.**
+
+Tiling is the one place Windows needs help. Windows 11 has Snap Layouts
+natively, and [PowerToys](https://learn.microsoft.com/windows/powertoys/) —
+Microsoft's own — has FancyZones, which is the real analogue of omakub's
+`tactile`, plus Command Palette in place of its Super+Space launcher. It is
+offered among the optional tools rather than installed for you, because it is a
+program that stays running. It ships with no grid configured; open it once to
+draw one.
+
+What Windows genuinely does not offer is switching to a *numbered* virtual
+desktop. omakub binds `Super+1..6`; Windows has virtual desktops and only
+sequential navigation, and reaching a specific one means calling
+`IVirtualDesktopManager`, whose interface changes between Windows builds.
+
 > [!IMPORTANT]
 > **Open a new terminal afterwards.** The installer adds
 > `%LOCALAPPDATA%\red-dev\bin` to your user `PATH`, and Windows does not push
@@ -378,6 +433,41 @@ red-dev shell
 
 Windows Terminal has profiles and does not need this; red-dev already sets its
 default to the distro, opening in your Linux home rather than under `/mnt/c`.
+
+### One directory both sides read
+
+```bash
+red-dev share                 # where the root is, and how this side spells it
+red-dev share adopt starship  # move one tool's configuration into it
+red-dev share adopt           # what can be shared
+```
+
+A setting applied on one side is then the same setting on the other. The split
+matters more than the directory does, and each third was measured rather than
+assumed:
+
+| | | |
+| --- | --- | --- |
+| **configuration** | shared | 65 ms against 22 ms to read twenty files |
+| **binaries** | co-located, `bin/linux` and `bin/windows` | ELF and PE are different formats |
+| **source code** | never | a build goes from 324 ms to 2726 ms |
+
+So `bin/` is split by format and never plain `bin` — that is the part one
+directory cannot deliver. WSL gets both, since interop lets a distro run a
+Windows `.exe`; Windows gets only its own, because it would find files it
+cannot run.
+
+The root is stored the one way both environments can agree on — as Windows
+spells it — and each side translates. There are three spellings, not two:
+`C:\Users\me\.reddev` for PowerShell, `/c/Users/me/.reddev` for Git Bash, and
+`/mnt/c/Users/me/.reddev` for WSL.
+
+Nothing moves on its own. `adopt` copies rather than moves and leaves the
+original where it is; on a boundary this fiddly, deleting the file you had been
+editing is the wrong kind of tidy.
+
+`git` is included rather than replaced, and `btop` stays local — both name
+absolute paths that exist on exactly one side.
 
 ### Look before you touch
 
@@ -488,7 +578,7 @@ red-dev theme gruvbox
 ```
 
 ```console
- ok  themed: zellij, btop, neovim
+ ok  themed: zellij, btop, neovim, vscode, bat, delta, lazygit, opencode, herdr, windows
  ok  wallpaper set
  ok  Windows Terminal configured (backup at .../settings.json.red-dev-backup)
  ok  theme: Gruvbox Dark — open a new terminal to see it
@@ -500,9 +590,29 @@ Ten of them, the same set omakub ships: `tokyo-night` · `catppuccin` ·
 
 A theme in Omakub is eight files, not a palette. Colouring only the terminal is
 what makes a switch feel half-done: the multiplexer keeps its old blue, the
-editor keeps its old background, and the seams show immediately. Here one
-palette reaches the terminal, the multiplexer, the system monitor, the editor
-and the desktop wallpaper.
+editor keeps its old background, and the seams show immediately.
+
+Omakub themes eight surfaces and every one is an application with a window. The
+command-line tools it installs keep whatever colours they shipped with — so a
+Kanagawa terminal shows you a Monokai diff and a Dracula file browser. Those are
+surfaces too, and unlike the desktop ones they work on all five targets:
+
+| surface | how |
+| --- | --- |
+| alacritty, zellij, btop, neovim, VS Code | a generated theme file each |
+| `bat` | written twice, since Debian renames the binary and the config follows it |
+| `delta` | through git config, where red-dev already made it the pager |
+| `lazygit` | our block only; anything else in the file survives |
+| `opencode`, `herdr` | told to follow the terminal rather than given a copied palette |
+| Windows | dark mode and accent colour |
+| GNOME | light/dark preference and accent |
+| wallpaper | generated from the palette, not shipped as an image |
+
+Telling an agent to follow the terminal instead of copying sixteen hex values
+is [omarchy](https://github.com/basecamp/omarchy)'s idea, and it is the better
+one: following cannot drift. Where `herdr` ships a theme with our name — it has
+`tokyo-night`, `catppuccin`, `gruvbox` and `nord` — that wins, because its
+author tuned those for its own interface.
 
 Each writer owns a generated file and **references** your config rather than
 rewriting it — your zellij keybindings and the rest of `btop.conf` are yours.
@@ -521,28 +631,37 @@ compiled binary on every target.
 | **Ubuntu desktop** | The `desktop` scope is implemented and **has never run on real hardware**. GNOME hotkeys, extensions and dock settings are not ported at all. |
 | **Ubuntu 26.04** | The `u26` manifest column exists and **no 26.04 machine has exercised it**. Package-name drift is undiscovered. |
 | **WSL** | Windows interop cannot work under `sudo -u <other-user>`: `WSL_INTEROP` points at a per-session socket that sudo drops. Real invocations run as you, so this affects test harnesses only. |
-| **Native Windows** | Choosing a section from the fullscreen interface has been reported to crash and take the console with it. Not reproduced yet — see below. No zellij session persistence across reboots. No `ble.sh`-style line editor. |
+| **Native Windows** | No switching to a *numbered* virtual desktop — Windows offers only sequential navigation, and reaching a specific one means an interface that changes between builds. No zellij session persistence across reboots. No `ble.sh`-style line editor. |
 | **All** | `red-ui` installs on Linux desktop only, because that release has no Windows or macOS asset to install. |
 
 Stated plainly because "implemented" and "known to work" are different claims,
 and a README that blurs them costs someone an afternoon.
 
-### The Windows crash
+### When something goes wrong
 
-Picking `install`, `doctor` or `apps` from the fullscreen interface has been
-reported to kill the process and close the console with it. Picking a theme, from
-the same screen, works.
+Uncaught exceptions and rejections are written to
+`%LOCALAPPDATA%\red-dev\crash.log` before the process exits, and on Linux to
+`~/.local/state/red-dev/crash.log`. A fullscreen application that dies takes the
+console with it, so the stack scrolls past inside a window that is already
+closing — the file is the copy that survives.
 
-It has not reproduced. On Linux the whole path completes cleanly, driven through
-a sized pty. On Windows, in a real console with `isTTY` true, none of the
-candidate mechanisms reproduce either: two `render()` calls in one process,
-`exit()` called from inside a key handler, and a wall of ordinary output after
-the fullscreen tears down all survive, with raw mode restored and no leaked
-listeners. `doctor` run directly, without the fullscreen, also completes.
+That file earned its place. Picking Install from the fullscreen interface used
+to kill the process and close the console, and three separate experiments failed
+to reproduce it: two `render()` calls in one process, `exit()` from inside a key
+handler, and a wall of output after teardown all survive in a real console. The
+crash log named it in one stack — a second `render()` whose initialisation
+failed and whose own cleanup then wrote to a stdout that was already gone. The
+interface hosts every view in one render now.
 
-So instead of guessing, red-dev now records it. Uncaught exceptions and
-rejections are written to `%LOCALAPPDATA%\red-dev\crash.log` before the process
-exits — the console may not survive, the file does.
+To see the development warnings the shipped binaries suppress:
+
+```bash
+bun run build:debug
+```
+
+Not an environment variable. `bun build --compile` substitutes
+`process.env.NODE_ENV` at build time, so nothing at runtime — not this program,
+not your shell — can reach that check.
 
 ### `red-ui` on Windows
 
@@ -672,12 +791,35 @@ Early, but the loop runs end to end.
 - Verified on WSL Ubuntu 24.04 and native Windows from one source tree, and on a
   freshly created user for the dotfiles path — including the full install path
   from the published release
-- `red` and `tq` installed and run from the published releases on native
-  Windows; `red-request`'s installer verified to be NSIS asking for `asInvoker`,
-  so `/S` installs per-user without a UAC prompt
+- On native Windows: `tq 0.13.0`, `reddb 1.23.2` and `dit 0.3.0` installed and
+  running from their own releases, Red Request installed silently without a UAC
+  prompt, PowerToys through winget, all three hotkeys in the Start Menu with the
+  elevation flag on the right one, and the accent colour read back from the
+  registry as the colour the theme asked for
+- Configuration shared across the boundary both ways, with the same bytes read
+  from `/mnt/c/...` and `C:\...`
 
 See [Known limitations](#known-limitations-per-target) for what is implemented
 but unproven.
+
+### Trying it on Windows
+
+```powershell
+irm https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.ps1 | iex
+```
+
+Then, in order:
+
+1. **Open a new terminal.** The `PATH` entry does not reach shells that were
+   already running, and this is the single most common "it did not install".
+2. `red-dev` — the interface. **Install** asks its questions first; nothing
+   converges until you answer.
+3. Try `Ctrl+Alt+T`, `Ctrl+Alt+Shift+T` and `Ctrl+Shift+T`.
+4. `red-dev theme gruvbox`, then look at a title bar. Windows applies the accent
+   to windows opened *after* the switch.
+5. `red-dev doctor` — it should report no drift.
+
+If anything dies, `%LOCALAPPDATA%\red-dev\crash.log` is the file to send.
 
 ---
 
