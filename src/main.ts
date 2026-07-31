@@ -119,7 +119,7 @@ async function cmdInstall(p: Platform, inv: Invocation): Promise<number> {
   // CI, in a pipe and over a non-interactive SSH — which is what makes
   // asking safe rather than something to avoid entirely.
   if (!inv.dryRun && !inv.yes && !inv.scope) {
-    const { isFirstRun, askFirstRun, writeShellEnv } = await import("./firstrun.ts");
+    const { isFirstRun, askFirstRun, writeShellEnv, carryOutChoices } = await import("./firstrun.ts");
     if (await isFirstRun(p)) {
       const choices = await askFirstRun(p);
       if (choices) {
@@ -133,45 +133,10 @@ async function cmdInstall(p: Platform, inv: Invocation): Promise<number> {
         if (choices.apps.length > 0) extraScopes = ["optional"];
         await writeShellEnv(p, choices.blesh);
 
-        // Agents chosen in the fullscreen setup, installed here rather
-        // than inside the render loop — a converge printing under a live
-        // layout fights it for the terminal.
-        if (choices.agents && choices.agents.length > 0) {
-          const { availableAgents, installAgent, isAgentInstalled, installRedSkills } =
-            await import("./agents.ts");
-          const available = availableAgents(p);
-          for (const key of choices.agents) {
-            const agent = available.find((a) => a.key === key);
-            if (!agent) continue;
-            if (isAgentInstalled(agent)) {
-              log.skip(`${agent.label} already present`);
-              continue;
-            }
-            try {
-              await installAgent(agent, p);
-              log.ok(agent.label);
-            } catch (err) {
-              log.err(`${agent.label}: ${(err as Error).message}`);
-            }
-          }
-          // red-skills configures whatever is now present, so it runs
-          // once after all of them rather than per agent.
-          if (choices.agents.some((k) => k !== "claude-desktop" && k !== "codex-desktop")) {
-            try {
-              await installRedSkills();
-            } catch (err) {
-              log.warn(`red-skills: ${(err as Error).message}`);
-            }
-          }
-        }
-        if (choices.runtimes.length > 0) {
-          const { useRuntimes } = await import("./runtimes.ts");
-          try {
-            await useRuntimes(choices.runtimes);
-          } catch (err) {
-            log.warn(`runtimes: ${(err as Error).message}`);
-          }
-        }
+        // One implementation, reachable from both paths. It used to live
+        // only here, so the fullscreen menu asked which agents you wanted
+        // and installed none of them.
+        await carryOutChoices(p, choices);
       }
     }
   }

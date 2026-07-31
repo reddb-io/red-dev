@@ -110,8 +110,74 @@ export async function applySetupAnswers(
       : {}),
   });
   await writeShellEnv(p, answers.blesh);
+  await carryOutChoices(p, {
+    agents: answers.agents,
+    runtimes: answers.runtimes,
+    apps: answers.apps,
+  });
   void inv;
   return { answers };
+}
+
+/**
+ * Install what the interview chose.
+ *
+ * This lived inside cmdInstall's first-run branch and nowhere else, so
+ * the fullscreen menu — the path the one-liner takes — asked which
+ * agents you wanted and then installed none of them. You picked
+ * claude-code, codex and opencode, the interview closed, the converge
+ * ran, and nothing had happened.
+ *
+ * red-skills runs once at the end rather than per agent, because its
+ * installer detects which hosts are present and wires each one. Running
+ * it first would find nothing and report success — the same ordering
+ * mistake as the tool itself warns about.
+ */
+export async function carryOutChoices(
+  p: Platform,
+  choices: { agents?: string[]; runtimes: string[]; apps: string[] },
+): Promise<void> {
+  const agents = choices.agents ?? [];
+  if (agents.length > 0) {
+    const { availableAgents, installAgent, isAgentInstalled, installRedSkills } = await import(
+      "./agents.ts"
+    );
+    const available = availableAgents(p);
+    for (const key of agents) {
+      const agent = available.find((a) => a.key === key);
+      if (!agent) continue;
+      if (isAgentInstalled(agent)) {
+        log.skip(`${agent.label} already present`);
+        continue;
+      }
+      try {
+        await installAgent(agent, p);
+        log.ok(agent.label);
+      } catch (err) {
+        // One agent failing never stops the others, the same policy the
+        // converge has for tools.
+        log.err(`${agent.label}: ${(err as Error).message}`);
+      }
+    }
+    // The desktop apps host no skills, so picking only those is not a
+    // reason to run the installer.
+    if (agents.some((k) => k !== "claude-desktop" && k !== "codex-desktop" && k !== "t3code")) {
+      try {
+        await installRedSkills();
+      } catch (err) {
+        log.warn(`red-skills: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  if (choices.runtimes.length > 0) {
+    const { useRuntimes } = await import("./runtimes.ts");
+    try {
+      await useRuntimes(choices.runtimes);
+    } catch (err) {
+      log.warn(`runtimes: ${(err as Error).message}`);
+    }
+  }
 }
 
 export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> {
