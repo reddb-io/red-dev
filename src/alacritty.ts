@@ -210,6 +210,9 @@ args = ['--login', '-i']
 `;
 }
 
+/** The files alacritty.toml has to import for red-dev to reach it. */
+const REQUIRED_IMPORTS = ['theme.toml', 'font.toml', 'shell.toml'] as const;
+
 function mainToml(opacity: number): string {
   return `# red-dev — Alacritty.
 #
@@ -304,7 +307,7 @@ export async function configureAlacritty(opts: AlacrittyOptions): Promise<void> 
     await Bun.write(main, mainToml(opts.opacity));
     log.ok(`alacritty: config written to ${dir}`);
   } else if (await migrateImportKey(main)) {
-    log.ok(`alacritty.toml: import moved under [general] — theme and font updated`);
+    log.ok(`alacritty.toml: import block repaired — theme, font and shell now imported`);
   } else {
     log.skip(`alacritty.toml exists — theme and font updated, yours left alone`);
   }
@@ -325,9 +328,28 @@ export async function configureAlacritty(opts: AlacrittyOptions): Promise<void> 
  */
 export async function migrateImportKey(path: string): Promise<boolean> {
   const text = await Bun.file(path).text();
-  if (/^\s*\[general\]/m.test(text)) return false;
-  const block = /^import = \[\r?\n(?:[^\]]*?)\r?\n\]/m;
-  if (!block.test(text)) return false;
-  await Bun.write(path, text.replace(block, (m) => `[general]\n${m}`));
+  const block = /(^\s*\[general\]\r?\n(?:[^[]*?))?^(\s*)import = \[\r?\n([^\]]*?)\r?\n\s*\]/m;
+  const m = block.exec(text);
+  if (!m) return false;
+
+  const hasGeneral = m[1] !== undefined;
+  const listed = (m[3] ?? "")
+    .split(/\r?\n/)
+    .map((l) => l.trim().replace(/^['"]|['"],?$/g, ""))
+    .filter(Boolean);
+
+  // Missing entries matter more than the deprecation did.
+  //
+  // The file is written once, so one that predates a new import never
+  // gains it: this machine's had theme and font and no shell, which is
+  // why `red-dev shell` had no effect on that side — the choice was
+  // being written to a file nothing read. Adding is safe in a way
+  // rewriting is not; anything the user put there is kept.
+  const missing = REQUIRED_IMPORTS.filter((r) => !listed.includes(r));
+  if (hasGeneral && missing.length === 0) return false;
+
+  const merged = [...listed, ...missing];
+  const rebuilt = `[general]\nimport = [\n${merged.map((i) => `  '${i}',`).join("\n")}\n]`;
+  await Bun.write(path, text.replace(block, rebuilt));
   return true;
 }

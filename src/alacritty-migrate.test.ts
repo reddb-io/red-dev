@@ -43,10 +43,28 @@ describe("the alacritty import key", () => {
     expect(out).toContain("opacity = 0.90");
   });
 
-  test("leaves a config that already has [general] alone", async () => {
+  test("leaves a config that is already complete alone", async () => {
     const already = OLD.replace("import = [", "[general]\nimport = [");
     const out = await migrate(already);
     expect((out.match(/\[general\]/g) ?? []).length).toBe(1);
+  });
+
+  test("adds an import the file predates", async () => {
+    // The bug that mattered more than the warning. This machine's config
+    // was written before shell.toml existed, so it never imported it —
+    // and `red-dev shell` had been writing a choice into a file nothing
+    // read.
+    const old = OLD.replace("  'shell.toml',\n", "");
+    expect(old).not.toContain("shell.toml");
+    const out = await migrate(old);
+    expect(out).toContain("shell.toml");
+    expect(out).toContain("theme.toml");
+    expect(out).toContain("font.toml");
+  });
+
+  test("keeps an import the user added", async () => {
+    const mine = OLD.replace("  'shell.toml',", "  'shell.toml',\n  'meu.toml',");
+    expect(await migrate(mine)).toContain("meu.toml");
   });
 
   test("does not touch an import written some other way", async () => {
