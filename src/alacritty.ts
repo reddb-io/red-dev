@@ -216,6 +216,16 @@ function mainToml(opacity: number): string {
 # This file is created once and never rewritten, so it is yours to edit.
 # Theme and font live in the imported files, which red-dev regenerates.
 
+[general]
+# general.import, not a bare top-level import: Alacritty deprecated the
+# latter, and every launch prints
+#
+#   [WARN] Config warning: import has been deprecated; use general.import
+#
+# over the terminal before the shell has drawn anything. It still works,
+# which is why it went unnoticed — the file red-dev writes is created
+# once and never rewritten, so an install from before the rename keeps
+# warning until this file is replaced by hand.
 import = [
   'theme.toml',
   'font.toml',
@@ -293,7 +303,31 @@ export async function configureAlacritty(opts: AlacrittyOptions): Promise<void> 
   if (!existsSync(main)) {
     await Bun.write(main, mainToml(opts.opacity));
     log.ok(`alacritty: config written to ${dir}`);
+  } else if (await migrateImportKey(main)) {
+    log.ok(`alacritty.toml: import moved under [general] — theme and font updated`);
   } else {
     log.skip(`alacritty.toml exists — theme and font updated, yours left alone`);
   }
+}
+
+/**
+ * Move a top-level `import` under `[general]`.
+ *
+ * "Written once and never rewritten" is the right policy for a file the
+ * user is invited to edit, and it has one cost: a key that upstream
+ * renames stays wrong forever. Alacritty deprecated the bare `import`,
+ * so every launch printed a warning over the terminal before the shell
+ * had drawn anything — on a config red-dev itself had written.
+ *
+ * The narrowest possible edit: only the import block, only when there is
+ * no [general] section already, and only when the block is the shape
+ * this file writes. Anything else is the user's and is left alone.
+ */
+export async function migrateImportKey(path: string): Promise<boolean> {
+  const text = await Bun.file(path).text();
+  if (/^\s*\[general\]/m.test(text)) return false;
+  const block = /^import = \[\r?\n(?:[^\]]*?)\r?\n\]/m;
+  if (!block.test(text)) return false;
+  await Bun.write(path, text.replace(block, (m) => `[general]\n${m}`));
+  return true;
 }
