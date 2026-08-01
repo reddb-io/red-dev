@@ -9,7 +9,7 @@
  */
 
 import { copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
-import { log, RedError } from "./log.ts";
+import { log, logIsCaptured, RedError } from "./log.ts";
 import type { Provider } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
 
@@ -24,16 +24,74 @@ import type { Platform } from "./platform.ts";
 const stdinMode = (): "inherit" | "ignore" =>
   process.stdin.isTTY === true ? "inherit" : "ignore";
 
+/**
+ * Forward a child's stream into the log, one line at a time.
+ *
+ * Carriage returns are resolved the way a terminal would: a progress
+ * line that rewrites itself becomes the last thing it said, rather than
+ * every state it passed through concatenated into one unreadable row.
+ */
+async function pumpToLog(stream: ReadableStream<Uint8Array> | null): Promise<void> {
+  if (!stream) return;
+  const decoder = new TextDecoder();
+  let rest = "";
+  const say = (raw: string): void => {
+    const line = (raw.includes("\r") ? raw.slice(raw.lastIndexOf("\r") + 1) : raw).trimEnd();
+    if (line) log.plain(line);
+  };
+  for await (const chunk of stream) {
+    rest += decoder.decode(chunk as Uint8Array, { stream: true });
+    const parts = rest.split("\n");
+    rest = parts.pop() ?? "";
+    for (const part of parts) say(part);
+  }
+  say(rest);
+}
+
+/**
+ * Spawn a child and put its output where log output is going.
+ *
+ * Inheriting is right when the terminal *is* the interface: the child's
+ * output is the feedback, unbuffered and in real time. It is wrong
+ * inside the fullscreen one, where the renderer owns the screen and a
+ * child writes wherever the cursor happens to be — which is how a line
+ * of installer output ended up painted through the middle of the
+ * right-hand column on a 96-column window.
+ *
+ * stdin goes with it. A child inheriting stdin while the interface is
+ * reading keys steals them, so captured means detached — which turns a
+ * prompt nobody could have answered into a non-zero exit, exactly as
+ * the apt guard above already does.
+ */
+export async function spawnLogged(
+  cmd: string[],
+  extra: { env?: Record<string, string | undefined> } = {},
+): Promise<number> {
+  if (!logIsCaptured()) {
+    const proc = Bun.spawn(cmd, {
+      stdout: "inherit",
+      stderr: "inherit",
+      stdin: stdinMode(),
+      ...extra,
+    });
+    return await proc.exited;
+  }
+
+  const proc = Bun.spawn(cmd, {
+    stdout: "pipe",
+    stderr: "pipe",
+    stdin: "ignore",
+    ...extra,
+  });
+  await Promise.all([pumpToLog(proc.stdout), pumpToLog(proc.stderr)]);
+  return await proc.exited;
+}
+
 async function run(
   cmd: string[],
   opts: { allowFailure?: boolean } = {},
 ): Promise<number> {
-  const proc = Bun.spawn(cmd, {
-    stdout: "inherit",
-    stderr: "inherit",
-    stdin: stdinMode(),
-  });
-  const code = await proc.exited;
+  const code = await spawnLogged(cmd);
   if (code !== 0 && !opts.allowFailure) {
     throw new RedError(`${cmd[0]} exited ${code}: ${cmd.join(" ")}`);
   }
@@ -100,13 +158,7 @@ export async function aptInstall(pkgs: string[]): Promise<void> {
   await aptRefreshOnce();
   log.step(`apt: ${pkgs.join(" ")}`);
   const env = { ...process.env, DEBIAN_FRONTEND: "noninteractive" };
-  const proc = Bun.spawn(["sudo", "-E", "apt-get", "install", "-y", ...pkgs], {
-    stdout: "inherit",
-    stderr: "inherit",
-    stdin: stdinMode(),
-    env,
-  });
-  const code = await proc.exited;
+  const code = await spawnLogged(["sudo", "-E", "apt-get", "install", "-y", ...pkgs], { env });
   if (code !== 0) throw new RedError(`apt-get install failed (${code})`);
 }
 
@@ -492,12 +544,7 @@ export async function installerInstall(
   // and fails with an instruction instead.
   if (body.includes("sudo ")) await requireSudo();
 
-  const proc = Bun.spawn([shell, tmp, ...args], {
-    stdout: "inherit",
-    stderr: "inherit",
-    stdin: stdinMode(),
-  });
-  const code = await proc.exited;
+  const code = await spawnLogged([shell, tmp, ...args]);
   await run(["rm", "-f", tmp], { allowFailure: true });
 
   if (code !== 0) throw new RedError(`installer exited ${code}: ${url}`);
@@ -614,13 +661,8 @@ export async function systemUpdate(p: Platform): Promise<void> {
     await aptRefreshOnce();
     log.step("apt full-upgrade");
     const env = { ...process.env, DEBIAN_FRONTEND: "noninteractive" };
-    const proc = Bun.spawn(["sudo", "-E", "apt-get", "full-upgrade", "-y"], {
-      stdout: "inherit",
-      stderr: "inherit",
-      stdin: stdinMode(),
-      env,
-    });
-    if ((await proc.exited) !== 0) throw new RedError("apt full-upgrade failed");
+    const upgrade = await spawnLogged(["sudo", "-E", "apt-get", "full-upgrade", "-y"], { env });
+    if (upgrade !== 0) throw new RedError("apt full-upgrade failed");
 
     log.step("apt autoremove");
     await run(["sudo", "-E", "apt-get", "autoremove", "-y"], { allowFailure: true });

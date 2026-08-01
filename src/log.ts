@@ -42,6 +42,19 @@ export function captureTo(sink: (line: string) => void): () => void {
   };
 }
 
+/**
+ * Whether anything other than the console is receiving log output.
+ *
+ * Asked by whoever spawns a child process. `log` calls are routed, but a
+ * child that inherits stdout writes to the terminal directly, and inside
+ * the fullscreen interface that means writing over a frame the renderer
+ * believes it owns — a line of apt output landing wherever the cursor
+ * happened to be, in the middle of the right-hand column.
+ */
+export function logIsCaptured(): boolean {
+  return buffer !== null || stream !== null;
+}
+
 const emit = (line: string, sink: (s: string) => void): void => {
   if (buffer) buffer.push(line);
   else if (stream) stream(line);

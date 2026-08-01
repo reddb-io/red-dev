@@ -50,8 +50,11 @@ async function capture(cmd: string[]): Promise<string> {
 }
 
 async function run(cmd: string[]): Promise<void> {
-  const proc = Bun.spawn(cmd, { stdout: "inherit", stderr: "inherit", stdin: "ignore" });
-  const code = await proc.exited;
+  // Through spawnLogged rather than inheriting: this scope runs inside
+  // the fullscreen converge, and a child writing to the terminal there
+  // paints over the frame the renderer owns.
+  const { spawnLogged } = await import("./providers.ts");
+  const code = await spawnLogged(cmd);
   if (code !== 0) throw new RedError(`${cmd[0]} exited ${code}`);
 }
 

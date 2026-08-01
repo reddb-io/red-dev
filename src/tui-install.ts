@@ -58,6 +58,21 @@ function etaText(done: number, total: number, elapsedMs: number, finished: boole
 }
 
 
+/**
+ * One log line, cut to the columns it actually has.
+ *
+ * LogViewer draws each line with a plain Text, and Text wraps. A wrapped
+ * line costs a row the layout budgeted for something else and breaks a
+ * path across two rows mid-segment, which is how a converge full of
+ * Windows paths turns a log into something you cannot read down. Cutting
+ * is the only option that keeps the shape: a log does not scroll
+ * sideways.
+ */
+export function fitToWidth(line: string, width: number): string {
+  if (width < 2) return "";
+  return line.length <= width ? line : `${line.slice(0, width - 1)}\u2026`;
+}
+
 export interface InstallTuiOptions {
   platform: Platform;
   ctx: ApplyContext;
@@ -269,6 +284,12 @@ export function InstallLayout(m: InstallModel, width: number, height: number) {
   const leftWidth = twoColumn ? width - rightOuter - 6 : width - 4;
   const logRows = Math.max(5, height - (twoColumn ? 8 : 16));
 
+  // What a log line actually gets: Accented spends one column on its
+  // bar and one on the margin, and LogViewer spends one more on the
+  // scrollbar as soon as there is anything to scroll — which, during a
+  // converge, is immediately.
+  const logTextWidth = Math.max(8, leftWidth - 3);
+
   const by = (o: string): number => results.filter((r) => r.outcome === o).length;
   const failures = results.filter((r) => r.outcome === "failed");
   const elapsedMs = m.elapsedMs();
@@ -294,7 +315,12 @@ export function InstallLayout(m: InstallModel, width: number, height: number) {
           logRows,
           leftWidth,
           LogViewer({
-            lines: m.lines(),
+            // Cut here rather than where the lines are made: this is
+            // where the width is known, and it is the width now rather
+            // than whatever it was when the line arrived. A fresh array
+            // each frame is safe — the scroll area keys off content
+            // length, which this does not change.
+            lines: m.lines().map((l) => fitToWidth(l, logTextWidth)),
             height: logRows,
             // Follow the tail only while nobody has scrolled away from
             // it. Passing `true` unconditionally is what made the scroll
