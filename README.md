@@ -14,7 +14,68 @@ red-dev installs the same tools, shell, terminal, tiling and theme on bare-metal
 Ubuntu, on WSL, and on native Windows — from a single binary that needs no
 runtime, no bash on Windows, and no second configuration to keep in sync.
 
+<sub>Derived from <a href="https://omakub.org">Omakub</a> by
+<a href="https://dhh.dk">DHH</a> and Basecamp.
+<a href="#attribution"><strong>If you run Ubuntu 24.04 on the desktop, use Omakub.</strong></a></sub>
+
 </div>
+
+---
+
+## Contents
+
+| Getting there | What it is | Living with it |
+| --- | --- | --- |
+| [Quick start](#quick-start) | [The support matrix](#the-support-matrix) | [Usage](#usage) |
+| [Attribution](#attribution) | [The identical layer](#the-identical-layer) | [Using it on each target](#using-it-on-each-target) |
+| [Develop](#develop) | [One directory both sides read](#one-directory-both-sides-read) | [Themes](#themes) |
+| [Status](#status) | [Under the hood](#under-the-hood) | [Troubleshooting](#troubleshooting) |
+
+---
+
+## Quick start
+
+Linux and WSL:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.sh | sh
+```
+
+Native Windows:
+
+```powershell
+irm https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.ps1 | iex
+```
+
+Both resolve the binary for your platform from the latest release, install it
+under your own user, and then **open red-dev's own interface** — the same screen
+you get by typing `red-dev`, where you choose between a first install and
+maintenance. The bootstrap and the binary arrive at the same place on purpose;
+running the one-liner is how you get the product, not a different, shorter
+version of it.
+
+Neither needs administrator or root rights for red-dev itself; individual
+packages may still ask for sudo.
+
+On Windows, open a new terminal after installing — the `PATH` entry does not
+reach shells that were already running.
+
+Every push to `main` also publishes a `next` prerelease, so the newest work is
+installable without waiting for a tag:
+
+```bash
+RED_DEV_CHANNEL=next sh -c "$(curl -fsSL https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.sh)"
+```
+
+```powershell
+$env:RED_DEV_CHANNEL='next'; irm https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.ps1 | iex
+```
+
+| Variable | Effect |
+| --- | --- |
+| `RED_DEV_CHANNEL` | `stable` (default) or `next` — every push to `main` publishes a `next` prerelease |
+| `RED_DEV_BIN_DIR` | Where the binary lands; defaults to `~/.local/bin` (Linux) or `%LOCALAPPDATA%\red-dev\bin` |
+| `GITHUB_TOKEN` | Raises the API rate limit; required only for a private fork |
 
 ---
 
@@ -74,52 +135,6 @@ the manifest, nothing else.
 
 ---
 
-## Install
-
-Linux and WSL:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.sh | sh
-```
-
-Native Windows:
-
-```powershell
-irm https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.ps1 | iex
-```
-
-Both resolve the binary for your platform from the latest release, install it
-under your own user, and then **open red-dev's own interface** — the same screen
-you get by typing `red-dev`, where you choose between a first install and
-maintenance. The bootstrap and the binary arrive at the same place on purpose;
-running the one-liner is how you get the product, not a different, shorter
-version of it.
-
-Neither needs administrator or root rights for red-dev itself; individual
-packages may still ask for sudo.
-
-On Windows, open a new terminal after installing — the `PATH` entry does not
-reach shells that were already running.
-
-Every push to `main` also publishes a `next` prerelease, so the newest work is
-installable without waiting for a tag:
-
-```bash
-RED_DEV_CHANNEL=next sh -c "$(curl -fsSL https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.sh)"
-```
-
-```powershell
-$env:RED_DEV_CHANNEL='next'; irm https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.ps1 | iex
-```
-
-| Variable | Effect |
-| --- | --- |
-| `RED_DEV_CHANNEL` | `stable` (default) or `next` — every push to `main` publishes a `next` prerelease |
-| `RED_DEV_BIN_DIR` | Where the binary lands; defaults to `~/.local/bin` (Linux) or `%LOCALAPPDATA%\red-dev\bin` |
-| `GITHUB_TOKEN` | Raises the API rate limit; required only for a private fork |
-
----
-
 <img src="docs/stack.svg" alt="The identical layer — Alacritty, zellij and bash, one config each" width="100%">
 
 ## The identical layer
@@ -142,6 +157,8 @@ On native Windows the terminal launches **Git Bash, not PowerShell**. That is
 what makes the shipped dotfiles apply there at all, and it is why standardising
 on bash rather than PowerShell is what makes "same experience" true instead of
 aspirational.
+
+---
 
 ### zellij is the session, not a command you run
 
@@ -265,8 +282,6 @@ real terminal, so turning it on is deliberate:
 export RED_BLE=1
 ```
 
----
-
 ## Usage
 
 ```bash
@@ -291,6 +306,8 @@ red-dev doctor               # report tool and configuration drift
 
 Global options: `--theme`, `--font`, `--opacity`. Scopes: `core`, `desktop`,
 `wsl`, `optional`.
+
+---
 
 ### Nothing to install
 
@@ -329,6 +346,139 @@ deliberately:
 Omakub asks these at first run; here they are re-runnable, because the answers
 change when a project does.
 
+### Look before you touch
+
+`plan` names the provider that would satisfy each tool, and marks what is
+already there:
+
+```bash
+red-dev plan core
+```
+
+```console
+[core]
+  git              apt:git (present)
+  ripgrep          apt:ripgrep (present)
+  fd               apt:fd-find (present)
+  bat              apt:bat (present)
+  starship         gh:starship/starship:starship-x86_64-unknown-linux-gnu.tar.gz (present)
+  zellij           gh:zellij-org/zellij:zellij-x86_64-unknown-linux-musl.tar.gz
+  docker           aptrepo:docker-ce,docker-ce-cli,containerd.io,...
+```
+
+The `wsl` scope reads differently on each side of the boundary. From inside the
+distro:
+
+```console
+[wsl]
+  wsl-interop      builtin:wsl-interop (managed)
+  nerd-font        builtin:nerd-font (managed)
+  alacritty-host   winget:Alacritty.Alacritty (managed)
+  windows-terminal builtin:windows-terminal (managed)
+```
+
+From native Windows, the same scope is entirely skipped — and every skip says
+why:
+
+```console
+[wsl]
+  wsl-interop      skip (native Windows needs no interop shim)
+  nerd-font        skip (the Windows host provides this instead)
+  alacritty-host   skip (the Windows host provides this instead)
+  windows-terminal skip (the Windows host provides this instead)
+```
+
+A skip is a decision. One without a reason is an undocumented gap wearing a
+decision's clothes, so the manifest cannot express one.
+
+### Converge
+
+```bash
+red-dev install wsl --dry-run
+```
+
+```console
+:: os=linux distro=ubuntu version=24.04 env=wsl arch=x64
+:: scope: wsl
+  would install wsl-interop via builtin:wsl-interop
+  would install nerd-font via builtin:nerd-font
+  would install alacritty-host via winget:Alacritty.Alacritty
+  would install windows-terminal via builtin:windows-terminal
+ ok  dry run — nothing changed
+```
+
+Every provider is idempotent. Re-running after a partial failure is the normal
+recovery path, not an edge case — one tool failing never aborts the rest:
+
+```console
+warn alacritty: ENOEXEC: unknown error, posix_spawn 'cmd.exe'
+ ok  themed: zellij, btop
+ ok  converged — restart your shell
+```
+
+### Reading the log while it is being written
+
+A converge inside the fullscreen interface follows the tail, which is right until
+the moment something fails — at which point the thing you want to read is the
+line that just scrolled past. So the log scrolls:
+
+| | |
+| --- | --- |
+| `↑` `↓` / `k` `j` | a line at a time; moving up stops following the tail |
+| `PgUp` `PgDn` | a screen at a time |
+| `g` / `G` | the top; the bottom, which resumes following |
+
+Reaching the bottom re-arms the follow on its own, so there is no mode to
+remember. The status line says `paused` whenever it is off — a log that stops
+moving during a live converge otherwise reads as a hang.
+
+Bad input is rejected before any provider runs, which is the cheapest possible
+place to fail:
+
+```console
+$ red-dev plan nonsense
+fail invalid scope 'nonsense' (expected: core, desktop, wsl)
+
+$ red-dev frobnicate
+fail Unknown command: frobnicate
+Available commands: platform, plan, install, update, doctor, theme, menu
+```
+
+## One directory both sides read
+
+```bash
+red-dev share                 # where the root is, and how this side spells it
+red-dev share adopt starship  # move one tool's configuration into it
+red-dev share adopt           # what can be shared
+```
+
+A setting applied on one side is then the same setting on the other. The split
+matters more than the directory does, and each third was measured rather than
+assumed:
+
+| | | |
+| --- | --- | --- |
+| **configuration** | shared | 65 ms against 22 ms to read twenty files |
+| **binaries** | co-located, `bin/linux` and `bin/windows` | ELF and PE are different formats |
+| **source code** | never | a build goes from 324 ms to 2726 ms |
+
+So `bin/` is split by format and never plain `bin` — that is the part one
+directory cannot deliver. WSL gets both, since interop lets a distro run a
+Windows `.exe`; Windows gets only its own, because it would find files it
+cannot run.
+
+The root is stored the one way both environments can agree on — as Windows
+spells it — and each side translates. There are three spellings, not two:
+`C:\Users\me\.reddev` for PowerShell, `/c/Users/me/.reddev` for Git Bash, and
+`/mnt/c/Users/me/.reddev` for WSL.
+
+Nothing moves on its own. `adopt` copies rather than moves and leaves the
+original where it is; on a boundary this fiddly, deleting the file you had been
+editing is the wrong kind of tidy.
+
+`git` is included rather than replaced, and `btop` stays local — both name
+absolute paths that exist on exactly one side.
+
 ---
 
 ## Using it on each target
@@ -336,6 +486,8 @@ change when a project does.
 The command is the same everywhere. What differs is which scopes apply and
 which machine the work lands on — `red-dev platform` will tell you before you
 commit to anything.
+
+---
 
 ### Ubuntu desktop — 24.04 or 26.04
 
@@ -476,141 +628,6 @@ red-dev shell
 Windows Terminal has profiles and does not need this; red-dev already sets its
 default to the distro, opening in your Linux home rather than under `/mnt/c`.
 
-### One directory both sides read
-
-```bash
-red-dev share                 # where the root is, and how this side spells it
-red-dev share adopt starship  # move one tool's configuration into it
-red-dev share adopt           # what can be shared
-```
-
-A setting applied on one side is then the same setting on the other. The split
-matters more than the directory does, and each third was measured rather than
-assumed:
-
-| | | |
-| --- | --- | --- |
-| **configuration** | shared | 65 ms against 22 ms to read twenty files |
-| **binaries** | co-located, `bin/linux` and `bin/windows` | ELF and PE are different formats |
-| **source code** | never | a build goes from 324 ms to 2726 ms |
-
-So `bin/` is split by format and never plain `bin` — that is the part one
-directory cannot deliver. WSL gets both, since interop lets a distro run a
-Windows `.exe`; Windows gets only its own, because it would find files it
-cannot run.
-
-The root is stored the one way both environments can agree on — as Windows
-spells it — and each side translates. There are three spellings, not two:
-`C:\Users\me\.reddev` for PowerShell, `/c/Users/me/.reddev` for Git Bash, and
-`/mnt/c/Users/me/.reddev` for WSL.
-
-Nothing moves on its own. `adopt` copies rather than moves and leaves the
-original where it is; on a boundary this fiddly, deleting the file you had been
-editing is the wrong kind of tidy.
-
-`git` is included rather than replaced, and `btop` stays local — both name
-absolute paths that exist on exactly one side.
-
-### Look before you touch
-
-`plan` names the provider that would satisfy each tool, and marks what is
-already there:
-
-```bash
-red-dev plan core
-```
-
-```console
-[core]
-  git              apt:git (present)
-  ripgrep          apt:ripgrep (present)
-  fd               apt:fd-find (present)
-  bat              apt:bat (present)
-  starship         gh:starship/starship:starship-x86_64-unknown-linux-gnu.tar.gz (present)
-  zellij           gh:zellij-org/zellij:zellij-x86_64-unknown-linux-musl.tar.gz
-  docker           aptrepo:docker-ce,docker-ce-cli,containerd.io,...
-```
-
-The `wsl` scope reads differently on each side of the boundary. From inside the
-distro:
-
-```console
-[wsl]
-  wsl-interop      builtin:wsl-interop (managed)
-  nerd-font        builtin:nerd-font (managed)
-  alacritty-host   winget:Alacritty.Alacritty (managed)
-  windows-terminal builtin:windows-terminal (managed)
-```
-
-From native Windows, the same scope is entirely skipped — and every skip says
-why:
-
-```console
-[wsl]
-  wsl-interop      skip (native Windows needs no interop shim)
-  nerd-font        skip (the Windows host provides this instead)
-  alacritty-host   skip (the Windows host provides this instead)
-  windows-terminal skip (the Windows host provides this instead)
-```
-
-A skip is a decision. One without a reason is an undocumented gap wearing a
-decision's clothes, so the manifest cannot express one.
-
-### Converge
-
-```bash
-red-dev install wsl --dry-run
-```
-
-```console
-:: os=linux distro=ubuntu version=24.04 env=wsl arch=x64
-:: scope: wsl
-  would install wsl-interop via builtin:wsl-interop
-  would install nerd-font via builtin:nerd-font
-  would install alacritty-host via winget:Alacritty.Alacritty
-  would install windows-terminal via builtin:windows-terminal
- ok  dry run — nothing changed
-```
-
-Every provider is idempotent. Re-running after a partial failure is the normal
-recovery path, not an edge case — one tool failing never aborts the rest:
-
-```console
-warn alacritty: ENOEXEC: unknown error, posix_spawn 'cmd.exe'
- ok  themed: zellij, btop
- ok  converged — restart your shell
-```
-
-### Reading the log while it is being written
-
-A converge inside the fullscreen interface follows the tail, which is right until
-the moment something fails — at which point the thing you want to read is the
-line that just scrolled past. So the log scrolls:
-
-| | |
-| --- | --- |
-| `↑` `↓` / `k` `j` | a line at a time; moving up stops following the tail |
-| `PgUp` `PgDn` | a screen at a time |
-| `g` / `G` | the top; the bottom, which resumes following |
-
-Reaching the bottom re-arms the follow on its own, so there is no mode to
-remember. The status line says `paused` whenever it is off — a log that stops
-moving during a live converge otherwise reads as a hang.
-
-Bad input is rejected before any provider runs, which is the cheapest possible
-place to fail:
-
-```console
-$ red-dev plan nonsense
-fail invalid scope 'nonsense' (expected: core, desktop, wsl)
-
-$ red-dev frobnicate
-fail Unknown command: frobnicate
-Available commands: platform, plan, install, update, doctor, theme, menu
-```
-
----
-
 <img src="docs/themes.svg" alt="Themes — one palette applied to terminal, multiplexer, monitor, editor and wallpaper" width="100%">
 
 ## Themes
@@ -666,7 +683,12 @@ compiled binary on every target.
 
 ---
 
-## Known limitations, per target
+## Troubleshooting
+
+When a machine stops matching the manifest, these are the three
+places to look — in this order.
+
+### Known limitations, per target
 
 | Target | What does not work, and why |
 | --- | --- |
@@ -718,9 +740,11 @@ already wired, and the matrix entry is commented out with "intentionally
 commented out until the Linux pipeline is green end-to-end". When it comes back,
 this end is one line.
 
----
+## Under the hood
 
-## Design
+Why the code is shaped the way it is, and what it cost to learn.
+
+### Design
 
 The orchestrator is TypeScript compiled with [bun](https://bun.sh) to a
 standalone binary, so **native Windows needs no bash to bootstrap**. The dotfiles
@@ -734,9 +758,7 @@ broken gum download aborts the whole install before showing a single screen.
 Compiling the interface in removes that bootstrap dependency: red-dev can always
 draw its own interface, including the screen that reports a failed install.
 
----
-
-## Bugs inherited from the WSL forks, fixed here
+### Bugs inherited from the WSL forks, fixed here
 
 Porting surfaced real defects in the community WSL forks of Omakub. None are
 Omakub's fault — they are what happens when a desktop-shaped tool is bent toward
@@ -774,9 +796,7 @@ points at a cache URL whose format has since changed: every `tldr --update` fail
 and every query answers "Page cache not found". red-dev installs the release
 build instead.
 
----
-
-## Navigation
+### Navigation
 
 | Need | Go to |
 | --- | --- |
@@ -789,8 +809,6 @@ build instead.
 | The WSL-to-Windows boundary | [`src/wsl.ts`](src/wsl.ts) |
 | Wallpaper generation | [`src/wallpaper.ts`](src/wallpaper.ts), [`src/png.ts`](src/png.ts) |
 | Bootstrap scripts | [`boot.sh`](boot.sh), [`boot.ps1`](boot.ps1) |
-
----
 
 ## Develop
 
@@ -843,6 +861,8 @@ Early, but the loop runs end to end.
 See [Known limitations](#known-limitations-per-target) for what is implemented
 but unproven.
 
+---
+
 ### Trying it on Windows
 
 ```powershell
@@ -862,8 +882,8 @@ Then, in order:
 
 If anything dies, `%LOCALAPPDATA%\red-dev\crash.log` is the file to send.
 
----
-
 ## License
 
 [MIT](LICENSE).
+
+---
