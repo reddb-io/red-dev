@@ -25,7 +25,7 @@ import promptSh from "../config/bash/prompt.sh" with { type: "text" };
 import sharedSh from "../config/bash/shared.sh" with { type: "text" };
 import zellijSh from "../config/bash/zellij.sh" with { type: "text" };
 import inputrc from "../config/bash/inputrc.conf" with { type: "text" };
-import zellijConfig from "../config/zellij/config.kdl" with { type: "text" };
+import zellijBase from "../config/zellij/config.kdl" with { type: "text" };
 
 /** Exported so `doctor` can compare what is deployed against what this
  * binary would deploy — an upgraded red-dev with stale files on disk is
@@ -217,6 +217,43 @@ const SHIPPED_ZELLIJ_CONFIGS = new Set([
   "a9e80a2b4a25075a6e594fec7aa1806b4b7b569f406aaa6361673f918a048ee3",
 ]);
 
+/**
+ * The zellij config for this machine, which is the shipped one plus the
+ * one line that cannot be shipped.
+ *
+ * Without a copy_command zellij copies through OSC 52 — it asks the
+ * terminal to set the clipboard and reports success either way. On
+ * Windows that ask goes unanswered often enough that selecting text
+ * shows "Copied!" and pastes the previous contents, which is worse than
+ * failing. clip.exe is the Windows clipboard itself, reachable from WSL
+ * through interop and from Git Bash as a normal program; verified from
+ * this side with a round trip through Get-Clipboard.
+ *
+ * Per platform rather than shipped, because a copy_command naming a
+ * program that does not exist is the same silent failure pointed the
+ * other way.
+ */
+export function zellijConfigFor(p: Platform): string {
+  const command =
+    p.os === "windows" || p.env === "wsl"
+      ? "clip.exe"
+      : p.env === "desktop"
+        ? "wl-copy"
+        : null;
+
+  if (!command) return zellijBase;
+
+  return `${zellijBase}
+// Generated for this target by red-dev.
+//
+// The clipboard zellij should write to. Without it zellij uses OSC 52,
+// which asks the terminal to do the copying and cannot tell whether it
+// did — so a selection reports success and the clipboard keeps whatever
+// was in it.
+copy_command "${command}"
+`;
+}
+
 export type ZellijConfigAction = "write" | "upgrade" | "keep";
 
 /**
@@ -293,8 +330,9 @@ async function installZellijConfig(p: Platform): Promise<void> {
   // file already sitting there and left it alone, and the result was two
   // lines where the config should have been. Nothing was missing, so
   // re-running install never fixed it.
+  const shipped = zellijConfigFor(p);
   const current = existsSync(path) ? await Bun.file(path).text() : null;
-  switch (zellijConfigAction(current, zellijConfig)) {
+  switch (zellijConfigAction(current, shipped)) {
     case "keep":
       log.skip("zellij config exists — left alone");
       // Saying nothing here is how someone ends up with a terminal that
@@ -308,11 +346,11 @@ async function installZellijConfig(p: Platform): Promise<void> {
       }
       break;
     case "upgrade":
-      await Bun.write(path, zellijConfig);
+      await Bun.write(path, shipped);
       log.ok("zellij config upgraded — the one on disk was red-dev's own");
       break;
     case "write":
-      await Bun.write(path, zellijConfig);
+      await Bun.write(path, shipped);
       log.ok(`zellij config written to ${path}`);
       break;
   }
