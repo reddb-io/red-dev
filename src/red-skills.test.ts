@@ -16,6 +16,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { TOOLS, applicableScopes, providerFor } from "./manifest.ts";
+import { AGENTS, SKILL_HOSTS } from "./agents.ts";
 import type { Platform } from "./platform.ts";
 
 function platform(over: Partial<Platform>): Platform {
@@ -69,30 +70,47 @@ describe("red-skills as a converge step", () => {
 describe("how it decides it is already done", () => {
   const src = readFileSync("src/agents.ts", "utf8");
 
-  /** The readiness function alone, not the file that documents it. */
-  const wired = (() => {
-    const from = src.indexOf("export async function redSkillsWired");
-    return src.slice(from, src.indexOf("\n}", from));
-  })();
+  test("asks each host separately", () => {
+    // The first version asked Claude and let it answer for everything.
+    // Install Codex a week after Claude and the check says "wired",
+    // skips, and Codex never gets a marketplace — which is the case
+    // that prompted this and the reason the probe is a table.
+    expect(SKILL_HOSTS.map((h) => h.cmd).sort()).toEqual(["claude", "codex", "opencode"]);
+  });
 
-  test("asks the CLI, not the filesystem", () => {
+  test("every host is a real agent, so the two lists cannot drift", () => {
+    const keys = new Set(AGENTS.map((a) => a.key));
+    for (const h of SKILL_HOSTS) expect(keys.has(h.agent)).toBe(true);
+  });
+
+  test("asks the CLI where the CLI can answer", () => {
     // ~/.red-skills exists the moment the installer has ever run, and
-    // it existed here for two days with nothing wired anywhere. The
-    // check has to reach the thing the user actually sees.
-    expect(wired).toContain("marketplace");
-    expect(wired).toContain("list");
-    expect(wired).not.toContain("existsSync");
-    expect(wired).not.toContain("HOME");
+    // it existed here for two days with nothing wired anywhere. What
+    // the user sees is the marketplace list, so that is what is asked.
+    expect(src).toContain('"marketplace", "list"');
+  });
+
+  test("and reads the manifest where it cannot", () => {
+    // OpenCode has no marketplace to list. The installer records what
+    // it generated in an uninstall manifest; the config directory
+    // existing means nothing, since opencode creates that itself.
+    expect(src).toContain("redskills-install-manifest.txt");
   });
 
   test("treats an unanswerable question as done rather than as broken", () => {
-    // Otherwise a machine where the probe cannot run reinstalls
-    // red-skills on every single converge.
-    const fn = src.slice(src.indexOf("export async function redSkillsWired"));
-    expect(fn.slice(0, fn.indexOf("}\n\n"))).toContain("return true");
+    // Otherwise a machine whose claude is broken for unrelated reasons
+    // reinstalls red-skills on every single converge.
+    const fn = src.slice(src.indexOf("async function cliNamesRedSkills"));
+    expect(fn.slice(0, fn.indexOf("\n}"))).toContain("return true");
   });
 
   test("says so out loud when there is no agent to configure", () => {
     expect(src).toContain("no coding agent installed to configure");
+  });
+
+  test("names the hosts it is about to wire", () => {
+    // A converge that reinstalls should say which host was missing,
+    // rather than reporting work with no reason attached.
+    expect(src).toContain("not wired into");
   });
 });

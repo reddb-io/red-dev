@@ -13,6 +13,7 @@
  * one agent exists. Installing it alone would configure nothing.
  */
 
+import { existsSync } from "node:fs";
 import { log, RedError } from "./log.ts";
 import type { Platform } from "./platform.ts";
 
@@ -268,36 +269,84 @@ export async function installRedSkills(): Promise<void> {
 }
 
 /**
- * Whether red-skills is actually wired into the agents on this machine.
+ * The hosts red-skills wires into, and how each one answers.
  *
- * Asked of the CLIs rather than of the filesystem, and that distinction
- * is the whole point: ~/.red-skills exists as soon as the installer has
- * ever run, and this machine had it for two days with no marketplace
- * registered anywhere. The source cache is not the feature. What the
- * user sees is `claude plugin marketplace list`, so that is what gets
- * asked.
+ * A table rather than one probe, because "is red-skills installed" is
+ * not a question with a single answer. The installer configures every
+ * CLI it detects, so a machine that had only Claude when it last ran and
+ * has Codex now is wired for one and not the other — and the first
+ * version of this asked Claude alone and let Claude speak for the set,
+ * which would have left exactly that machine unwired forever.
  *
- * Claude speaks for the set. Codex and OpenCode are wired by the same
- * installer in the same run, so one of them being unwired means the run
- * has not happened — and asking three CLIs costs three process starts
- * on every converge to learn the same thing.
+ * Each host answers in its own currency, and all three were checked on
+ * a real machine rather than assumed:
+ *
+ *   claude    `claude plugin marketplace list`  names red-skills
+ *   codex     `codex plugin marketplace list`   names red-skills
+ *   opencode  no such command — the installer leaves an uninstall
+ *             manifest, which is the only artifact that means "we did
+ *             this" rather than "a directory exists"
  */
-export async function redSkillsWired(): Promise<boolean> {
-  if (!Bun.which("claude")) return false;
+export interface SkillHost {
+  /** Key in AGENTS, so the two lists cannot drift apart silently. */
+  agent: string;
+  /** Command that proves this host is installed at all. */
+  cmd: string;
+  /** Whether red-skills is wired into this host specifically. */
+  wired: () => Promise<boolean>;
+}
+
+/** Does this CLI name red-skills among its marketplaces? */
+async function cliNamesRedSkills(cmd: string[]): Promise<boolean> {
   try {
-    const proc = Bun.spawn(["claude", "plugin", "marketplace", "list"], {
-      stdout: "pipe",
-      stderr: "ignore",
-      stdin: "ignore",
-    });
+    const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
     const out = (await new Response(proc.stdout).text()).toLowerCase();
     await proc.exited;
     return out.includes("red-skills");
   } catch {
-    // A question that cannot be asked is not a no. Saying yes here means
-    // a converge does nothing rather than reinstalling on every run.
+    // A question that cannot be asked is not a no. Answering yes means a
+    // converge does nothing, rather than reinstalling on every run
+    // against a CLI that is broken for unrelated reasons.
     return true;
   }
+}
+
+function configHome(): string {
+  const home = process.env["HOME"] ?? process.env["USERPROFILE"] ?? "";
+  return `${home.replace(/\\/g, "/")}/.config`;
+}
+
+export const SKILL_HOSTS: SkillHost[] = [
+  {
+    agent: "claude-code",
+    cmd: "claude",
+    wired: () => cliNamesRedSkills(["claude", "plugin", "marketplace", "list"]),
+  },
+  {
+    agent: "codex",
+    cmd: "codex",
+    wired: () => cliNamesRedSkills(["codex", "plugin", "marketplace", "list"]),
+  },
+  {
+    agent: "opencode",
+    cmd: "opencode",
+    // OpenCode has no marketplace to list: red-skills generates plugin
+    // and skill modules into its config directory and records them in an
+    // uninstall manifest. That file is the claim; the directory existing
+    // is not, since opencode makes it itself.
+    wired: async () =>
+      existsSync(`${configHome()}/opencode/redskills-install-manifest.txt`),
+  },
+];
+
+/** Installed hosts that red-skills has not been wired into. */
+export async function unwiredSkillHosts(): Promise<SkillHost[]> {
+  const present = SKILL_HOSTS.filter((h) => Bun.which(h.cmd));
+  const out: SkillHost[] = [];
+  for (const h of present) {
+    if (!(await h.wired())) out.push(h);
+  }
+  return out;
 }
 
 /**
@@ -308,20 +357,27 @@ export async function redSkillsWired(): Promise<boolean> {
  * therefore the install script, never set it up. A machine could carry
  * four coding agents and no marketplace, which is what this one did.
  *
- * Skipped loudly with no agent installed: red-skills configures hosts,
- * and with no host to configure it has nothing to do.
+ * One installer run wires every host it detects, so finding a single
+ * unwired one is reason enough to run it: installing Codex a week after
+ * Claude has to be enough to get the marketplace into it.
+ *
+ * Skipped loudly with no host installed: red-skills configures agents,
+ * and with no agent to configure it has nothing to do.
  */
 export async function convergeRedSkills(p: Platform): Promise<void> {
-  const present = availableAgents(p).filter((a) => isAgentInstalled(a));
+  void p;
+  const present = SKILL_HOSTS.filter((h) => Bun.which(h.cmd));
   if (present.length === 0) {
     log.skip("red-skills: no coding agent installed to configure");
     return;
   }
 
-  if (await redSkillsWired()) {
-    log.skip(`red-skills already wired into ${present.length} agent(s)`);
+  const missing = await unwiredSkillHosts();
+  if (missing.length === 0) {
+    log.skip(`red-skills already wired into ${present.map((h) => h.cmd).join(", ")}`);
     return;
   }
 
+  log.step(`red-skills: not wired into ${missing.map((h) => h.cmd).join(", ")}`);
   await installRedSkills();
 }

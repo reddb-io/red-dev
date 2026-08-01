@@ -346,8 +346,20 @@ change when a project does.
 
 Two things are not questions and never were. The Start Menu hotkeys and the
 RedSkills marketplace are part of `core`, so installing red-dev at all is enough
-to get them — the marketplace goes into whichever coding agents are present, and
-does nothing at all when none are.
+to get them.
+
+The marketplace is checked per agent, because each one is wired differently and
+each can arrive later:
+
+| Agent | Wired by | Checked with |
+| --- | --- | --- |
+| Claude Code | marketplace | `claude plugin marketplace list` |
+| Codex CLI | marketplace | `codex plugin marketplace list` |
+| OpenCode | generated plugins and skills | its uninstall manifest |
+
+Installing Codex a week after Claude is enough to get the marketplace into it —
+one unwired host is reason enough to run the installer, which configures every
+host it detects. With no agent installed it does nothing and says so.
 
 ### Look before you touch
 
