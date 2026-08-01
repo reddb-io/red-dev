@@ -30,8 +30,45 @@ if [ -r /usr/share/bash-completion/bash_completion ]; then
   . /usr/share/bash-completion/bash_completion
 fi
 
+# Windows programs that print shell code print Windows paths with it.
+#
+# Every activation below runs a native .exe under Git Bash, and the .exe
+# cannot tell that the bash asking is an MSYS one. mise rewrites PATH
+# outright — semicolons, backslashes, drive letters — and carapace
+# prepends its own bin directory in the same spelling. bash splits PATH
+# on ':', so `C:\Users\...` becomes the entry `C` followed by
+# `\Users\...`, the list collapses, and every tool on it stops
+# resolving: grep, sed, zellij, and the `command -v` guards in the rest
+# of this file along with them.
+#
+# So the repair is a function rather than a line, because it has to run
+# more than once: right after mise, or nothing below can be found at
+# all, and again at the end for whatever the later activations added.
+#
+# cygpath is the way back, and it is resolved before any of them: it
+# lives in /usr/bin, one of the directories that goes missing.
+if [ "${RED_ENV:-}" = "windows" ]; then
+  _RED_CYGPATH=$(command -v cygpath 2>/dev/null)
+fi
+
+_red_fix_path() {
+  [ "${RED_ENV:-}" = "windows" ] || return 0
+  [ -n "${_RED_CYGPATH:-}" ] || return 0
+
+  # Assigned only when it produced something. A cygpath that fails would
+  # otherwise hand back an empty string and take PATH with it, which is
+  # a worse shell than the mangled one being repaired.
+  _red_posix_path=$("$_RED_CYGPATH" -p "$PATH" 2>/dev/null)
+  if [ -n "$_red_posix_path" ]; then
+    PATH="$_red_posix_path"
+    export PATH
+  fi
+  unset _red_posix_path
+}
+
 if command -v mise >/dev/null 2>&1; then
   eval "$(mise activate bash)"
+  _red_fix_path
 fi
 
 if command -v zoxide >/dev/null 2>&1; then
@@ -67,6 +104,17 @@ fi
 if command -v direnv >/dev/null 2>&1; then
   eval "$(direnv hook bash)"
 fi
+
+# Once more, for whatever the activations above prepended.
+#
+# carapace is the one that made this necessary: it adds its own bin
+# directory, in Windows spelling, after mise has already been repaired —
+# so a single fix left one entry reading
+# `/Users/.../carapace/bin;/c/.../mise/installs/bun/1.3.14/bin`, two
+# directories glued into one that is neither.
+_red_fix_path
+unset -f _red_fix_path
+unset _RED_CYGPATH
 
 export EDITOR="nvim"
 export SUDO_EDITOR="nvim"
