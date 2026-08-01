@@ -10,6 +10,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { MIGRATIONS } from "./migrations.ts";
 
 describe("the ledger", () => {
@@ -37,25 +38,21 @@ describe("the ledger", () => {
   });
 });
 
-describe("removing the hotkeys", () => {
-  const m = MIGRATIONS.find((x) => x.id === "2026-08-01-remove-hotkeys");
-
-  test("is registered", () => {
-    expect(m).toBeDefined();
+describe("the migration that removed the hotkeys", () => {
+  test("is gone, because the hotkeys came back", () => {
+    // It deleted the Start Menu folder red-dev writes. With the feature
+    // restored, a machine whose ledger had not yet recorded it would
+    // have the shortcuts written by the converge and deleted by the
+    // repair pass in the same run — the outcome depending on which ran
+    // first, which is the worst kind of bug to own.
+    expect(MIGRATIONS.map((m) => m.id)).not.toContain("2026-08-01-remove-hotkeys");
   });
 
-  test("does not apply to a machine with no Windows behind it", async () => {
-    // A Linux desktop never had a Start Menu to write into, and asking
-    // Windows about it there would cost a subprocess to learn nothing.
-    const linux = {
-      os: "linux",
-      env: "desktop",
-      distro: "ubuntu",
-      version: "24.04",
-      codename: "noble",
-      arch: "x64",
-      caps: { apt: true, gui: true, systemd: true, winget: false, flatpak: true },
-    };
-    expect(await m!.applies(linux as never)).toBe(false);
+  test("and nothing else in the ledger removes anything", () => {
+    // The rule at the top of migrations.ts: a migration may repair and
+    // must not remove. The hotkey one was the single exception and it
+    // no longer exists.
+    const src = readFileSync("src/migrations.ts", "utf8");
+    expect(src).not.toContain("Remove-Item");
   });
 });

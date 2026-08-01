@@ -578,6 +578,22 @@ crossing.
 Turn it off with `RED_DEV_NO_WSL_SYNC=1`. `red-dev doctor` reports the skew
 either way.
 
+#### Global hotkeys
+
+Two keys, both anchored on Alt, written as Start Menu shortcuts — which is where
+they have to be for the key to fire. No AutoHotkey, no PowerToys: a `.lnk`
+carries a hotkey natively, and byte 21 of the file format carries the elevation
+flag.
+
+| Key | Opens |
+| --- | --- |
+| `Ctrl+Alt+T` | the terminal — bash inside WSL, through Alacritty when it is installed |
+| `Ctrl+Alt+Shift+T` | PowerShell, elevated — it will prompt for consent |
+
+`Ctrl+Shift+T` is deliberately not among them. It is reopen-closed-tab in every
+browser, in VS Code and in Windows Terminal itself, and a global hotkey beats the
+focused application — so claiming it took that away from the whole machine.
+
 #### The desktop, not just the terminal
 
 A theme switch also sets Windows' dark mode and accent colour, from the same

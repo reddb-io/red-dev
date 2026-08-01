@@ -777,6 +777,11 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
         await applyWallpaperLogged(theme, ctx.theme, ctx.platform);
         return;
       }
+      if (pr.name === "hotkeys") {
+        const { installWindowsHotkeys } = await import("./hotkeys.ts");
+        await installWindowsHotkeys(ctx.platform);
+        return;
+      }
       if (pr.name === "wsl-sync") {
         const { syncWslDistro } = await import("./wsl-sync.ts");
         await syncWslDistro(ctx.platform);
