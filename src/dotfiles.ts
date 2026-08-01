@@ -215,6 +215,12 @@ const SHIPPED_ZELLIJ_CONFIGS = new Set([
   // config/bash/zellij.sh made it the session, because those bindings
   // take Ctrl-p, Ctrl-n, Ctrl-t, Ctrl-o and Ctrl-s from the shell.
   "a9e80a2b4a25075a6e594fec7aa1806b4b7b569f406aaa6361673f918a048ee3",
+  // 0.11.0 through 0.14.0: locked mode and the cleared keybindings, but
+  // no copy_command — so zellij still reported copying through OSC 52
+  // and the clipboard never changed. Without this entry the machines
+  // that took 0.11.0 could never be given one, because "written once"
+  // has no exception for a file that is still exactly ours.
+  "df96577497a13f992edf36e3ffcb89717472e83c841809eea1a789bed20ae34b",
 ]);
 
 /**

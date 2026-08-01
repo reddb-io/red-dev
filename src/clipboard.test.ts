@@ -14,6 +14,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { zellijConfigFor } from "./dotfiles.ts";
+import { repairedImports } from "./alacritty.ts";
 import type { Platform } from "./platform.ts";
 
 function platform(over: Partial<Platform>): Platform {
@@ -89,5 +90,61 @@ describe("paste", () => {
     expect(src).toContain("'keys.toml'");
     const block = src.slice(src.indexOf("const REQUIRED_IMPORTS"));
     expect(block.slice(0, 120)).toContain("keys.toml");
+  });
+});
+
+describe("reaching a machine that already has a config", () => {
+  test("the config being shipped is registered as shipped", () => {
+    // The upgrade only fires for a file that hashes to something
+    // red-dev is known to have written. Leaving the current one out is
+    // how 0.11.0's config became unupgradable — locked mode had landed,
+    // so it did not look stale, and the copy_command could never be
+    // added to it. Editing config.kdl means adding its hash here.
+    const shipped = readFileSync("config/zellij/config.kdl", "utf8");
+    const digest = new Bun.CryptoHasher("sha256").update(shipped).digest("hex");
+    const src = readFileSync("src/dotfiles.ts", "utf8");
+    expect(src).toContain(digest);
+  });
+
+  test("an alacritty.toml gains an import added after it was written", () => {
+    const before = [
+      "[general]",
+      "import = [",
+      "  'theme.toml',",
+      "  'font.toml',",
+      "  'shell.toml',",
+      "]",
+      "",
+      "[window]",
+      "opacity = 0.98",
+    ].join("\n");
+    const after = repairedImports(before);
+    expect(after).not.toBeNull();
+    expect(after).toContain("keys.toml");
+    // And keeps what was already there.
+    expect(after).toContain("theme.toml");
+    expect(after).toContain("opacity = 0.98");
+  });
+
+  test("says nothing to repair when the imports are complete", () => {
+    const complete = [
+      "[general]",
+      "import = [",
+      "  'theme.toml',",
+      "  'font.toml',",
+      "  'shell.toml',",
+      "  'keys.toml',",
+      "]",
+    ].join("\n");
+    expect(repairedImports(complete)).toBeNull();
+  });
+
+  test("is a pure function, so it can repair across the WSL boundary", () => {
+    // The reason this exists. The first version did its own file IO and
+    // was guarded on not being WSL at its only call site — so the one
+    // target whose config lives on the far side of a boundary was the
+    // one target that could never be repaired.
+    const before = "[general]\nimport = [\n  'theme.toml',\n]";
+    expect(repairedImports(before)).toContain("keys.toml");
   });
 });

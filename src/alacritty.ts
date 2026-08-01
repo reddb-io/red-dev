@@ -58,6 +58,30 @@ async function writeThroughHost(winPath: string, content: string): Promise<void>
 }
 
 /**
+ * Read a file from the Windows side, from inside WSL.
+ *
+ * The mirror of writeThroughHost, and needed for the same reason: under
+ * WSL the two sides hold distinct NTFS records for the same path, so
+ * reading through /mnt/c answers about a file the Windows Alacritty
+ * never opens. Base64 back for the same quoting reasons.
+ */
+async function readThroughHost(winPath: string): Promise<string | null> {
+  const script = [
+    `$p = '${winPath.replace(/'/g, "''")}'`,
+    `if (-not (Test-Path $p)) { exit 2 }`,
+    `[Convert]::ToBase64String([IO.File]::ReadAllBytes($p))`,
+  ].join("; ");
+  const proc = Bun.spawn(["powershell.exe", "-NoProfile", "-Command", script], {
+    stdout: "pipe",
+    stderr: "ignore",
+    stdin: "ignore",
+  });
+  const out = (await new Response(proc.stdout).text()).trim();
+  if ((await proc.exited) !== 0) return null;
+  return Buffer.from(out, "base64").toString("utf8");
+}
+
+/**
  * Does the host see this file?
  *
  * Asked of Windows rather than of /mnt/c, because on this machine those
@@ -441,10 +465,22 @@ export async function configureAlacritty(opts: AlacrittyOptions): Promise<void> 
   if (!mainExists) {
     await put("alacritty.toml", mainToml(opts.opacity));
     log.ok(`alacritty: config written to ${winDir ?? dir}`);
-  } else if (!winDir && (await migrateImportKey(main))) {
-    log.ok(`alacritty.toml: import block repaired — theme, font and shell now imported`);
+    return;
+  }
+
+  // Read from whichever side owns the file, repair, write back the same
+  // way. Guarding this on `!winDir` is what kept every WSL machine from
+  // ever gaining an import added after its config was written.
+  const current = winDir
+    ? await readThroughHost(`${winDir}\\alacritty.toml`)
+    : await Bun.file(main).text();
+  const repaired = current === null ? null : repairedImports(current);
+
+  if (repaired !== null) {
+    await put("alacritty.toml", repaired);
+    log.ok(`alacritty.toml: import block repaired — ${REQUIRED_IMPORTS.join(", ")}`);
   } else {
-    log.skip(`alacritty.toml exists — theme and font updated, yours left alone`);
+    log.skip(`alacritty.toml exists — theme, font and keys updated, yours left alone`);
   }
 }
 
@@ -462,10 +498,26 @@ export async function configureAlacritty(opts: AlacrittyOptions): Promise<void> 
  * this file writes. Anything else is the user's and is left alone.
  */
 export async function migrateImportKey(path: string): Promise<boolean> {
-  const text = await Bun.file(path).text();
+  const repaired = repairedImports(await Bun.file(path).text());
+  if (repaired === null) return false;
+  await Bun.write(path, repaired);
+  return true;
+}
+
+/**
+ * The repaired file, or null when there was nothing to repair.
+ *
+ * Pure, and that is the point: the same config has to be repaired from
+ * inside WSL, where it is read and written through PowerShell rather
+ * than through the filesystem. The first version did the IO itself and
+ * was therefore guarded on `!winDir` at its only call site — so the
+ * repair never ran on the one target whose config lives on the other
+ * side of a boundary, which is the target that needs it most.
+ */
+export function repairedImports(text: string): string | null {
   const block = /(^\s*\[general\]\r?\n(?:[^[]*?))?^(\s*)import = \[\r?\n([^\]]*?)\r?\n\s*\]/m;
   const m = block.exec(text);
-  if (!m) return false;
+  if (!m) return null;
 
   const hasGeneral = m[1] !== undefined;
   const listed = (m[3] ?? "")
@@ -481,10 +533,9 @@ export async function migrateImportKey(path: string): Promise<boolean> {
   // being written to a file nothing read. Adding is safe in a way
   // rewriting is not; anything the user put there is kept.
   const missing = REQUIRED_IMPORTS.filter((r) => !listed.includes(r));
-  if (hasGeneral && missing.length === 0) return false;
+  if (hasGeneral && missing.length === 0) return null;
 
   const merged = [...listed, ...missing];
   const rebuilt = `[general]\nimport = [\n${merged.map((i) => `  '${i}',`).join("\n")}\n]`;
-  await Bun.write(path, text.replace(block, rebuilt));
-  return true;
+  return text.replace(block, rebuilt);
 }
