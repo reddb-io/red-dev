@@ -10,6 +10,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { wingetArgv } from "./providers.ts";
+import { machineWideFontScript } from "./wsl.ts";
 
 describe("winget invocation", () => {
   /**
@@ -136,5 +137,86 @@ describe("boot.sh next-channel selection", () => {
     const url = pick(FIXTURE, "red-dev-linux-x64");
     expect(url).toStartWith("https://");
     expect(url).not.toContain("\\1");
+  });
+});
+
+/**
+ * A per-user font install can be correct and still invisible.
+ *
+ * The files landed in %LOCALAPPDATA%\Microsoft\Windows\Fonts, the HKCU
+ * entries carried the right family names, and doctor could have checked
+ * both and said yes. Windows 11 on an Entra-joined machine ignored the
+ * lot — across a sign-out — and Alacritty refused to start: font
+ * "FiraCode Nerd Font Mono" not found. The repair is to install for the
+ * whole machine, which needs elevation, which is why the check that
+ * triggers it has to ask the font stack rather than the filesystem.
+ */
+describe("machine-wide font install script", () => {
+  const script = machineWideFontScript("FiraCode", "C:\\Users\\x\\AppData\\Local\\Temp\\r.log");
+
+  test("registers under HKLM, where a machine-wide font belongs", () => {
+    expect(script).toContain("HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts");
+    expect(script).toContain("$env:SystemRoot\\Fonts");
+  });
+
+  test("names the file, not the path", () => {
+    // HKLM entries are resolved against the system font directory; a
+    // full path there is the per-user spelling and does not resolve.
+    expect(script).toContain("-Value $f.Name");
+  });
+
+  test("takes only the Mono faces already staged per-user", () => {
+    expect(script).toContain('-Filter "FiraCodeNerdFontMono-*.ttf"');
+  });
+
+  test("survives the template literal it is written in", () => {
+    // The script is a TS template string full of $ and \. One escaped
+    // dollar turns a variable into text and the install silently does
+    // nothing, so assert the PowerShell that comes out is PowerShell.
+    expect(script).toContain("$f.BaseName -match '-(\\w+)$'");
+    expect(script).not.toContain("\\\\");
+    expect(script).not.toContain("\\$");
+  });
+
+  test("reports its outcome to the file the caller reads", () => {
+    // An elevated child is a separate process tree: its stdout never
+    // comes home, so success that is not written down reads as failure.
+    expect(script).toContain("$result = 'C:\\Users\\x\\AppData\\Local\\Temp\\r.log'");
+    expect(script).toContain('"installed $count" | Set-Content $result');
+    expect(script).toContain("| Set-Content $result\n}");
+  });
+
+  test("parses as PowerShell", () => {
+    // Skipped where there is no PowerShell to ask; the assertion is
+    // worth having on the platform this code actually runs on.
+    const shell =
+      Bun.which("powershell.exe") ??
+      "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
+    if (!Bun.which(shell)) return;
+
+    const probe = `
+$errors = $null
+[System.Management.Automation.Language.Parser]::ParseInput(
+  [IO.File]::ReadAllText($args[0]), [ref]$null, [ref]$errors) | Out-Null
+if ($errors.Count) { $errors | ForEach-Object { $_.Message }; exit 1 }
+"parsed"
+`;
+    const path = "/tmp/red-dev-font-script-test.ps1";
+    const probePath = "/tmp/red-dev-font-parse-test.ps1";
+    Bun.write(path, script);
+    Bun.write(probePath, probe);
+    const win = (p: string) =>
+      new TextDecoder().decode(Bun.spawnSync(["wslpath", "-w", p]).stdout).trim();
+
+    const proc = Bun.spawnSync([
+      shell,
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      win(probePath),
+      win(path),
+    ]);
+    expect(new TextDecoder().decode(proc.stdout).trim()).toBe("parsed");
   });
 });

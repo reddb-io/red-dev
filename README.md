@@ -336,6 +336,14 @@ silently removes.
 That crossing needs interop working. If `.exe` calls fail with an exec format
 error, `red-dev install wsl` repairs it.
 
+The font goes in for the current user first, which asks nothing of anyone. Some
+machines — Entra-joined Windows 11 among them — ignore per-user font
+registrations entirely, and the symptom is a terminal that refuses to start with
+`font "FiraCode Nerd Font Mono" not found` while the files and the registry both
+look right. So the install does not trust itself: it asks Windows whether the
+family resolves, and only when the answer is no does it install machine-wide and
+ask for consent. `red-dev doctor` asks the same question afterwards.
+
 ### Windows, native
 
 ```powershell

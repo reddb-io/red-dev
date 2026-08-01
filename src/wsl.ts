@@ -32,6 +32,15 @@ function interopBin(name: string): string {
   return existsSync(absolute) ? absolute : name;
 }
 
+/** Windows PowerShell, from either side of the boundary. */
+function powershellBin(): string {
+  if (process.platform === "win32") return "powershell.exe";
+  return (
+    Bun.which("powershell.exe") ??
+    "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+  );
+}
+
 async function capture(cmd: string[]): Promise<string> {
   const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
   const out = await new Response(proc.stdout).text();
@@ -215,6 +224,7 @@ export async function installNerdFont(key: string): Promise<void> {
   if (existsSync(installedProbe)) {
     log.skip(`${spec.family} files present — re-registering`);
     await registerFontsOnWindows(spec.asset);
+    await ensureFontVisible(spec);
     return;
   }
 
@@ -246,6 +256,194 @@ export async function installNerdFont(key: string): Promise<void> {
   await registerFontsOnWindows(spec.asset);
   await run(["rm", "-rf", tmp]);
   log.ok(`${spec.family} installed (${faces.length} faces)`);
+  await ensureFontVisible(spec);
+}
+
+/**
+ * Whether Windows applications can resolve a family by name.
+ *
+ * The only question that matters. Files on disk and registry entries are
+ * both necessary and neither is sufficient, so ask the font stack itself
+ * the same question Alacritty asks when it opens.
+ */
+async function fontVisibleToWindows(family: string): Promise<boolean> {
+  try {
+    const out = await capture([
+      powershellBin(),
+      "-NoProfile",
+      "-Command",
+      "Add-Type -AssemblyName System.Drawing; " +
+        "(New-Object System.Drawing.Text.InstalledFontCollection).Families | " +
+        `Where-Object { $_.Name -eq '${family.replace(/'/g, "''")}' } | ` +
+        "Measure-Object | Select-Object -ExpandProperty Count",
+    ]);
+    return /^[1-9]/.test(out.split("\n").pop()?.trim() ?? "");
+  } catch {
+    // A check that cannot run is not evidence the font is missing.
+    return true;
+  }
+}
+
+/**
+ * Make sure the font the terminal is about to be pointed at actually
+ * resolves, and escalate when it does not.
+ *
+ * A per-user install is the polite one: no administrator, no UAC prompt,
+ * and on most machines the font is live for applications started
+ * afterwards. On some it never becomes visible — Entra-joined machines
+ * have been seen ignoring HKCU font registrations across a full sign-out
+ * — and the symptom is the terminal refusing to start with a missing
+ * font. Files present, registry correct, nothing works.
+ *
+ * So the polite install is treated as an attempt rather than a result:
+ * verify, and if Windows still cannot see the family, install for the
+ * whole machine instead. That needs consent, which is why it is not the
+ * first move.
+ */
+async function ensureFontVisible(spec: NerdFontSpec): Promise<void> {
+  if (await fontVisibleToWindows(spec.family)) {
+    log.ok(`${spec.family} visible to Windows applications`);
+    return;
+  }
+
+  log.warn(
+    `${spec.family} is registered for this user but no application can see it`,
+  );
+  log.step("installing for the whole machine — Windows will ask for consent");
+
+  if (
+    (await installFontsMachineWide(spec.asset)) &&
+    (await fontVisibleToWindows(spec.family))
+  ) {
+    log.ok(`${spec.family} installed machine-wide`);
+    return;
+  }
+
+  log.warn(
+    `${spec.family} still invisible. Open %LOCALAPPDATA%\\Microsoft\\Windows\\Fonts, ` +
+      `select the ${spec.asset}NerdFontMono-*.ttf files, right-click and choose ` +
+      `"Install for all users", then restart the terminal.`,
+  );
+}
+
+/**
+ * Copy the already-downloaded faces into the system font store and
+ * register them under HKLM. Requires elevation, so it runs through
+ * Start-Process -Verb RunAs and reports back through a file: an elevated
+ * child is a separate process tree whose stdout does not come home.
+ *
+ * The per-user font directory doubles as the staging area — the download
+ * has already put the faces there. The per-user copies and their HKCU
+ * entries are left alone: they are inert once the machine-wide install
+ * takes over, and removing a font is not something a repair should do.
+ */
+async function installFontsMachineWide(assetPrefix: string): Promise<boolean> {
+  const localAppData = await windowsLocalAppData();
+  const scriptPath = `${localAppData}/Temp/red-dev-fonts-machine.ps1`;
+  const resultPath = `${localAppData}/Temp/red-dev-fonts-machine.log`;
+  await run(["rm", "-f", resultPath]);
+
+  const script = machineWideFontScript(assetPrefix, await toWindowsPath(resultPath));
+  await Bun.write(scriptPath, script);
+  const winScript = await toWindowsPath(scriptPath);
+
+  try {
+    // -Wait so the check below runs after the elevated child, not
+    // beside it. A declined UAC prompt throws here and leaves no
+    // result file, which is the same answer either way.
+    await run([
+      powershellBin(),
+      "-NoProfile",
+      "-Command",
+      "Start-Process powershell.exe -Verb RunAs -Wait -WindowStyle Hidden " +
+        `-ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','${winScript}'`,
+    ]);
+  } catch {
+    log.warn("elevation declined — the font stays per-user");
+    return false;
+  } finally {
+    await run(["rm", "-f", scriptPath]);
+  }
+
+  if (!existsSync(resultPath)) return false;
+  const outcome = (await Bun.file(resultPath).text()).trim();
+  await run(["rm", "-f", resultPath]);
+  if (!outcome.startsWith("installed")) {
+    log.warn(`machine-wide font install ${outcome}`);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * The elevated half, as text.
+ *
+ * Separated from running it because the running needs a UAC prompt and a
+ * reboot's worth of state, and the text is the part that can be wrong in
+ * a way no one notices: a doubled backslash or an escaped `$` produces a
+ * script that parses, does nothing, and reports success.
+ */
+export function machineWideFontScript(assetPrefix: string, resultPath: string): string {
+  return `
+$ErrorActionPreference = 'Stop'
+$result = '${resultPath.replace(/'/g, "''")}'
+try {
+    Add-Type -AssemblyName System.Drawing
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public class RedDevFontMachine {
+    [DllImport("gdi32.dll", CharSet=CharSet.Unicode)]
+    public static extern int AddFontResourceW(string lpFileName);
+    [DllImport("user32.dll", CharSet=CharSet.Auto)]
+    public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, IntPtr wParam,
+        IntPtr lParam, uint fuFlags, uint uTimeout, out IntPtr lpdwResult);
+}
+'@
+
+    $src = "$env:LOCALAPPDATA\\Microsoft\\Windows\\Fonts"
+    $dst = "$env:SystemRoot\\Fonts"
+    $regPath = "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts"
+    $count = 0
+
+    foreach ($f in Get-ChildItem $src -Filter "${assetPrefix}NerdFontMono-*.ttf") {
+        $pfc = New-Object System.Drawing.Text.PrivateFontCollection
+        $pfc.AddFontFile($f.FullName)
+        $family = $pfc.Families[0].Name
+        $pfc.Dispose()
+
+        $style = ''
+        if ($f.BaseName -match '-(\\w+)$') { $style = $Matches[1] }
+        if ($style -eq 'Regular') { $style = '' }
+        if ($style -and $family -notmatch [regex]::Escape($style)) {
+            $regName = "$family $style (TrueType)"
+        } else {
+            $regName = "$family (TrueType)"
+        }
+
+        $target = Join-Path $dst $f.Name
+        Copy-Item $f.FullName $target -Force
+        [RedDevFontMachine]::AddFontResourceW($target) | Out-Null
+        # Machine-wide entries name the file, not the path: Windows
+        # resolves them against the system font directory.
+        New-ItemProperty -Path $regPath -Name $regName -Value $f.Name -PropertyType String -Force | Out-Null
+        $count++
+    }
+
+    $r = [IntPtr]::Zero
+    # 0xFFFF = HWND_BROADCAST, 0x001D = WM_FONTCHANGE
+    [RedDevFontMachine]::SendMessageTimeout([IntPtr]0xFFFF, 0x001D, [IntPtr]::Zero, [IntPtr]::Zero, 2, 1000, [ref]$r) | Out-Null
+    "installed $count" | Set-Content $result
+} catch {
+    "failed $($_.Exception.Message)" | Set-Content $result
+}
+`;
+}
+
+/** A path Windows can open, from either side of the boundary. */
+async function toWindowsPath(p: string): Promise<string> {
+  if (process.platform === "win32") return p;
+  return await capture(["wslpath", "-w", p]);
 }
 
 /**
@@ -318,12 +516,16 @@ Write-Output "registered $count"
 
   const scriptPath = "/tmp/red-dev-fonts.ps1";
   await Bun.write(scriptPath, script);
-  const winScript = await capture(["wslpath", "-w", scriptPath]);
-  const shell =
-    Bun.which("powershell.exe") ??
-    "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
+  const winScript = await toWindowsPath(scriptPath);
 
-  await run([shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", winScript]);
+  await run([
+    powershellBin(),
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    winScript,
+  ]);
   await run(["rm", "-f", scriptPath]);
 }
 

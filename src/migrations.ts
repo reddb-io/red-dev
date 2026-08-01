@@ -78,6 +78,53 @@ export const MIGRATIONS: Migration[] = [
       await installNerdFont("firacode");
     },
   },
+  {
+    id: "2026-08-01-font-machine-wide",
+    describe: "install the Nerd Font machine-wide where per-user is ignored",
+    /**
+     * The registration repair above assumed a correct HKCU entry is
+     * enough. On some machines it is not — an Entra-joined Windows 11 was
+     * seen ignoring per-user font registrations across a full sign-out,
+     * files and registry both correct and no application able to see the
+     * family. The previous migration ran, reported success, and marked
+     * itself done, so the ledger has to be asked again under a new id.
+     *
+     * Same symptom as before, so the same question: nothing visible.
+     */
+    applies: async (p) => {
+      if (p.os !== "windows" && p.env !== "wsl") return false;
+      const shell =
+        p.os === "windows"
+          ? "powershell.exe"
+          : (Bun.which("powershell.exe") ??
+            "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe");
+      const proc = Bun.spawn(
+        [
+          shell,
+          "-NoProfile",
+          "-Command",
+          "Add-Type -AssemblyName System.Drawing; " +
+            "(New-Object System.Drawing.Text.InstalledFontCollection).Families | " +
+            "Where-Object { $_.Name -like '*Nerd Font Mono' } | Measure-Object | " +
+            "Select-Object -ExpandProperty Count",
+        ],
+        { stdout: "pipe", stderr: "ignore" },
+      );
+      const out = (await new Response(proc.stdout).text()).trim();
+      await proc.exited;
+      return out === "0";
+    },
+    /**
+     * The font chosen at setup, not a hardcoded one: re-installing
+     * FiraCode on a machine configured for JetBrains Mono would leave
+     * the terminal pointing at a family that is still missing.
+     */
+    run: async (p) => {
+      const { installNerdFont } = await import("./wsl.ts");
+      const prefs = await readPreferences(p);
+      await installNerdFont(prefs.font ?? "firacode");
+    },
+  },
 ];
 
 /**
