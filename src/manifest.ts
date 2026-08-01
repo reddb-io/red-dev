@@ -104,6 +104,7 @@ export type Provider =
         | "runtimes"
         | "shared-root"
         | "hotkeys"
+        | "red-skills"
         | "wsl-sync";
     }
   /** Not installed here, deliberately. The reason is required. */
@@ -194,7 +195,8 @@ const builtin = (
     | "blesh"
     | "runtimes"
     | "shared-root"
-    | "hotkeys",
+    | "hotkeys"
+    | "red-skills",
 ): Provider => ({ kind: "builtin", name });
 const skip = (reason: string): Provider => ({ kind: "skip", reason });
 
@@ -657,6 +659,18 @@ export const TOOLS: Tool[] = [
     managed: true,
     u24: builtin("hotkeys"),
     win: builtin("hotkeys"),
+  },
+  {
+    // After the agents, never before: the installer detects which CLIs
+    // exist and wires each one, so running it on a machine with none
+    // configures nothing and reports success. It sits at the end of
+    // core for that reason.
+    name: "red-skills",
+    about: "the RedSkills marketplace, in whichever agents are installed",
+    scope: "core",
+    managed: true,
+    u24: builtin("red-skills"),
+    win: builtin("red-skills"),
   },
   {
     name: "wsl-interop",

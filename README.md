@@ -344,6 +344,11 @@ deliberately:
 Omakub asks these at first run; here they are re-runnable, because the answers
 change when a project does.
 
+Two things are not questions and never were. The Start Menu hotkeys and the
+RedSkills marketplace are part of `core`, so installing red-dev at all is enough
+to get them — the marketplace goes into whichever coding agents are present, and
+does nothing at all when none are.
+
 ### Look before you touch
 
 `plan` names the provider that would satisfy each tool, and marks what is

@@ -266,3 +266,62 @@ export async function installRedSkills(): Promise<void> {
   log.plain("     and generates plugin modules for OpenCode. User-level, global.");
   await installerInstall(url, "reddb-io/red-skills");
 }
+
+/**
+ * Whether red-skills is actually wired into the agents on this machine.
+ *
+ * Asked of the CLIs rather than of the filesystem, and that distinction
+ * is the whole point: ~/.red-skills exists as soon as the installer has
+ * ever run, and this machine had it for two days with no marketplace
+ * registered anywhere. The source cache is not the feature. What the
+ * user sees is `claude plugin marketplace list`, so that is what gets
+ * asked.
+ *
+ * Claude speaks for the set. Codex and OpenCode are wired by the same
+ * installer in the same run, so one of them being unwired means the run
+ * has not happened — and asking three CLIs costs three process starts
+ * on every converge to learn the same thing.
+ */
+export async function redSkillsWired(): Promise<boolean> {
+  if (!Bun.which("claude")) return false;
+  try {
+    const proc = Bun.spawn(["claude", "plugin", "marketplace", "list"], {
+      stdout: "pipe",
+      stderr: "ignore",
+      stdin: "ignore",
+    });
+    const out = (await new Response(proc.stdout).text()).toLowerCase();
+    await proc.exited;
+    return out.includes("red-skills");
+  } catch {
+    // A question that cannot be asked is not a no. Saying yes here means
+    // a converge does nothing rather than reinstalling on every run.
+    return true;
+  }
+}
+
+/**
+ * Put red-skills where the agents can see it, as part of a converge.
+ *
+ * It used to run in exactly two places — the first-run interview and
+ * behind a confirm in `red-dev agents` — so a plain `install core`, and
+ * therefore the install script, never set it up. A machine could carry
+ * four coding agents and no marketplace, which is what this one did.
+ *
+ * Skipped loudly with no agent installed: red-skills configures hosts,
+ * and with no host to configure it has nothing to do.
+ */
+export async function convergeRedSkills(p: Platform): Promise<void> {
+  const present = availableAgents(p).filter((a) => isAgentInstalled(a));
+  if (present.length === 0) {
+    log.skip("red-skills: no coding agent installed to configure");
+    return;
+  }
+
+  if (await redSkillsWired()) {
+    log.skip(`red-skills already wired into ${present.length} agent(s)`);
+    return;
+  }
+
+  await installRedSkills();
+}
