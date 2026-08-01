@@ -14,9 +14,8 @@ red-dev installs the same tools, shell, terminal, tiling and theme on bare-metal
 Ubuntu, on WSL, and on native Windows — from a single binary that needs no
 runtime, no bash on Windows, and no second configuration to keep in sync.
 
-<sub>Derived from <a href="https://omakub.org">Omakub</a> by
-<a href="https://dhh.dk">DHH</a> and Basecamp.
-<a href="#attribution"><strong>If you run Ubuntu 24.04 on the desktop, use Omakub.</strong></a></sub>
+<sub>Built on the ideas of <a href="https://omakub.org">Omakub</a> by
+<a href="https://dhh.dk">DHH</a> and Basecamp — <a href="#attribution">credit where it is due</a>.</sub>
 
 </div>
 
@@ -82,16 +81,15 @@ $env:RED_DEV_CHANNEL='next'; irm https://raw.githubusercontent.com/reddb-io/red-
 ## Attribution
 
 **This project is inspired by, and derived from, [Omakub](https://omakub.org) by
-[David Heinemeier Hansson](https://dhh.dk) and Basecamp.** Omakub is the original
-idea and it deserves the credit: the omakase philosophy, the curated tool
-selection, the aliases, the minimal prompt, the LazyVim setup, the theme system —
-all of it started there. **If you run Ubuntu 24.04 on the desktop, use Omakub.**
-It is excellent and it is the real thing.
+[David Heinemeier Hansson](https://dhh.dk) and Basecamp.** The omakase
+philosophy, the curated tool selection, the aliases, the minimal prompt, the
+LazyVim setup and the theme system all started there, and the credit for them is
+his.
 
-red-dev exists for one reason: Omakub targets Ubuntu 24.04 desktop, and we needed
-the same environment on Ubuntu 26.04, on WSL, and on native Windows as well.
-Where this project disagrees with Omakub it is about portability, never about
-taste.
+Omakub targets Ubuntu 24.04 on the desktop. red-dev runs that environment on
+Ubuntu 24.04 and 26.04, inside WSL and on native Windows — one binary, one
+configuration, no second copy to keep in sync. Where the two disagree it is
+about portability, never about taste.
 
 Also built on [tuiuiu.js](https://github.com/forattini-dev/tuiuiu.js) for the
 interactive layer and
