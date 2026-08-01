@@ -327,6 +327,41 @@ async function checkBlesh(): Promise<DriftCheck> {
       };
 }
 
+/**
+ * Whether the distro is running the same red-dev this machine is.
+ *
+ * Only from Windows, and only when there is a distro. The two halves of
+ * a WSL machine drift apart silently — separate homes, separate
+ * binaries — and the half you type in is usually the distro, so a
+ * Windows converge that reported success can sit next to a terminal
+ * three versions behind and nothing anywhere says so.
+ */
+async function checkWslDistro(p: Platform): Promise<DriftCheck> {
+  if (p.os !== "windows") {
+    return { name: "wsl distro", status: "n/a", detail: "not the Windows side" };
+  }
+  try {
+    const { defaultDistro, distroVersion } = await import("./wsl-sync.ts");
+    const distro = await defaultDistro();
+    if (!distro) {
+      return { name: "wsl distro", status: "n/a", detail: "no distro installed" };
+    }
+    const there = await distroVersion(distro);
+    const { VERSION } = await import("./cli.ts");
+    if (there === VERSION) {
+      return { name: "wsl distro", status: "ok", detail: `${distro} on ${VERSION}` };
+    }
+    return {
+      name: "wsl distro",
+      status: "drift",
+      detail: `${distro} has ${there ?? "no red-dev"}, this side has ${VERSION}`,
+      fix: "red-dev install desktop",
+    };
+  } catch (err) {
+    return { name: "wsl distro", status: "n/a", detail: (err as Error).message };
+  }
+}
+
 export async function collectDrift(p: Platform): Promise<DriftCheck[]> {
   const checks: DriftCheck[] = [];
   checks.push(await checkDotfiles());
@@ -335,6 +370,7 @@ export async function collectDrift(p: Platform): Promise<DriftCheck[]> {
   checks.push(await checkWallpaper(p));
   checks.push(checkWslInterop(p));
   checks.push(await checkFont(p));
+  checks.push(await checkWslDistro(p));
   checks.push(await checkDelta());
   checks.push(await checkRuntimes());
   checks.push(await checkDocker(p));

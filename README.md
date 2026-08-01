@@ -407,6 +407,27 @@ the palette previewed while the cursor moves. Previous answers come back
 pre-ticked, so agreeing again is enter, enter, enter, and `q` returns to the
 menu rather than starting anything.
 
+#### The distro, converged from the Windows side
+
+A Windows machine running WSL is two machines: separate home directories,
+separate `PATH`s, separate copies of red-dev. Converging one used to say nothing
+about the other, and the half you type in is usually the distro — so a Windows
+install could report success beside a distro three versions behind, with no
+error anywhere and the feature you had just installed simply absent.
+
+The `desktop` scope now reaches across. It finds the default distro, compares
+its red-dev to this one's, installs the matching version inside it when they
+differ, and then runs `red-dev install core` there. That converge is idempotent
+and costs seconds on a distro that is already current; the expensive case is the
+one that needed the work.
+
+The `wsl` scope is the same boundary crossed the other way — distro reaching out
+to the host for the terminal and the fonts. Whoever is converging owns the
+crossing.
+
+Turn it off with `RED_DEV_NO_WSL_SYNC=1`. `red-dev doctor` reports the skew
+either way.
+
 #### Global hotkeys
 
 Three shortcuts land in the Start Menu, which is where Windows requires them
@@ -417,7 +438,13 @@ hotkey natively, and byte 21 of the file format carries the elevation flag.
 | --- | --- |
 | `Ctrl+Alt+T` | the terminal, on the shell you chose |
 | `Ctrl+Alt+Shift+T` | the same terminal running Git Bash instead |
-| `Ctrl+Shift+T` | PowerShell, elevated — it will prompt for consent |
+| — | PowerShell, elevated — a Start Menu entry with **no** hotkey |
+
+`Ctrl+Shift+T` used to open the elevated PowerShell and no longer does. It is
+reopen-closed-tab in every browser, in VS Code and in Windows Terminal itself,
+and a global hotkey beats the focused application — so claiming it took that
+away everywhere. Only `Ctrl+Alt+T` and `Ctrl+Alt+Shift+T` are claimed now, and
+a converge clears the old binding from the shortcut it already wrote.
 
 Alacritty is used where it exists, since it is the terminal red-dev themes. The
 elevated one is deliberately not Alacritty: elevation belongs to the process
@@ -831,7 +858,7 @@ Early, but the loop runs end to end.
   from the published release
 - On native Windows: `tq 0.13.0`, `reddb 1.23.2` and `dit 0.3.0` installed and
   running from their own releases, Red Request installed silently without a UAC
-  prompt, PowerToys through winget, all three hotkeys in the Start Menu with the
+  prompt, PowerToys through winget, the hotkeys in the Start Menu with the
   elevation flag on the right one, and the accent colour read back from the
   registry as the colour the theme asked for
 - Configuration shared across the boundary both ways, with the same bytes read
@@ -852,7 +879,7 @@ Then, in order:
    already running, and this is the single most common "it did not install".
 2. `red-dev` — the interface. **Install** asks its questions first; nothing
    converges until you answer.
-3. Try `Ctrl+Alt+T`, `Ctrl+Alt+Shift+T` and `Ctrl+Shift+T`.
+3. Try `Ctrl+Alt+T` and `Ctrl+Alt+Shift+T`.
 4. `red-dev theme gruvbox`, then look at a title bar. Windows applies the accent
    to windows opened *after* the switch.
 5. `red-dev doctor` — it should report no drift.

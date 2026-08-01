@@ -182,6 +182,18 @@ esac
 # terminal, falls back to a line menu in a narrow one, and prints help
 # when there is no terminal at all — so CI still gets something sane out
 # of the same command.
+# Installed, and that is all that was asked for.
+#
+# The Windows side converges its distro by running this inside it, where
+# there is no one watching and WSL hands even a non-interactive
+# `wsl -- bash -lc` a pty — so the interface below would open against
+# nobody and wait forever. Anything scripting this install wants the
+# same escape.
+if [ "${RED_DEV_NO_LAUNCH:-0}" = "1" ]; then
+  say "installed at $BIN (not starting: RED_DEV_NO_LAUNCH=1)"
+  exit 0
+fi
+
 say "starting red-dev"
 
 # Reconnect stdin to the terminal before handing over.

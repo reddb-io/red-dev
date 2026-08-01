@@ -103,7 +103,8 @@ export type Provider =
         | "blesh"
         | "runtimes"
         | "shared-root"
-        | "hotkeys";
+        | "hotkeys"
+        | "wsl-sync";
     }
   /** Not installed here, deliberately. The reason is required. */
   | { kind: "skip"; reason: string };
@@ -189,6 +190,7 @@ const builtin = (
     | "dotfiles"
     | "alacritty"
     | "wsl-interop"
+    | "wsl-sync"
     | "blesh"
     | "runtimes"
     | "shared-root"
@@ -677,6 +679,18 @@ export const TOOLS: Tool[] = [
     managed: true,
     u24: winget("Alacritty.Alacritty"),
     win: skip(HOST_PROVIDES),
+  },
+  {
+    // The desktop scope, not the wsl one, and that is the whole point:
+    // the wsl scope runs inside the distro and reaches out to Windows,
+    // and native Windows never gets it. This is the crossing in the
+    // other direction, so it belongs to the target that can make it.
+    name: "wsl-sync",
+    about: "the WSL distro, converged from the Windows side",
+    scope: "desktop",
+    managed: true,
+    u24: skip("no distro to reach into from a Linux desktop"),
+    win: builtin("wsl-sync"),
   },
   {
     name: "windows-terminal",
