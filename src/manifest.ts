@@ -103,7 +103,6 @@ export type Provider =
         | "blesh"
         | "runtimes"
         | "shared-root"
-        | "hotkeys"
         | "wsl-sync";
     }
   /** Not installed here, deliberately. The reason is required. */
@@ -193,8 +192,7 @@ const builtin = (
     | "wsl-sync"
     | "blesh"
     | "runtimes"
-    | "shared-root"
-    | "hotkeys",
+    | "shared-root",
 ): Provider => ({ kind: "builtin", name });
 const skip = (reason: string): Provider => ({ kind: "skip", reason });
 
@@ -642,19 +640,6 @@ export const TOOLS: Tool[] = [
     managed: true,
     u24: builtin("shared-root"),
     win: builtin("shared-root"),
-  },
-  {
-    // Global hotkeys belong to the machine with a desktop on it, which
-    // under WSL is the Windows host — the same crossing the font and the
-    // terminal already make. On bare-metal Ubuntu these are GNOME
-    // custom keybindings and not written yet; saying so beats writing
-    // them blind for a session nobody here has run.
-    name: "hotkeys",
-    about: "Ctrl+Alt+T and friends, as Start Menu shortcuts",
-    scope: "wsl",
-    managed: true,
-    u24: builtin("hotkeys"),
-    win: builtin("hotkeys"),
   },
   {
     name: "wsl-interop",

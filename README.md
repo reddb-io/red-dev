@@ -428,29 +428,6 @@ crossing.
 Turn it off with `RED_DEV_NO_WSL_SYNC=1`. `red-dev doctor` reports the skew
 either way.
 
-#### Global hotkeys
-
-Three shortcuts land in the Start Menu, which is where Windows requires them
-to be for the key to fire. No AutoHotkey, no PowerToys — a `.lnk` carries a
-hotkey natively, and byte 21 of the file format carries the elevation flag.
-
-| | |
-| --- | --- |
-| `Ctrl+Alt+T` | the terminal, on the shell you chose |
-| `Ctrl+Alt+Shift+T` | the same terminal running Git Bash instead |
-| — | PowerShell, elevated — a Start Menu entry with **no** hotkey |
-
-`Ctrl+Shift+T` used to open the elevated PowerShell and no longer does. It is
-reopen-closed-tab in every browser, in VS Code and in Windows Terminal itself,
-and a global hotkey beats the focused application — so claiming it took that
-away everywhere. Only `Ctrl+Alt+T` and `Ctrl+Alt+Shift+T` are claimed now, and
-a converge clears the old binding from the shortcut it already wrote.
-
-Alacritty is used where it exists, since it is the terminal red-dev themes. The
-elevated one is deliberately not Alacritty: elevation belongs to the process
-the shortcut starts, and an elevated terminal would make every pane admin
-rather than giving one admin shell.
-
 #### The desktop, not just the terminal
 
 A theme switch also sets Windows' dark mode and accent colour, from the same
@@ -858,8 +835,7 @@ Early, but the loop runs end to end.
   from the published release
 - On native Windows: `tq 0.13.0`, `reddb 1.23.2` and `dit 0.3.0` installed and
   running from their own releases, Red Request installed silently without a UAC
-  prompt, PowerToys through winget, the hotkeys in the Start Menu with the
-  elevation flag on the right one, and the accent colour read back from the
+  prompt, PowerToys through winget, and the accent colour read back from the
   registry as the colour the theme asked for
 - Configuration shared across the boundary both ways, with the same bytes read
   from `/mnt/c/...` and `C:\...`

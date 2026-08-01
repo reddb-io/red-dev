@@ -125,6 +125,63 @@ export const MIGRATIONS: Migration[] = [
       await installNerdFont(prefs.font ?? "firacode");
     },
   },
+  {
+    id: "2026-08-01-remove-hotkeys",
+    describe: "remove the global hotkeys red-dev used to install",
+    /**
+     * The one migration here that removes rather than repairs, and the
+     * rule above says not to. The rule is about the user's things: this
+     * deletes a Start Menu folder red-dev created, containing shortcuts
+     * red-dev wrote, for a feature red-dev no longer has. Leaving them
+     * would leave Ctrl+Alt+T bound on a machine whose red-dev has no
+     * idea why — and a .lnk keeps its hotkey forever, so not writing
+     * them again fixes nothing.
+     */
+    applies: async (p) => {
+      if (p.os !== "windows" && p.env !== "wsl") return false;
+      const shell =
+        p.os === "windows"
+          ? "powershell.exe"
+          : (Bun.which("powershell.exe") ??
+            "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe");
+      const proc = Bun.spawn(
+        [
+          shell,
+          "-NoProfile",
+          "-Command",
+          "$d = Join-Path $env:APPDATA 'Microsoft\\Windows\\Start Menu\\Programs\\red-dev'; " +
+            "if (Test-Path $d) { 'yes' } else { 'no' }",
+        ],
+        { stdout: "pipe", stderr: "ignore" },
+      );
+      const out = (await new Response(proc.stdout).text()).trim();
+      await proc.exited;
+      return out === "yes";
+    },
+    run: async (p) => {
+      const shell =
+        p.os === "windows"
+          ? "powershell.exe"
+          : (Bun.which("powershell.exe") ??
+            "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe");
+      const proc = Bun.spawn(
+        [
+          shell,
+          "-NoProfile",
+          "-Command",
+          "$d = Join-Path $env:APPDATA 'Microsoft\\Windows\\Start Menu\\Programs\\red-dev'; " +
+            "if (Test-Path $d) { Remove-Item -Recurse -Force $d }; " +
+            "if (Test-Path $d) { exit 1 } else { 'removed' }",
+        ],
+        { stdout: "pipe", stderr: "pipe" },
+      );
+      const out = (await new Response(proc.stdout).text()).trim();
+      if ((await proc.exited) !== 0) {
+        throw new Error(`could not remove the Start Menu shortcuts: ${out}`);
+      }
+      log.ok("global hotkeys removed from the Start Menu");
+    },
+  },
 ];
 
 /**
