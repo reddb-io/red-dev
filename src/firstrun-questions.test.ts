@@ -7,16 +7,21 @@
  * is the correction; asking it before anything writes a file is what
  * makes the correction real.
  *
- * The step list is not exported, so this reads the source. Crude, and it
- * fails on the two things that actually matter: the question
+ * The step list is read out of the source rather than imported, which is
+ * crude and fails on the two things that actually matter: the question
  * disappearing, and it drifting down the list behind something that
  * writes.
+ *
+ * It reads tui-setup-model.ts, which is now the only place the questions
+ * are declared. They used to be in both that file and tui-setup.ts,
+ * identically, for two interfaces asking the same interview — so this
+ * test watched one copy and the other was free to drift.
  */
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 
-const src = readFileSync("src/tui-setup.ts", "utf8");
+const src = readFileSync("src/tui-setup-model.ts", "utf8");
 
 /** Question ids in the order they are declared. */
 function stepOrder(): string[] {
@@ -46,6 +51,9 @@ describe("the first-run questions", () => {
 
   test("the answer is carried out of the wizard", () => {
     // A question whose answer nothing reads is worse than no question.
-    expect(src).toContain('share: get("share")[0] === "yes"');
+    // Both interfaces map it, so both are checked.
+    const model = readFileSync("src/tui-setup-model.ts", "utf8");
+    const tui = readFileSync("src/tui-setup.ts", "utf8");
+    expect(model + tui).toContain('share: get("share")[0] === "yes"');
   });
 });

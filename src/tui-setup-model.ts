@@ -44,14 +44,14 @@ export interface SetupAnswers {
   completed: boolean;
 }
 
-interface Choice {
+export interface Choice {
   key: string;
   label: string;
   note: string;
 }
 
 /** One step: a question, its choices, and how many may be picked. */
-interface Question {
+export interface Question {
   id: string;
   title: string;
   description: string;
@@ -70,7 +70,12 @@ const FONTS: Choice[] = [
   { key: "caskaydiacove", label: "Caskaydia Cove", note: "Microsoft's Cascadia" },
 ];
 
-function questions(p: Platform, agents: Choice[], apps: Choice[], runtimes: Choice[]): Question[] {
+export function questions(
+  p: Platform,
+  agents: Choice[],
+  apps: Choice[],
+  runtimes: Choice[],
+): Question[] {
   return [
     {
       // First, and before anything that writes a file.
@@ -143,25 +148,46 @@ function questions(p: Platform, agents: Choice[], apps: Choice[], runtimes: Choi
     {
       id: "apps",
       title: "Tools",
-      description: "Never installed by a plain converge. Empty is a good answer.",
+      description:
+        "Everything on offer, all of it ticked. Untick what you do not want — " +
+        "none of these is installed by a plain converge, so this list is the " +
+        "only thing that decides.",
       multi: true,
       choices: apps,
-      preset: [],
+      // All of them. The first version preset nothing and argued that
+      // empty was a good answer, which is true for a tool you have never
+      // heard of and wrong for a curated list — the point of an omakase
+      // setup is that somebody already chose.
+      preset: apps.map((a) => a.key),
       applies: () => apps.length > 0,
     },
     {
-      id: "blesh",
-      title: "ble.sh",
+      // A category rather than one tool's yes/no.
+      //
+      // ble.sh was its own step, which put a single opt-in bash addon at
+      // the same level as Theme and Runtimes and left nowhere to put the
+      // next one. What it actually is is a plugin for the line editor,
+      // and that is a group: everything red-dev bolts onto bash rather
+      // than installs beside it belongs here.
+      id: "plugins",
+      title: "Plugins",
       description:
-        "Autosuggestions and syntax highlighting for bash. It replaces the line " +
-        "editor that atuin, fzf and carapace bind into, so whether they survive " +
-        "is worth checking before you rely on it.",
-      multi: false,
+        "Things that attach to bash itself rather than sit next to it. The rest " +
+        "of what red-dev installs — atuin, fzf, carapace, zoxide, starship — is " +
+        "already wired in and needs no answer.",
+      multi: true,
       choices: [
-        { key: "no", label: "Leave it off", note: "installed, not enabled" },
-        { key: "yes", label: "Enable it", note: "confirm Ctrl-R still reaches atuin" },
+        {
+          key: "blesh",
+          label: "ble.sh",
+          note: "autosuggestions and syntax highlighting — replaces the line editor",
+        },
       ],
-      preset: ["no"],
+      // Unticked, and the one place in this interview where that is
+      // deliberate: ble.sh replaces the line editor that atuin, fzf and
+      // carapace bind into, and whether they survive it is an empirical
+      // question nobody here has answered from a real terminal.
+      preset: [],
       applies: () => true,
     },
     {
@@ -256,7 +282,7 @@ export function useSetupModel(steps: Question[], wizard: ReturnType<typeof creat
       apps: get("apps"),
       runtimes: get("runtimes"),
       agents: get("agents"),
-      blesh: get("blesh")[0] === "yes",
+      blesh: get("plugins").includes("blesh"),
       share: get("share")[0] === "yes",
       ...(get("shell")[0] ? { terminalShell: get("shell")[0] as "wsl" | "gitbash" } : {}),
       completed: true,

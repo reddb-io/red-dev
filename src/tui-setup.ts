@@ -32,169 +32,19 @@ import type { Platform } from "./platform.ts";
 import { summary } from "./platform.ts";
 import { Screen, Surface } from "./tui-chrome.ts";
 import { muted, ui } from "./tui-theme.ts";
-import { THEMES, themeNames } from "./themes.ts";
+import { THEMES } from "./themes.ts";
+// The questions live in tui-setup-model.ts and only there. They were
+// declared in both files, identically, for two interfaces that ask the
+// same interview — which is a copy that drifts the first time one of
+// them is edited and nobody notices until an answer differs between the
+// menu and the standalone first run.
+import {
+  questions,
+  type Choice,
+  type Question,
+  type SetupAnswers,
+} from "./tui-setup-model.ts";
 
-export interface SetupAnswers {
-  theme: string;
-  font: string;
-  apps: string[];
-  runtimes: string[];
-  agents: string[];
-  blesh: boolean;
-  terminalShell?: "wsl" | "gitbash";
-  /** Whether to set up the one directory both environments read. */
-  share: boolean;
-  /** False when the user left before finishing. */
-  completed: boolean;
-}
-
-interface Choice {
-  key: string;
-  label: string;
-  note: string;
-}
-
-/** One step: a question, its choices, and how many may be picked. */
-interface Question {
-  id: string;
-  title: string;
-  description: string;
-  multi: boolean;
-  choices: Choice[];
-  /** Pre-selected keys. */
-  preset: string[];
-  /** Hidden when this returns false — the WSL steps on a Linux desktop. */
-  applies: (p: Platform) => boolean;
-}
-
-const FONTS: Choice[] = [
-  { key: "firacode", label: "FiraCode", note: "ligatures, the default" },
-  { key: "jetbrainsmono", label: "JetBrains Mono", note: "taller x-height" },
-  { key: "hack", label: "Hack", note: "no ligatures" },
-  { key: "caskaydiacove", label: "Caskaydia Cove", note: "Microsoft's Cascadia" },
-];
-
-function questions(p: Platform, agents: Choice[], apps: Choice[], runtimes: Choice[]): Question[] {
-  return [
-    {
-      // First, and before anything that writes a file.
-      //
-      // This was an afterthought — a separate command you ran once the
-      // converge had already written every configuration into ~/.config,
-      // leaving `share adopt` to move them one at a time. That makes the
-      // shared root an accessory. It is meant to be the foundation, so
-      // it is asked before there is anything to migrate.
-      //
-      // Gated exactly like Terminal below: bare-metal Ubuntu and servers
-      // have no second environment, and sharing with a machine that is
-      // not there is not a thing.
-      id: "share",
-      title: "Shared",
-      description:
-        "One directory both WSL and Windows read configuration from, so a setting " +
-        "applied on one side is the same setting on the other. Binaries cannot be " +
-        "shared — the formats differ — so it holds one directory each. Source code " +
-        "should not be: a build costs eight times more across the boundary.",
-      multi: false,
-      choices: [
-        {
-          key: "yes",
-          label: "Share configuration",
-          note: "%LOCALAPPDATA%\\..\\.reddev — 43ms per shell, measured",
-        },
-        { key: "no", label: "Keep each side separate", note: "every config stays local" },
-      ],
-      preset: ["yes"],
-      applies: (pl: Platform) => pl.env === "wsl" || pl.os === "windows",
-    },
-    {
-      id: "shell",
-      title: "Terminal",
-      description:
-        "Alacritty has no profiles, so it opens exactly one shell. " +
-        "This is a recorded choice, not a side effect of where the last converge ran.",
-      multi: false,
-      choices: [
-        { key: "wsl", label: "WSL", note: "your distro, in its own filesystem" },
-        { key: "gitbash", label: "Git Bash", note: "stay on Windows, same dotfiles" },
-      ],
-      preset: ["wsl"],
-      applies: (pl: Platform) => pl.env === "wsl" || pl.os === "windows",
-    },
-    {
-      id: "agents",
-      title: "Agents",
-      description:
-        "Picking any CLI agent also installs red-skills, which registers its " +
-        "marketplace in Claude Code and Codex and generates plugin modules for OpenCode.",
-      multi: true,
-      choices: agents,
-      preset: agents.filter((a) => a.key.match(/^(claude-code|codex|opencode)$/)).map((a) => a.key),
-      applies: () => true,
-    },
-    {
-      id: "runtimes",
-      title: "Runtimes",
-      description:
-        "Owned by mise, so node resolves the same way in WSL, on the desktop " +
-        "and in Git Bash. A version manager that manages nothing is how pnpm " +
-        "ends up working in one shell and not another.",
-      multi: true,
-      choices: runtimes,
-      preset: runtimes.slice(0, 1).map((r) => r.key),
-      applies: () => true,
-    },
-    {
-      id: "apps",
-      title: "Tools",
-      description: "Never installed by a plain converge. Empty is a good answer.",
-      multi: true,
-      choices: apps,
-      preset: [],
-      applies: () => apps.length > 0,
-    },
-    {
-      id: "blesh",
-      title: "ble.sh",
-      description:
-        "Autosuggestions and syntax highlighting for bash. It replaces the line " +
-        "editor that atuin, fzf and carapace bind into, so whether they survive " +
-        "is worth checking before you rely on it.",
-      multi: false,
-      choices: [
-        { key: "no", label: "Leave it off", note: "installed, not enabled" },
-        { key: "yes", label: "Enable it", note: "confirm Ctrl-R still reaches atuin" },
-      ],
-      preset: ["no"],
-      applies: () => true,
-    },
-    {
-      id: "font",
-      title: "Font",
-      description: "A Nerd Font, because the prompt and eza's icons need the glyphs.",
-      multi: false,
-      choices: FONTS,
-      preset: ["firacode"],
-      applies: () => true,
-    },
-    {
-      id: "theme",
-      title: "Theme",
-      description:
-        "One palette reaches the terminal, zellij, btop, Neovim, VS Code, GNOME " +
-        "and the wallpaper — which is generated from these colours, not shipped " +
-        "as an image.",
-      multi: false,
-      choices: themeNames().map((n) => ({
-        key: n,
-        label: THEMES[n]?.name ?? n,
-        note: `neovim: ${THEMES[n]?.neovim ?? "—"}`,
-      })),
-      preset: ["tokyo-night"],
-      applies: () => true,
-    },
-  ].filter((q) => q.applies(p));
-}
 
 /** The palette, in the order that reads best as a strip. */
 function paletteOf(slug: string): string[] {
@@ -247,7 +97,7 @@ export async function runSetupTui(
           apps: get("apps"),
           runtimes: get("runtimes"),
           agents: get("agents"),
-          blesh: get("blesh")[0] === "yes",
+          blesh: get("plugins").includes("blesh"),
           share: get("share")[0] === "yes",
           ...(get("shell")[0] ? { terminalShell: get("shell")[0] as "wsl" | "gitbash" } : {}),
           completed: true,

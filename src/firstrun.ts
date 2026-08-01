@@ -295,17 +295,28 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
     [runtimeLabels[0]!],
   );
 
-  // 4. Extra tools. Empty is a perfectly good answer and the default.
+  // 4. Extra tools, all of them ticked.
+  //
+  // This used to default to none and call empty a good answer. That is
+  // true for a list you have to evaluate and wrong for a curated one —
+  // the point of an omakase setup is that somebody already chose, and
+  // none of these is installed by a plain converge, so this list is the
+  // only thing that decides.
   const { toolsInScope, providerFor } = await import("./manifest.ts");
   const optional = toolsInScope("optional").filter((t) => providerFor(t, p).kind !== "skip");
   const appLabels = optional.map((t) => `${t.name} — ${t.about ?? ""}`);
   const pickedApps =
     appLabels.length > 0
-      ? await checkbox("Optional tools? (space to select, enter for none)", appLabels as [string, ...string[]], [])
+      ? await checkbox(
+          "Optional tools? (space to untick what you do not want)",
+          appLabels as [string, ...string[]],
+          appLabels,
+        )
       : [];
 
-  // 5. The one question with a real caveat, so it gets stated before
-  //    the question rather than after.
+  // 5. Plugins — things that attach to bash rather than sit beside it.
+  //    ble.sh is the only one, and the only question here with a real
+  //    caveat, so it gets stated before the question rather than after.
   log.plain("");
   log.plain("     ble.sh adds autosuggestions and syntax highlighting to bash.");
   log.plain("     It replaces the line editor that atuin, fzf and carapace bind");
