@@ -16,17 +16,21 @@
 import { describe, expect, test } from "bun:test";
 import { zellijConfigAction } from "./dotfiles.ts";
 import shipped from "../config/zellij/config.kdl" with { type: "text" };
+import legacy from "./fixtures/zellij-config-legacy.kdl" with { type: "text" };
 
 /**
- * The 0.9.x–0.10.2 config, read out of git rather than pasted here: a
- * copy would drift from what was actually shipped, and the hash in
- * dotfiles.ts is what decides, so a stale copy would test nothing.
+ * The 0.9.x–0.10.2 config, kept as a fixture.
+ *
+ * The first version of this test read it out of git, which passed here
+ * and failed in CI: the checkout is one commit deep, `git show` on an
+ * older revision returned nothing, and a test comparing empty strings
+ * had nothing to say. A committed copy needs no history — and the
+ * assertion below keeps it honest, since the hash in dotfiles.ts is what
+ * actually decides and a fixture that drifted from it would prove
+ * nothing at all.
  */
 function previouslyShipped(): string {
-  const proc = Bun.spawnSync(["git", "show", "23b2e27:config/zellij/config.kdl"], {
-    cwd: `${import.meta.dir}/..`,
-  });
-  return new TextDecoder().decode(proc.stdout);
+  return legacy;
 }
 
 describe("zellij config upgrade", () => {
@@ -36,6 +40,18 @@ describe("zellij config upgrade", () => {
 
   test("does nothing when it already matches", () => {
     expect(zellijConfigAction(shipped, shipped)).toBe("keep");
+  });
+
+  test("the fixture really is the version dotfiles.ts recognises", () => {
+    // The hash in SHIPPED_ZELLIJ_CONFIGS is the authority. If someone
+    // edits the fixture, every case below still passes while testing a
+    // file red-dev never shipped — so pin it here.
+    const digest = new Bun.CryptoHasher("sha256")
+      .update(previouslyShipped())
+      .digest("hex");
+    expect(digest).toBe(
+      "a9e80a2b4a25075a6e594fec7aa1806b4b7b569f406aaa6361673f918a048ee3",
+    );
   });
 
   test("upgrades an untouched config from before the always-on session", () => {
