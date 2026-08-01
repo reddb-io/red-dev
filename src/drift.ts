@@ -12,7 +12,7 @@
  * answer is no.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import type { Platform } from "./platform.ts";
 
 export type DriftStatus = "ok" | "drift" | "n/a";
@@ -124,6 +124,22 @@ async function checkTheme(p: Platform): Promise<DriftCheck[]> {
             status: "drift",
             detail: 'config.kdl references theme "red-dev" which is not there',
             fix: "red-dev theme <name>",
+          },
+    );
+
+    // A config from before the always-on session leaves zellij holding
+    // keys the shell needs, and the way that presents is Ctrl-p doing
+    // the wrong thing rather than an error anyone can search for.
+    const kdl = readFileSync(zellijConfig, "utf8");
+    checks.push(
+      /default_mode\s+"locked"/.test(kdl)
+        ? { name: "zellij keys", status: "ok", detail: "locked by default" }
+        : {
+            name: "zellij keys",
+            status: "drift",
+            detail:
+              "config.kdl predates the always-on session — zellij holds Ctrl-p, Ctrl-n, Ctrl-t, Ctrl-o, Ctrl-s",
+            fix: "delete ~/.config/zellij/config.kdl and re-run `red-dev install core`",
           },
     );
   }

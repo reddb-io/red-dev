@@ -203,30 +203,129 @@ async function wireDelta(): Promise<void> {
 }
 
 /**
- * Written once, never rewritten. The theme file next to it is
- * regenerated on every switch, but keybindings and layout preferences
- * are the user's.
+ * Every version of this file red-dev has shipped.
+ *
+ * A config that hashes to one of these is ours and has not been touched,
+ * so replacing it loses nothing that anyone chose. Anything else is the
+ * user's, and the most a converge may do to it is say so.
+ */
+const SHIPPED_ZELLIJ_CONFIGS = new Set([
+  // 0.9.x through 0.10.2: zellij's own keybindings, no locked mode.
+  // Harmless while zellij was something you launched; hostile once
+  // config/bash/zellij.sh made it the session, because those bindings
+  // take Ctrl-p, Ctrl-n, Ctrl-t, Ctrl-o and Ctrl-s from the shell.
+  "a9e80a2b4a25075a6e594fec7aa1806b4b7b569f406aaa6361673f918a048ee3",
+]);
+
+export type ZellijConfigAction = "write" | "upgrade" | "keep";
+
+/**
+ * A config.kdl that holds nothing but the generated theme pointer.
+ *
+ * This is what a fresh machine actually got, and it was not a shipped
+ * version of anything: applyZellij creates config.kdl to point at the
+ * theme it just wrote, installZellijConfig then found a file already
+ * there and left it alone, and the result was two lines where the
+ * config should have been. Every setting in it — the scrollback, the
+ * clipboard, session serialization — was silently absent.
+ *
+ * Recognised by content rather than by hash because the stub is
+ * whatever applyZellij last wrote, and that string has changed before.
+ */
+function isThemeStub(text: string): boolean {
+  const meaningful = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("//"));
+  // "red-dev" specifically, not any theme: someone whose whole config is
+  // `theme "gruvbox"` wrote that themselves, and it is not ours to
+  // replace with a file that would change their theme.
+  return meaningful.length === 1 && /^theme\s+"red-dev"$/.test(meaningful[0] ?? "");
+}
+
+/**
+ * What to do about the zellij config already on disk.
+ *
+ * Separated from doing it because the decision is the part that can be
+ * wrong in a way nobody notices: keep a stale config and the terminal
+ * silently eats the shell's keys, replace an edited one and someone's
+ * keybindings are gone.
+ */
+export function zellijConfigAction(
+  current: string | null,
+  shipped: string,
+): ZellijConfigAction {
+  if (current === null) return "write";
+  if (current === shipped) return "keep";
+  if (isThemeStub(current)) return "upgrade";
+  const digest = new Bun.CryptoHasher("sha256").update(current).digest("hex");
+  return SHIPPED_ZELLIJ_CONFIGS.has(digest) ? "upgrade" : "keep";
+}
+
+/**
+ * Written once and then the user's — except when it is still ours.
+ *
+ * The theme file next to it is regenerated on every switch; keybindings
+ * and layout are not, because someone may have changed them. The
+ * exception is a file that is byte-for-byte a version red-dev shipped,
+ * which nobody has changed by definition, and which after 0.11.0 would
+ * otherwise leave zellij holding keys the shell needs.
  */
 async function installZellijConfig(p: Platform): Promise<void> {
-  const dir = `${home()}/.config/zellij`;
+  // configHome, not home().
+  //
+  // These two steps disagreed, and the disagreement was invisible: the
+  // theme went to the shared root because applyZellij asks configHome,
+  // the config went to ~/.config because this asked home(), and
+  // shared.sh exports ZELLIJ_CONFIG_DIR pointing at the share. So zellij
+  // read a config red-dev had never written to, and the one it had
+  // written sat locally being read by nobody.
+  const { configHome } = await import("./shared-root.ts");
+  const dir = `${configHome(p, "zellij")}/zellij`;
   const path = `${dir}/config.kdl`;
+  mkdirSync(dir, { recursive: true });
+
+  // The config first, the theme it references second.
+  //
+  // The other order is what shipped, and it quietly cost every fresh
+  // machine its zellij config: applyZellij creates config.kdl in order
+  // to point at the theme it just wrote, the check below then found a
+  // file already sitting there and left it alone, and the result was two
+  // lines where the config should have been. Nothing was missing, so
+  // re-running install never fixed it.
+  const current = existsSync(path) ? await Bun.file(path).text() : null;
+  switch (zellijConfigAction(current, zellijConfig)) {
+    case "keep":
+      log.skip("zellij config exists — left alone");
+      // Saying nothing here is how someone ends up with a terminal that
+      // swallows Ctrl-p and no idea why.
+      if (current && !/default_mode\s+"locked"/.test(current)) {
+        log.warn(
+          "your zellij config predates the always-on session and does not set " +
+            'default_mode "locked", so zellij will hold Ctrl-p, Ctrl-n, Ctrl-t, ' +
+            "Ctrl-o and Ctrl-s. Delete it to take red-dev's, or set RED_ZELLIJ=0.",
+        );
+      }
+      break;
+    case "upgrade":
+      await Bun.write(path, zellijConfig);
+      log.ok("zellij config upgraded — the one on disk was red-dev's own");
+      break;
+    case "write":
+      await Bun.write(path, zellijConfig);
+      log.ok(`zellij config written to ${path}`);
+      break;
+  }
 
   // The config references theme "red-dev", so that theme has to exist
   // even when the theme step has not run or failed. Writing a default
   // here means the reference always resolves; a later theme switch
-  // overwrites this file with the chosen palette.
+  // overwrites this file with the chosen palette. Now that config.kdl
+  // already says `theme "red-dev"`, applyZellij leaves it untouched.
   const { THEMES, DEFAULT_THEME } = await import("./themes.ts");
   const fallback = THEMES[DEFAULT_THEME];
   if (fallback && !existsSync(`${dir}/themes/red-dev.kdl`)) {
     const { applyZellij } = await import("./theme-apply.ts");
     await applyZellij(fallback, p);
   }
-
-  if (existsSync(path)) {
-    log.skip("zellij config exists — left alone");
-    return;
-  }
-  mkdirSync(dir, { recursive: true });
-  await Bun.write(path, zellijConfig);
-  log.ok(`zellij config written to ${path}`);
 }
