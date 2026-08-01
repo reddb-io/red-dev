@@ -84,7 +84,10 @@ fi
 # runs before PATH is built and cannot assume any binary exists yet.
 if [ -n "${RED_SHARE_WIN:-}" ]; then
   _red_drive=$(printf '%s' "$RED_SHARE_WIN" | cut -c1 | tr '[:upper:]' '[:lower:]')
-  _red_rest=$(printf '%s' "$RED_SHARE_WIN" | cut -c3- | tr '\\' '/')
+  # \134 is a backslash, spelled the one way that is unambiguous here.
+  # `tr '\\' '/'` does the same thing and reads like an escaped quote to
+  # anyone — shellcheck included — arriving at the line cold.
+  _red_rest=$(printf '%s' "$RED_SHARE_WIN" | cut -c3- | tr '\134' '/')
   case "$RED_ENV" in
     windows) RED_SHARE="/${_red_drive}${_red_rest}" ;;
     wsl) RED_SHARE="/mnt/${_red_drive}${_red_rest}" ;;
