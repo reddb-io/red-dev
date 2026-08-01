@@ -334,7 +334,7 @@ deliberately:
 | --- | --- |
 | `red-dev` | the fullscreen interface, then whatever you pick — a line-based menu below 60 columns, and `--help` with no terminal at all |
 | `red-dev theme` | which theme, when given no name |
-| `red-dev apps` | which optional tools |
+| `red-dev apps` | which optional tools — ticked, minus anything that says it is too large to be a default |
 | `red-dev lang` | which runtimes mise should manage |
 | `red-dev shell` | whether a terminal lands in WSL or Git Bash |
 | `red-dev agents` | which coding agents — pre-ticked, then offers red-skills |

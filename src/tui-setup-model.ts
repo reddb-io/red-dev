@@ -48,6 +48,8 @@ export interface Choice {
   key: string;
   label: string;
   note: string;
+  /** Shown unticked even in a step that ticks everything. */
+  off?: boolean;
 }
 
 /** One step: a question, its choices, and how many may be picked. */
@@ -154,11 +156,13 @@ export function questions(
         "only thing that decides.",
       multi: true,
       choices: apps,
-      // All of them. The first version preset nothing and argued that
-      // empty was a good answer, which is true for a tool you have never
-      // heard of and wrong for a curated list — the point of an omakase
-      // setup is that somebody already chose.
-      preset: apps.map((a) => a.key),
+      // All of them, minus what says it costs too much to be a default.
+      // The first version preset nothing and argued that empty was a
+      // good answer, which is true for a tool you have never heard of
+      // and wrong for a curated list — the point of an omakase setup is
+      // that somebody already chose. The exception is declared in the
+      // manifest, next to the size that earns it.
+      preset: apps.filter((a) => !a.off).map((a) => a.key),
       applies: () => apps.length > 0,
     },
     {

@@ -114,6 +114,17 @@ export type Provider =
 export interface Tool {
   /** Stable logical name — what the user thinks they have. */
   name: string;
+  /**
+   * Offered unticked.
+   *
+   * The Tools step arrives with everything selected, on the grounds
+   * that a curated list is a set of answers rather than a quiz. That
+   * argument holds while the entries cost megabytes. Blender is 1.2 GB,
+   * which is not a default anyone should acquire by pressing enter — so
+   * the exception is recorded next to the cost that justifies it,
+   * rather than as a name hardcoded in the interview.
+   */
+  offByDefault?: boolean;
   /** One line shown when offering this tool in a selection list. */
   about?: string;
   /**
@@ -592,6 +603,7 @@ export const TOOLS: Tool[] = [
     // rest.
     name: "blender",
     about: "3D creation suite — 1.2 GB, the official build",
+    offByDefault: true,
     scope: "optional",
     managed: true,
     u24: builtin("blender"),

@@ -14,6 +14,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { questions, type Choice } from "./tui-setup-model.ts";
+import { TOOLS } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
 
 const WSL: Platform = {
@@ -39,6 +40,26 @@ describe("the optional tools", () => {
   test("arrive with everything ticked", () => {
     const q = step("apps");
     expect(q.preset).toEqual(q.choices.map((c) => c.key));
+  });
+
+  test("except what declares itself too large to be a default", () => {
+    // Blender is 1.2 GB. A curated list is a set of answers, but not
+    // one that hands somebody a gigabyte for pressing enter.
+    const apps = [
+      { key: "just", label: "just", note: "" },
+      { key: "blender", label: "blender", note: "", off: true },
+    ];
+    const q = step("apps", apps);
+    expect(q.choices.map((c) => c.key)).toContain("blender");
+    expect(q.preset).toEqual(["just"]);
+  });
+
+  test("and the manifest is where that is declared", () => {
+    // Not a name hardcoded in the interview: the cost and the exception
+    // live in the same place, so the next heavy tool needs no UI change.
+    const blender = TOOLS.find((t) => t.name === "blender");
+    expect(blender?.offByDefault).toBe(true);
+    expect(TOOLS.filter((t) => t.offByDefault).map((t) => t.name)).toEqual(["blender"]);
   });
 
   test("stay ticked however many there are", () => {

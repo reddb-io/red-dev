@@ -74,7 +74,7 @@ export async function buildSetupSteps(p: Platform) {
     })),
     toolsInScope("optional")
       .filter((t) => providerFor(t, p).kind !== "skip")
-      .map((t) => ({ key: t.name, label: t.name, note: t.about ?? "" })),
+      .map((t) => ({ key: t.name, label: t.name, note: t.about ?? "", off: t.offByDefault })),
     OFFERED_RUNTIMES.map((r) => ({ key: r.id, label: r.id, note: r.about })),
   );
 }
@@ -204,7 +204,7 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
       })),
       toolsInScope("optional")
         .filter((t) => providerFor(t, p).kind !== "skip")
-        .map((t) => ({ key: t.name, label: t.name, note: t.about ?? "" })),
+        .map((t) => ({ key: t.name, label: t.name, note: t.about ?? "", off: t.offByDefault })),
       OFFERED_RUNTIMES.map((r) => ({ key: r.id, label: r.id, note: r.about })),
     );
 
@@ -305,12 +305,18 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
   const { toolsInScope, providerFor } = await import("./manifest.ts");
   const optional = toolsInScope("optional").filter((t) => providerFor(t, p).kind !== "skip");
   const appLabels = optional.map((t) => `${t.name} — ${t.about ?? ""}`);
+  // Ticked, minus whatever the manifest says is too large to be a
+  // default. Same rule the fullscreen interview follows, read from the
+  // same place rather than repeated as a list of names.
+  const appDefaults = optional
+    .filter((t) => !t.offByDefault)
+    .map((t) => `${t.name} — ${t.about ?? ""}`);
   const pickedApps =
     appLabels.length > 0
       ? await checkbox(
           "Optional tools? (space to untick what you do not want)",
           appLabels as [string, ...string[]],
-          appLabels,
+          appDefaults,
         )
       : [];
 
