@@ -105,6 +105,7 @@ export type Provider =
         | "shared-root"
         | "hotkeys"
         | "red-skills"
+        | "blender"
         | "wsl-sync";
     }
   /** Not installed here, deliberately. The reason is required. */
@@ -196,7 +197,8 @@ const builtin = (
     | "runtimes"
     | "shared-root"
     | "hotkeys"
-    | "red-skills",
+    | "red-skills"
+    | "blender",
 ): Provider => ({ kind: "builtin", name });
 const skip = (reason: string): Provider => ({ kind: "skip", reason });
 
@@ -581,6 +583,19 @@ export const TOOLS: Tool[] = [
     scope: "optional",
     u24: skip("PowerToys is Windows-only; zellij is the tiling answer here"),
     win: winget("Microsoft.PowerToys"),
+  },
+  {
+    // A builtin rather than a provider, because Blender fits none of
+    // them: apt has 4.0.2 against winget's 5.2.0 and a .blend written by
+    // one will not open in the other, and `gh` reads neither .tar.xz nor
+    // a 1.2 GB tree that has to stay whole. src/blender.ts says the
+    // rest.
+    name: "blender",
+    about: "3D creation suite — 1.2 GB, the official build",
+    scope: "optional",
+    managed: true,
+    u24: builtin("blender"),
+    win: winget("BlenderFoundation.Blender"),
   },
   {
     name: "just",
