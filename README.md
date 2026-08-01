@@ -143,6 +143,36 @@ what makes the shipped dotfiles apply there at all, and it is why standardising
 on bash rather than PowerShell is what makes "same experience" true instead of
 aspirational.
 
+### zellij is the session, not a command you run
+
+Every interactive shell starts inside zellij. omakub gets this by pointing
+Alacritty's shell at `zellij`, which works because there the terminal and the
+multiplexer are the same machine's programs. Here they are not: under WSL and
+Git Bash the terminal is a Windows program and zellij is not, and Windows
+Terminal, the VS Code terminal and every SSH session never read Alacritty's
+config at all.
+
+So it starts from [`config/bash/zellij.sh`](config/bash/zellij.sh) instead —
+the one layer every target shares. One behaviour in the terminals red-dev
+configures and in the ones it does not, and on the far end of an SSH
+connection, which no terminal config can reach. It also settles `TERM`: a pane
+gets `xterm-256color` everywhere, rather than `alacritty` in one place and
+something else in another.
+
+It stays out of the way where a multiplexer would break things — non-interactive
+shells, no tty, tmux, the VS Code and JetBrains terminals, nvim's `:terminal`,
+`TERM=dumb`. And it does not `exec`: a zellij that cannot start leaves you in a
+plain shell with a message, because the alternative is a terminal that closes as
+fast as it opens and no way to edit the dotfile that would fix it.
+
+Turn it off with `RED_ZELLIJ=0` in `~/.config/red-dev/env.sh`.
+
+Because zellij is now always on, its own keybindings would be taking `Ctrl-p`,
+`Ctrl-t`, `Ctrl-n`, `Ctrl-o` and `Ctrl-s` from the shell that had them first. So
+`config.kdl` starts in **locked** mode with the defaults cleared: `Ctrl-g`
+unlocks, every binding returns to locked, and `Alt` plus arrows or `hjkl` moves
+between panes without leaving it.
+
 ### The tools
 
 `git` · `curl` · `ripgrep` · `fd` · `bat` · `eza` · `zoxide` · `fzf` · `btop` ·

@@ -1,21 +1,26 @@
 // red-dev — zellij.
 //
-// zellij is what makes tiling the same on all five targets. Alacritty
+// zellij is what makes tiling the same on every target. Alacritty
 // deliberately has no panes, and the platform-native answers share
-// nothing: GNOME extensions on Linux, FancyZones on Windows, Snap
-// Layouts elsewhere. Putting the panes inside the terminal instead
+// nothing: GNOME extensions on Linux, FancyZones on Windows, Mission
+// Control elsewhere. Putting the panes inside the terminal instead
 // means one set of keybindings that works everywhere, including over
 // SSH — which no window manager can offer.
+//
+// Since config/bash/zellij.sh starts a session for every interactive
+// shell, this file is not describing a tool you opened. It describes the
+// terminal itself, and that changes what belongs in it: every key zellij
+// binds is a key the shell no longer gets.
 //
 // This file is installed once and then left alone. The theme lives in
 // themes/red-dev.kdl, which red-dev regenerates on every theme switch.
 
 theme "red-dev"
 
-// Keep zellij's own defaults for pane and tab management rather than
-// inventing a scheme: Ctrl-p for panes, Ctrl-t for tabs, Ctrl-n for
-// resize, Ctrl-o for sessions. Anyone arriving from zellij docs or
-// another machine finds what they expect.
+// One status line instead of a tab bar and a status bar. Two rows of
+// chrome is a fair price for a tool opened on purpose and a poor one
+// for every terminal window that will ever be opened.
+default_layout "compact"
 
 // Do not spawn a login shell inside an already-login shell; it doubles
 // the dotfile load on every new pane.
@@ -25,9 +30,241 @@ default_shell "bash"
 // which matters when the thing that exited did so because it failed.
 on_force_close "quit"
 
-// Rounded corners and a single status bar. simplified_ui stays off
-// because red-dev installs a Nerd Font on every target, so the arrow
-// separators render.
+// ------------------------------------------------------------- keys
+//
+// Locked by default, with zellij's own bindings cleared.
+//
+// That scheme takes Ctrl-p, Ctrl-t, Ctrl-n, Ctrl-o and Ctrl-s. Those are
+// readline's previous-command and next-command, and the keys fzf, atuin
+// and nvim bind — every one of them a key the shell had first. The
+// collision is survivable when zellij is something you launch for an
+// afternoon. It is not when zellij is the terminal.
+//
+// So locked mode holds nothing, Ctrl-g unlocks, and each binding returns
+// to locked once it has done its work. Alt is the exception: moving
+// between panes and resizing them work without leaving locked, because
+// that is a keystroke rather than a mode.
+//
+// The table is omakub's, which has had far more hours on it than
+// anything invented here would have.
+
+default_mode "locked"
+
+keybinds clear-defaults=true {
+    locked {
+        bind "Ctrl g" { SwitchToMode "normal"; }
+    }
+    pane {
+        bind "Left" { MoveFocus "left"; }
+        bind "Down" { MoveFocus "down"; }
+        bind "Up" { MoveFocus "up"; }
+        bind "Right" { MoveFocus "right"; }
+        bind "c" { SwitchToMode "renamepane"; PaneNameInput 0; }
+        bind "d" { NewPane "down"; SwitchToMode "locked"; }
+        bind "e" { TogglePaneEmbedOrFloating; SwitchToMode "locked"; }
+        bind "f" { ToggleFocusFullscreen; SwitchToMode "locked"; }
+        bind "h" { MoveFocus "left"; }
+        bind "j" { MoveFocus "down"; }
+        bind "k" { MoveFocus "up"; }
+        bind "l" { MoveFocus "right"; }
+        bind "n" { NewPane; SwitchToMode "locked"; }
+        bind "p" { SwitchToMode "normal"; }
+        bind "r" { NewPane "right"; SwitchToMode "locked"; }
+        bind "w" { ToggleFloatingPanes; SwitchToMode "locked"; }
+        bind "x" { CloseFocus; SwitchToMode "locked"; }
+        bind "z" { TogglePaneFrames; SwitchToMode "locked"; }
+        bind "Tab" { SwitchFocus; }
+    }
+    tab {
+        bind "Left" { GoToPreviousTab; }
+        bind "Down" { GoToNextTab; }
+        bind "Up" { GoToPreviousTab; }
+        bind "Right" { GoToNextTab; }
+        bind "1" { GoToTab 1; SwitchToMode "locked"; }
+        bind "2" { GoToTab 2; SwitchToMode "locked"; }
+        bind "3" { GoToTab 3; SwitchToMode "locked"; }
+        bind "4" { GoToTab 4; SwitchToMode "locked"; }
+        bind "5" { GoToTab 5; SwitchToMode "locked"; }
+        bind "6" { GoToTab 6; SwitchToMode "locked"; }
+        bind "7" { GoToTab 7; SwitchToMode "locked"; }
+        bind "8" { GoToTab 8; SwitchToMode "locked"; }
+        bind "9" { GoToTab 9; SwitchToMode "locked"; }
+        bind "[" { BreakPaneLeft; SwitchToMode "locked"; }
+        bind "]" { BreakPaneRight; SwitchToMode "locked"; }
+        bind "b" { BreakPane; SwitchToMode "locked"; }
+        bind "h" { GoToPreviousTab; }
+        bind "j" { GoToNextTab; }
+        bind "k" { GoToPreviousTab; }
+        bind "l" { GoToNextTab; }
+        bind "n" { NewTab; SwitchToMode "locked"; }
+        bind "r" { SwitchToMode "renametab"; TabNameInput 0; }
+        bind "s" { ToggleActiveSyncTab; SwitchToMode "locked"; }
+        bind "t" { SwitchToMode "normal"; }
+        bind "x" { CloseTab; SwitchToMode "locked"; }
+        bind "Tab" { ToggleTab; }
+    }
+    resize {
+        bind "Left" { Resize "Increase left"; }
+        bind "Down" { Resize "Increase down"; }
+        bind "Up" { Resize "Increase up"; }
+        bind "Right" { Resize "Increase right"; }
+        bind "+" { Resize "Increase"; }
+        bind "-" { Resize "Decrease"; }
+        bind "=" { Resize "Increase"; }
+        bind "H" { Resize "Decrease left"; }
+        bind "J" { Resize "Decrease down"; }
+        bind "K" { Resize "Decrease up"; }
+        bind "L" { Resize "Decrease right"; }
+        bind "h" { Resize "Increase left"; }
+        bind "j" { Resize "Increase down"; }
+        bind "k" { Resize "Increase up"; }
+        bind "l" { Resize "Increase right"; }
+        bind "r" { SwitchToMode "normal"; }
+    }
+    move {
+        bind "Left" { MovePane "left"; }
+        bind "Down" { MovePane "down"; }
+        bind "Up" { MovePane "up"; }
+        bind "Right" { MovePane "right"; }
+        bind "h" { MovePane "left"; }
+        bind "j" { MovePane "down"; }
+        bind "k" { MovePane "up"; }
+        bind "l" { MovePane "right"; }
+        bind "m" { SwitchToMode "normal"; }
+        bind "n" { MovePane; }
+        bind "p" { MovePaneBackwards; }
+        bind "Tab" { MovePane; }
+    }
+    scroll {
+        bind "Alt Left" { MoveFocusOrTab "left"; SwitchToMode "locked"; }
+        bind "Alt Down" { MoveFocus "down"; SwitchToMode "locked"; }
+        bind "Alt Up" { MoveFocus "up"; SwitchToMode "locked"; }
+        bind "Alt Right" { MoveFocusOrTab "right"; SwitchToMode "locked"; }
+        bind "e" { EditScrollback; SwitchToMode "locked"; }
+        bind "f" { SwitchToMode "entersearch"; SearchInput 0; }
+        bind "Alt h" { MoveFocusOrTab "left"; SwitchToMode "locked"; }
+        bind "Alt j" { MoveFocus "down"; SwitchToMode "locked"; }
+        bind "Alt k" { MoveFocus "up"; SwitchToMode "locked"; }
+        bind "Alt l" { MoveFocusOrTab "right"; SwitchToMode "locked"; }
+        bind "s" { SwitchToMode "normal"; }
+    }
+    search {
+        bind "c" { SearchToggleOption "CaseSensitivity"; }
+        bind "n" { Search "down"; }
+        bind "o" { SearchToggleOption "WholeWord"; }
+        bind "p" { Search "up"; }
+        bind "w" { SearchToggleOption "Wrap"; }
+    }
+    session {
+        bind "c" {
+            LaunchOrFocusPlugin "configuration" {
+                floating true
+                move_to_focused_tab true
+            }
+            SwitchToMode "locked"
+        }
+        bind "d" { Detach; }
+        bind "o" { SwitchToMode "normal"; }
+        bind "p" {
+            LaunchOrFocusPlugin "plugin-manager" {
+                floating true
+                move_to_focused_tab true
+            }
+            SwitchToMode "locked"
+        }
+        bind "w" {
+            LaunchOrFocusPlugin "session-manager" {
+                floating true
+                move_to_focused_tab true
+            }
+            SwitchToMode "locked"
+        }
+    }
+    shared_among "normal" "locked" {
+        bind "Alt Left" { MoveFocusOrTab "left"; }
+        bind "Alt Down" { MoveFocus "down"; }
+        bind "Alt Up" { MoveFocus "up"; }
+        bind "Alt Right" { MoveFocusOrTab "right"; }
+        bind "Alt +" { Resize "Increase"; }
+        bind "Alt -" { Resize "Decrease"; }
+        bind "Alt =" { Resize "Increase"; }
+        bind "Alt [" { PreviousSwapLayout; }
+        bind "Alt ]" { NextSwapLayout; }
+        bind "Alt f" { ToggleFloatingPanes; }
+        bind "Alt h" { MoveFocusOrTab "left"; }
+        bind "Alt i" { MoveTab "left"; }
+        bind "Alt j" { MoveFocus "down"; }
+        bind "Alt k" { MoveFocus "up"; }
+        bind "Alt l" { MoveFocusOrTab "right"; }
+        bind "Alt n" { NewPane; }
+        bind "Alt o" { MoveTab "right"; }
+    }
+    shared_except "locked" "renametab" "renamepane" {
+        bind "Ctrl g" { SwitchToMode "locked"; }
+        bind "Ctrl q" { Quit; }
+    }
+    shared_except "locked" "entersearch" {
+        bind "Enter" { SwitchToMode "locked"; }
+    }
+    shared_except "locked" "entersearch" "renametab" "renamepane" {
+        bind "Esc" { SwitchToMode "locked"; }
+    }
+    shared_except "locked" "entersearch" "renametab" "renamepane" "move" {
+        bind "m" { SwitchToMode "move"; }
+    }
+    shared_except "locked" "entersearch" "search" "renametab" "renamepane" "session" {
+        bind "o" { SwitchToMode "session"; }
+    }
+    shared_except "locked" "tab" "entersearch" "renametab" "renamepane" {
+        bind "t" { SwitchToMode "tab"; }
+    }
+    shared_except "locked" "tab" "scroll" "entersearch" "renametab" "renamepane" {
+        bind "s" { SwitchToMode "scroll"; }
+    }
+    shared_among "normal" "resize" "tab" "scroll" "prompt" "tmux" {
+        bind "p" { SwitchToMode "pane"; }
+    }
+    shared_except "locked" "resize" "pane" "tab" "entersearch" "renametab" "renamepane" {
+        bind "r" { SwitchToMode "resize"; }
+    }
+    shared_among "scroll" "search" {
+        bind "PageDown" { PageScrollDown; }
+        bind "PageUp" { PageScrollUp; }
+        bind "Left" { PageScrollUp; }
+        bind "Down" { ScrollDown; }
+        bind "Up" { ScrollUp; }
+        bind "Right" { PageScrollDown; }
+        bind "Ctrl b" { PageScrollUp; }
+        bind "Ctrl c" { ScrollToBottom; SwitchToMode "locked"; }
+        bind "d" { HalfPageScrollDown; }
+        bind "Ctrl f" { PageScrollDown; }
+        bind "h" { PageScrollUp; }
+        bind "j" { ScrollDown; }
+        bind "k" { ScrollUp; }
+        bind "l" { PageScrollDown; }
+        bind "u" { HalfPageScrollUp; }
+    }
+    entersearch {
+        bind "Ctrl c" { SwitchToMode "scroll"; }
+        bind "Esc" { SwitchToMode "scroll"; }
+        bind "Enter" { SwitchToMode "search"; }
+    }
+    renametab {
+        bind "Esc" { UndoRenameTab; SwitchToMode "tab"; }
+    }
+    shared_among "renametab" "renamepane" {
+        bind "Ctrl c" { SwitchToMode "locked"; }
+    }
+    renamepane {
+        bind "Esc" { UndoRenamePane; SwitchToMode "pane"; }
+    }
+}
+
+// ---------------------------------------------------------- session
+
+// Rounded corners and the session name in the frame. simplified_ui
+// stays off because red-dev installs a Nerd Font on every target, so
+// the arrow separators render.
 ui {
     pane_frames {
         rounded_corners true
@@ -47,5 +284,4 @@ pane_viewport_serialization true
 // Scrollback deep enough to find the error you scrolled past.
 scroll_buffer_size 50000
 
-// Do not ask on exit; the session is serialized anyway.
 mouse_mode true
