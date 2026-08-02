@@ -243,4 +243,12 @@ describe("a marketplace that reports updates it cannot receive", () => {
       expect(repair).toContain(plugin);
     }
   });
+
+  test("castle has the repo-local fallback Codex already searches", () => {
+    // The legacy Codex MCP command for castle checks this path before
+    // giving up. Keep a real launcher here so a clean session in this
+    // repository can still reach the RedSkills marketplace checkout.
+    const launcher = readFileSync("plugins/dev/hooks/castle-mcp.sh", "utf8");
+    expect(launcher).toContain("red-skills/plugins/dev/hooks/castle-mcp.sh");
+  });
 });
