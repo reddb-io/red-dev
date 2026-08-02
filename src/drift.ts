@@ -87,7 +87,7 @@ async function checkShellWiring(): Promise<DriftCheck> {
       };
 }
 
-async function checkTheme(p: Platform): Promise<DriftCheck[]> {
+export async function checkTheme(p: Platform): Promise<DriftCheck[]> {
   const checks: DriftCheck[] = [];
 
   const { configDir } = await import("./alacritty.ts");
@@ -112,12 +112,24 @@ async function checkTheme(p: Platform): Promise<DriftCheck[]> {
     });
   }
 
-  // zellij's config references theme "red-dev"; if that file is absent
-  // the multiplexer starts with a theme it cannot resolve.
-  const zellijConfig = `${home()}/.config/zellij/config.kdl`;
+  // Asked of the directory zellij will actually open.
+  //
+  // This read ~/.config/zellij unconditionally, and on a machine with a
+  // shared root that is not where zellij looks: shared.sh exports
+  // ZELLIJ_CONFIG_DIR at the share, install writes the config there, and
+  // ~/.config/zellij keeps whatever was left behind when the share was
+  // adopted. Here that was an 87-byte theme stub from July, so doctor
+  // reported the theme resolved and the keybindings stale while the
+  // 12 KB file zellij was reading was neither. Both verdicts were about
+  // a file nothing opens, and the offered fix — delete it and converge —
+  // could never clear the warning, because the converge writes to the
+  // share and the check would read the stub again.
+  const { configHome } = await import("./shared-root.ts");
+  const zellijDir = `${configHome(p, "zellij")}/zellij`;
+  const zellijConfig = `${zellijDir}/config.kdl`;
   if (existsSync(zellijConfig)) {
     checks.push(
-      existsSync(`${home()}/.config/zellij/themes/red-dev.kdl`)
+      existsSync(`${zellijDir}/themes/red-dev.kdl`)
         ? { name: "zellij theme", status: "ok", detail: "resolved" }
         : {
             name: "zellij theme",
@@ -139,7 +151,7 @@ async function checkTheme(p: Platform): Promise<DriftCheck[]> {
             status: "drift",
             detail:
               "config.kdl predates the always-on session — zellij holds Ctrl-p, Ctrl-n, Ctrl-t, Ctrl-o, Ctrl-s",
-            fix: "delete ~/.config/zellij/config.kdl and re-run `red-dev install core`",
+            fix: `delete ${zellijConfig} and re-run \`red-dev install core\``,
           },
     );
   }
