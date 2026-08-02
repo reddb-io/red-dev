@@ -381,6 +381,48 @@ export async function claudeMarketplaceIsGithub(): Promise<boolean | null> {
   }
 }
 
+function tomlStringValue(line: string, key: string): string | null {
+  const match = line.match(new RegExp(`^\\s*${key}\\s*=\\s*"([^"]*)"\\s*$`));
+  return match?.[1] ?? null;
+}
+
+/**
+ * Whether Codex's marketplace points at GitHub rather than a local
+ * red-skills snapshot.
+ *
+ * Codex records marketplace sources in config.toml. A local source has
+ * the same failure mode as Claude's directory marketplace: RedSkills
+ * appears installed and enabled, but MCP launchers that fall back to
+ * Codex's Git marketplace checkout have nowhere to go.
+ */
+export async function codexMarketplaceIsGithub(): Promise<boolean | null> {
+  const home = process.env["HOME"] ?? process.env["USERPROFILE"];
+  if (!home) return null;
+  const path = `${home.replace(/\\/g, "/")}/.codex/config.toml`;
+  if (!existsSync(path)) return null;
+
+  try {
+    const lines = (await Bun.file(path).text()).split(/\r?\n/);
+    let inTable = false;
+    for (const line of lines) {
+      const table = line.match(/^\s*\[([^\]]+)\]\s*$/);
+      if (table) {
+        inTable = table[1] === "marketplaces.red-skills";
+        continue;
+      }
+      if (!inTable) continue;
+      const sourceType = tomlStringValue(line, "source_type");
+      if (sourceType !== null) return sourceType === "git";
+    }
+    return null;
+  } catch {
+    // Unreadable is not the same as wrong. Null means "no opinion", and
+    // the caller leaves the machine alone rather than repointing a
+    // marketplace on a guess.
+    return null;
+  }
+}
+
 /**
  * Repoint Claude's marketplace from the frozen directory to GitHub.
  *
@@ -408,6 +450,33 @@ export async function repointClaudeMarketplace(): Promise<void> {
     await spawnLogged(["claude", "plugin", "install", `${plugin}@red-skills`]);
   }
   log.ok("red-skills marketplace now tracks reddb-io/red-skills");
+}
+
+/**
+ * Repoint Codex's marketplace from a local snapshot to GitHub.
+ *
+ * Codex keeps plugin enablement when a marketplace is removed, but the
+ * explicit add calls refresh the cache for the three RedSkills plugins
+ * that contribute skills, hooks, and MCP servers.
+ */
+export async function repointCodexMarketplace(): Promise<void> {
+  const { spawnLogged } = await import("./providers.ts");
+  log.step("red-skills: Codex marketplace points at a local directory — repointing at GitHub");
+  log.plain("     A local Codex marketplace can leave MCP launchers looking");
+  log.plain("     for a Git marketplace checkout that does not exist.");
+
+  if ((await spawnLogged(["codex", "plugin", "marketplace", "remove", "red-skills"])) !== 0) {
+    throw new RedError("could not remove the local red-skills marketplace from Codex");
+  }
+  if ((await spawnLogged(["codex", "plugin", "marketplace", "add", "reddb-io/red-skills"])) !== 0) {
+    throw new RedError("could not add the red-skills marketplace to Codex from GitHub");
+  }
+  for (const plugin of ["dev", "memory", "brain"]) {
+    if ((await spawnLogged(["codex", "plugin", "add", `${plugin}@red-skills`])) !== 0) {
+      throw new RedError(`could not install ${plugin}@red-skills into Codex`);
+    }
+  }
+  log.ok("Codex red-skills marketplace now tracks reddb-io/red-skills");
 }
 
 function configHome(): string {
@@ -476,6 +545,9 @@ export async function convergeRedSkills(p: Platform): Promise<void> {
   // of reinstalling the same installer will fix.
   if (Bun.which("claude") && (await claudeMarketplaceIsGithub()) === false) {
     await repointClaudeMarketplace();
+  }
+  if (Bun.which("codex") && (await codexMarketplaceIsGithub()) === false) {
+    await repointCodexMarketplace();
   }
 
   const missing = await unwiredSkillHosts();
