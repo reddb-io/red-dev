@@ -205,6 +205,19 @@ async function cmdUpdate(p: Platform, inv: Invocation): Promise<number> {
     log.err((err as Error).message);
     return 1;
   }
+  // Before the converge, because the converge builds out of this tree:
+  // convergeRedSkills stops at "already wired", which is correct for
+  // install and leaves the checkout frozen forever under update.
+  if (!inv.dryRun) {
+    try {
+      const { updateRedSkills } = await import("./agents.ts");
+      await updateRedSkills(p);
+    } catch (err) {
+      // Never fatal: the rest of the machine still has an update to do.
+      log.warn(`red-skills: ${(err as Error).message}`);
+    }
+  }
+
   // Upgrading can leave the manifest unsatisfied (a package removed, a
   // binary replaced), so always re-converge afterwards.
   return await cmdInstall(p, inv);

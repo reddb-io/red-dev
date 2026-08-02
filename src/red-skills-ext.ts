@@ -13,7 +13,7 @@
  * side effect of converging something else.
  */
 
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { log, RedError } from "./log.ts";
 import type { Platform } from "./platform.ts";
 
@@ -27,6 +27,121 @@ function home(): string {
 export function sourceRoot(): string | null {
   const root = `${home()}/.red-skills/current`;
   return existsSync(`${root}/package.json`) ? root : null;
+}
+
+/**
+ * The version directory `current` points at.
+ *
+ * The symlink is the only thing that moves — the versions beneath it
+ * are immutable, so the resolved path is the whole freshness question
+ * for anything built out of the tree.
+ */
+export function resolvedSource(): string | null {
+  const root = sourceRoot();
+  return root === null ? null : realpathSync(root);
+}
+
+/**
+ * Which checkout each artifact was last built from.
+ *
+ * Neither artifact carries the red-skills version: the extension's own
+ * package.json says 0.1.0 and stayed 0.1.0 across every release, and
+ * the herdr plugin's manifest says 0.1.0 too. Asking the editor or
+ * herdr what version it has answers a question about the artifact and
+ * not about the source it came from, so the build records the source
+ * itself. Comparing that to where `current` points now is the only
+ * signal that does not lie.
+ */
+export interface BuildStamp {
+  vscode?: string;
+  herdr?: string;
+}
+
+/** Computed rather than a constant: the tests move HOME between cases. */
+function stampPath(): string {
+  return `${home()}/.local/share/red-dev/red-skills-built.json`;
+}
+
+export function readStamp(): BuildStamp {
+  const path = stampPath();
+  if (!existsSync(path)) return {};
+  try {
+    return JSON.parse(readFileSync(path, "utf8")) as BuildStamp;
+  } catch {
+    // A stamp we cannot read means "rebuild", which is the safe way to
+    // be wrong: the cost is one rebuild, not a permanently stale editor.
+    return {};
+  }
+}
+
+export async function recordBuild(which: keyof BuildStamp): Promise<void> {
+  const source = resolvedSource();
+  if (source === null) return;
+  const path = stampPath();
+  mkdirSync(path.slice(0, path.lastIndexOf("/")), { recursive: true });
+  await Bun.write(path, `${JSON.stringify({ ...readStamp(), [which]: source }, null, 2)}\n`);
+}
+
+/** Run a command and hand back its stdout, empty when it fails. */
+async function capture(cmd: string[]): Promise<string> {
+  try {
+    const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
+    const out = await new Response(proc.stdout).text();
+    return (await proc.exited) === 0 ? out : "";
+  } catch {
+    return "";
+  }
+}
+
+const EXTENSION_ID = "reddb-io.vscode-redskilled";
+const PLUGIN_ID = "reddb-io.red-skills";
+
+/** Editors that already have the extension, which are the ones to refresh. */
+async function editorsWithExtension(): Promise<string[]> {
+  const found: string[] = [];
+  for (const cli of vscodeClis()) {
+    if ((await capture([cli, "--list-extensions"])).includes(EXTENSION_ID)) found.push(cli);
+  }
+  return found;
+}
+
+/** Does herdr already know the plugin? */
+async function herdrHasPlugin(): Promise<boolean> {
+  if (!Bun.which("herdr")) return false;
+  return (await capture(["herdr", "plugin", "list"])).includes(PLUGIN_ID);
+}
+
+/**
+ * Rebuild whichever of the two is installed and behind the checkout.
+ *
+ * Only what is already there. Both are offByDefault and optional, and
+ * `update` advancing a machine into software it never asked for would
+ * be a worse bug than the staleness this fixes — so absence is left
+ * alone and presence is kept current.
+ */
+export async function refreshRedSkillsExtensions(p: Platform): Promise<void> {
+  const source = resolvedSource();
+  if (source === null) return;
+  const stamp = readStamp();
+  const version = source.split("/").pop();
+
+  if ((await editorsWithExtension()).length === 0) {
+    log.skip("vscode extension: not installed, left alone");
+  } else if (stamp.vscode === source) {
+    log.skip(`vscode extension already built from ${version}`);
+  } else {
+    log.step(`vscode extension: rebuilding against ${version}`);
+    await installVscodeExtension();
+  }
+
+  if (!(await herdrHasPlugin())) {
+    log.skip("herdr plugin: not installed, left alone");
+  } else if (stamp.herdr === source) {
+    log.skip(`herdr plugin already installed from ${version}`);
+  } else {
+    log.step(`herdr plugin: reinstalling against ${version}`);
+    await installHerdrPlugin(p);
+  }
 }
 
 async function sh(cmd: string[], cwd?: string): Promise<number> {
@@ -115,13 +230,18 @@ export async function installVscodeExtension(): Promise<void> {
   // plainly existed. The real path works in both.
   const real = realpathSync(vsix);
 
+  let installed = 0;
   for (const cli of clis) {
     if ((await sh([cli, "--install-extension", real, "--force"])) === 0) {
       log.ok(`vscode extension installed into ${cli}`);
+      installed++;
     } else {
       log.warn(`${cli} refused the extension`);
     }
   }
+  // Only when something took it: stamping a refused install would
+  // report the editor as current and never retry.
+  if (installed > 0) await recordBuild("vscode");
 }
 
 /**
@@ -151,6 +271,7 @@ export async function installHerdrPlugin(p: Platform): Promise<void> {
   ]);
   if (remote === 0) {
     log.ok("herdr plugin installed from reddb-io/red-skills");
+    await recordBuild("herdr");
     await bindDashboard(p);
     return;
   }
@@ -167,6 +288,7 @@ export async function installHerdrPlugin(p: Platform): Promise<void> {
     throw new RedError("herdr refused to link the plugin");
   }
   log.ok("herdr plugin linked from the red-skills checkout");
+  await recordBuild("herdr");
   await bindDashboard(p);
 }
 

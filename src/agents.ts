@@ -269,6 +269,39 @@ export async function installRedSkills(): Promise<void> {
 }
 
 /**
+ * Advance the red-skills checkout, and rebuild what was built from it.
+ *
+ * convergeRedSkills asks whether red-skills is *wired*, and a wired
+ * machine is one it has nothing left to do on — which is the right
+ * answer for `install` and the wrong one for `update`. The checkout at
+ * ~/.red-skills/current froze at the version that first wired this
+ * machine and stayed there, while Claude's own plugin cache went on
+ * updating through the marketplace. Two copies, one advancing, and the
+ * one everything here builds from was the stationary one.
+ *
+ * So this is update's business, not converge's: the installer is
+ * re-run, which is what fetches the newest tarball and repoints
+ * `current`, and then anything built from that tree is rebuilt against
+ * where it now points.
+ */
+export async function updateRedSkills(p: Platform): Promise<void> {
+  const { sourceRoot, refreshRedSkillsExtensions } = await import("./red-skills-ext.ts");
+  if (!sourceRoot()) {
+    log.skip("red-skills: not installed, nothing to advance");
+    return;
+  }
+
+  const { realpathSync } = await import("node:fs");
+  const before = realpathSync(sourceRoot() as string);
+  await installRedSkills();
+  const after = realpathSync(sourceRoot() as string);
+  if (before === after) log.skip(`red-skills already at ${after.split("/").pop()}`);
+  else log.ok(`red-skills ${before.split("/").pop()} → ${after.split("/").pop()}`);
+
+  await refreshRedSkillsExtensions(p);
+}
+
+/**
  * The hosts red-skills wires into, and how each one answers.
  *
  * A table rather than one probe, because "is red-skills installed" is
