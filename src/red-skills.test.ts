@@ -17,7 +17,12 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { TOOLS, applicableScopes, providerFor } from "./manifest.ts";
-import { AGENTS, SKILL_HOSTS, claudeMarketplaceIsGithub } from "./agents.ts";
+import {
+  AGENTS,
+  SKILL_HOSTS,
+  claudeMarketplaceIsGithub,
+  codexMarketplaceIsGithub,
+} from "./agents.ts";
 import type { Platform } from "./platform.ts";
 
 function platform(over: Partial<Platform>): Platform {
@@ -168,18 +173,72 @@ describe("a marketplace that reports updates it cannot receive", () => {
     expect(await sourceIsGithub(undefined)).toBeNull();
   });
 
+  /** A HOME holding one crafted Codex config.toml. */
+  function fakeCodexHome(sourceType?: string): string {
+    const dir = mkdtempSync(`${tmpdir()}/red-codex-mkt-`);
+    mkdirSync(`${dir}/.codex`, { recursive: true });
+    if (sourceType !== undefined) {
+      writeFileSync(
+        `${dir}/.codex/config.toml`,
+        [
+          "[marketplaces.red-skills]",
+          'last_updated = "2026-08-02T18:04:00Z"',
+          `source_type = "${sourceType}"`,
+          sourceType === "git"
+            ? 'source = "https://github.com/reddb-io/red-skills.git"'
+            : 'source = "/home/x/.red-skills/versions/v3.3.0"',
+          "",
+        ].join("\n"),
+      );
+    }
+    return dir;
+  }
+
+  async function codexSourceIsGithub(sourceType?: string): Promise<boolean | null> {
+    const saved = process.env["HOME"];
+    process.env["HOME"] = fakeCodexHome(sourceType);
+    try {
+      return await codexMarketplaceIsGithub();
+    } finally {
+      if (saved === undefined) delete process.env["HOME"];
+      else process.env["HOME"] = saved;
+    }
+  }
+
+  test("Codex has the same local-marketplace drift as Claude", async () => {
+    expect(await codexSourceIsGithub("local")).toBe(false);
+  });
+
+  test("Codex git marketplaces can receive RedSkills updates", async () => {
+    expect(await codexSourceIsGithub("git")).toBe(true);
+  });
+
+  test("no Codex marketplace entry is no opinion", async () => {
+    expect(await codexSourceIsGithub(undefined)).toBeNull();
+  });
+
   test("the name alone cannot tell the two apart", () => {
     // Which is why the old check could not see this: `red-skills`
     // appears in `plugin marketplace list` either way.
     const wired = src.slice(src.indexOf("async function cliNamesRedSkills"));
     expect(wired.slice(0, wired.indexOf("\n}"))).toContain("red-skills");
     expect(src).toContain("claudeMarketplaceIsGithub");
+    expect(src).toContain("codexMarketplaceIsGithub");
   });
 
   test("the repair reinstalls the plugins it removed", () => {
     // They came from a marketplace that no longer exists under that
     // name, so re-adding the source is not enough on its own.
     const repair = src.slice(src.indexOf("export async function repointClaudeMarketplace"));
+    for (const plugin of ["dev", "memory", "brain"]) {
+      expect(repair).toContain(plugin);
+    }
+  });
+
+  test("the Codex repair refreshes the plugins that provide MCPs", () => {
+    const repair = src.slice(src.indexOf("export async function repointCodexMarketplace"));
+    expect(repair).toContain("plugin");
+    expect(repair).toContain("marketplace");
     for (const plugin of ["dev", "memory", "brain"]) {
       expect(repair).toContain(plugin);
     }
