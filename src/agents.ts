@@ -311,6 +311,72 @@ async function cliNamesRedSkills(cmd: string[]): Promise<boolean> {
   }
 }
 
+/**
+ * Whether Claude's marketplace points at GitHub rather than at a
+ * directory on this disk.
+ *
+ * The vendor installer registers `~/.red-skills/current`, which is a
+ * symlink into a versioned snapshot taken the day it ran. Claude then
+ * does exactly what it was asked: auto-update re-reads that directory,
+ * finds it unchanged, and records a fresh lastUpdated. The machine
+ * reports "Updated today" and sits on the version it was installed
+ * with — 3.3.0 against 3.3.7 upstream, for a week, with nothing
+ * anywhere saying so.
+ *
+ * "Is red-skills in the list" cannot see that: the name is present
+ * either way. The source is what distinguishes a marketplace that can
+ * receive updates from one that only appears to.
+ */
+export async function claudeMarketplaceIsGithub(): Promise<boolean | null> {
+  const home = process.env["HOME"] ?? process.env["USERPROFILE"];
+  if (!home) return null;
+  const path = `${home.replace(/\\/g, "/")}/.claude/plugins/known_marketplaces.json`;
+  if (!existsSync(path)) return null;
+  try {
+    const known = JSON.parse(await Bun.file(path).text()) as Record<
+      string,
+      { source?: { source?: string } }
+    >;
+    const entry = known["red-skills"];
+    if (!entry) return null;
+    return entry.source?.source === "github";
+  } catch {
+    // Unreadable is not the same as wrong. Null means "no opinion", and
+    // the caller leaves the machine alone rather than repointing a
+    // marketplace on a guess.
+    return null;
+  }
+}
+
+/**
+ * Repoint Claude's marketplace from the frozen directory to GitHub.
+ *
+ * Remove, re-add by repo, reinstall the plugins — the same five steps
+ * anyone doing this by hand runs, because there is no `marketplace
+ * set-source`. The plugins have to be reinstalled: they were installed
+ * from a marketplace that no longer exists under that name.
+ *
+ * Not destructive in any way that matters. Everything removed here is
+ * re-created from the origin in the same run, and the source cache under
+ * ~/.red-skills is left alone.
+ */
+export async function repointClaudeMarketplace(): Promise<void> {
+  const { spawnLogged } = await import("./providers.ts");
+  log.step("red-skills: marketplace points at a local directory — repointing at GitHub");
+  log.plain("     A directory source cannot receive updates. Claude re-reads the");
+  log.plain("     same snapshot and records a new timestamp, so a stuck machine");
+  log.plain("     reports itself as current.");
+
+  await spawnLogged(["claude", "plugin", "marketplace", "remove", "red-skills"]);
+  if ((await spawnLogged(["claude", "plugin", "marketplace", "add", "reddb-io/red-skills"])) !== 0) {
+    throw new RedError("could not add the red-skills marketplace from GitHub");
+  }
+  for (const plugin of ["dev", "memory", "brain"]) {
+    await spawnLogged(["claude", "plugin", "install", `${plugin}@red-skills`]);
+  }
+  log.ok("red-skills marketplace now tracks reddb-io/red-skills");
+}
+
 function configHome(): string {
   const home = process.env["HOME"] ?? process.env["USERPROFILE"] ?? "";
   return `${home.replace(/\\/g, "/")}/.config`;
@@ -370,6 +436,13 @@ export async function convergeRedSkills(p: Platform): Promise<void> {
   if (present.length === 0) {
     log.skip("red-skills: no coding agent installed to configure");
     return;
+  }
+
+  // Before asking whether it is wired: a marketplace registered against
+  // a local directory is wired and permanently stale, which no amount
+  // of reinstalling the same installer will fix.
+  if (Bun.which("claude") && (await claudeMarketplaceIsGithub()) === false) {
+    await repointClaudeMarketplace();
   }
 
   const missing = await unwiredSkillHosts();

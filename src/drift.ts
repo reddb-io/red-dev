@@ -362,6 +362,39 @@ async function checkWslDistro(p: Platform): Promise<DriftCheck> {
   }
 }
 
+/**
+ * Whether red-skills can actually receive updates.
+ *
+ * A marketplace registered against a local directory is the worst kind
+ * of wrong: Claude re-reads the snapshot, finds it unchanged, and writes
+ * a fresh timestamp — so the machine reports itself current while
+ * sitting on whatever version the installer captured. Seen at 3.3.0
+ * against 3.3.7 upstream, reporting "Updated today".
+ */
+async function checkRedSkillsSource(): Promise<DriftCheck> {
+  if (!Bun.which("claude")) {
+    return { name: "red-skills", status: "n/a", detail: "claude not installed" };
+  }
+  try {
+    const { claudeMarketplaceIsGithub } = await import("./agents.ts");
+    const github = await claudeMarketplaceIsGithub();
+    if (github === null) {
+      return { name: "red-skills", status: "n/a", detail: "no marketplace registered" };
+    }
+    return github
+      ? { name: "red-skills", status: "ok", detail: "tracking reddb-io/red-skills" }
+      : {
+          name: "red-skills",
+          status: "drift",
+          detail:
+            "marketplace points at a local directory — it reports updates it cannot receive",
+          fix: "red-dev install core",
+        };
+  } catch (err) {
+    return { name: "red-skills", status: "n/a", detail: (err as Error).message };
+  }
+}
+
 export async function collectDrift(p: Platform): Promise<DriftCheck[]> {
   const checks: DriftCheck[] = [];
   checks.push(await checkDotfiles());
@@ -371,6 +404,7 @@ export async function collectDrift(p: Platform): Promise<DriftCheck[]> {
   checks.push(checkWslInterop(p));
   checks.push(await checkFont(p));
   checks.push(await checkWslDistro(p));
+  checks.push(await checkRedSkillsSource());
   checks.push(await checkDelta());
   checks.push(await checkRuntimes());
   checks.push(await checkDocker(p));

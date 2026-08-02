@@ -14,9 +14,10 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { TOOLS, applicableScopes, providerFor } from "./manifest.ts";
-import { AGENTS, SKILL_HOSTS } from "./agents.ts";
+import { AGENTS, SKILL_HOSTS, claudeMarketplaceIsGithub } from "./agents.ts";
 import type { Platform } from "./platform.ts";
 
 function platform(over: Partial<Platform>): Platform {
@@ -112,5 +113,75 @@ describe("how it decides it is already done", () => {
     // A converge that reinstalls should say which host was missing,
     // rather than reporting work with no reason attached.
     expect(src).toContain("not wired into");
+  });
+});
+
+describe("a marketplace that reports updates it cannot receive", () => {
+  const src = readFileSync("src/agents.ts", "utf8");
+
+  /** A HOME holding one crafted known_marketplaces.json. */
+  function fakeHome(entry: unknown): string {
+    const dir = mkdtempSync(`${tmpdir()}/red-mkt-`);
+    mkdirSync(`${dir}/.claude/plugins`, { recursive: true });
+    if (entry !== undefined) {
+      writeFileSync(
+        `${dir}/.claude/plugins/known_marketplaces.json`,
+        JSON.stringify({ "red-skills": entry }),
+      );
+    }
+    return dir;
+  }
+
+  async function sourceIsGithub(entry: unknown): Promise<boolean | null> {
+    const saved = process.env["HOME"];
+    process.env["HOME"] = fakeHome(entry);
+    try {
+      return await claudeMarketplaceIsGithub();
+    } finally {
+      if (saved === undefined) delete process.env["HOME"];
+      else process.env["HOME"] = saved;
+    }
+  }
+
+  test("a directory source is drift, however recently it says it updated", async () => {
+    // The exact entry off a real machine: autoUpdate on, a timestamp
+    // from today, and a version a week behind. Claude re-reads the
+    // snapshot, finds it unchanged, and records success.
+    expect(
+      await sourceIsGithub({
+        source: { source: "directory", path: "/home/x/.red-skills/current" },
+        lastUpdated: "2026-08-02T12:35:21.550Z",
+        autoUpdate: true,
+      }),
+    ).toBe(false);
+  });
+
+  test("a github source is what a working one looks like", async () => {
+    expect(
+      await sourceIsGithub({ source: { source: "github", repo: "reddb-io/red-skills" } }),
+    ).toBe(true);
+  });
+
+  test("no entry is no opinion, not a verdict", async () => {
+    // Null means leave the machine alone. Repointing a marketplace on a
+    // guess is worse than the drift.
+    expect(await sourceIsGithub(undefined)).toBeNull();
+  });
+
+  test("the name alone cannot tell the two apart", () => {
+    // Which is why the old check could not see this: `red-skills`
+    // appears in `plugin marketplace list` either way.
+    const wired = src.slice(src.indexOf("async function cliNamesRedSkills"));
+    expect(wired.slice(0, wired.indexOf("\n}"))).toContain("red-skills");
+    expect(src).toContain("claudeMarketplaceIsGithub");
+  });
+
+  test("the repair reinstalls the plugins it removed", () => {
+    // They came from a marketplace that no longer exists under that
+    // name, so re-adding the source is not enough on its own.
+    const repair = src.slice(src.indexOf("export async function repointClaudeMarketplace"));
+    for (const plugin of ["dev", "memory", "brain"]) {
+      expect(repair).toContain(plugin);
+    }
   });
 });
