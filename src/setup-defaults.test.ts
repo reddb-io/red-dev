@@ -59,7 +59,15 @@ describe("the optional tools", () => {
     // live in the same place, so the next heavy tool needs no UI change.
     const blender = TOOLS.find((t) => t.name === "blender");
     expect(blender?.offByDefault).toBe(true);
-    expect(TOOLS.filter((t) => t.offByDefault).map((t) => t.name)).toEqual(["blender"]);
+    // Named one by one on purpose. Each is unticked for a reason worth
+    // stating — Blender is 1.2 GB, and the two extensions build a turbo
+    // workspace before they install anything — and a fourth appearing
+    // here should be a decision rather than a diff nobody read.
+    expect(TOOLS.filter((t) => t.offByDefault).map((t) => t.name).sort()).toEqual([
+      "blender",
+      "red-skills-herdr",
+      "red-skills-vscode",
+    ]);
   });
 
   test("stay ticked however many there are", () => {

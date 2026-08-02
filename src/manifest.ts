@@ -105,6 +105,8 @@ export type Provider =
         | "shared-root"
         | "hotkeys"
         | "red-skills"
+        | "red-skills-vscode"
+        | "red-skills-herdr"
         | "blender"
         | "wsl-sync";
     }
@@ -209,6 +211,8 @@ const builtin = (
     | "shared-root"
     | "hotkeys"
     | "red-skills"
+    | "red-skills-vscode"
+    | "red-skills-herdr"
     | "blender",
 ): Provider => ({ kind: "builtin", name });
 const skip = (reason: string): Provider => ({ kind: "skip", reason });
@@ -608,6 +612,28 @@ export const TOOLS: Tool[] = [
     managed: true,
     u24: builtin("blender"),
     win: winget("BlenderFoundation.Blender"),
+  },
+  {
+    // Offered rather than assumed, and unticked: both build from the
+    // red-skills monorepo, which means a pnpm install of a turbo
+    // workspace the first time. That is not a cost to hand somebody for
+    // pressing enter.
+    name: "red-skills-vscode",
+    about: "RedSkills panel for VS Code — builds from source, needs pnpm",
+    offByDefault: true,
+    scope: "optional",
+    managed: true,
+    u24: builtin("red-skills-vscode"),
+    win: builtin("red-skills-vscode"),
+  },
+  {
+    name: "red-skills-herdr",
+    about: "RedSkills plugin for herdr — live workers, logs and PRs",
+    offByDefault: true,
+    scope: "optional",
+    managed: true,
+    u24: builtin("red-skills-herdr"),
+    win: skip("herdr has no stable Windows build"),
   },
   {
     name: "just",

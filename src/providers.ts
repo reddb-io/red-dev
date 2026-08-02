@@ -65,7 +65,7 @@ async function pumpToLog(stream: ReadableStream<Uint8Array> | null): Promise<voi
  */
 export async function spawnLogged(
   cmd: string[],
-  extra: { env?: Record<string, string | undefined> } = {},
+  extra: { env?: Record<string, string | undefined>; cwd?: string } = {},
 ): Promise<number> {
   if (!logIsCaptured()) {
     const proc = Bun.spawn(cmd, {
@@ -775,6 +775,16 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
 
         const { applyWallpaperLogged } = await import("./wallpaper.ts");
         await applyWallpaperLogged(theme, ctx.theme, ctx.platform);
+        return;
+      }
+      if (pr.name === "red-skills-vscode") {
+        const { installVscodeExtension } = await import("./red-skills-ext.ts");
+        await installVscodeExtension();
+        return;
+      }
+      if (pr.name === "red-skills-herdr") {
+        const { installHerdrPlugin } = await import("./red-skills-ext.ts");
+        await installHerdrPlugin();
         return;
       }
       if (pr.name === "blender") {
