@@ -192,19 +192,14 @@ const HERDR_THEME: Record<string, string> = {
 export async function applyHerdr(p: Platform, slug: string): Promise<boolean> {
   if (!Bun.which("herdr") && !Bun.which("herdr.exe")) return false;
 
-  // Its own path, not configHome's: herdr reads %APPDATA%\herdr on
-  // Windows and ~/.config/herdr elsewhere, which is documented and not
-  // a guess.
-  const dir =
-    p.os === "windows"
-      ? `${process.env["APPDATA"] ?? ""}\\herdr`
-      : `${configHome(p, "herdr")}/herdr`;
-  if (p.os === "windows" && !process.env["APPDATA"]) return false;
+  const { herdrConfigDir, herdrConfigPath } = await import("./herdr.ts");
+  const dir = herdrConfigDir(p);
+  const path = herdrConfigPath(p);
+  if (dir === null || path === null) return false;
   mkdirSync(dir, { recursive: true });
 
   const name = HERDR_THEME[slug] ?? "terminal";
   const block = `# ${GENERATED}\n[theme]\nname = "${name}"\n`;
-  const path = `${dir}${p.os === "windows" ? "\\" : "/"}config.toml`;
 
   if (!existsSync(path)) {
     await Bun.write(path, block);

@@ -15,6 +15,7 @@
 
 import { existsSync, realpathSync } from "node:fs";
 import { log, RedError } from "./log.ts";
+import type { Platform } from "./platform.ts";
 
 function home(): string {
   const h = process.env["HOME"] ?? process.env["USERPROFILE"];
@@ -130,8 +131,11 @@ export async function installVscodeExtension(): Promise<void> {
  * has been seen to fail on a machine whose plugin has to be built after
  * fetching, so the fallback is the one the plugin's own README
  * documents: prepare the workspace and link the directory.
+ *
+ * Either way it ends with a key bound to it. An installed plugin herdr
+ * gives no shortcut to is one nobody opens.
  */
-export async function installHerdrPlugin(): Promise<void> {
+export async function installHerdrPlugin(p: Platform): Promise<void> {
   if (!Bun.which("herdr")) {
     log.skip("herdr plugin: herdr is not installed");
     return;
@@ -147,6 +151,7 @@ export async function installHerdrPlugin(): Promise<void> {
   ]);
   if (remote === 0) {
     log.ok("herdr plugin installed from reddb-io/red-skills");
+    await bindDashboard(p);
     return;
   }
 
@@ -162,4 +167,19 @@ export async function installHerdrPlugin(): Promise<void> {
     throw new RedError("herdr refused to link the plugin");
   }
   log.ok("herdr plugin linked from the red-skills checkout");
+  await bindDashboard(p);
+}
+
+/**
+ * The binding is a convenience, so it never fails the install — and a
+ * running server keeps the old config until it is told otherwise, which
+ * is why the reload is asked for rather than left to the next launch.
+ */
+async function bindDashboard(p: Platform): Promise<void> {
+  try {
+    const { bindHerdrDashboard } = await import("./herdr.ts");
+    if (await bindHerdrDashboard(p)) await sh(["herdr", "server", "reload-config"]);
+  } catch (err) {
+    log.warn(`herdr keybinding: ${(err as Error).message}`);
+  }
 }

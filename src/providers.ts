@@ -784,7 +784,7 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
       }
       if (pr.name === "red-skills-herdr") {
         const { installHerdrPlugin } = await import("./red-skills-ext.ts");
-        await installHerdrPlugin();
+        await installHerdrPlugin(ctx.platform);
         return;
       }
       if (pr.name === "blender") {
