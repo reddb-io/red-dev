@@ -695,6 +695,8 @@ export interface ApplyContext {
   theme: string;
   /** Font key from src/wsl.ts NERD_FONTS. */
   font: string;
+  /** Terminal font size in points. */
+  fontSize?: number;
   /** Terminal background opacity, 0-100. */
   opacity: number;
 }
@@ -763,6 +765,7 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
             platform: ctx.platform,
             theme,
             fontFamily: spec.family,
+            fontSize: ctx.fontSize,
             opacity: ctx.opacity,
           });
         } catch (err) {

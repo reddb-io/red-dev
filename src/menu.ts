@@ -46,7 +46,7 @@ type Handlers = {
   install: () => Promise<number>;
   update: () => Promise<number>;
   doctor: () => Promise<number>;
-  plan: () => number;
+  plan: () => Promise<number>;
   platform: () => number;
   apps: () => Promise<number>;
   lang: () => Promise<number>;
@@ -168,7 +168,7 @@ export async function runMenu(
         last = await h.update();
         break;
       case "Plan":
-        last = h.plan();
+        last = await h.plan();
         break;
       case "Doctor":
         last = await h.doctor();

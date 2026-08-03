@@ -16,6 +16,7 @@
  */
 
 import { existsSync, mkdirSync } from "node:fs";
+import type { ApplyContext } from "./providers.ts";
 import type { Platform } from "./platform.ts";
 
 export type TerminalShell = "wsl" | "gitbash";
@@ -83,4 +84,36 @@ export async function resolveTerminalShell(p: Platform): Promise<TerminalShell> 
   const prefs = await readPreferences(p);
   if (prefs.terminalShell) return prefs.terminalShell;
   return p.env === "wsl" ? "wsl" : "gitbash";
+}
+
+export type ApplyContextEntryPath = "plan" | "install" | "update" | "theme";
+
+export interface InvocationDefaults {
+  themeName: string;
+  font: string;
+  opacity: number;
+}
+
+/**
+ * Build the apply context after durable preferences have had their say.
+ *
+ * Command flags remain a run's defaults, but recorded user choices are
+ * the better answer when a non-interactive entry point regenerates
+ * terminal configuration. Without this, theme switches and converges
+ * rewrote font.toml with FiraCode 11 even on machines configured for a
+ * different font.
+ */
+export async function applyContextForEntry(
+  p: Platform,
+  inv: InvocationDefaults,
+  _entry: ApplyContextEntryPath,
+): Promise<ApplyContext> {
+  const prefs = await readPreferences(p);
+  return {
+    platform: p,
+    theme: prefs.theme ?? inv.themeName,
+    font: prefs.font ?? inv.font,
+    fontSize: prefs.fontSize,
+    opacity: inv.opacity,
+  };
 }
