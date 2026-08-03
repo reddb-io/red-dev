@@ -20,6 +20,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { log, RedError } from "./log.ts";
 import type { Platform } from "./platform.ts";
 import type { Theme, TerminalPalette } from "./themes.ts";
+import { readWindowsOutput } from "./windows-output.ts";
 
 async function capture(cmd: string[]): Promise<string> {
   const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
@@ -228,14 +229,13 @@ async function shellToml(p: Platform): Promise<string> {
 /**
  * The distro WSL would open by default.
  *
- * `wsl -l -q` writes UTF-16, so the output arrives with NUL bytes
- * between characters; stripping them is the difference between parsing
- * a name and parsing nothing.
+ * `wsl -l -q` writes UTF-16LE when redirected, so decode the Windows
+ * boundary before treating the result as normal text.
  */
 async function defaultWslDistro(): Promise<string | null> {
   try {
     const proc = Bun.spawn(["wsl.exe", "-l", "-q"], { stdout: "pipe", stderr: "ignore" });
-    const out = (await new Response(proc.stdout).text()).replace(/\0/g, "");
+    const out = await readWindowsOutput(proc.stdout);
     if ((await proc.exited) !== 0) return null;
     return out.split(/\r?\n/).map((l) => l.trim()).find(Boolean) ?? null;
   } catch {

@@ -551,13 +551,33 @@ async function cmdUi(p: Platform, inv: Invocation): Promise<number> {
 }
 
 /**
- * Set WSL up from the Windows side, on demand rather than only during a
+ * Set WSL 2 up from the Windows side, on demand rather than only during a
  * first run — someone who declined at setup should not have to reset
  * their preferences to change their mind.
  */
 async function cmdWsl(p: Platform): Promise<number> {
+  if (p.env === "wsl") {
+    const { detectWsl } = await import("./wsl-provision.ts");
+    const state = await detectWsl();
+    const name = process.env["WSL_DISTRO_NAME"];
+    const distro = state.distributions.find((item) => item.name === name);
+    if (distro?.version === 2) {
+      log.ok(`${distro.name} is using WSL 2`);
+      return 0;
+    }
+
+    const label = name ?? "this distro";
+    const commandName = name ?? "<distro>";
+    log.err(`${label} is not confirmed as WSL 2`);
+    log.plain("     A running distro cannot safely convert itself. In PowerShell run:");
+    log.plain(`       wsl --shutdown`);
+    log.plain(`       wsl --set-default-version 2`);
+    log.plain(`       wsl --set-version ${commandName} 2`);
+    return 1;
+  }
+
   if (p.os !== "windows") {
-    log.skip("this sets WSL up from the Windows side; you are already inside a distro");
+    log.skip("this sets WSL 2 up from the Windows side");
     return 0;
   }
   const { offerWsl } = await import("./wsl-provision.ts");

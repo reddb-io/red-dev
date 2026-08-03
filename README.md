@@ -188,6 +188,16 @@ Because zellij is now always on, its own keybindings would be taking `Ctrl-p`,
 unlocks, every binding returns to locked, and `Alt` plus arrows or `hjkl` moves
 between panes without leaving it.
 
+Clipboard text stays Unicode across WSL: zellij sends UTF-8, and red-dev's
+low-latency bridge converts it to BOM-less UTF-16LE before `clip.exe` reads it.
+That avoids both `clip.exe`'s OEM-code-page mojibake and zellij's one-second
+timeout for clipboard commands. Mouse selection copies automatically. In
+Alacritty, paste is `Ctrl+V` or `Ctrl+Shift+V`; `Ctrl+Shift+C` copies an
+Alacritty selection, while plain `Ctrl+C` remains the application's interrupt
+key. Inside a mouse-capturing TUI such as herdr, normal drag selection belongs
+to herdr and is copied automatically; hold `Shift` while dragging to select in
+Alacritty instead, or use herdr's copy mode (`Ctrl+B`, then `[`).
+
 ### The tools
 
 `git` · `curl` · `ripgrep` · `fd` · `bat` · `eza` · `zoxide` · `fzf` · `btop` ·
@@ -297,7 +307,7 @@ red-dev agents               # choose coding agents, wire in red-skills
 red-dev share [path]         # one directory both WSL and Windows read
 red-dev share adopt <tool>   # move that tool's configuration into it
 red-dev uninstall            # remove tools, or red-dev's own config
-red-dev wsl                  # Windows: set up WSL
+red-dev wsl                  # Windows: set up or verify WSL 2
 red-dev ui                   # fullscreen, with live theme preview
 red-dev doctor               # report tool and configuration drift
 ```
@@ -522,6 +532,14 @@ run natively, and the wallpaper goes through `gsettings`.
 ```bash
 curl -fsSL https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.sh | sh
 ```
+
+WSL 2 is an explicit invariant, not an assumption. From Windows, red-dev sets
+version 2 as the default for every future distro and reads `wsl --list
+--verbose` before entering the selected distro. An existing WSL 1 distro is
+never used silently: `red-dev wsl` offers to convert it after warning that the
+conversion can take time, while `red-dev doctor` reports the architecture in
+use. From inside a distro, `red-dev wsl` verifies it and prints the PowerShell
+conversion commands when Windows does not report version 2.
 
 Scopes: `core` + `wsl`. The `core` half installs inside the distro; the `wsl`
 half deliberately reaches **out to Windows**, because that is where the terminal
