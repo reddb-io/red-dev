@@ -194,7 +194,11 @@ const GNOME_ACCENTS: Record<string, string> = {
   "rose-pine": "pink",
 };
 
-export async function applyGnomeTheme(p: Platform, slug: string): Promise<boolean> {
+export function gnomeColorScheme(theme: Theme): "prefer-light" | "prefer-dark" {
+  return theme.appearance === "light" ? "prefer-light" : "prefer-dark";
+}
+
+export async function applyGnomeTheme(p: Platform, theme: Theme, slug: string): Promise<boolean> {
   if (!p.caps.gui || !Bun.which("gsettings")) {
     log.skip("no GNOME session here");
     return false;
@@ -208,9 +212,7 @@ export async function applyGnomeTheme(p: Platform, slug: string): Promise<boolea
     return (await proc.exited) === 0;
   };
 
-  // Every palette shipped here is dark; when a light one lands this
-  // should read the background's luminance rather than assume.
-  await run("org.gnome.desktop.interface", "color-scheme", "prefer-dark");
+  await run("org.gnome.desktop.interface", "color-scheme", gnomeColorScheme(theme));
 
   const accent = GNOME_ACCENTS[slug];
   if (accent) {

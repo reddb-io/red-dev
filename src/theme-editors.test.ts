@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { codeArgv } from "./theme-editors.ts";
+import { codeArgv, gnomeColorScheme } from "./theme-editors.ts";
+import { THEMES } from "./themes.ts";
 
 describe("codeArgv", () => {
   test("wraps a .cmd on Windows, because CreateProcess cannot run one", () => {
@@ -30,5 +31,12 @@ describe("codeArgv", () => {
 
   test("does not wrap a path that merely contains .cmd", () => {
     expect(codeArgv(["C:\\cmd.tools\\code.exe"], "win32")).toEqual(["C:\\cmd.tools\\code.exe"]);
+  });
+});
+
+describe("gnomeColorScheme", () => {
+  test("uses Rose Pine's explicit light appearance", () => {
+    const theme = THEMES["rose-pine"]!;
+    expect(gnomeColorScheme(theme)).toBe("prefer-light");
   });
 });
