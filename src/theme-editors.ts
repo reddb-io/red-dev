@@ -42,32 +42,127 @@ export function codeArgv(argv: string[], platform: string = process.platform): s
  * `workbench.colorTheme` to a theme that is not installed leaves VS
  * Code on its default with a notification nobody reads.
  */
-export const VSCODE_THEMES: Record<string, { extension: string; label: string }> = {
-  "tokyo-night": { extension: "enkia.tokyo-night", label: "Tokyo Night" },
-  catppuccin: { extension: "Catppuccin.catppuccin-vsc", label: "Catppuccin Macchiato" },
-  gruvbox: { extension: "jdinhlife.gruvbox", label: "Gruvbox Dark Medium" },
-  everforest: { extension: "sainnhe.everforest", label: "Everforest Dark" },
-  kanagawa: { extension: "qufiwefefwoyn.kanagawa", label: "Kanagawa" },
+export type VsCodeThemeSpec =
+  | { status: "exact"; extension: string; label: string }
+  | { status: "unsupported"; reason: string };
+
+export const VSCODE_THEMES: Record<string, VsCodeThemeSpec> = {
+  "tokyo-night": { status: "exact", extension: "enkia.tokyo-night", label: "Tokyo Night" },
+  catppuccin: { status: "exact", extension: "Catppuccin.catppuccin-vsc", label: "Catppuccin Macchiato" },
+  gruvbox: { status: "exact", extension: "jdinhlife.gruvbox", label: "Gruvbox Dark Medium" },
+  everforest: { status: "exact", extension: "sainnhe.everforest", label: "Everforest Dark" },
+  kanagawa: { status: "exact", extension: "qufiwefefwoyn.kanagawa", label: "Kanagawa" },
   // Was AndreiVoronkov.matte-black, which the marketplace has never
   // published. Label taken from the extension's own contributes.themes
   // rather than from its display name — "Matte Black Theme", not
   // "Matte Black", and workbench.colorTheme wants the former.
-  "matte-black": { extension: "CleanThemes.matte-black-theme", label: "Matte Black Theme" },
-  nord: { extension: "arcticicestudio.nord-visual-studio-code", label: "Nord" },
+  "matte-black": { status: "exact", extension: "CleanThemes.matte-black-theme", label: "Matte Black Theme" },
+  nord: { status: "exact", extension: "arcticicestudio.nord-visual-studio-code", label: "Nord" },
   // Was kaiwood.monokai-pro, which does not exist; this is the
   // publisher's own.
   ristretto: {
+    status: "exact",
     extension: "monokai.theme-monokai-pro-vscode",
     label: "Monokai Pro (Filter Ristretto)",
   },
-  "rose-pine": { extension: "mvllow.rose-pine", label: "Rosé Pine" },
-  // osaka-jade is deliberately absent. solomonhyt.osaka-jade does not
-  // exist either, and no VS Code theme of that name does — the nearest
-  // matches are Solarized Osaka, which is a different palette. Falling
-  // through to "no VS Code theme mapped" leaves the editor alone, which
-  // is honest; pointing at a plausible-looking neighbour would theme it
-  // wrong and say it succeeded.
+  "rose-pine": { status: "exact", extension: "mvllow.rose-pine", label: "Rosé Pine" },
+  "osaka-jade": {
+    status: "unsupported",
+    reason:
+      "no exact Osaka Jade VS Code theme is published; Solarized Osaka is a different palette",
+  },
 };
+
+function stripJsonComments(text: string): string {
+  let out = "";
+  let inString = false;
+  let inLine = false;
+  let inBlock = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]!;
+    const next = text[i + 1];
+    if (inLine) {
+      if (c === "\n") {
+        inLine = false;
+        out += c;
+      }
+      continue;
+    }
+    if (inBlock) {
+      if (c === "*" && next === "/") {
+        inBlock = false;
+        i++;
+      }
+      continue;
+    }
+    if (inString) {
+      out += c;
+      if (c === "\\") {
+        out += text[i + 1] ?? "";
+        i++;
+        continue;
+      }
+      if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') {
+      inString = true;
+      out += c;
+      continue;
+    }
+    if (c === "/" && next === "/") {
+      inLine = true;
+      i++;
+      continue;
+    }
+    if (c === "/" && next === "*") {
+      inBlock = true;
+      i++;
+      continue;
+    }
+    out += c;
+  }
+  return out;
+}
+
+function stripTrailingCommas(text: string): string {
+  let out = "";
+  let inString = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]!;
+    if (inString) {
+      out += c;
+      if (c === "\\") {
+        out += text[i + 1] ?? "";
+        i++;
+        continue;
+      }
+      if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') {
+      inString = true;
+      out += c;
+      continue;
+    }
+    if (c === ",") {
+      const rest = text.slice(i + 1);
+      if (/^\s*[\]}]/.test(rest)) continue;
+    }
+    out += c;
+  }
+  return out;
+}
+
+export function parseJsoncObject(text: string): Record<string, unknown> {
+  return JSON.parse(stripTrailingCommas(stripJsonComments(text))) as Record<string, unknown>;
+}
+
+export function vscodeSettingsJson(original: string, label: string): string {
+  const settings = original.trim() ? parseJsoncObject(original) : {};
+  settings["workbench.colorTheme"] = label;
+  return JSON.stringify(settings, null, 2) + "\n";
+}
 
 /**
  * Where the VS Code that will actually run reads its settings.
@@ -129,6 +224,10 @@ export async function applyVsCodeTheme(theme: Theme, p: Platform, slug: string):
     log.skip(`no VS Code theme mapped for ${slug}`);
     return false;
   }
+  if (spec.status === "unsupported") {
+    log.skip(`no VS Code theme mapped for ${slug}: ${spec.reason}`);
+    return false;
+  }
 
   // Installing the extension first: setting a theme that is not there
   // leaves the editor on its default.
@@ -152,10 +251,11 @@ export async function applyVsCodeTheme(theme: Theme, p: Platform, slug: string):
     return false;
   }
 
-  let settings: Record<string, unknown> = {};
+  let original = "";
   if (existsSync(path)) {
     try {
-      settings = JSON.parse(await Bun.file(path).text()) as Record<string, unknown>;
+      original = await Bun.file(path).text();
+      parseJsoncObject(original);
     } catch {
       // A settings.json with comments or a trailing comma is common and
       // valid to VS Code but not to JSON.parse. Overwriting it would
@@ -167,8 +267,7 @@ export async function applyVsCodeTheme(theme: Theme, p: Platform, slug: string):
     mkdirSync(path.replace(/[\\/][^\\/]+$/, ""), { recursive: true });
   }
 
-  settings["workbench.colorTheme"] = spec.label;
-  await Bun.write(path, JSON.stringify(settings, null, 2) + "\n");
+  await Bun.write(path, vscodeSettingsJson(original, spec.label));
   void theme;
   return true;
 }

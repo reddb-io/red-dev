@@ -45,6 +45,7 @@ async function exists(id: string): Promise<boolean> {
 
 const missing: string[] = [];
 for (const [slug, spec] of Object.entries(VSCODE_THEMES)) {
+  if (spec.status !== "exact") continue;
   const ok = await exists(spec.extension);
   console.log(`  ${ok ? "ok     " : "MISSING"} ${slug.padEnd(12)} ${spec.extension}`);
   if (!ok) missing.push(`${slug} -> ${spec.extension}`);
