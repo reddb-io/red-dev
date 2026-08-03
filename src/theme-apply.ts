@@ -245,7 +245,7 @@ export async function applyThemeEverywhere(
           ["neovim", () => applyNeovim(theme)],
           ["vscode", () => applyVsCodeTheme(theme, p, key)],
           ...cliSurfaces(theme, p, key),
-          ["gnome", () => applyGnomeTheme(p, key)],
+          ["gnome", () => applyGnomeTheme(p, theme, key)],
         ];
 
   for (const [name, fn] of surfaces) {
