@@ -178,7 +178,7 @@ export const THEMES: Record<string, Theme> = {
   },
   "matte-black": {
     name: "Matte Black",
-    neovim: "matte-black",
+    neovim: "matteblack",
     terminal: {
       background: "#121212",
       foreground: "#BEBEBE",
@@ -204,7 +204,7 @@ export const THEMES: Record<string, Theme> = {
   },
   "nord": {
     name: "Nord",
-    neovim: "nord",
+    neovim: "nordfox",
     terminal: {
       background: "#2E3440",
       foreground: "#D8DEE9",
@@ -230,7 +230,7 @@ export const THEMES: Record<string, Theme> = {
   },
   "osaka-jade": {
     name: "Osaka Jade",
-    neovim: "osaka-jade",
+    neovim: "bamboo",
     terminal: {
       background: "#111C18",
       foreground: "#C1C497",
@@ -256,7 +256,7 @@ export const THEMES: Record<string, Theme> = {
   },
   "ristretto": {
     name: "Ristretto",
-    neovim: "ristretto",
+    neovim: "monokai-pro",
     terminal: {
       background: "#2C2525",
       foreground: "#E6D9DB",
@@ -282,7 +282,7 @@ export const THEMES: Record<string, Theme> = {
   },
   "rose-pine": {
     name: "Rose Pine",
-    neovim: "rose-pine",
+    neovim: "rose-pine-dawn",
     terminal: {
       background: "#FAF4ED",
       foreground: "#575279",
