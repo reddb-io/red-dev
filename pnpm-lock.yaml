@@ -1,0 +1,73 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      cli-args-parser:
+        specifier: ^1.0.6
+        version: 1.0.6
+      tuiuiu.js:
+        specifier: 1.0.75
+        version: 1.0.75
+    devDependencies:
+      '@types/bun':
+        specifier: latest
+        version: 1.3.14
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+
+packages:
+
+  '@types/bun@1.3.14':
+    resolution: {integrity: sha512-h1hFqFVcvAvD9j9K7ZW7vd82aSA+rTdznZa+5bwvCwqSB1jmmfLcbIWhOLx1/+boy/xmjgCs/OMUL8hRJSmnPw==}
+
+  '@types/node@26.1.2':
+    resolution: {integrity: sha512-Vu4a5UFA9rIIFJ7rB/Vaafh9lrCQszopTCx6KjFboXTGQbPNasehVR5TEiithSDGyd1DEiUByggTZsg8jukeIg==}
+
+  bun-types@1.3.14:
+    resolution: {integrity: sha512-4N0ig0fEomHt5R0KCFWjovxow98rIoRwKolrYdCcknNwMekCXRnWEUvgu5soYV8QXtVsrUD8B95MBOZGPvr6KQ==}
+
+  cli-args-parser@1.0.6:
+    resolution: {integrity: sha512-c6dKqF8mo2Vq1gw9OUoYoEGnGi9uatHLJWEzbzBn55kXMJdWIFMfRld9NprOF02oco9+SU9E2AgobmdjXxLlBw==}
+    engines: {node: '>=18.0.0'}
+
+  tuiuiu.js@1.0.75:
+    resolution: {integrity: sha512-QQCbz22sDi12OV/CMxMutn7eJ2IwS3eJFbW3nQTQqwsgjD5bbHX2NRT+Insu56p8WbpJLWnerADhEnsQxlIa5A==}
+    engines: {node: '>=22.12'}
+    hasBin: true
+
+  typescript@5.9.3:
+    resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
+    engines: {node: '>=14.17'}
+    hasBin: true
+
+  undici-types@8.3.0:
+    resolution: {integrity: sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ==}
+
+snapshots:
+
+  '@types/bun@1.3.14':
+    dependencies:
+      bun-types: 1.3.14
+
+  '@types/node@26.1.2':
+    dependencies:
+      undici-types: 8.3.0
+
+  bun-types@1.3.14:
+    dependencies:
+      '@types/node': 26.1.2
+
+  cli-args-parser@1.0.6: {}
+
+  tuiuiu.js@1.0.75: {}
+
+  typescript@5.9.3: {}
+
+  undici-types@8.3.0: {}
