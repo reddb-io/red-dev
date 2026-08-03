@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 220" width="1200" height="220" role="img" aria-labelledby="targets-title targets-desc">
+  <title id="targets-title">The support matrix</title>
+  <desc id="targets-desc">Two axes, not five cases: Ubuntu desktop and WSL each span 24.04 and 26.04, while native Windows is one target with no distro axis. Code branches on where it runs and what that place can do, never on a raw version string.</desc>
+  <defs>
+    <linearGradient id="tg-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d1117"/>
+      <stop offset="1" stop-color="#07090d"/>
+    </linearGradient>
+    <radialGradient id="tg-glow" cx="0.2" cy="0.1" r="0.8">
+      <stop offset="0" stop-color="#ff2056" stop-opacity="0.30"/>
+      <stop offset="1" stop-color="#ff2056" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="tg-rule" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff2056"/>
+      <stop offset="1" stop-color="#ff2056" stop-opacity="0"/>
+    </linearGradient>
+    <pattern id="tg-grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <path d="M24 0H0V24" fill="none" stroke="#ffffff" stroke-opacity="0.028" stroke-width="1"/>
+    </pattern>
+    <clipPath id="tg-frame">
+      <rect x="0" y="0" width="1200" height="220" rx="18"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#tg-frame)">
+    <rect width="1200" height="220" fill="url(#tg-bg)"/>
+    <rect width="1200" height="220" fill="url(#tg-grid)"/>
+    <ellipse cx="160" cy="20" rx="400" ry="210" fill="url(#tg-glow)"/>
+    <g font-family="ui-monospace, SFMono-Regular, 'JetBrains Mono', Menlo, Consolas, monospace">
+      <text x="72" y="92" font-size="26" fill="#ff2056" letter-spacing="2">THE SUPPORT MATRIX</text>
+      <text x="72" y="142" font-size="44" font-weight="700" fill="#f0f6fc">two axes, not five cases</text>
+      <rect x="72" y="164" width="200" height="3" fill="url(#tg-rule)"/>
+      <text x="72" y="194" font-size="18" fill="#8b949e">where it runs &#215; what that place can do &#8212; never a version string</text>
+
+      <!-- the matrix: rows desktop / wsl / windows, columns 24.04 / 26.04 -->
+      <g font-size="14">
+        <text x="960" y="66" fill="#6e7681" text-anchor="middle">24.04</text>
+        <text x="1080" y="66" fill="#6e7681" text-anchor="middle">26.04</text>
+
+        <text x="792" y="102" fill="#8b949e">desktop</text>
+        <text x="960" y="102" fill="#ff2056" text-anchor="middle">&#9679;</text>
+        <text x="1080" y="102" fill="#ff2056" text-anchor="middle">&#9679;</text>
+
+        <text x="792" y="138" fill="#8b949e">wsl</text>
+        <text x="960" y="138" fill="#ff2056" text-anchor="middle">&#9679;</text>
+        <text x="1080" y="138" fill="#ff2056" text-anchor="middle">&#9679;</text>
+
+        <text x="792" y="174" fill="#8b949e">windows</text>
+        <text x="1020" y="174" fill="#3fb950" text-anchor="middle">native &#8212; no distro axis</text>
+      </g>
+      <line x1="880" y1="112" x2="880" y2="184" stroke="#ffffff" stroke-opacity="0.08"/>
+    </g>
+    <rect x="0" y="216" width="1200" height="4" fill="#ff2056"/>
+  </g>
+</svg>

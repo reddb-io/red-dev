@@ -1,22 +1,44 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 150" width="1200" height="150" role="img" aria-label="The identical layer — Alacritty, zellij and bash, one config each, on all five targets">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 220" width="1200" height="220" role="img" aria-labelledby="stack-title stack-desc">
+  <title id="stack-title">The identical layer</title>
+  <desc id="stack-desc">Alacritty, zellij and bash — one config file each, the same on all five targets, with the panes living inside the terminal so tiling survives SSH.</desc>
   <defs>
-    <linearGradient id="sbg" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#07080a"/>
-      <stop offset="100%" stop-color="#14171c"/>
+    <linearGradient id="stack-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d1117"/>
+      <stop offset="1" stop-color="#07090d"/>
     </linearGradient>
+    <radialGradient id="stack-glow" cx="0.2" cy="0.1" r="0.8">
+      <stop offset="0" stop-color="#ff2056" stop-opacity="0.30"/>
+      <stop offset="1" stop-color="#ff2056" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="stack-rule" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff2056"/>
+      <stop offset="1" stop-color="#ff2056" stop-opacity="0"/>
+    </linearGradient>
+    <pattern id="stack-grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <path d="M24 0H0V24" fill="none" stroke="#ffffff" stroke-opacity="0.028" stroke-width="1"/>
+    </pattern>
+    <clipPath id="stack-frame">
+      <rect x="0" y="0" width="1200" height="220" rx="18"/>
+    </clipPath>
   </defs>
-  <rect width="1200" height="150" fill="url(#sbg)"/>
-  <rect width="4" height="150" fill="#ff2056"/>
+  <g clip-path="url(#stack-frame)">
+    <rect width="1200" height="220" fill="url(#stack-bg)"/>
+    <rect width="1200" height="220" fill="url(#stack-grid)"/>
+    <ellipse cx="160" cy="20" rx="400" ry="210" fill="url(#stack-glow)"/>
+    <g font-family="ui-monospace, SFMono-Regular, 'JetBrains Mono', Menlo, Consolas, monospace">
+      <text x="72" y="92" font-size="26" fill="#ff2056" letter-spacing="2">THE IDENTICAL LAYER</text>
+      <text x="72" y="142" font-size="44" font-weight="700" fill="#f0f6fc">alacritty &#183; zellij &#183; bash</text>
+      <rect x="72" y="164" width="200" height="3" fill="url(#stack-rule)"/>
+      <text x="72" y="194" font-size="18" fill="#8b949e">one config each &#183; panes inside the terminal &#183; still tiling over SSH</text>
 
-  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
-    <text x="44" y="52" font-size="13" fill="#ff2056" letter-spacing="2">THE IDENTICAL LAYER</text>
-    <text x="44" y="90" font-size="30" fill="#f4f5f7" font-weight="700">alacritty &#183; zellij &#183; bash</text>
-    <text x="44" y="120" font-size="15" fill="#7a8088">One config each. Five targets. No second copy to keep in sync.</text>
-
-    <g font-size="13" fill="#4a4f57" text-anchor="end">
-      <text x="1156" y="62">renderer</text>
-      <text x="1156" y="88">panes, tabs, sessions &#8212; and over SSH</text>
-      <text x="1156" y="114">shell, Git Bash on Windows</text>
+      <rect x="780" y="54" width="360" height="112" rx="12" fill="#0b0f15" stroke="#ffffff" stroke-opacity="0.09"/>
+      <text x="804" y="86" font-size="14" fill="#6e7681">alacritty.toml</text>
+      <text x="1116" y="86" font-size="14" fill="#8b949e" text-anchor="end">renderer</text>
+      <text x="804" y="116" font-size="14" fill="#6e7681">config.kdl</text>
+      <text x="1116" y="116" font-size="14" fill="#8b949e" text-anchor="end">panes, tabs, sessions</text>
+      <text x="804" y="146" font-size="14" fill="#6e7681">bash dotfiles</text>
+      <text x="1116" y="146" font-size="14" fill="#3fb950" text-anchor="end">Git Bash on Windows</text>
     </g>
+    <rect x="0" y="216" width="1200" height="4" fill="#ff2056"/>
   </g>
 </svg>
