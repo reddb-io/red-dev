@@ -8,6 +8,7 @@
  */
 
 import { existsSync } from "node:fs";
+import { RedError } from "./log.ts";
 import { commandExists, versionAtLeast, type Platform } from "./platform.ts";
 
 export type Scope =
@@ -772,6 +773,12 @@ export const TOOLS: Tool[] = [
 
 /** Pick the provider column that applies to this machine. */
 export function providerFor(tool: Tool, p: Platform): Provider {
+  if (p.os === "darwin") {
+    throw new RedError(
+      "unsupported platform: darwin. macOS support is planned in Phase 5 as an adapter of the platform contracts; this is not a broken Ubuntu install.",
+    );
+  }
+
   // Docker is the one tool whose right answer depends on what the host
   // is already doing, not on which platform this is. Docker Desktop
   // shares one daemon with Windows and every integrated distro;
