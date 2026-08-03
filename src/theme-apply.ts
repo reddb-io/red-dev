@@ -189,26 +189,23 @@ return {
 
 // --------------------------------------------------------- entrypoint
 
-/**
- * The command-line surfaces, which omakub leaves alone.
- *
- * A Kanagawa terminal showing a Monokai diff is the seam this closes.
- * Every one of these is a config file, so unlike the GNOME layer they
- * work on all five targets — including native Windows, where they are
- * the *only* surfaces there are.
- */
-function cliSurfaces(
-  theme: Theme,
-  p: Platform,
-  key: string,
-): [string, () => Promise<boolean>][] {
+const PORTABLE_SURFACE_NAMES = [
+  "zellij",
+  "btop",
+  "neovim",
+  "vscode",
+  "bat",
+  "delta",
+  "lazygit",
+  "opencode",
+  "herdr",
+];
+
+export function themeSurfaceNames(p: Platform): string[] {
   return [
-    ["bat", () => applyBat(theme, p, key)],
-    ["delta", () => applyDelta(theme, key)],
-    ["lazygit", () => applyLazygit(theme, p)],
-    ["opencode", () => applyOpencode(p)],
-    ["herdr", () => applyHerdr(p, key)],
-    ...(p.env === "wsl" ? [["windows", () => applyWindowsDesktopTheme(theme, p, key)] as [string, () => Promise<boolean>]] : []),
+    ...PORTABLE_SURFACE_NAMES,
+    ...(p.env === "wsl" || p.env === "windows" ? ["windows"] : []),
+    ...(p.os !== "windows" ? ["gnome"] : []),
   ];
 }
 
@@ -230,23 +227,20 @@ export async function applyThemeEverywhere(
   // one, so `theme gruvbox` and the menu both reach the same mapping.
   const key = slug ?? theme.name.toLowerCase().replace(/\s+/g, "-");
 
-  // These live in the Linux filesystem and mean nothing on native
-  // Windows, where btop4win and zellij either differ or do not exist.
-  const surfaces: [string, () => Promise<boolean>][] =
-    p.os === "windows"
-      ? [
-          ["neovim", () => applyNeovim(theme)],
-          ["vscode", () => applyVsCodeTheme(theme, p, key)],
-          ["windows", () => applyWindowsDesktopTheme(theme, p, key)],
-        ]
-      : [
-          ["zellij", () => applyZellij(theme, p)],
-          ["btop", () => applyBtop(theme)],
-          ["neovim", () => applyNeovim(theme)],
-          ["vscode", () => applyVsCodeTheme(theme, p, key)],
-          ...cliSurfaces(theme, p, key),
-          ["gnome", () => applyGnomeTheme(p, theme, key)],
-        ];
+  const surfaceFns: Record<string, () => Promise<boolean>> = {
+    zellij: () => applyZellij(theme, p),
+    btop: () => applyBtop(theme),
+    neovim: () => applyNeovim(theme),
+    vscode: () => applyVsCodeTheme(theme, p, key),
+    bat: () => applyBat(theme, p, key),
+    delta: () => applyDelta(theme, key),
+    lazygit: () => applyLazygit(theme, p),
+    opencode: () => applyOpencode(p),
+    herdr: () => applyHerdr(p, key),
+    windows: () => applyWindowsDesktopTheme(theme, p, key),
+    gnome: () => applyGnomeTheme(p, theme, key),
+  };
+  const surfaces = themeSurfaceNames(p).map((name) => [name, surfaceFns[name]!] as const);
 
   for (const [name, fn] of surfaces) {
     try {
