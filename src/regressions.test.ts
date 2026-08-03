@@ -10,7 +10,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { wingetArgv } from "./providers.ts";
-import { machineWideFontScript } from "./wsl.ts";
+import { linuxFontProbeArgv, machineWideFontScript, windowsFontProbeArgv } from "./wsl.ts";
 
 describe("winget invocation", () => {
   /**
@@ -218,5 +218,24 @@ if ($errors.Count) { $errors | ForEach-Object { $_.Message }; exit 1 }
       win(path),
     ]);
     expect(new TextDecoder().decode(proc.stdout).trim()).toBe("parsed");
+  });
+});
+
+describe("font installation verification", () => {
+  test("Linux verifies through fontconfig, not terminal config", () => {
+    expect(linuxFontProbeArgv("FiraCode Nerd Font Mono")).toEqual([
+      "fc-match",
+      "--format",
+      "%{family}\n",
+      "FiraCode Nerd Font Mono",
+    ]);
+  });
+
+  test("Windows verifies through the installed font collection", () => {
+    const argv = windowsFontProbeArgv("FiraCode Nerd Font Mono");
+    expect(argv).toContain("-Command");
+    expect(argv.join(" ")).toContain("InstalledFontCollection");
+    expect(argv.join(" ")).toContain("FiraCode Nerd Font Mono");
+    expect(argv.join(" ")).not.toContain("settings.json");
   });
 });
