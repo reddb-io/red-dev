@@ -41,6 +41,13 @@ const WINDOWS = platform({
   version: null,
   caps: { apt: false, gui: true, systemd: false, winget: true, flatpak: false },
 });
+const DARWIN = platform({
+  os: "darwin",
+  env: "desktop",
+  distro: null,
+  version: null,
+  caps: { apt: false, gui: true, systemd: false, winget: false, flatpak: false },
+});
 
 describe("applicableScopes", () => {
   test("WSL gets core and wsl, never desktop", () => {
@@ -85,6 +92,12 @@ describe("providerFor", () => {
   test("falls back to u24 when u26 is omitted", () => {
     const same: Tool = { ...tool, u26: undefined };
     expect(providerFor(same, WSL26)).toEqual({ kind: "apt", pkg: "example" });
+  });
+
+  test("rejects Darwin before selecting a Linux provider", () => {
+    expect(() => providerFor(tool, DARWIN)).toThrow(
+      "unsupported platform: darwin. macOS support is planned in Phase 5 as an adapter of the platform contracts; this is not a broken Ubuntu install.",
+    );
   });
 });
 
