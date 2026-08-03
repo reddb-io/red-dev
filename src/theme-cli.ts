@@ -222,25 +222,3 @@ export async function applyHerdr(p: Platform, slug: string): Promise<boolean> {
   await Bun.write(path, `${existing.trimEnd()}\n\n${block}`);
   return true;
 }
-
-/**
- * fzf, which takes its colours from an environment variable.
- *
- * Not a file, so this returns the line for the shell config rather than
- * writing anything — the dotfiles own the environment.
- */
-export function fzfColors(theme: Theme): string {
-  const c = theme.terminal;
-  return [
-    `--color=bg+:${c.selectionBackground}`,
-    `fg:${c.foreground}`,
-    `fg+:${c.brightWhite}`,
-    `hl:${c.blue}`,
-    `hl+:${c.brightBlue}`,
-    `info:${c.brightBlack}`,
-    `prompt:${c.red}`,
-    `pointer:${c.purple}`,
-    `marker:${c.green}`,
-    `border:${c.brightBlack}`,
-  ].join(",");
-}
