@@ -98,6 +98,8 @@ surface.
 
 ---
 
+<img src="docs/targets.svg" alt="The support matrix — two axes, not five cases: Ubuntu desktop and WSL each span 24.04 and 26.04, native Windows is one target with no distro axis" width="100%">
+
 ## The support matrix
 
 |                         | Ubuntu 24.04 | Ubuntu 26.04 |
@@ -188,10 +190,13 @@ Because zellij is now always on, its own keybindings would be taking `Ctrl-p`,
 unlocks, every binding returns to locked, and `Alt` plus arrows or `hjkl` moves
 between panes without leaving it.
 
-Clipboard text stays Unicode across WSL: zellij sends UTF-8, and red-dev's
-low-latency bridge converts it to BOM-less UTF-16LE before `clip.exe` reads it.
-That avoids both `clip.exe`'s OEM-code-page mojibake and zellij's one-second
-timeout for clipboard commands. Mouse selection copies automatically. In
+The clipboard is one behaviour reached three ways. On a real Linux desktop
+zellij's copy command targets `wl-copy`, so `wl-clipboard` is a declared
+`desktop` dependency rather than a tool you are assumed to already have. WSL and
+native Windows cross to the Windows clipboard instead, and there text stays
+Unicode: zellij sends UTF-8, and red-dev's low-latency bridge converts it to
+BOM-less UTF-16LE before `clip.exe` reads it. That avoids both `clip.exe`'s
+OEM-code-page mojibake and zellij's one-second timeout for clipboard commands. Mouse selection copies automatically. In
 Alacritty, paste is `Ctrl+V` or `Ctrl+Shift+V`; `Ctrl+Shift+C` copies an
 Alacritty selection, while plain `Ctrl+C` remains the application's interrupt
 key. Inside a mouse-capturing TUI such as herdr, normal drag selection belongs
@@ -213,7 +218,7 @@ developer works in:
 | [`red`](https://github.com/reddb-io/reddb) | the RedDB CLI | every target |
 | [`tq`](https://github.com/reddb-io/toon) | query and convert TOON | every target |
 | [`red-request`](https://github.com/reddb-io/red-request) | API client, powered by recker | desktop sessions |
-| [`red-ui`](https://github.com/reddb-io/red-ui) | universal client for reddb | **Linux desktop only** — see below |
+| [`red-ui`](https://github.com/reddb-io/red-ui) | universal client for reddb | desktop sessions — see below |
 | [`dit`](https://github.com/reddb-io/dit) | push-to-toggle voice dictation | desktop sessions |
 | [`herdr`](https://herdr.dev) | several agents in one terminal, alive over SSH | Linux and WSL |
 
@@ -265,8 +270,11 @@ another on the same machine.
 
 Aliases that normalise Debian's renames (`bat` → `batcat`, `fd` → `fdfind`), the
 readline bindings that put history search on the arrow keys, `autocd`,
-`cdspell`, `globstar`, a curated git alias set — and the integrations that make
-the tools above actually do something rather than merely exist:
+`cdspell`, `globstar`, a curated git alias set, and shell functions like
+`webm2mp4` — and the integrations that make the tools above actually do
+something rather than merely exist. A shipped function is only honest if what it
+shells out to is present, so `webm2mp4`'s `ffmpeg` dependency is declared as a
+`core` tool rather than assumed:
 
 **Docker** is one daemon, never two. Under WSL, if Docker Desktop already serves
 the distro, red-dev does not install `docker-ce` — a second daemon means
@@ -521,7 +529,11 @@ curl -fsSL https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.sh | sh
 ```
 
 Scopes: `core` + `desktop`. Everything installs locally; Alacritty and zellij
-run natively, and the wallpaper goes through `gsettings`.
+run natively, the Nerd Font is registered in the local font store, and the
+wallpaper goes through `gsettings`. The `desktop` scope owns the font on the two
+targets that have no Windows host to reach — bare-metal Ubuntu and native
+Windows — and it verifies the family resolves before configuring the terminals
+that depend on it, rather than trusting the copy to have taken.
 
 > [!WARNING]
 > This target is **implemented and unproven** — no bare-metal Ubuntu has run it.
@@ -707,7 +719,8 @@ surfaces too, and unlike the desktop ones they work on all five targets:
 
 | surface | how |
 | --- | --- |
-| alacritty, zellij, btop, neovim, VS Code | a generated theme file each |
+| alacritty, zellij, btop, neovim | a generated theme file each |
+| VS Code | `workbench.colorTheme` in a settings file parsed as JSONC — comments and trailing commas survive the edit, and where no exact theme is published (Osaka Jade) it says so rather than picking a lookalike |
 | `bat` | written twice, since Debian renames the binary and the config follows it |
 | `delta` | through git config, where red-dev already made it the pager |
 | `lazygit` | our block only; anything else in the file survives |
@@ -745,7 +758,7 @@ places to look — in this order.
 | **Ubuntu 26.04** | The `u26` manifest column exists and **no 26.04 machine has exercised it**. Package-name drift is undiscovered. |
 | **WSL** | Windows interop cannot work under `sudo -u <other-user>`: `WSL_INTEROP` points at a per-session socket that sudo drops. Real invocations run as you, so this affects test harnesses only. |
 | **Native Windows** | No switching to a *numbered* virtual desktop — Windows offers only sequential navigation, and reaching a specific one means an interface that changes between builds. No zellij session persistence across reboots. No `ble.sh`-style line editor. |
-| **All** | `red-ui` installs on Linux desktop only, because that release has no Windows or macOS asset to install. |
+| **All** | `red-ui` is a `desktop` app: it installs on Ubuntu desktop and native Windows, never inside WSL, where a Linux GUI has no display to draw on. |
 
 Stated plainly because "implemented" and "known to work" are different claims,
 and a README that blurs them costs someone an afternoon.
@@ -776,18 +789,22 @@ Not an environment variable. `bun build --compile` substitutes
 `process.env.NODE_ENV` at build time, so nothing at runtime — not this program,
 not your shell — can reach that check.
 
-### `red-ui` on Windows
+### `red-ui`, on both desktops now
 
-Not an oversight on either side. That release publishes a `.deb`, an
-`.AppImage`, an `.rpm` and a web bundle, and nothing else — so red-dev skips it
-there with that as the stated reason, rather than pointing a provider at a
-filename nobody published.
+For a while this end pointed a provider at a filename nobody published — red-ui's
+release carried a `.deb`, an `.AppImage`, an `.rpm` and a web bundle, and no
+Windows asset, so red-dev skipped it there with that as the stated reason.
 
-It is two commented lines away in `red-ui`'s own `release.yml`: the staging step
-for `red-ui-windows-x86_64-setup.exe` and the `WINDOWS_CERTIFICATE` secrets are
-already wired, and the matrix entry is commented out with "intentionally
-commented out until the Linux pipeline is green end-to-end". When it comes back,
-this end is one line.
+The Windows staging step has since landed upstream: red-ui now publishes
+`red-ui-windows-x86_64-setup.exe`, and the manifest consumes it the same way
+red-request does — Linux takes the `red-ui_*_amd64.deb`, native Windows runs the
+setup installer silently with `/S`, so a clean native-Windows converge gets the
+app. The glob keeps the wildcard where the version goes; anchoring it to today's
+release is the 404-on-next-release bug this project already learned once.
+
+WSL is still the one place it is not installed, and on purpose: red-ui is a GUI
+app, and a Linux GUI inside a distro with no display is the exact mistake the
+`desktop` scope exists to avoid — the Windows target already covers that machine.
 
 ## Under the hood
 
@@ -906,6 +923,9 @@ Early, but the loop runs end to end.
   registry as the colour the theme asked for
 - Configuration shared across the boundary both ways, with the same bytes read
   from `/mnt/c/...` and `C:\...`
+- Nerd Fonts installed and verified — the family is confirmed to resolve before
+  the terminals that need it are configured — on Ubuntu desktop and native
+  Windows, alongside the existing WSL-reaches-Windows font path
 
 See [Known limitations](#known-limitations-per-target) for what is implemented
 but unproven.
