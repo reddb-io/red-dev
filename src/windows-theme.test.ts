@@ -12,7 +12,8 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { accentDword } from "./windows-theme.ts";
+import { THEMES } from "./themes.ts";
+import { accentDword, windowsLightThemeValue } from "./windows-theme.ts";
 
 describe("accentDword", () => {
   test("Windows' own default round-trips", () => {
@@ -34,5 +35,12 @@ describe("accentDword", () => {
     // The first version produced -7830203 and PowerShell refused it.
     expect(accentDword("#458588")).toBeGreaterThan(0);
     expect(accentDword("#000000")).toBe(0xff000000);
+  });
+});
+
+describe("windowsLightThemeValue", () => {
+  test("uses Rose Pine's explicit light appearance", () => {
+    const theme = THEMES["rose-pine"]!;
+    expect(windowsLightThemeValue(theme)).toBe(1);
   });
 });
