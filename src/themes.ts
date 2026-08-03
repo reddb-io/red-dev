@@ -33,6 +33,7 @@ export interface TerminalPalette {
 
 export interface Theme {
   name: string;
+  appearance: "light" | "dark";
   /** Neovim colorscheme name, for the LazyVim config. */
   neovim: string;
   terminal: TerminalPalette;
@@ -41,6 +42,7 @@ export interface Theme {
 export const THEMES: Record<string, Theme> = {
   "tokyo-night": {
     name: "Tokyo Night",
+    appearance: "dark",
     neovim: "tokyonight",
     terminal: {
       background: "#1A1B26",
@@ -68,6 +70,7 @@ export const THEMES: Record<string, Theme> = {
 
   catppuccin: {
     name: "Catppuccin Macchiato",
+    appearance: "dark",
     neovim: "catppuccin-macchiato",
     terminal: {
       background: "#24273A",
@@ -95,6 +98,7 @@ export const THEMES: Record<string, Theme> = {
 
   gruvbox: {
     name: "Gruvbox Dark",
+    appearance: "dark",
     neovim: "gruvbox",
     terminal: {
       background: "#282828",
@@ -126,6 +130,7 @@ export const THEMES: Record<string, Theme> = {
   // notices their terminal's blue is slightly off.
   "everforest": {
     name: "Everforest",
+    appearance: "dark",
     neovim: "everforest",
     terminal: {
       background: "#2D353B",
@@ -152,6 +157,7 @@ export const THEMES: Record<string, Theme> = {
   },
   "kanagawa": {
     name: "Kanagawa",
+    appearance: "dark",
     neovim: "kanagawa",
     terminal: {
       background: "#1F1F28",
@@ -178,6 +184,7 @@ export const THEMES: Record<string, Theme> = {
   },
   "matte-black": {
     name: "Matte Black",
+    appearance: "dark",
     neovim: "matteblack",
     terminal: {
       background: "#121212",
@@ -204,6 +211,7 @@ export const THEMES: Record<string, Theme> = {
   },
   "nord": {
     name: "Nord",
+    appearance: "dark",
     neovim: "nordfox",
     terminal: {
       background: "#2E3440",
@@ -230,6 +238,7 @@ export const THEMES: Record<string, Theme> = {
   },
   "osaka-jade": {
     name: "Osaka Jade",
+    appearance: "dark",
     neovim: "bamboo",
     terminal: {
       background: "#111C18",
@@ -256,6 +265,7 @@ export const THEMES: Record<string, Theme> = {
   },
   "ristretto": {
     name: "Ristretto",
+    appearance: "dark",
     neovim: "monokai-pro",
     terminal: {
       background: "#2C2525",
@@ -282,6 +292,7 @@ export const THEMES: Record<string, Theme> = {
   },
   "rose-pine": {
     name: "Rose Pine",
+    appearance: "light",
     neovim: "rose-pine-dawn",
     terminal: {
       background: "#FAF4ED",
