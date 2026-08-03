@@ -13,8 +13,9 @@
  * which is why config/bash/path.sh prepends instead.
  */
 
-import { existsSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { log, RedError } from "./log.ts";
+import type { Platform } from "./platform.ts";
 import { THEMES, type Theme } from "./themes.ts";
 
 /**
@@ -204,7 +205,16 @@ async function ghAsset(repo: string, name: string): Promise<string> {
  * HKCU. Both halves are required — a file the registry does not know
  * about is invisible to applications.
  */
-export async function installNerdFont(key: string): Promise<void> {
+export async function installNerdFont(key: string, platform?: Platform): Promise<void> {
+  if (platform?.os === "linux" && platform.env === "desktop") {
+    await installLinuxNerdFont(key);
+    return;
+  }
+
+  await installWindowsNerdFont(key);
+}
+
+async function installWindowsNerdFont(key: string): Promise<void> {
   const spec = NERD_FONTS[key];
   if (!spec) {
     throw new RedError(
@@ -262,6 +272,72 @@ export async function installNerdFont(key: string): Promise<void> {
   await ensureFontVisible(spec);
 }
 
+export function linuxFontProbeArgv(family: string): string[] {
+  return ["fc-match", "--format", "%{family}\n", family];
+}
+
+async function fontVisibleToLinux(family: string): Promise<boolean> {
+  try {
+    const out = await capture(linuxFontProbeArgv(family));
+    return out
+      .split(",")
+      .map((part) => part.trim())
+      .includes(family);
+  } catch {
+    return false;
+  }
+}
+
+async function installLinuxNerdFont(key: string): Promise<void> {
+  const spec = NERD_FONTS[key];
+  if (!spec) {
+    throw new RedError(
+      `unknown font '${key}' (known: ${Object.keys(NERD_FONTS).join(", ")})`,
+    );
+  }
+
+  if (await fontVisibleToLinux(spec.family)) {
+    log.skip(`${spec.family} visible to fontconfig`);
+    return;
+  }
+
+  const url = await ghAsset("ryanoasis/nerd-fonts", `${spec.asset}.zip`);
+  log.step(`nerd font: ${spec.asset} -> ${spec.family}`);
+
+  const tmp = `/tmp/red-dev-font-${spec.asset}`;
+  await run(["rm", "-rf", tmp]);
+  await run(["mkdir", "-p", tmp]);
+
+  const res = await fetch(url);
+  if (!res.ok) throw new RedError(`font download failed ${res.status}`);
+  await Bun.write(`${tmp}/font.zip`, res);
+  await run(["unzip", "-qo", `${tmp}/font.zip`, "-d", tmp]);
+
+  const fontDir = `${process.env["HOME"] ?? ""}/.local/share/fonts/red-dev/${spec.asset}`;
+  rmSync(fontDir, { recursive: true, force: true });
+  mkdirSync(fontDir, { recursive: true });
+
+  const listing = await capture(["find", tmp, "-name", "*.ttf", "-type", "f"]);
+  const wanted = /NerdFontMono-(Regular|Bold|Italic|BoldItalic)\.ttf$/;
+  const faces = listing.split("\n").filter((f) => wanted.test(f));
+  if (faces.length === 0) {
+    throw new RedError(`no Mono faces found in ${spec.asset}.zip`);
+  }
+
+  for (const face of faces) {
+    const base = face.split("/").pop() ?? "";
+    copyFileSync(face, `${fontDir}/${base}`);
+  }
+
+  await run(["fc-cache", "-f", fontDir]);
+  await run(["rm", "-rf", tmp]);
+
+  if (!(await fontVisibleToLinux(spec.family))) {
+    throw new RedError(`${spec.family} installed but fontconfig cannot resolve it`);
+  }
+  log.ok(`${spec.family} installed (${faces.length} faces)`);
+}
+
 /**
  * Whether Windows applications can resolve a family by name.
  *
@@ -271,20 +347,24 @@ export async function installNerdFont(key: string): Promise<void> {
  */
 async function fontVisibleToWindows(family: string): Promise<boolean> {
   try {
-    const out = await capture([
-      powershellBin(),
-      "-NoProfile",
-      "-Command",
-      "Add-Type -AssemblyName System.Drawing; " +
-        "(New-Object System.Drawing.Text.InstalledFontCollection).Families | " +
-        `Where-Object { $_.Name -eq '${family.replace(/'/g, "''")}' } | ` +
-        "Measure-Object | Select-Object -ExpandProperty Count",
-    ]);
+    const out = await capture(windowsFontProbeArgv(family));
     return /^[1-9]/.test(out.split("\n").pop()?.trim() ?? "");
   } catch {
     // A check that cannot run is not evidence the font is missing.
     return true;
   }
+}
+
+export function windowsFontProbeArgv(family: string): string[] {
+  return [
+    powershellBin(),
+    "-NoProfile",
+    "-Command",
+    "Add-Type -AssemblyName System.Drawing; " +
+      "(New-Object System.Drawing.Text.InstalledFontCollection).Families | " +
+      `Where-Object { $_.Name -eq '${family.replace(/'/g, "''")}' } | ` +
+      "Measure-Object | Select-Object -ExpandProperty Count",
+  ];
 }
 
 /**
