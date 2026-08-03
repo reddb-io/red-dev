@@ -1,62 +1,87 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 340" width="1200" height="340" role="img" aria-label="red-dev — one development environment across Ubuntu 24.04, Ubuntu 26.04, WSL and Windows">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420" width="1200" height="420" role="img" aria-labelledby="rd-hero-title rd-hero-desc">
+  <title id="rd-hero-title">red-dev — one development environment across five targets</title>
+  <desc id="rd-hero-desc">red-dev installs the same tools, shell, terminal, tiling and theme on bare-metal Ubuntu 24.04 and 26.04, inside WSL, and on native Windows — from one standalone binary that branches on what a machine is and what it can do.</desc>
+
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#07080a"/>
-      <stop offset="100%" stop-color="#0c0e11"/>
+    <linearGradient id="rd-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d1117"/>
+      <stop offset="1" stop-color="#07090d"/>
     </linearGradient>
-    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#ff2056"/>
-      <stop offset="100%" stop-color="#ff5470"/>
+    <radialGradient id="rd-glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ff2056" stop-opacity="0.30"/>
+      <stop offset="1" stop-color="#ff2056" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="rd-rule" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff2056"/>
+      <stop offset="1" stop-color="#ff2056" stop-opacity="0"/>
     </linearGradient>
-    <linearGradient id="rule" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#ff2056" stop-opacity="0.9"/>
-      <stop offset="100%" stop-color="#ff2056" stop-opacity="0"/>
-    </linearGradient>
+    <pattern id="rd-grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <path d="M24 0H0V24" fill="none" stroke="#ffffff" stroke-opacity="0.028" stroke-width="1"/>
+    </pattern>
+    <clipPath id="rd-frame">
+      <rect x="0" y="0" width="1200" height="420" rx="18"/>
+    </clipPath>
   </defs>
 
-  <rect width="1200" height="340" fill="url(#bg)"/>
+  <g clip-path="url(#rd-frame)">
+    <rect width="1200" height="420" fill="url(#rd-bg)"/>
+    <rect width="1200" height="420" fill="url(#rd-grid)"/>
+    <ellipse cx="120" cy="60" rx="420" ry="300" fill="url(#rd-glow)"/>
+    <ellipse cx="1120" cy="410" rx="360" ry="240" fill="url(#rd-glow)" opacity="0.5"/>
 
-  <!-- subtle grid, echoing the two-axis support matrix -->
-  <g stroke="#7a8088" stroke-opacity="0.07">
-    <path d="M0 85H1200M0 170H1200M0 255H1200"/>
-    <path d="M300 0V340M600 0V340M900 0V340"/>
-  </g>
+    <!-- left: the wordmark, what it does, what it bundles -->
+    <g font-family="ui-monospace, SFMono-Regular, 'JetBrains Mono', Menlo, Consolas, monospace">
+      <text x="72" y="150" font-size="84" font-weight="700" fill="#f0f6fc" letter-spacing="-3">red-dev</text>
+      <rect x="430" y="102" width="18" height="50" fill="#ff2056"/>
 
-  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
-    <!-- prompt glyph, the one the shell actually ships -->
-    <text x="72" y="128" font-size="46" fill="url(#accent)" font-weight="700">&#8250;_</text>
-    <text x="130" y="128" font-size="62" fill="#f4f5f7" font-weight="700">red-dev</text>
+      <text x="72" y="204" font-size="32" font-weight="600" fill="#ff2056" letter-spacing="-1">one environment &#183; five targets</text>
 
-    <rect x="74" y="152" width="420" height="3" fill="url(#rule)"/>
+      <rect x="74" y="230" width="150" height="3" fill="url(#rd-rule)"/>
 
-    <text x="74" y="196" font-size="21" fill="#7a8088">One development environment. Five targets. Same experience.</text>
+      <text x="72" y="272" font-size="19" fill="#8b949e">Same tools, shell, terminal, tiling and theme &#8212;</text>
+      <text x="72" y="298" font-size="19" fill="#8b949e">bare-metal Ubuntu, WSL, and native Windows.</text>
 
-    <!-- the matrix, as the README states it -->
-    <g font-size="15">
-      <text x="74" y="252" fill="#7a8088">desktop</text>
-      <text x="74" y="284" fill="#7a8088">wsl</text>
-      <text x="74" y="316" fill="#7a8088">windows</text>
-
-      <text x="210" y="224" fill="#7a8088">ubuntu 24.04</text>
-      <text x="380" y="224" fill="#7a8088">ubuntu 26.04</text>
-
-      <g fill="#ff2056">
-        <text x="210" y="252">&#9679;</text>
-        <text x="380" y="252">&#9679;</text>
-        <text x="210" y="284">&#9679;</text>
-        <text x="380" y="284">&#9679;</text>
-        <text x="210" y="316">&#9679;</text>
+      <text x="72" y="322" font-size="11" fill="#6e7681" letter-spacing="2.5">BUNDLES THE REDDB BELT</text>
+      <g font-size="14">
+        <rect x="72" y="332" width="60" height="28" rx="14" fill="#ffffff" fill-opacity="0.04" stroke="#ff2056" stroke-opacity="0.35"/>
+        <text x="88" y="351" fill="#c9d1d9">red</text>
+        <rect x="142" y="332" width="54" height="28" rx="14" fill="#ffffff" fill-opacity="0.04" stroke="#ffffff" stroke-opacity="0.08"/>
+        <text x="158" y="351" fill="#c9d1d9">tq</text>
+        <rect x="206" y="332" width="88" height="28" rx="14" fill="#ffffff" fill-opacity="0.04" stroke="#ffffff" stroke-opacity="0.08"/>
+        <text x="222" y="351" fill="#c9d1d9">red-ui</text>
+        <rect x="304" y="332" width="80" height="28" rx="14" fill="#ffffff" fill-opacity="0.04" stroke="#ffffff" stroke-opacity="0.08"/>
+        <text x="320" y="351" fill="#c9d1d9">herdr</text>
       </g>
-      <text x="238" y="316" fill="#7a8088">native</text>
+
+      <text x="72" y="392" font-size="11" fill="#6e7681" letter-spacing="2">RUNS ON</text>
+      <text x="150" y="392" font-size="14" fill="#8b949e">Ubuntu 24.04 &#183; 26.04 &#183; WSL &#183; native Windows</text>
     </g>
 
-    <!-- the stack, right aligned -->
-    <g font-size="16" text-anchor="end">
-      <text x="1128" y="232" fill="#7a8088">alacritty</text>
-      <text x="1128" y="262" fill="#7a8088">zellij</text>
-      <text x="1128" y="292" fill="#7a8088">bash</text>
-      <text x="1128" y="196" fill="#4a4f57" font-size="13">ONE CONFIG EACH</text>
+    <!-- right: ask a machine what it is -->
+    <g font-family="ui-monospace, SFMono-Regular, 'JetBrains Mono', Menlo, Consolas, monospace">
+      <rect x="680" y="56" width="464" height="308" rx="12" fill="#0b0f15" stroke="#ffffff" stroke-opacity="0.09"/>
+      <circle cx="704" cy="84" r="5" fill="#ff5f56"/>
+      <circle cx="722" cy="84" r="5" fill="#ffbd2e"/>
+      <circle cx="740" cy="84" r="5" fill="#27c93f"/>
+      <text x="760" y="89" font-size="12" fill="#6e7681" letter-spacing="1">red-dev platform</text>
+
+      <g font-size="15">
+        <text x="704" y="128"><tspan fill="#ff2056">$</tspan> <tspan fill="#c9d1d9">red-dev platform</tspan></text>
+        <text x="704" y="154" fill="#8b949e">os=linux distro=ubuntu env=wsl</text>
+        <text x="704" y="176" fill="#8b949e">version=24.04 arch=x64</text>
+        <text x="704" y="200"><tspan fill="#6e7681">caps: apt=1 </tspan><tspan fill="#ff2056">gui=0</tspan><tspan fill="#6e7681"> systemd=1 </tspan><tspan fill="#ff2056">winget=1</tspan></text>
+
+        <line x1="704" y1="222" x2="1120" y2="222" stroke="#ffffff" stroke-opacity="0.08"/>
+
+        <text x="704" y="252" fill="#6e7681"># the same probe, on the host</text>
+        <text x="704" y="278"><tspan fill="#ff2056">$</tspan> <tspan fill="#c9d1d9">red-dev platform</tspan></text>
+        <text x="704" y="304" fill="#8b949e">os=windows env=windows arch=x64</text>
+        <text x="704" y="326"><tspan fill="#6e7681">caps: apt=0 </tspan><tspan fill="#3fb950">gui=1</tspan><tspan fill="#6e7681"> systemd=0 winget=1</tspan></text>
+      </g>
+
+      <text x="704" y="352" font-size="12" fill="#6e7681">two axes, not five cases &#8212; never a raw version string</text>
     </g>
-    <rect x="1140" y="180" width="3" height="120" fill="#ff2056" fill-opacity="0.5"/>
+
+    <rect x="0" y="416" width="1200" height="4" fill="#ff2056"/>
   </g>
 </svg>
