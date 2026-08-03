@@ -17,6 +17,7 @@ import {
 } from "./manifest.ts";
 import { detect, summary, type Platform } from "./platform.ts";
 import { applyProvider, systemUpdate, type ApplyContext } from "./providers.ts";
+import { applyContextForEntry, type ApplyContextEntryPath } from "./preferences.ts";
 import { THEMES, themeNames } from "./themes.ts";
 import { interactive, select } from "./ui.ts";
 
@@ -24,13 +25,12 @@ function resolveScopes(p: Platform, arg?: string): Scope[] {
   return arg ? [arg as Scope] : applicableScopes(p);
 }
 
-function contextFor(p: Platform, inv: Invocation): ApplyContext {
-  return {
-    platform: p,
-    theme: inv.themeName,
-    font: inv.font,
-    opacity: inv.opacity,
-  };
+async function contextFor(
+  p: Platform,
+  inv: Invocation,
+  entry: ApplyContextEntryPath,
+): Promise<ApplyContext> {
+  return await applyContextForEntry(p, inv, entry);
 }
 
 function cmdPlatform(p: Platform): number {
@@ -38,7 +38,8 @@ function cmdPlatform(p: Platform): number {
   return 0;
 }
 
-function cmdPlan(p: Platform, inv: Invocation): number {
+async function cmdPlan(p: Platform, inv: Invocation): Promise<number> {
+  await contextFor(p, inv, "plan");
   for (const scope of resolveScopes(p, inv.scope)) {
     log.plain(`\n[${scope}]`);
     for (const tool of toolsInScope(scope)) {
@@ -110,8 +111,12 @@ async function cmdDoctor(p: Platform, inv: Invocation): Promise<number> {
   return 0;
 }
 
-async function cmdInstall(p: Platform, inv: Invocation): Promise<number> {
-  let ctx = contextFor(p, inv);
+async function cmdInstall(
+  p: Platform,
+  inv: Invocation,
+  entry: "install" | "update" = "install",
+): Promise<number> {
+  let ctx = await contextFor(p, inv, entry);
   let extraScopes: Scope[] = [];
 
   // Ask once, on a real terminal, when this machine is new. Every ui.ts
@@ -220,12 +225,13 @@ async function cmdUpdate(p: Platform, inv: Invocation): Promise<number> {
 
   // Upgrading can leave the manifest unsatisfied (a package removed, a
   // binary replaced), so always re-converge afterwards.
-  return await cmdInstall(p, inv);
+  return await cmdInstall(p, inv, "update");
 }
 
 async function cmdTheme(p: Platform, inv: Invocation, name?: string): Promise<number> {
+  const ctx = await contextFor(p, inv, "theme");
   const chosen =
-    name ?? (await select("Theme?", themeNames() as [string, ...string[]], inv.themeName));
+    name ?? (await select("Theme?", themeNames() as [string, ...string[]], ctx.theme));
   const theme = THEMES[chosen];
   if (!theme) {
     log.err(`unknown theme '${chosen}' (known: ${themeNames().join(", ")})`);
@@ -233,9 +239,9 @@ async function cmdTheme(p: Platform, inv: Invocation, name?: string): Promise<nu
   }
 
   const wsl = await import("./wsl.ts");
-  const spec = wsl.NERD_FONTS[inv.font];
+  const spec = wsl.NERD_FONTS[ctx.font];
   if (!spec) {
-    log.err(`unknown font '${inv.font}'`);
+    log.err(`unknown font '${ctx.font}'`);
     return 1;
   }
 
@@ -250,7 +256,8 @@ async function cmdTheme(p: Platform, inv: Invocation, name?: string): Promise<nu
       platform: p,
       theme,
       fontFamily: spec.family,
-      opacity: inv.opacity,
+      fontSize: ctx.fontSize,
+      opacity: ctx.opacity,
     });
   } catch (err) {
     log.err(`alacritty: ${(err as Error).message}`);
@@ -277,7 +284,7 @@ async function cmdTheme(p: Platform, inv: Invocation, name?: string): Promise<nu
       await wsl.configureWindowsTerminal({
         fontFace: spec.family,
         theme,
-        opacity: inv.opacity,
+        opacity: ctx.opacity,
         distro: process.env["WSL_DISTRO_NAME"] ?? undefined,
         home: process.env["HOME"] ?? undefined,
       });
@@ -323,7 +330,7 @@ async function cmdApps(p: Platform, inv: Invocation): Promise<number> {
 
   // Map the decorated labels back to tool names.
   const names = picked.map((l) => l.split(" ")[0]!.trim());
-  const ctx = contextFor(p, inv);
+  const ctx = await contextFor(p, inv, "install");
   let failures = 0;
 
   for (const name of names) {
@@ -390,14 +397,16 @@ async function cmdShell(p: Platform, inv: Invocation): Promise<number> {
   try {
     const { configureAlacritty } = await import("./alacritty.ts");
     const wsl = await import("./wsl.ts");
-    const theme = THEMES[inv.themeName];
-    const spec = wsl.NERD_FONTS[inv.font];
+    const ctx = await contextFor(p, inv, "theme");
+    const theme = THEMES[ctx.theme];
+    const spec = wsl.NERD_FONTS[ctx.font];
     if (theme && spec) {
       await configureAlacritty({
         platform: p,
         theme,
         fontFamily: spec.family,
-        opacity: inv.opacity,
+        fontSize: ctx.fontSize,
+        opacity: ctx.opacity,
       });
     }
     log.plain("     open a new terminal window to see it");
@@ -513,7 +522,7 @@ async function cmdUi(p: Platform, inv: Invocation): Promise<number> {
     p,
     {
       platform: p,
-      ctx: contextFor(p, inv),
+      ctx: await contextFor(p, inv, "install"),
       scopes: resolveScopes(p, inv.scope),
     },
     // Every one of these runs inside the interface now. Choosing a theme
@@ -725,7 +734,8 @@ async function cmdMenu(p: Platform, inv: Invocation, cliHelp: string): Promise<n
     applyFont: async (font, size) => {
       const wsl = await import("./wsl.ts");
       const spec = wsl.NERD_FONTS[font];
-      const theme = THEMES[inv.themeName];
+      const ctx = await contextFor(p, inv, "theme");
+      const theme = THEMES[ctx.theme];
       if (!spec || !theme) return;
       const { configureAlacritty } = await import("./alacritty.ts");
       await configureAlacritty({
@@ -733,7 +743,7 @@ async function cmdMenu(p: Platform, inv: Invocation, cliHelp: string): Promise<n
         theme,
         fontFamily: spec.family,
         fontSize: size,
-        opacity: inv.opacity,
+        opacity: ctx.opacity,
       });
     },
   });
@@ -847,7 +857,7 @@ async function main(): Promise<number> {
     case "platform":
       return cmdPlatform(p);
     case "plan":
-      return cmdPlan(p, inv);
+      return await cmdPlan(p, inv);
     case "doctor":
       return await cmdDoctor(p, inv);
     case "install":
