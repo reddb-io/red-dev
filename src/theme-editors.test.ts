@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { codeArgv, gnomeColorScheme } from "./theme-editors.ts";
+import { codeArgv, gnomeColorScheme, VSCODE_THEMES, vscodeSettingsJson } from "./theme-editors.ts";
 import { THEMES } from "./themes.ts";
 
 describe("codeArgv", () => {
@@ -31,6 +31,33 @@ describe("codeArgv", () => {
 
   test("does not wrap a path that merely contains .cmd", () => {
     expect(codeArgv(["C:\\cmd.tools\\code.exe"], "win32")).toEqual(["C:\\cmd.tools\\code.exe"]);
+  });
+});
+
+describe("VS Code themes", () => {
+  test("themes settings.json that contains comments and a trailing comma", () => {
+    const next = vscodeSettingsJson(
+      `{
+  // kept by VS Code
+  "editor.fontFamily": "FiraCode Nerd Font",
+  "workbench.colorTheme": "Default Dark Modern",
+}
+`,
+      "Tokyo Night",
+    );
+
+    expect(JSON.parse(next)).toEqual({
+      "editor.fontFamily": "FiraCode Nerd Font",
+      "workbench.colorTheme": "Tokyo Night",
+    });
+  });
+
+  test("reports Osaka Jade as unsupported instead of exact", () => {
+    expect(VSCODE_THEMES["osaka-jade"]).toEqual({
+      status: "unsupported",
+      reason:
+        "no exact Osaka Jade VS Code theme is published; Solarized Osaka is a different palette",
+    });
   });
 });
 
