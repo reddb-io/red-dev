@@ -28,7 +28,8 @@ import { VERSION } from "./cli.ts";
 import { log, RedError } from "./log.ts";
 import type { Platform } from "./platform.ts";
 import { spawnLogged } from "./providers.ts";
-import { detectWsl } from "./wsl-provision.ts";
+import { detectWsl, setWsl2Default, type WslDistribution } from "./wsl-provision.ts";
+import { readWindowsOutput } from "./windows-output.ts";
 
 const BOOT_URL = "https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.sh";
 
@@ -39,24 +40,29 @@ async function inDistro(distro: string, script: string): Promise<{ out: string; 
     stderr: "pipe",
     stdin: "ignore",
   });
-  const out = await new Response(proc.stdout).text();
+  const out = await readWindowsOutput(proc.stdout);
   const code = await proc.exited;
-  // WSL writes UTF-16 for its own messages; a distro's stdout is plain,
-  // but a failure notice from wsl.exe itself arrives NUL-separated.
-  return { out: out.replace(/\0/g, "").trim(), code };
+  // A distro's stdout is UTF-8, but a failure notice from wsl.exe itself
+  // is UTF-16LE. The boundary decoder handles both without losing text.
+  return { out: out.trim(), code };
 }
 
 /**
  * Which distro to converge.
  *
  * The default one, which is what `wsl.exe` with no `-d` opens and
- * therefore what the terminal red-dev configures will land in. `wsl -l
- * -q` lists the default first, which is the only ordering guarantee
- * there is — and the only one needed.
+ * therefore what the terminal red-dev configures will land in. The
+ * verbose listing marks it with `*`, which also lets us verify that it
+ * is actually WSL 2 before executing anything inside it.
  */
 export async function defaultDistro(): Promise<string | null> {
+  return (await defaultDistroInfo())?.name ?? null;
+}
+
+/** The default distro and, unlike the legacy quiet listing, its architecture. */
+export async function defaultDistroInfo(): Promise<WslDistribution | null> {
   const state = await detectWsl();
-  return state.distros[0] ?? null;
+  return state.distributions.find((distro) => distro.default) ?? state.distributions[0] ?? null;
 }
 
 /** What red-dev the distro has, or null when it has none. */
@@ -114,13 +120,27 @@ export async function syncWslDistro(p: Platform): Promise<void> {
     return;
   }
 
-  const distro = await defaultDistro();
-  if (!distro) {
+  // Keep future installs on WSL 2 even when there is no distro yet.
+  // A failed preference is visible but does not hide the more specific
+  // architecture diagnosis below.
+  await setWsl2Default();
+
+  const selected = await defaultDistroInfo();
+  if (!selected) {
     // Loudly, because "no distro" and "distro left alone" are different
     // states and only one of them is fine.
     log.skip("wsl sync: no WSL distro on this machine");
     return;
   }
+
+  if (selected.version !== 2) {
+    const observed = selected.version === 1 ? "WSL 1" : "an unknown WSL version";
+    throw new RedError(
+      `${selected.name} uses ${observed}; run \`red-dev wsl\` from Windows to migrate it to WSL 2`,
+    );
+  }
+
+  const distro = selected.name;
 
   const plan = planFor(await distroVersion(distro));
   log.step(`wsl sync: ${distro} — ${plan.reason}`);

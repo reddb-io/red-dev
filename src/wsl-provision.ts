@@ -18,37 +18,88 @@
 
 import { log } from "./log.ts";
 import type { Platform } from "./platform.ts";
+import { readWindowsOutput } from "./windows-output.ts";
 
 export interface WslState {
   /** The WSL feature is present and usable. */
   available: boolean;
   /** Distro names already installed. */
   distros: string[];
+  /** Installed distros, including the WSL architecture when Windows reports it. */
+  distributions: WslDistribution[];
   detail: string;
+}
+
+export interface WslDistribution {
+  name: string;
+  default: boolean;
+  /** Null only on an old WSL build that cannot report verbose state. */
+  version: 1 | 2 | null;
 }
 
 async function capture(cmd: string[]): Promise<{ out: string; code: number }> {
   const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
-  const out = await new Response(proc.stdout).text();
+  const out = await readWindowsOutput(proc.stdout);
   const code = await proc.exited;
   return { out, code };
+}
+
+/** Parse decoded `wsl -l -v` output, tolerating the old NUL-separated form too. */
+export function parseWslVerbose(out: string): WslDistribution[] {
+  const lines = out
+    .replace(/\0/g, "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const distributions: WslDistribution[] = [];
+  for (const line of lines) {
+    const isDefault = line.startsWith("*");
+    const columns = line.replace(/^\*\s*/, "").split(/\s{2,}/);
+    const version = Number(columns.at(-1));
+    if ((version !== 1 && version !== 2) || columns.length < 3) continue;
+    distributions.push({
+      name: columns.slice(0, -2).join("  ").trim(),
+      default: isDefault,
+      version,
+    });
+  }
+  return distributions;
 }
 
 /**
  * What WSL looks like right now.
  *
- * `wsl -l -q` writes UTF-16 on Windows, so the output arrives with NUL
- * bytes between characters — stripping them is not cosmetic, it is the
- * difference between parsing distro names and parsing nothing.
+ * `wsl -l -v` writes UTF-16LE when redirected. `capture` decodes that
+ * Windows boundary before this function parses the architecture column.
  */
 export async function detectWsl(): Promise<WslState> {
   const wsl = process.platform === "win32" ? "wsl.exe" : "wsl.exe";
+  const verbose = await capture([wsl, "-l", "-v"]);
+
+  if (verbose.code === 0) {
+    const distributions = parseWslVerbose(verbose.out);
+    return {
+      available: true,
+      distros: distributions.map((distro) => distro.name),
+      distributions,
+      detail:
+        distributions.length > 0
+          ? `${distributions.length} distro(s) installed`
+          : "WSL is enabled but has no distro",
+    };
+  }
+
+  // Old inbox WSL builds do not support `--verbose`. They can still be
+  // detected, but the architecture stays unknown and red-dev will not
+  // silently claim they are WSL 2.
   const { out, code } = await capture([wsl, "-l", "-q"]);
 
   if (code !== 0) {
     return {
       available: false,
       distros: [],
+      distributions: [],
       detail: "the WSL feature is not enabled on this machine",
     };
   }
@@ -62,8 +113,53 @@ export async function detectWsl(): Promise<WslState> {
   return {
     available: true,
     distros,
+    distributions: distros.map((name, index) => ({
+      name,
+      default: index === 0,
+      version: null,
+    })),
     detail: distros.length > 0 ? `${distros.length} distro(s) installed` : "WSL is enabled but has no distro",
   };
+}
+
+/** Make every future distro choose the WSL 2 architecture. */
+export async function setWsl2Default(): Promise<boolean> {
+  log.step("WSL 2: setting the default architecture for new distros");
+  const proc = Bun.spawn(["wsl.exe", "--set-default-version", "2"], {
+    stdout: "inherit",
+    stderr: "inherit",
+    stdin: "ignore",
+  });
+  const code = await proc.exited;
+  if (code !== 0) {
+    log.err(`wsl --set-default-version 2 exited ${code}`);
+    return false;
+  }
+  log.ok("WSL 2 is the default for new distros");
+  return true;
+}
+
+/** Convert one stopped distro after the user has accepted the migration cost. */
+export async function convertDistroToWsl2(distro: string): Promise<boolean> {
+  log.step(`WSL 2: converting ${distro}`);
+  const proc = Bun.spawn(["wsl.exe", "--set-version", distro, "2"], {
+    stdout: "inherit",
+    stderr: "inherit",
+    stdin: "inherit",
+  });
+  const code = await proc.exited;
+  if (code !== 0) {
+    log.err(`wsl --set-version ${distro} 2 exited ${code}`);
+    return false;
+  }
+
+  const observed = (await detectWsl()).distributions.find((item) => item.name === distro);
+  if (observed?.version !== 2) {
+    log.err(`Windows did not report ${distro} as WSL 2 after conversion`);
+    return false;
+  }
+  log.ok(`${distro} now uses WSL 2`);
+  return true;
 }
 
 /** Is this process elevated? `wsl --install` will not work without it. */
@@ -91,6 +187,14 @@ export async function installWsl(distro = "Ubuntu-24.04"): Promise<boolean> {
     log.plain("     Open PowerShell as Administrator and run:");
     log.plain(`       wsl --install -d ${distro}`);
     log.plain("     Then re-run red-dev. It will pick up from there.");
+    return false;
+  }
+
+  // `wsl --install` defaults to WSL 2 on current Windows releases, but
+  // make the invariant explicit so an older machine or previous user
+  // preference cannot silently create a WSL 1 distro.
+  if (!(await setWsl2Default())) {
+    log.err("refusing to install a distro without confirming WSL 2 as the default");
     return false;
   }
 
@@ -148,8 +252,24 @@ export async function offerWsl(p: Platform): Promise<boolean> {
   const state = await detectWsl();
 
   if (state.distros.length > 0) {
-    log.skip(`WSL already set up: ${state.distros.join(", ")}`);
-    return false;
+    const preferred = state.distributions.find((distro) => distro.default) ?? state.distributions[0]!;
+    await setWsl2Default();
+
+    if (preferred.version === 2) {
+      log.skip(`WSL 2 already set up: ${preferred.name}`);
+      return false;
+    }
+
+    if (preferred.version === null) {
+      log.warn(`cannot verify the WSL version for ${preferred.name}`);
+      log.plain("     Update WSL, then run `red-dev wsl` again. red-dev will not assume WSL 2.");
+      return false;
+    }
+
+    log.warn(`${preferred.name} is using WSL 1; red-dev targets WSL 2`);
+    log.plain("     Conversion can take time. Back up important distro files first.");
+    if (!(await confirm(`Convert ${preferred.name} to WSL 2 now?`, false))) return false;
+    return await convertDistroToWsl2(preferred.name);
   }
 
   log.plain("");

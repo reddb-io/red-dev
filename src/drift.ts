@@ -199,6 +199,49 @@ function checkWslInterop(p: Platform): DriftCheck {
       };
 }
 
+/** WSL is a product name; this check makes the required architecture explicit. */
+async function checkWslArchitecture(p: Platform): Promise<DriftCheck> {
+  if (p.env !== "wsl" && p.os !== "windows") {
+    return { name: "wsl architecture", status: "n/a", detail: "not WSL or Windows" };
+  }
+
+  try {
+    const { detectWsl } = await import("./wsl-provision.ts");
+    const state = await detectWsl();
+    const currentName = p.env === "wsl" ? process.env["WSL_DISTRO_NAME"] : undefined;
+    const distro =
+      state.distributions.find((item) => item.name === currentName) ??
+      state.distributions.find((item) => item.default) ??
+      state.distributions[0];
+
+    if (!distro) {
+      return { name: "wsl architecture", status: "n/a", detail: "no distro installed" };
+    }
+    if (distro.version === 2) {
+      return { name: "wsl architecture", status: "ok", detail: `${distro.name} uses WSL 2` };
+    }
+    if (distro.version === 1) {
+      return {
+        name: "wsl architecture",
+        status: "drift",
+        detail: `${distro.name} uses WSL 1; red-dev requires WSL 2`,
+        fix:
+          p.os === "windows"
+            ? "red-dev wsl"
+            : `from PowerShell: wsl --set-version ${distro.name} 2`,
+      };
+    }
+    return {
+      name: "wsl architecture",
+      status: "drift",
+      detail: `cannot verify whether ${distro.name} uses WSL 2`,
+      fix: "wsl --update, then red-dev doctor",
+    };
+  } catch (err) {
+    return { name: "wsl architecture", status: "n/a", detail: (err as Error).message };
+  }
+}
+
 async function checkDelta(): Promise<DriftCheck> {
   if (!Bun.which("delta")) {
     return { name: "git pager", status: "n/a", detail: "delta not installed" };
@@ -413,6 +456,7 @@ export async function collectDrift(p: Platform): Promise<DriftCheck[]> {
   checks.push(await checkShellWiring());
   checks.push(...(await checkTheme(p)));
   checks.push(await checkWallpaper(p));
+  checks.push(await checkWslArchitecture(p));
   checks.push(checkWslInterop(p));
   checks.push(await checkFont(p));
   checks.push(await checkWslDistro(p));

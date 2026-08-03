@@ -12,8 +12,9 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { zellijConfigFor } from "./dotfiles.ts";
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { zellijConfigAction, zellijConfigFor } from "./dotfiles.ts";
 import { repairedImports } from "./alacritty.ts";
 import type { Platform } from "./platform.ts";
 
@@ -31,16 +32,44 @@ function platform(over: Partial<Platform>): Platform {
 }
 
 describe("where zellij puts a copied selection", () => {
-  test("goes through clip.exe under WSL", () => {
-    // Verified from a distro before this was written: piping into
-    // clip.exe and reading Get-Clipboard back returns the same text.
+  test("uses the fast UTF-8 bridge under WSL", () => {
     const config = zellijConfigFor(platform({ env: "wsl" }));
-    expect(config).toContain('copy_command "clip.exe"');
+    expect(config).toContain("windows-clipboard.sh");
+    expect(config).not.toContain("powershell.exe");
+    expect(config).not.toContain('copy_command "clip.exe"');
   });
 
-  test("goes through clip.exe on native Windows too", () => {
+  test("uses the same Unicode-safe bridge on native Windows", () => {
     const config = zellijConfigFor(platform({ os: "windows", env: "windows" }));
-    expect(config).toContain('copy_command "clip.exe"');
+    expect(config).toContain("powershell.exe");
+    expect(config).not.toContain('copy_command "clip.exe"');
+  });
+
+  test("converts Zellij UTF-8 to BOM-less UTF-16LE within its timeout", async () => {
+    const dir = mkdtempSync(`${tmpdir()}/red-clipboard-`);
+    const capture = `${dir}/clipboard.bin`;
+    const fakeClip = `${dir}/clip.exe`;
+    writeFileSync(fakeClip, '#!/bin/sh\nexec tee "$CLIP_CAPTURE" >/dev/null\n');
+    chmodSync(fakeClip, 0o755);
+
+    const input = "copiar e colar: ação — 🧪";
+    const started = performance.now();
+    const proc = Bun.spawn(["bash", "config/bash/windows-clipboard.sh"], {
+      env: {
+        ...process.env,
+        PATH: `${dir}:${process.env["PATH"] ?? ""}`,
+        CLIP_CAPTURE: capture,
+      },
+      stdin: "pipe",
+      stdout: "ignore",
+      stderr: "pipe",
+    });
+    proc.stdin.write(input);
+    proc.stdin.end();
+
+    expect(await proc.exited).toBe(0);
+    expect(performance.now() - started).toBeLessThan(1_000);
+    expect(readFileSync(capture).toString("utf16le")).toBe(input);
   });
 
   test("uses the Wayland tool on a Linux desktop", () => {
@@ -94,6 +123,43 @@ describe("paste", () => {
 });
 
 describe("reaching a machine that already has a config", () => {
+  test("upgrades the generated clip.exe config that corrupts UTF-8", () => {
+    const base = readFileSync("config/zellij/config.kdl", "utf8");
+    const old = `${base}
+// Generated for this target by red-dev.
+//
+// The clipboard zellij should write to. Without it zellij uses OSC 52,
+// which asks the terminal to do the copying and cannot tell whether it
+// did — so a selection reports success and the clipboard keeps whatever
+// was in it.
+copy_command "clip.exe"
+`;
+    const next = zellijConfigFor(platform({ env: "wsl" }));
+    expect(zellijConfigAction(old, next)).toBe("upgrade");
+  });
+
+  test("upgrades the generated PowerShell bridge that Zellij times out", () => {
+    const base = readFileSync("config/zellij/config.kdl", "utf8");
+    const script =
+      "$ProgressPreference='SilentlyContinue';" +
+      "$s=[Console]::OpenStandardInput();" +
+      "$m=New-Object IO.MemoryStream;" +
+      "$s.CopyTo($m);" +
+      "Set-Clipboard -Value ([Text.Encoding]::UTF8.GetString($m.ToArray()))";
+    const encoded = Buffer.from(script, "utf16le").toString("base64");
+    const old = `${base}
+// Generated for this target by red-dev.
+//
+// The clipboard zellij should write to. Without it zellij uses OSC 52,
+// which asks the terminal to do the copying and cannot tell whether it
+// did — so a selection reports success and the clipboard keeps whatever
+// was in it.
+copy_command "powershell.exe -NoProfile -EncodedCommand ${encoded}"
+`;
+    const next = zellijConfigFor(platform({ env: "wsl" }));
+    expect(zellijConfigAction(old, next)).toBe("upgrade");
+  });
+
   test("the config being shipped is registered as shipped", () => {
     // The upgrade only fires for a file that hashes to something
     // red-dev is known to have written. Leaving the current one out is

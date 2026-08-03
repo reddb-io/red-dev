@@ -139,7 +139,7 @@ export function buildCli(): CLI {
         description: "remove tools or red-dev's own configuration",
       },
       wsl: {
-        description: "set up WSL on this Windows machine",
+        description: "set up or verify WSL 2 on this Windows machine",
       },
       ui: {
         description: "fullscreen interface, with live theme preview",

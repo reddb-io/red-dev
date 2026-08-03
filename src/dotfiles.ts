@@ -24,6 +24,7 @@ import functionsSh from "../config/bash/functions.sh" with { type: "text" };
 import promptSh from "../config/bash/prompt.sh" with { type: "text" };
 import sharedSh from "../config/bash/shared.sh" with { type: "text" };
 import zellijSh from "../config/bash/zellij.sh" with { type: "text" };
+import windowsClipboardSh from "../config/bash/windows-clipboard.sh" with { type: "text" };
 import inputrc from "../config/bash/inputrc.conf" with { type: "text" };
 import zellijBase from "../config/zellij/config.kdl" with { type: "text" };
 
@@ -39,6 +40,7 @@ export const FILES: Record<string, string> = {
   "prompt.sh": promptSh,
   "shared.sh": sharedSh,
   "zellij.sh": zellijSh,
+  "windows-clipboard.sh": windowsClipboardSh,
   // Deployed without the .conf suffix: the repo needs an extension for
   // the text import to resolve, readline does not care what it is
   // called, and INPUTRC points straight at it.
@@ -221,7 +223,42 @@ const SHIPPED_ZELLIJ_CONFIGS = new Set([
   // that took 0.11.0 could never be given one, because "written once"
   // has no exception for a file that is still exactly ours.
   "df96577497a13f992edf36e3ffcb89717472e83c841809eea1a789bed20ae34b",
+  // 0.15.0 through 0.19.0 on WSL/Windows: the base above plus a
+  // generated `copy_command "clip.exe"`. clip.exe decodes redirected
+  // stdin with the Windows OEM code page, so UTF-8 became mojibake.
+  "2210c40109a5f89c9acb30baa0cc3f67072eed998ac3c7569c19866aa8a2efb8",
+  // 0.19.0 on WSL/Windows: the UTF-8-safe PowerShell bridge. Correct in
+  // isolation, but Zellij kills copy commands after one second and Windows
+  // PowerShell startup can exceed that from WSL, leaving the old clipboard.
+  "386a88423e2c91e3af3341ac82f9402d0cf81ae2ed325859236e1dbfa400db12",
 ]);
+
+/**
+ * WSL's low-latency clipboard bridge.
+ *
+ * Zellij gives copy_command UTF-8 on stdin and terminates it after one
+ * second. Starting powershell.exe is too slow on some WSL machines, while
+ * iconv + clip.exe completes in tens of milliseconds. clip.exe accepts
+ * redirected UTF-16LE without a BOM, preserving accents and supplementary
+ * Unicode characters in the Windows clipboard.
+ */
+export function wslClipboardCommand(): string {
+  return `bash ${home()}/.local/share/red-dev/config/bash/windows-clipboard.sh`;
+}
+
+/** Native Windows fallback. WSL uses the faster helper above because Zellij
+ * terminates commands after one second; PowerShell startup inside WSL can
+ * exceed that deadline. */
+export function windowsClipboardCommand(): string {
+  const script =
+    "$ProgressPreference='SilentlyContinue';" +
+    "$s=[Console]::OpenStandardInput();" +
+    "$m=New-Object IO.MemoryStream;" +
+    "$s.CopyTo($m);" +
+    "Set-Clipboard -Value ([Text.Encoding]::UTF8.GetString($m.ToArray()))";
+  const encoded = Buffer.from(script, "utf16le").toString("base64");
+  return `powershell.exe -NoProfile -EncodedCommand ${encoded}`;
+}
 
 /**
  * The zellij config for this machine, which is the shipped one plus the
@@ -231,9 +268,10 @@ const SHIPPED_ZELLIJ_CONFIGS = new Set([
  * terminal to set the clipboard and reports success either way. On
  * Windows that ask goes unanswered often enough that selecting text
  * shows "Copied!" and pastes the previous contents, which is worse than
- * failing. clip.exe is the Windows clipboard itself, reachable from WSL
- * through interop and from Git Bash as a normal program; verified from
- * this side with a round trip through Get-Clipboard.
+ * failing. On WSL the helper converts Zellij's UTF-8 to BOM-less UTF-16LE
+ * before clip.exe reads it. This both preserves Unicode and finishes before
+ * Zellij's one-second copy-command deadline. Native Windows uses the same
+ * explicit UTF-8 decoding through the PowerShell clipboard API.
  *
  * Per platform rather than shipped, because a copy_command naming a
  * program that does not exist is the same silent failure pointed the
@@ -241,11 +279,13 @@ const SHIPPED_ZELLIJ_CONFIGS = new Set([
  */
 export function zellijConfigFor(p: Platform): string {
   const command =
-    p.os === "windows" || p.env === "wsl"
-      ? "clip.exe"
-      : p.env === "desktop"
-        ? "wl-copy"
-        : null;
+    p.env === "wsl"
+      ? wslClipboardCommand()
+      : p.os === "windows"
+        ? windowsClipboardCommand()
+        : p.env === "desktop"
+          ? "wl-copy"
+          : null;
 
   if (!command) return zellijBase;
 
