@@ -1,229 +1,229 @@
-# red-dev vs. Omakub: análise comparativa e oportunidades
+# red-dev vs. Omakub: comparative analysis and opportunities
 
-## Data
+## Date
 
 2026-08-03
 
 ## Query
 
-Comparar o que o Omakub entrega hoje com o que o red-dev entrega, validar a tese de que o red-dev é uma evolução espiritual multiplataforma, identificar lacunas para o setup inicial dos colaboradores da RedDB.io e propor um caminho de produto para instalação, experiência de desktop, agentes, ferramentas internas e upgrades.
+Compare what Omakub delivers today with what red-dev delivers, validate the thesis that red-dev is a multiplatform spiritual evolution, identify gaps for the initial setup of RedDB.io contributors and propose a product path for installation, desktop experience, agents, internal tools and upgrades.
 
-## Escopo
+## Scope
 
-- red-dev no commit `e7757978783fc96ec8871e5efdeddc93ee8adc06`, versão de pacote `0.19.0`.
-- Última release estável publicada do red-dev no momento da pesquisa: `v0.17.1`.
-- Omakub no commit `c873902f1a5d8b0f54e2e52d565a77274a5941ff`, versão/release `1.5.0`.
-- Ubuntu, WSL, Windows e a aspiração de suporte a macOS.
-- Instalação inicial, convergência, atualização, temas, fontes, hotkeys, tiling, aplicativos, linguagens, bancos, agentes de IA e ferramentas RedDB.
-- Apenas documentação, repositórios e releases oficiais foram usados como fontes externas.
+- red-dev in commit `e7757978783fc96ec8871e5efdeddc93ee8adc06`, package version `0.19.0`.
+- Latest published stable release of red-dev at the time of research: `v0.17.1`.
+- Omakub in commit `c873902f1a5d8b0f54e2e52d565a77274a5941ff`, version/release `1.5.0`.
+- Ubuntu, WSL, Windows and the aspiration to support macOS.
+- Initial installation, convergence, updating, themes, fonts, hotkeys, tiling, applications, languages, databases, AI agents and RedDB tools.
+- Only official documentation, repositories and releases were used as external sources.
 
-Não fazem parte deste estudo testes manuais em hardware limpo, avaliação subjetiva de cada tema nem a escolha final de ferramentas nativas para tiling e launcher no macOS.
+Manual testing on clean hardware, subjective evaluation of each theme or the final choice of native tools for tiling and launcher on macOS are not part of this study.
 
-## Resumo executivo
+## Executive Summary
 
-A tese de “evolução espiritual do Omakub” é defensável, mas ainda está parcialmente realizada.
+The thesis of "spiritual evolution of the Omakub" is defensible, but it is still partially realized.
 
-O red-dev já tem uma fundação de engenharia mais ambiciosa: modelo tipado de plataforma e capacidades, binários compilados, providers por plataforma, instalação convergente e reexecutável, `plan`, `doctor`, isolamento de falhas, preferências persistentes, migrações, integração WSL/Windows e uma oferta muito mais orientada a agentes e ao ecossistema RedDB. Isso é uma evolução real do modelo de scripts Bash focados em Ubuntu do Omakub.
+red-dev already has a more ambitious engineering foundation: typed model of platform and capabilities, compiled binaries, providers per platform, convergent and re-executable installation, `plan`, `doctor`, fault isolation, persistent preferences, migrations, WSL/Windows integration and a much more agent- and RedDB ecosystem-oriented offering. This is a real evolution of Omakub's Ubuntu-focused Bash scripting model.
 
-O Omakub, porém, ainda entrega uma experiência de desktop Linux mais completa e coerente no primeiro dia. Ele configura GNOME, workspaces, tiling, launcher, dock, atalhos, aplicativos, LazyVim, VS Code, web apps, linguagens e bancos como uma experiência única. O red-dev tem ótimas peças, mas várias ainda não formam uma jornada ponta a ponta.
+Omakub, however, still delivers a more complete and coherent Linux desktop experience on day one. It configures GNOME, workspaces, tiling, launcher, dock, shortcuts, applications, LazyVim, VS Code, web apps, languages and databases as a single experience. red-dev has great pieces, but several still don't form an end-to-end journey.
 
-Os cinco bloqueadores principais são:
+The five main blockers are:
 
-1. `red-dev update` não atualiza o próprio binário do red-dev.
-2. macOS não é suportado e hoje pode cair incorretamente em providers Ubuntu; deve falhar de forma explícita até existir um provider Darwin real.
-3. Pi não está no catálogo e Hermes é instalado sem receber a integração RedSkills; a promessa de ambiente de agentes uniforme ainda cobre efetivamente apenas Claude Code, Codex e OpenCode.
-4. O desktop Ubuntu não porta nem valida a camada que torna o Omakub memorável: hotkeys, tiling, workspaces, dock, launcher e extensões GNOME.
-5. A experiência editorial e de workstation está incompleta: não há bootstrap LazyVim, template completo de VS Code, seletor de bancos e o módulo de web apps não está conectado a nenhum comando ou menu.
+1. `red-dev update` does not update the red-dev binary itself.
+2. macOS is not supported and today may fall incorrectly into Ubuntu providers; must explicitly fail until there is a real Darwin provider.
+3. Pi is not in the catalog and Hermes is installed without receiving RedSkills integration; the uniform agent environment promise still effectively only covers Claude Code, Codex, and OpenCode.
+4. The Ubuntu desktop does not port or validate the layer that makes Omakub memorable: hotkeys, tiling, workspaces, dock, launcher and GNOME extensions.
+5. The editorial and workstation experience is incomplete: there is no LazyVim bootstrap, full VS Code template, database selector and the web apps module is not connected to any commands or menus.
 
-A recomendação não é copiar indiscriminadamente todos os aplicativos do Omakub. É preservar a arquitetura convergente do red-dev e organizar o produto em perfis declarativos — por exemplo `minimal`, `desktop`, `reddb-employee` e `ai-heavy` — com uma camada semântica comum para temas, fontes, hotkeys, ferramentas, agentes e verificações de prontidão.
+The recommendation is not to indiscriminately copy all Omakub applications. It's about preserving red-dev's converged architecture and organizing the product into declarative profiles - for example `minimal`, `desktop`, `reddb-employee`, and `ai-heavy` - with a common semantic layer for themes, fonts, hotkeys, tools, agents, and readiness checks.
 
-## Fontes oficiais
+## Official sources
 
 ### red-dev
 
-- [README e promessa de produto](https://github.com/reddb-io/red-dev/blob/e7757978783fc96ec8871e5efdeddc93ee8adc06/README.md)
-- [Detecção de plataforma e capacidades](https://github.com/reddb-io/red-dev/blob/e7757978783fc96ec8871e5efdeddc93ee8adc06/src/platform.ts)
-- [Manifesto de ferramentas e seleção de providers](https://github.com/reddb-io/red-dev/blob/e7757978783fc96ec8871e5efdeddc93ee8adc06/src/manifest.ts)
-- [Catálogo e instalação de agentes](https://github.com/reddb-io/red-dev/blob/e7757978783fc96ec8871e5efdeddc93ee8adc06/src/agents.ts)
-- [Providers de instalação e atualização](https://github.com/reddb-io/red-dev/blob/e7757978783fc96ec8871e5efdeddc93ee8adc06/src/providers.ts)
-- [CLI de atualização](https://github.com/reddb-io/red-dev/blob/e7757978783fc96ec8871e5efdeddc93ee8adc06/src/commands/update.ts)
-- [Migrações](https://github.com/reddb-io/red-dev/blob/e7757978783fc96ec8871e5efdeddc93ee8adc06/src/migrations.ts)
+- [README and product promise](https://github.com/reddb-io/red-dev/blob/e7757978783fc96ec8871e5efdeddc93ee8adc06/README.md)
+- [Platform detection and capabilities](https://github.com/reddb-io/red-dev/blob/e7757978783fc96ec8871e5efdeddc93ee8adc06/src/platform.ts)
+- [Tool manifest and provider selection](https://github.com/reddb-io/red-dev/blob/e7757978783fc96ec8871e5efdeddc93ee8adc06/src/manifest.ts)
+- [Agent catalog and installation](https://github.com/reddb-io/red-dev/blob/e7757978783fc96ec8871e5efdeddc93ee8adc06/src/agents.ts)
+- [Installation and update providers](https://github.com/reddb-io/red-dev/blob/e7757978783fc96ec8871e5efdeddc93ee8adc06/src/providers.ts)
+- [Update CLI](https://github.com/reddb-io/red-dev/blob/e7757978783fc96ec8871e5efdeddc93ee8adc06/src/commands/update.ts)
+- [Migrations](https://github.com/reddb-io/red-dev/blob/e7757978783fc96ec8871e5efdeddc93ee8adc06/src/migrations.ts)
 - [Hotkeys](https://github.com/reddb-io/red-dev/blob/e7757978783fc96ec8871e5efdeddc93ee8adc06/src/hotkeys.ts)
 - [Web apps](https://github.com/reddb-io/red-dev/blob/e7757978783fc96ec8871e5efdeddc93ee8adc06/src/webapps.ts)
-- [Release estável v0.17.1](https://github.com/reddb-io/red-dev/releases/tag/v0.17.1)
+- [Stable release v0.17.1](https://github.com/reddb-io/red-dev/releases/tag/v0.17.1)
 
 ### Omakub
 
-- [Site oficial](https://omakub.org/)
-- [Manual oficial](https://learn.omacom.io/1/read)
-- [Repositório oficial](https://github.com/basecamp/omakub)
-- [Instalador principal](https://github.com/basecamp/omakub/blob/c873902f1a5d8b0f54e2e52d565a77274a5941ff/install.sh)
-- [Menu principal](https://github.com/basecamp/omakub/blob/c873902f1a5d8b0f54e2e52d565a77274a5941ff/bin/omakub)
-- [Configuração de GNOME e hotkeys](https://github.com/basecamp/omakub/tree/c873902f1a5d8b0f54e2e52d565a77274a5941ff/defaults)
-- [Catálogo de temas](https://github.com/basecamp/omakub/tree/c873902f1a5d8b0f54e2e52d565a77274a5941ff/themes)
-- [Atualização e migrações](https://github.com/basecamp/omakub/blob/c873902f1a5d8b0f54e2e52d565a77274a5941ff/bin/omakub-sub/update.sh)
+- [Official website](https://omakub.org/)
+- [Official manual](https://learn.omacom.io/1/read)
+- [Official repository](https://github.com/basecamp/omakub)
+- [Main installer](https://github.com/basecamp/omakub/blob/c873902f1a5d8b0f54e2e52d565a77274a5941ff/install.sh)
+- [Main menu](https://github.com/basecamp/omakub/blob/c873902f1a5d8b0f54e2e52d565a77274a5941ff/bin/omakub)
+- [GNOME configuration and hotkeys](https://github.com/basecamp/omakub/tree/c873902f1a5d8b0f54e2e52d565a77274a5941ff/defaults)
+- [Theme catalog](https://github.com/basecamp/omakub/tree/c873902f1a5d8b0f54e2e52d565a77274a5941ff/themes)
+- [Update and migrations](https://github.com/basecamp/omakub/blob/c873902f1a5d8b0f54e2e52d565a77274a5941ff/bin/omakub-sub/update.sh)
 - [Release v1.5.0](https://github.com/basecamp/omakub/releases/tag/v1.5.0)
 
-### Pi e Hermes
+### Pi and Hermes
 
-- [Pi Coding Agent — README oficial](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/README.md)
+- [Pi Coding Agent - official README](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/README.md)
 - [Pi packages](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/packages.md)
-- [Hermes — instalação](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/getting-started/installation.md)
-- [Hermes — skills](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/features/skills.md)
-- [Hermes — MCP](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/features/mcp.md)
+- [Hermes - installation](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/getting-started/installation.md)
+- [Hermes - skills](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/features/skills.md)
+- [Hermes - MCP](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/features/mcp.md)
 
 ## Hotlinks
 
-- [README do red-dev](../../README.md)
-- [Plataformas](../../src/platform.ts)
-- [Manifesto](../../src/manifest.ts)
-- [Agentes](../../src/agents.ts)
+- [red-dev README](../../README.md)
+- [Platforms](../../src/platform.ts)
+- [Manifest](../../src/manifest.ts)
+- [Agents](../../src/agents.ts)
 - [Providers](../../src/providers.ts)
 - [Hotkeys](../../src/hotkeys.ts)
 - [Web apps](../../src/webapps.ts)
-- [Migrações](../../src/migrations.ts)
+- [Migrations](../../src/migrations.ts)
 
-## Comparação de produto
+## Product Comparison
 
-| Dimensão | Omakub | red-dev hoje | Veredito |
+| Dimension | Omakub | red-dev today | Verdict |
 |---|---|---|---|
-| Plataforma | Ubuntu GNOME x86_64; foco deliberadamente estreito | Ubuntu 24.04, caminho para 26.04, WSL e Windows x64; macOS aspiracional | red-dev tem a arquitetura mais ampla, mas ainda não entrega macOS/ARM |
-| Forma de distribuição | Checkout Git + scripts Bash | Binários compilados Linux/Windows e manifesto tipado | red-dev |
-| Reexecução | Instalação linear com `set -e` | Convergência idempotente, etapas independentes, `plan` e `doctor` | red-dev |
-| Atualização | Atualiza o próprio checkout e executa migrações | Atualiza sistema, ferramentas e RedSkills, mas não o próprio red-dev | Empate com lacuna crítica no red-dev |
-| Desktop Linux | GNOME completo: extensões, tiling, dock, launcher, workspaces e hotkeys | Apps, temas e fontes; configuração GNOME ainda não portada/validada | Omakub |
-| Windows/WSL | Não é objetivo | Integração de host, config compartilhada, winget e hotkeys básicos | red-dev |
-| Temas | Dez temas sobre terminal, editor e GNOME | Os mesmos dez, mais várias superfícies CLI e agentes | red-dev em cobertura; Omakub em acabamento GNOME |
-| Fontes | Quatro famílias, tamanhos configuráveis | Quatro famílias, tamanhos persistentes 7–14 | Equivalentes, com escolhas de família diferentes |
-| Editor | Neovim/LazyVim e VS Code configurados | Instala Neovim/VS Code e aplica temas, sem baseline completo | Omakub |
-| Linguagens | Ruby/Node e seleção de Go, PHP, Python, Elixir, Rust e Java | Node, Bun, Deno, Python, Go, Rust, Ruby e Java via mise | red-dev em runtimes modernos; Omakub inclui PHP/Elixir |
-| Bancos | MySQL, Redis e PostgreSQL selecionáveis via Docker | Sem jornada de bancos/serviços | Omakub |
-| Aplicativos | Catálogo amplo de workstation | Catálogo menor e centrado em desenvolvimento/RedDB | Omakub em abrangência; red-dev tem melhor identidade interna |
-| Web apps | Integrados ao menu e ao desktop | Implementação existe, mas está sem rota de CLI/menu e é Linux-only | Omakub |
-| Agentes | Não é o centro do produto | Dez opções, RedSkills em três hosts, extensões RedDB | red-dev, com lacunas Pi/Hermes |
-| Ferramentas RedDB | Não se aplica | `red`, `tq`, red-request, dit e red-ui conforme plataforma | red-dev |
-| Diagnóstico | Scripts/migrações, sem modelo de drift equivalente | `doctor`, capacidades, providers e preferências persistentes | red-dev |
+| Platform | Ubuntu GNOME x86_64; deliberately narrow focus | Ubuntu 24.04, path to 26.04, WSL and Windows x64; aspirational macOS | red-dev has the broader architecture, but still doesn't ship macOS/ARM |
+| Distribution method | Checkout Git + scripts Bash | Linux/Windows compiled binaries and typed manifest | red-dev |
+| Reexecution | Linear installation with `set -e` | Idempotent convergence, independent steps, `plan` and `doctor` | red-dev |
+| Update | Updates the checkout itself and performs migrations | Updates system, tools and RedSkills, but not red-dev itself | Draw with critical gap in red-dev |
+| Desktop Linux | Complete GNOME: extensions, tiling, dock, launcher, workspaces and hotkeys | Apps, themes and fonts; GNOME configuration not yet ported/validated | Omakub |
+| Windows/WSL | Not an objective | Host integration, shared config, winget and basic hotkeys | red-dev |
+| Themes | Ten themes about terminal, editor and GNOME | Same ten, plus multiple CLI surfaces and agents | red-dev in coverage; Omakub in GNOME finish |
+| Fonts | Four families, configurable sizes | Four families, persistent sizes 7–14 | Equivalent, with different family choices |
+| Editor | Neovim/LazyVim and VS Code configured | Install Neovim/VS Code and apply themes, without complete baseline | Omakub |
+| Languages | Ruby/Node and selection of Go, PHP, Python, Elixir, Rust and Java | Node, Bun, Deno, Python, Go, Rust, Ruby and Java via mise | red-dev on modern runtimes; Omakub includes PHP/Elixir |
+| Databases | MySQL, Redis and PostgreSQL selectable via Docker | No database/service journey | Omakub |
+| Applications | Extensive workstation catalog | Smaller, development-centric catalog/RedDB | Omakub in scope; red-dev has better internal identity |
+| Web apps | Integrated into the menu and desktop | Implementation exists, but has no CLI/menu route and is Linux-only | Omakub |
+| Agents | Not the center of the product | Ten options, RedSkills on three hosts, RedDB extensions | red-dev, with Pi/Hermes gaps |
+| RedDB Tools | Not applicable | `red`, `tq`, red-request, dit and red-ui depending on platform | red-dev |
+| Diagnosis | Scripts/migrations, without equivalent drift model | `doctor`, capabilities, providers and persistent preferences | red-dev |
 
-## Principais achados
+## Main findings
 
-### 1. A vantagem estrutural do red-dev é real
+### 1. red-dev's structural advantage is real
 
-O Omakub é um produto vertical: escolhe Ubuntu GNOME e o transforma profundamente. Essa restrição é responsável por boa parte de sua coerência. O instalador oficial valida Ubuntu e arquitetura x86 e executa scripts Bash em sequência.
+Omakub is a vertical product: choose Ubuntu GNOME and transform it profoundly. This restriction is responsible for much of its coherence. The official installer validates Ubuntu and x86 architecture and runs Bash scripts in sequence.
 
-O red-dev separa plataforma, ambiente e capacidades; usa providers diferentes para `apt`, `winget`, GitHub Releases e instaladores próprios; persiste preferências e migrações; e trata WSL e Windows como lados coordenados de uma mesma estação. O desenho permite crescer sem duplicar o produto inteiro por sistema operacional.
+red-dev separates platform, environment and capabilities; uses different providers for `apt`, `winget`, GitHub Releases and own installers; preferences and migrations persist; and treats WSL and Windows as coordinated sides of the same workstation. The design allows for growth without duplicating the entire product per operating system.
 
-Essa vantagem deve ser protegida. Portar scripts ad hoc do Omakub diretamente enfraqueceria o principal diferencial do red-dev. Cada nova entrega deveria entrar no mesmo modelo de manifesto, capacidade, ownership, convergência e diagnóstico.
+This advantage must be protected. Porting ad hoc scripts from Omakub directly would weaken red-dev's main differentiator. Each new delivery should follow the same manifesto, capacity, ownership, convergence and diagnosis model.
 
-### 2. macOS ainda não é uma plataforma do produto
+### 2. macOS is not yet a product platform
 
-`platform.ts` reconhece `darwin`, mas não existe ambiente Darwin nem coluna de provider macOS no manifesto. A seleção atual escolhe `u24` para qualquer sistema não Windows que não caia no ramo Ubuntu 26. Em outras palavras, macOS não apenas está ausente: sem uma guarda adicional, pode receber uma tentativa de instalação com providers Ubuntu.
+`platform.ts` recognizes `darwin`, but there is no Darwin environment or macOS provider column in the manifest. The current selection chooses `u24` for any non-Windows system that doesn't fall into the Ubuntu 26 branch. In other words, macOS is not just missing: without an additional guard, it may receive an installation attempt with Ubuntu providers.
 
-Os bootstraps e releases reforçam isso: há caminhos Linux/WSL e Windows x64, sem artefatos macOS x64/arm64. O primeiro conserto deve ser falhar fechado e explicar “macOS ainda não suportado”. Só depois devem entrar Homebrew/casks, caminhos de configuração, bootstrap, temas, fontes, hotkeys e artefatos universais.
+The bootstraps and releases reinforce this: there are Linux/WSL and Windows x64 paths, without macOS x64/arm64 artifacts. The first fix should be to fail closed and explain "macOS not yet supported". Only then should Homebrew/casks, configuration paths, bootstrap, themes, fonts, hotkeys and universal artifacts be included.
 
-### 3. A atualização tem um buraco no componente mais importante
+### 3. The update has a hole in the most important component
 
-O comando `red-dev update` faz upgrade do sistema por `apt` ou `winget`, atualiza RedSkills e converge os itens instalados. Ele não baixa uma nova release do próprio red-dev.
+The `red-dev update` command upgrades the system by `apt` or `winget`, updates RedSkills, and converges the installed items. It does not download a new release from red-dev itself.
 
-O Omakub atualiza o próprio checkout com Git e executa migrações posteriores ao commit anterior. O red-dev já possui uma infraestrutura de migrações melhor tipada, mas ela só chega ao usuário se o binário novo for instalado por outra via.
+Omakub updates its own checkout with Git and performs migrations after the previous commit. red-dev already has a better typed migration infrastructure, but it only reaches the user if the new binary is installed by another means.
 
-Uma trilha de upgrade confiável precisa incluir:
+A reliable upgrade trail needs to include:
 
-- descoberta de canal e versão (`stable`, opcionalmente `preview`);
-- download do artefato correto para sistema e arquitetura;
-- validação por checksum e, idealmente, assinatura;
-- troca atômica do binário;
-- execução de migrações;
-- rollback para o binário anterior;
-- `doctor` detectando divergência entre binário, manifesto e versão instalada de RedSkills.
+- channel and version discovery (`stable`, optionally `preview`);
+- download the correct artifact for system and architecture;
+- validation by checksum and, ideally, signature;
+- binary atomic swap;
+- execution of migrations;
+- rollback to previous binary;
+- `doctor` detecting divergence between binary, manifest and installed version of RedSkills.
 
-### 4. “Todo agente pronto” ainda significa três hosts
+### 4. "Every agent ready" still means three hosts
 
-O catálogo do red-dev oferece Claude Code, Codex, OpenCode, Gemini, T3 Code, Herdr, OpenClaw, Hermes, Claude Desktop e Codex Desktop. Pi não está presente.
+The red-dev catalog offers Claude Code, Codex, OpenCode, Gemini, T3 Code, Herdr, OpenClaw, Hermes, Claude Desktop, and Codex Desktop. Pi is not present.
 
-A integração RedSkills está codificada para Claude Code, Codex e OpenCode. Hermes pode ser instalado, mas não recebe o shared skills directory nem configuração MCP do RedSkills. Isso cria uma diferença importante entre “agente instalado” e “agente corporativo pronto”.
+RedSkills integration is coded for Claude Code, Codex and OpenCode. Hermes can be installed, but does not receive the shared skills directory or MCP configuration from RedSkills. This creates an important difference between "installed agent" and "enterprise ready agent".
 
-As fontes oficiais mostram um caminho prático:
+Official sources show a practical path:
 
-- Pi descobre skills em `~/.agents/skills/`, além dos diretórios próprios, e aceita packages para distribuir skills, extensions, prompts e temas. A primeira integração pode compartilhar as skills; uma integração completa pode usar um package/extensão para hooks, MCP e tema.
-- Hermes permite declarar diretórios externos de skills em `~/.hermes/config.yaml` e possui configuração MCP nativa. Portanto, pode apontar para `~/.agents/skills` e receber os servidores RedSkills sem duplicar o conteúdo.
+- Pi discovers skills in `~/.agents/skills/`, in addition to its own directories, and accepts packages to distribute skills, extensions, prompts and themes. The first integration can share skills; a complete integration can use a package/extension for hooks, MCP and theme.
+- Hermes allows you to declare external skill directories in `~/.hermes/config.yaml` and has native MCP configuration. Therefore, it can point to `~/.agents/skills` and receive the RedSkills servers without duplicating the content.
 
-O modelo recomendado é substituir a lista rígida por um `SkillHostAdapter` com operações comuns: detectar, instalar, conectar o diretório compartilhado, configurar MCP/hooks/extensões, medir versão/frescor e executar uma prova de saúde.
+The recommended model is to replace the hard list with a `SkillHostAdapter` with common operations: detect, install, connect shared directory, configure MCP/hooks/extensions, measure version/freshness, and run a health check.
 
-### 5. Omakub vence na experiência integrada de desktop Linux
+### 5. Omakub Wins in Integrated Linux Desktop Experience
 
-O Omakub configura seis workspaces fixos, navegação por teclado, atalhos para terminal/browser/launcher, favoritos do dock e extensões como Tactile, Just Perfection, Blur My Shell, Space Bar, Undecorate e TopHat. Isso não é um conjunto de detalhes isolados; é um modelo consistente de interação.
+Omakub configures six fixed workspaces, keyboard navigation, terminal/browser/launcher shortcuts, dock favorites, and extensions like Tactile, Just Perfection, Blur My Shell, Space Bar, Undecorate, and TopHat. This is not a set of isolated details; it is a consistent model of interaction.
 
-No red-dev, a camada de hotkeys implementada hoje cobre dois atalhos Windows para abrir terminal. O README reconhece que hotkeys, extensões e dock do GNOME ainda não foram portados e que o desktop Ubuntu não foi validado em hardware real.
+In red-dev, the hotkey layer implemented today covers two Windows shortcuts to open terminal. The README acknowledges that GNOME hotkeys, extensions, and dock have not yet been ported, and that the Ubuntu desktop has not been validated on real hardware.
 
-A oportunidade é mais forte que uma cópia de teclas: criar um catálogo semântico de ações, por exemplo `terminal.new`, `terminal.workspace`, `launcher.open`, `window.tile.left`, `workspace.goto.1` e `screenshot.region`. Cada plataforma recebe bindings equivalentes, validação de conflitos e uma cheat sheet gerada. Assim, a memória muscular permanece coerente mesmo quando GNOME, PowerToys e o gerenciador escolhido no macOS usam formatos diferentes.
+The opportunity is stronger than a key copy: create a semantic catalog of actions, for example `terminal.new`, `terminal.workspace`, `launcher.open`, `window.tile.left`, `workspace.goto.1` and `screenshot.region`. Each platform receives equivalent bindings, conflict validation and a generated cheat sheet. Thus, muscle memory remains coherent even when GNOME, PowerToys and the chosen manager on macOS use different formats.
 
-### 6. Temas e fontes são um ponto forte, mas precisam virar contrato
+### 6. Themes and fonts are a strong point, but they need to become a contract
 
-Os dois projetos oferecem hoje dez famílias de tema: Tokyo Night, Catppuccin, Gruvbox, Everforest, Kanagawa, Matte Black, Nord, Osaka Jade, Ristretto e Rose Pine.
+The two projects currently offer ten theme families: Tokyo Night, Catppuccin, Gruvbox, Everforest, Kanagawa, Matte Black, Nord, Osaka Jade, Ristretto and Rose Pine.
 
-O red-dev aplica o tema a zellij, btop, Neovim quando já configurado, VS Code, bat, delta, lazygit, OpenCode, Herdr e superfícies do sistema operacional. A cobertura de ferramentas é excelente. O Omakub aplica de forma particularmente coesa ao GNOME, terminal, zellij, Neovim, btop, TopHat, VS Code e wallpaper.
+red-dev applies the theme to zellij, btop, Neovim when already configured, VS Code, bat, delta, lazygit, OpenCode, Herdr, and OS surfaces. Tool coverage is excellent. Omakub applies particularly cohesively to GNOME, terminal, zellij, Neovim, btop, TopHat, VS Code and wallpaper.
 
-Para sustentar a expansão, o tema deve ser tratado como contrato de tokens e capacidades, não apenas como uma coleção de arquivos. Cada superfície deveria declarar suporte, ownership, estratégia de merge e verificação. Pi, Hermes, macOS, PowerToys/AeroSpace e wallpapers por plataforma entram como adapters desse contrato.
+To sustain expansion, the theme must be treated as a contract of tokens and capabilities, not just as a collection of files. Each surface should declare support, ownership, merge strategy and verification. Pi, Hermes, macOS, PowerToys/AeroSpace and wallpapers per platform are included as adapters for this contract.
 
-### 7. A experiência de editor está abaixo da promessa de “setup sensacional”
+### 7. The editor experience is below the promise of "awesome setup"
 
-O Omakub instala uma configuração funcional de Neovim baseada em LazyVim e configura VS Code. O red-dev instala os executáveis e sabe tematizar, mas só toca o Neovim quando uma configuração já existe. Não há bootstrap de um baseline editorial nem um template completo e governado de VS Code.
+Omakub installs a working Neovim setup based on LazyVim and configures VS Code. red-dev installs the executables and knows how to theme, but only touches Neovim when a configuration already exists. There is no bootstrap from an editorial baseline nor a complete and governed VS Code template.
 
-Para um colaborador novo, “editor instalado” não equivale a “editor pronto”. O comportamento seguro é:
+For a new contributor, "editor installed" does not equate to "editor ready". Safe behavior is:
 
-- quando não existe configuração, instalar um starter RedDB versionado;
-- quando existe, nunca sobrescrever: mostrar plano, oferecer adoção e fazer merge apenas de campos de propriedade explícita;
-- separar baseline corporativo, preferências pessoais e estado gerado;
-- testar reexecução e upgrade do template.
+- when there is no configuration, install a versioned RedDB starter;
+- when there is, never overwrite: show plan, offer adoption and merge only explicitly owned fields;
+- separate corporate baseline, personal preferences and generated state;
+- test re-execution and upgrade of the template.
 
-### 8. Aplicativos, bancos e web apps não formam uma jornada única
+### 8. Applications, databases and web apps do not form a single journey
 
-O Omakub oferece seleção inicial de apps, linguagens e bancos. Seu catálogo inclui browser, password manager, comunicação, mídia, escritório, screenshots, VPN, editores e ferramentas de desenvolvimento.
+Omakub offers an initial selection of apps, languages and databases. Its catalog includes browser, password manager, communication, media, office, screenshots, VPN, editors and development tools.
 
-O red-dev possui um conjunto moderno de CLI, ótimos runtimes e as ferramentas internas RedDB, mas não há seletor de bancos/serviços. Também existe um módulo com ChatGPT, Claude, Google Photos, Contacts, Tailscale e GitHub como web apps, porém ele não é chamado por comando ou menu e só gera atalhos Linux.
+red-dev has a modern set of CLI, great runtimes and the internal RedDB tools, but there is no database/service selector. There is also a module with ChatGPT, Claude, Google Photos, Contacts, Tailscale and GitHub as web apps, but it is not called by command or menu and only generates Linux shortcuts.
 
-Copiar todo o catálogo aumentaria custo de manutenção e opinião indesejada. Perfis resolvem melhor:
+Copying the entire catalog would increase maintenance costs and unwanted opinions. Profiles solve better:
 
-- `minimal`: shell, terminal, Git, mise e CLI essenciais;
-- `desktop`: apps, fonts, themes, hotkeys, editor e web apps;
-- `reddb-employee`: desktop + stack RedDB + agentes aprovados + configurações corporativas;
-- `ai-heavy`: conjunto ampliado de agentes, runtimes e extensões.
+- `minimal`: essential shell, terminal, Git, mise and CLI;
+- `desktop`: apps, fonts, themes, hotkeys, editor and web apps;
+- `reddb-employee`: desktop + RedDB stack + approved agents + corporate configurations;
+- `ai-heavy`: expanded set of agents, runtimes and extensions.
 
-O primeiro run seleciona um perfil, permite diferenças e grava a intenção. Atualizações posteriores reconciliam essa intenção sem transformar preferências pessoais em drift.
+The first run selects a profile, allows differences, and writes the intent. Later updates reconcile this intent without turning personal preferences into drift.
 
-### 9. A stack RedDB é o diferencial mais valioso e deve ter SLO de prontidão
+### 9. The RedDB stack is the most valuable differentiator and must have an SLO ready
 
-O red-dev já distribui `red`, `tq`, red-request, dit e red-ui, além de RedSkills e extensões. Esse é o ponto que o transforma de “dotfiles sofisticados” em plataforma de onboarding da companhia.
+red-dev already distributes `red`, `tq`, red-request, dit and red-ui, in addition to RedSkills and extensions. This is the point that transforms it from "sophisticated dotfiles" into the company’s onboarding platform.
 
-Hoje a disponibilidade varia por plataforma, com red-ui limitado a Linux e sem providers macOS. A instalação precisa terminar com um relatório de readiness, não apenas com processos bem-sucedidos:
+Today availability varies by platform, with red-ui limited to Linux and no macOS providers. The installation needs to end with a readiness report, not just successful processes:
 
-- cada CLI selecionada responde a `--version` ou `--help`;
-- cada app desktop selecionado possui artefato compatível e consegue iniciar;
-- Docker está ativo;
-- cada agente selecionado enxerga a mesma versão de RedSkills;
-- MCPs obrigatórios inicializam;
-- autenticações pendentes aparecem como ações humanas claras, sem armazenar segredos no red-dev;
-- skips têm motivo explícito e distinguem “não escolhido”, “não suportado” e “falhou”.
+- each selected CLI responds to `--version` or `--help`;
+- each selected desktop app has compatible artifact and can launch;
+- Docker is active;
+- each selected agent sees the same version of RedSkills;
+- Mandatory MCPs initialize;
+- pending authentications appear as clear human actions without storing secrets in red-dev;
+- skips have an explicit reason and distinguish "not chosen", "not supported" and "failed".
 
-### 10. A validação real precisa alcançar a ambição da matriz
+### 10. Real validation needs to achieve matrix ambition
 
-O próprio README registra limitações de validação: Ubuntu desktop e Ubuntu 26 ainda não foram exercitados como alvo completo, e o bootstrap Windows não foi validado em uma máquina totalmente limpa. As releases atuais cobrem apenas Linux x64 e Windows x64.
+The README itself notes validation limitations: Ubuntu desktop and Ubuntu 26 have not yet been exercised as a full target, and the Windows bootstrap has not been validated on a completely clean machine. Current releases only cover Linux x64 and Windows x64.
 
-O contrato mínimo de CI/E2E por alvo deve ser:
+The minimum CI/E2E contract per target must be:
 
-1. máquina limpa;
-2. `plan` antes da instalação;
-3. instalação do perfil;
-4. segunda instalação com zero mudanças inesperadas;
+1. clean machine;
+2. `plan` before installation;
+3. profile installation;
+4. second installation with zero unexpected changes;
 5. `doctor` verde;
-6. troca de tema/fonte e verificação das superfícies;
-7. atualização de N-1 para atual;
+6. changing theme/font and checking surfaces;
+7. update from N-1 to current;
 8. rollback testado;
-9. smoke test dos agentes e ferramentas RedDB.
+9. smoke test of RedDB agents and tools.
 
-## Detalhes de API, CLI e configuração
+## API, CLI and configuration details
 
-### CLI proposta
+### Proposed CLI
 
 ```text
 red-dev self-update [--channel stable|preview] [--version X]
@@ -239,9 +239,9 @@ red-dev doctor --readiness
 red-dev rollback
 ```
 
-`red-dev update` deveria orquestrar `self-update`, migrações e convergência, preservando um comando único para o caminho feliz.
+`red-dev update` should orchestrate `self-update`, migrations and convergence, preserving a single command to the happy path.
 
-### Contratos internos propostos
+### Proposed internal contracts
 
 ```ts
 interface PlatformProvider {
@@ -269,132 +269,132 @@ interface SemanticHotkey {
 }
 ```
 
-### Propriedade de configuração
+### Configuration Property
 
-Todo adapter deve declarar uma destas estratégias:
+Every adapter must declare one of these strategies:
 
-- `owned`: arquivo inteiramente gerado pelo red-dev;
-- `merged`: apenas chaves explícitas são gerenciadas;
-- `adopted`: arquivo existente é importado após confirmação;
-- `external`: red-dev apenas verifica e orienta.
+- `owned`: file entirely generated by red-dev;
+- `merged`: only explicit keys are managed;
+- `adopted`: existing file is imported after confirmation;
+- `external`: red-dev just checks and guides.
 
-Essa distinção é essencial para upgrades seguros de VS Code, Neovim, configurações de agentes, GNOME, PowerToys e macOS.
+This distinction is essential for secure upgrades of VS Code, Neovim, agent configurations, GNOME, PowerToys, and macOS.
 
-## Notas de versão
+## Release Notes
 
-- O checkout analisado do red-dev declara `0.19.0`, enquanto a última release estável encontrada é `v0.17.1`. O relatório avalia o código atual e sinaliza a diferença porque ela afeta a experiência de upgrade.
-- O Omakub analisado está em `1.5.0`, com release oficial correspondente.
-- A documentação manual do Omakub pode ficar atrás do repositório em inventários como quantidade de temas; quando houve divergência, o código fixado no commit analisado foi considerado a fonte de verdade.
-- Pi atualmente é publicado sob `earendil-works/pi`; links ou pacotes históricos podem apontar para nomes anteriores.
+- The audited red-dev checkout states `0.19.0`, while the latest stable release found is `v0.17.1`. The report evaluates the current code and flags the difference because it affects the upgrade experience.
+- The analyzed Omakub is in `1.5.0`, with corresponding official release.
+- Omakub's manual documentation may lag behind the repository in inventories such as number of themes; when there was divergence, the code fixed in the analyzed commit was considered the source of truth.
+- Pi is currently published under `earendil-works/pi`; Historical links or packages may point to earlier names.
 
 ## Gotchas
 
-- Multiplataforma não significa paridade artificial. Alguns recursos devem ter equivalentes semânticos, não implementações idênticas.
-- Não configurar `darwin` para “usar o que funcionar do Linux”. Providers devem falhar fechados para impedir chamadas `apt` em macOS.
-- Compartilhar o diretório de skills não garante integração total de RedSkills; MCP, hooks, plugins e ciclo de atualização precisam de verificação por host.
-- Alterar dotfiles existentes silenciosamente destruiria confiança. `plan`, ownership e adoção explícita são requisitos de produto.
-- Muitos aplicativos no core tornam a instalação lenta e frágil. Perfis devem manter o caminho mínimo pequeno.
-- Hotkeys globais conflitam com sistema, acessibilidade e apps. O schema precisa detectar colisões antes de aplicar.
-- Um download bem-sucedido não prova prontidão. O `doctor` deve testar o comportamento observável.
-- Atualização automática sem rollback transforma um instalador em ponto único de falha da estação de trabalho.
+- Multiplatform does not mean artificial parity. Some features must have semantic equivalents, not identical implementations.
+- Do not configure `darwin` to "use whatever works on Linux". Providers must fail closed to prevent `apt` calls on macOS.
+- Sharing the skills directory does not guarantee full RedSkills integration; MCP, hooks, plugins and update cycle need per-host verification.
+- Changing existing dotfiles silently would destroy trust. `plan`, ownership and explicit adoption are product requirements.
+- Many core applications make installation slow and fragile. Profiles must keep the shortest path small.
+- Global hotkeys conflict with system, accessibility and apps. The schema needs to detect collisions before applying.
+- A successful download does not prove readiness. `doctor` must test for observable behavior.
+- Automatic update without rollback turns an installer into a workstation's single point of failure.
 
-## Questões em aberto
+## Open questions
 
-1. Qual é o baseline obrigatório do perfil `reddb-employee` e quais itens permanecem opcionais?
-2. O macOS deve padronizar Bash para paridade, adotar Zsh nativo ou oferecer ambos sob o mesmo contrato?
-3. Qual combinação macOS será oficial para tiling e launcher? Essa decisão merece um spike com hardware real.
-4. A RedDB quer governar integralmente o template de Neovim/VS Code ou apenas distribuir starters atualizáveis?
-5. Quais MCPs e autenticações são obrigatórios por agente, e quais são pessoais?
-6. Releases preview serão consumidas por todos ou apenas por um canal interno?
-7. O perfil corporativo deve instalar apps de segurança/VPN/password manager ou somente preparar os hooks de integração?
-8. Quais métricas de onboarding podem ser coletadas de forma opt-in e sem expor informações da máquina?
+1. What is the mandatory baseline for the `reddb-employee` profile and which items remain optional?
+2. Should macOS standardize Bash for parity, adopt native Zsh, or offer both under the same contract?
+3. Which macOS combination will be official for tiling and launcher? This decision deserves a spike with real hardware.
+4. Does RedDB want to fully govern the Neovim/VS Code template or just distribute updatable starters?
+5. Which MCPs and authentications are required per agent, and which are personal?
+6. Will preview releases be consumed by everyone or just by an internal channel?
+7. Should the corporate profile install security apps/VPN/password manager or just prepare the integration hooks?
+8. What onboarding metrics can be collected opt-in and without exposing machine information?
 
-## Notas fonte a fonte
+## Source-to-source notes
 
 ### red-dev
 
-- O README define cinco alvos atuais/planejados, comandos, stack principal, agentes, temas, ferramentas RedDB e limitações conhecidas.
-- `platform.ts` comprova a presença de `darwin` no tipo de OS, mas ausência de um ambiente/provider macOS.
-- `manifest.ts` comprova as colunas Ubuntu 24, Ubuntu 26 e Windows e a seleção inadequada de Ubuntu para todo não Windows.
-- `providers.ts` e o comando de update mostram upgrades de sistema/ferramentas sem troca do binário red-dev.
-- `agents.ts` comprova o catálogo atual e a ausência de Pi.
-- A integração de RedSkills limita hosts a Claude, Codex e OpenCode; os caminhos adicionais cobrem extensão VS Code e plugin Herdr.
-- `hotkeys.ts` cobre apenas os dois atalhos Windows atuais.
-- `webapps.ts` contém a implementação, mas não há referência a ela em comando/menu.
-- `migrations.ts` demonstra que já existe uma base apropriada para upgrades de estado.
+- The README defines five current/planned targets, commands, core stack, agents, themes, RedDB tools, and known limitations.
+- `platform.ts` proves the presence of `darwin` in the OS type, but the absence of a macOS environment/provider.
+- `manifest.ts` checks the Ubuntu 24, Ubuntu 26 and Windows columns and the inappropriate selection of Ubuntu for all non-Windows.
+- `providers.ts` and the update command show system/tools upgrades without changing the red-dev binary.
+- `agents.ts` proves the current catalog and the absence of Pi.
+- RedSkills integration limits hosts to Claude, Codex, and OpenCode; additional paths cover VS Code extension and Herdr plugin.
+- `hotkeys.ts` only covers the two current Windows shortcuts.
+- `webapps.ts` contains the implementation, but there is no reference to it in command/menu.
+- `migrations.ts` demonstrates that an appropriate basis for state upgrades already exists.
 
 ### Omakub
 
-- README/site/manual definem a proposta deliberadamente opinionada para Ubuntu.
-- `install.sh` demonstra o pipeline Bash linear e a distinção terminal/desktop.
-- Os defaults do repositório mostram GNOME, extensões, dock, workspaces e hotkeys.
-- Os menus mostram seleção de apps, linguagens, bancos, temas, fontes, install/uninstall e update.
-- O catálogo de temas no commit analisado contém dez temas.
-- O fluxo de update usa o checkout Git e executa migrações por timestamp/commit.
+- README/site/manual define the deliberately opinionated proposal for Ubuntu.
+- `install.sh` demonstrates the linear Bash pipeline and the terminal/desktop distinction.
+- The repository defaults show GNOME, extensions, dock, workspaces and hotkeys.
+- The menus show selection of apps, languages, databases, themes, fonts, install/uninstall and update.
+- The theme catalog in the analyzed commit contains ten themes.
+- The update flow uses Git checkout and performs migrations by timestamp/commit.
 
 ### Pi
 
-- O README oficial documenta instalação, diretórios de skills e modelo extensível.
-- A documentação de packages mostra distribuição e atualização de skills, extensions, prompts e temas.
-- A filosofia do projeto não inclui MCP no core; uma extensão é o caminho para integração adicional.
+- The official README documents installation, skill directories, and extensible template.
+- Package documentation shows distribution and updating of skills, extensions, prompts and themes.
+- The project philosophy does not include MCP in the core; an extension is the path to further integration.
 
 ### Hermes
 
-- A documentação oficial cobre Linux, macOS, WSL e Windows.
-- Skills externas podem ser declaradas em configuração, permitindo compartilhar `~/.agents/skills`.
-- MCPs são configuráveis nativamente, oferecendo um caminho direto para os serviços RedSkills.
+- The official documentation covers Linux, macOS, WSL and Windows.
+- External skills can be declared in configuration, allowing sharing `~/.agents/skills`.
+- MCPs are natively configurable, offering a direct path to RedSkills services.
 
-## Próximos passos recomendados
+## Recommended next steps
 
-### P0 — tornar a promessa honesta e atualizável
+### P0 - make the promise honest and updatable
 
-1. Fazer macOS falhar fechado imediatamente; nunca selecionar provider Ubuntu para Darwin.
-2. Implementar `self-update` atômico com checksum, rollback e canal de release.
-3. Incorporar `self-update` ao caminho feliz de `red-dev update`.
-4. Gerar uma matriz pública de capacidade/plataforma a partir do manifesto.
-5. Adicionar `doctor --readiness` e distinguir installed/configured/healthy/auth-required.
+1. Make macOS crash closed immediately; never select Ubuntu provider for Darwin.
+2. Implement atomic `self-update` with checksum, rollback and release channel.
+3. Incorporate `self-update` into the happy path of `red-dev update`.
+4. Generate a public capability/platform matrix from the manifest.
+5. Add `doctor --readiness` and distinguish installed/configured/healthy/auth-required.
 
-### P0 — completar o perfil RedDB Day One
+### P0 - complete RedDB Day One profile
 
-1. Definir e versionar o perfil `reddb-employee`.
-2. Adicionar Pi ao catálogo.
-3. Introduzir `SkillHostAdapter` para Claude, Codex, OpenCode, Hermes e Pi.
-4. Ligar Hermes ao diretório compartilhado e aos MCPs RedSkills.
-5. Ligar Pi às shared skills e construir package/extensão para a integração completa.
-6. Garantir providers e health checks para `red`, `tq`, red-request, dit, red-ui e RedSkills em cada alvo suportado.
+1. Define and version the `reddb-employee` profile.
+2. Add Pi to catalog.
+3. Introduce `SkillHostAdapter` for Claude, Codex, OpenCode, Hermes and Pi.
+4. Connect Hermes to the shared directory and RedSkills MCPs.
+5. Connect Pi to shared skills and build package/extension for complete integration.
+6. Ensure providers and health checks for `red`, `tq`, red-request, dit, red-ui and RedSkills on each supported target.
 
-### P1 — alcançar o acabamento do Omakub no Linux
+### P1 - achieving Omakub finish on Linux
 
-1. Portar a intenção de GNOME do Omakub para adapters convergentes do red-dev.
-2. Criar o schema semântico de hotkeys e cheat sheet gerada.
-3. Entregar tiling, workspaces, launcher e dock como parte do perfil desktop.
-4. Bootstrap seguro de LazyVim e baseline VS Code quando não houver configuração.
-5. Conectar `webapps.ts` ao CLI/menu e adicionar adapters Windows/macOS.
-6. Oferecer bancos/serviços de desenvolvimento como módulo opcional.
+1. Port Omakub's GNOME intent to red-dev converged adapters.
+2. Create the semantic schema of hotkeys and generated cheat sheet.
+3. Deliver tiling, workspaces, launcher and dock as part of the desktop profile.
+4. LazyVim's secure bootstrap and VS Code baseline when there is no configuration.
+5. Connect `webapps.ts` to CLI/menu and add Windows/macOS adapters.
+6. Offer development databases/services as an optional module.
 
-### P1 — entregar macOS de verdade
+### P1 - truly deliver macOS
 
-1. Criar ambiente/capacidades Darwin e providers Homebrew/cask/builtin/GitHub Releases.
-2. Publicar x64 e arm64 com bootstrap e checksums.
-3. Adaptar caminhos, shell, terminal, fontes, temas e aplicativos.
-4. Fazer spike e ADR para tiling, launcher e hotkeys.
-5. Portar toda a stack RedDB antes de declarar paridade do perfil corporativo.
+1. Create Darwin environment/capabilities and providers Homebrew/cask/builtin/GitHub Releases.
+2. Publish x64 and arm64 with bootstrap and checksums.
+3. Adapt paths, shell, terminal, fonts, themes and applications.
+4. Make spike and ADR for tiling, launcher and hotkeys.
+5. Port the entire RedDB stack before declaring corporate profile parity.
 
-### P2 — comprovar e sustentar
+### P2 - prove and support
 
-1. CI/E2E em Ubuntu 24/26, WSL, Windows e macOS Intel/ARM.
-2. Testar instalação limpa, segunda convergência, N-1 update, rollback e doctor.
-3. Gerar docs, inventários de tema/app/agente e matriz de suporte a partir do código.
-4. Estabelecer SLOs de onboarding:
-   - perfil pronto em até 30 minutos, excluindo downloads e autenticações humanas;
-   - segunda convergência sem alterações inesperadas;
-   - `doctor` verde após setup;
-   - todo agente escolhido enxerga a versão esperada de RedSkills;
-   - toda ferramenta RedDB escolhida passa smoke test;
-   - atualização N-1 e rollback comprovados em cada plataforma.
+1. CI/E2E on Ubuntu 24/26, WSL, Windows and macOS Intel/ARM.
+2. Test clean installation, second convergence, N-1 update, rollback and doctor.
+3. Generate docs, theme/app/agent inventories and support matrix from code.
+4. Establish onboarding SLOs:
+   - profile ready in up to 30 minutes, excluding downloads and human authentications;
+   - second convergence without unexpected changes;
+   - `doctor` green after setup;
+   - every chosen agent sees the expected version of RedSkills;
+   - every RedDB tool chosen passes smoke test;
+   - proven N-1 upgrade and rollback on each platform.
 
-## Conclusão
+## Conclusion
 
-O red-dev não precisa competir com o Omakub pelo número de scripts ou aplicativos. Sua oportunidade é ser a versão governada, verificável e multiplataforma da mesma ideia: uma estação de desenvolvimento excelente como produto contínuo.
+red-dev doesn't need to compete with Omakub for the number of scripts or applications. Its opportunity is to be the governed, verifiable, cross-platform version of the same idea: an excellent development workstation as an ongoing product.
 
-Hoje ele já tem a melhor fundação para isso. Para transformar a tese em experiência, a prioridade deve ser fechar o ciclo completo — instalar, configurar, verificar, atualizar e recuperar — primeiro no perfil RedDB Day One, depois no desktop Linux e finalmente no macOS. Quando agentes, ferramentas internas, temas, fontes, hotkeys e editores forem expressos como contratos declarativos sobre essa fundação, o red-dev deixará de ser apenas uma evolução espiritual do Omakub e passará a ser uma plataforma de workstation que o Omakub, por escolha de escopo, não pretende ser.
+Today it already has the best foundation for this. To transform the thesis into experience, the priority must be to complete the full cycle - install, configure, verify, update and recover - first on the RedDB Day One profile, then on the Linux desktop and finally on macOS. When agents, internal tools, themes, fonts, hotkeys, and editors are expressed as declarative contracts on this foundation, red-dev will stop being just a spiritual evolution of Omakub and become a workstation platform that Omakub, by choice of scope, is not intended to be.
