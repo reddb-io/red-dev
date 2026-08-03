@@ -163,8 +163,16 @@ export async function applyNeovim(theme: Theme): Promise<boolean> {
     tokyonight: '"folke/tokyonight.nvim"',
     "catppuccin-macchiato": '"catppuccin/nvim", name = "catppuccin"',
     gruvbox: '"ellisonleao/gruvbox.nvim"',
+    everforest: '"neanias/everforest-nvim"',
+    kanagawa: '"rebelot/kanagawa.nvim"',
+    matteblack: '"tahayvr/matteblack.nvim"',
+    nordfox: '"EdenEast/nightfox.nvim"',
+    bamboo: '"ribru17/bamboo.nvim"',
+    "monokai-pro": '"gthelding/monokai-pro.nvim"',
+    "rose-pine-dawn": '"rose-pine/neovim", name = "rose-pine"',
   };
-  const spec = PLUGIN[theme.neovim] ?? '"folke/tokyonight.nvim"';
+  const spec = PLUGIN[theme.neovim];
+  if (!spec) throw new Error(`no Neovim plugin mapped for ${theme.neovim}`);
 
   const lua = `-- ${GENERATED}
 return {
