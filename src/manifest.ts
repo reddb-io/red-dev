@@ -258,6 +258,14 @@ export const TOOLS: Tool[] = [
   { name: "btop", scope: "core", u24: apt("btop"), win: winget("aristocratos.btop4win") },
   { name: "jq", scope: "core", u24: apt("jq"), win: winget("jqlang.jq") },
   {
+    // config/bash/functions.sh ships webm2mp4, and that helper is only
+    // honest if the binary it shells out to is part of the base toolset.
+    name: "ffmpeg",
+    scope: "core",
+    u24: apt("ffmpeg"),
+    win: winget("Gyan.FFmpeg"),
+  },
+  {
     // Beside jq rather than instead of it: the same shape of tool for a
     // different format, and the reason it is core is that a data tool
     // you cannot rely on being present is one you stop reaching for.
@@ -501,6 +509,14 @@ export const TOOLS: Tool[] = [
   },
   { name: "flatpak", scope: "desktop", u24: apt("flatpak"), win: skip(NO_GUI) },
   {
+    // Zellij's configured copy command targets wl-copy on real Linux
+    // desktops. WSL and native Windows use their own clipboard bridges.
+    name: "wl-clipboard",
+    scope: "desktop",
+    u24: apt("wl-clipboard"),
+    win: skip(NO_GUI),
+  },
+  {
     // A GUI app, so `desktop` — which also means WSL never attempts it,
     // because applicableScopes gates that scope on caps.gui. That is the
     // right answer rather than an omission: a Linux GUI app installed
@@ -531,12 +547,9 @@ export const TOOLS: Tool[] = [
     win: ghInstaller("reddb-io/red-request", "red-request-windows-x86_64-setup.exe", "/S"),
   },
   {
-    // The other RedDB desktop app. Same shape as red-request and a
-    // different answer on Windows, because the release genuinely has no
-    // Windows asset — .deb, .AppImage, .rpm and a web bundle, nothing
-    // else. skip() with the real reason rather than pointing the
-    // provider at a name that does not exist, which is the failure the
-    // gh provider was written to make impossible.
+    // The other RedDB desktop app. Same shape as red-request: Linux
+    // takes the deb, while Windows consumes the published installer
+    // asset directly so a clean native Windows converge gets the app.
     //
     // The glob carries a wildcard where the version goes:
     // red-ui_0.1.0_amd64.deb. Anchoring it to today's version is exactly
@@ -545,7 +558,7 @@ export const TOOLS: Tool[] = [
     about: "universal client for reddb — embedded, server, docker, cluster",
     scope: "desktop",
     u24: gh("reddb-io/red-ui", "red-ui_*_amd64.deb"),
-    win: skip("red-ui publishes no Windows build yet — deb, AppImage, rpm and web only"),
+    win: ghInstaller("reddb-io/red-ui", "red-ui-windows-x86_64-setup.exe", "/S"),
   },
   {
     // A CLI, and still `desktop` rather than `core`, because what it

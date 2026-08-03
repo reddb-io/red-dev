@@ -117,6 +117,37 @@ describe("isInstalled", () => {
 });
 
 describe("the manifest itself", () => {
+  test("Linux desktop declares wl-clipboard for Zellij copy", () => {
+    const tool = TOOLS.find((t) => t.name === "wl-clipboard");
+    expect(tool?.scope).toBe("desktop");
+    expect(providerFor(tool!, DESKTOP)).toEqual({ kind: "apt", pkg: "wl-clipboard" });
+  });
+
+  test("webm2mp4's ffmpeg dependency is declared", () => {
+    const tool = TOOLS.find((t) => t.name === "ffmpeg");
+    expect(tool?.scope).toBe("core");
+    expect(providerFor(tool!, WSL24)).toEqual({ kind: "apt", pkg: "ffmpeg" });
+    expect(providerFor(tool!, WINDOWS)).toEqual({ kind: "winget", id: "Gyan.FFmpeg" });
+  });
+
+  test("red-ui consumes the current Windows release asset", () => {
+    const tool = TOOLS.find((t) => t.name === "red-ui");
+    expect(providerFor(tool!, WINDOWS)).toEqual({
+      kind: "gh",
+      repo: "reddb-io/red-ui",
+      asset: "red-ui-windows-x86_64-setup.exe",
+      silentArgs: ["/S"],
+    });
+  });
+
+  test("a clean Windows plan includes red-ui", () => {
+    const plan = applicableScopes(WINDOWS)
+      .flatMap((scope) => toolsInScope(scope))
+      .filter((tool) => providerFor(tool, WINDOWS).kind !== "skip")
+      .map((tool) => tool.name);
+    expect(plan).toContain("red-ui");
+  });
+
   test("every skip carries a reason", () => {
     // A skip is a decision. One without a reason is an undocumented gap
     // wearing a decision's clothes.
