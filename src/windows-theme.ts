@@ -64,12 +64,12 @@ export function accentDword(hex: string): number {
   return ((0xff << 24) >>> 0) + (b << 16) + (g << 8) + r;
 }
 
+export function windowsLightThemeValue(theme: Theme): 0 | 1 {
+  return theme.appearance === "light" ? 1 : 0;
+}
+
 /**
  * Apply the desktop half of a theme on Windows.
- *
- * Every palette this project ships is dark, so dark mode is not a
- * question — light mode with a dark terminal is the seam omakub's GNOME
- * step exists to close.
  */
 export async function applyWindowsDesktopTheme(
   theme: Theme,
@@ -80,6 +80,7 @@ export async function applyWindowsDesktopTheme(
 
   const accent = accentOf(theme, slug);
   const dword = accentDword(accent);
+  const lightTheme = windowsLightThemeValue(theme);
 
   const script = [
     `$pers = 'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize'`,
@@ -87,8 +88,8 @@ export async function applyWindowsDesktopTheme(
     // Apps and shell together: setting only one leaves a light taskbar
     // over dark windows, which looks like a half-applied theme because
     // it is one.
-    `Set-ItemProperty $pers -Name AppsUseLightTheme -Value 0 -Type DWord`,
-    `Set-ItemProperty $pers -Name SystemUsesLightTheme -Value 0 -Type DWord`,
+    `Set-ItemProperty $pers -Name AppsUseLightTheme -Value ${lightTheme} -Type DWord`,
+    `Set-ItemProperty $pers -Name SystemUsesLightTheme -Value ${lightTheme} -Type DWord`,
     `Set-ItemProperty $dwm -Name AccentColor -Value ${dword} -Type DWord`,
     // Without this the accent is stored and never shown: it only reaches
     // title bars and the taskbar when prevalence is on.
@@ -108,7 +109,8 @@ export async function applyWindowsDesktopTheme(
     return false;
   }
 
-  log.plain(`       accent ${accent}, dark mode, accent on title bars`);
+  const mode = theme.appearance === "light" ? "light mode" : "dark mode";
+  log.plain(`       accent ${accent}, ${mode}, accent on title bars`);
   log.plain(`       already-open windows keep their colour until reopened`);
   return true;
 }
