@@ -748,6 +748,13 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "nerd-font",
+    scope: "desktop",
+    managed: true,
+    u24: builtin("nerd-font"),
+    win: builtin("nerd-font"),
+  },
+  {
+    name: "nerd-font",
     scope: "wsl",
     managed: true,
     u24: builtin("nerd-font"),
