@@ -148,6 +148,30 @@ describe("the manifest itself", () => {
     expect(plan).toContain("red-ui");
   });
 
+  test("Ubuntu desktop installs the configured Nerd Font", () => {
+    const plan = applicableScopes(DESKTOP)
+      .flatMap((scope) => toolsInScope(scope))
+      .filter((tool) => providerFor(tool, DESKTOP).kind !== "skip")
+      .map((tool) => tool.name);
+    expect(plan).toContain("nerd-font");
+  });
+
+  test("native Windows installs the configured Nerd Font", () => {
+    const plan = applicableScopes(WINDOWS)
+      .flatMap((scope) => toolsInScope(scope))
+      .filter((tool) => providerFor(tool, WINDOWS).kind !== "skip")
+      .map((tool) => tool.name);
+    expect(plan).toContain("nerd-font");
+  });
+
+  test("WSL keeps installing the font on the Windows host", () => {
+    const plan = applicableScopes(WSL24)
+      .flatMap((scope) => toolsInScope(scope))
+      .filter((tool) => providerFor(tool, WSL24).kind !== "skip")
+      .map((tool) => tool.name);
+    expect(plan).toContain("nerd-font");
+  });
+
   test("every skip carries a reason", () => {
     // A skip is a decision. One without a reason is an undocumented gap
     // wearing a decision's clothes.

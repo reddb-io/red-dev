@@ -821,7 +821,7 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
         return;
       }
       if (pr.name === "nerd-font") {
-        await wsl.installNerdFont(ctx.font);
+        await wsl.installNerdFont(ctx.font, ctx.platform);
       } else {
         const { THEMES } = await import("./themes.ts");
         const theme = THEMES[ctx.theme];
