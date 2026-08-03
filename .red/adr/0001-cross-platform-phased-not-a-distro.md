@@ -24,7 +24,9 @@ red-dev **stays cross-platform** (Linux, Windows/WSL, and eventually macOS) and 
 4. **Phase 4 — Contracts:** the remaining contracts (atomic per-surface theme contract, lifecycle/transactions, asset provenance, full command registry).
 5. **Phase 5 — macOS:** Darwin is born as an adapter of the Phase 4 contracts, never as a third ad-hoc implementation.
 
-Cross-cutting: an **incremental** clean-machine E2E fleet — each phase only closes with lanes covering what it shipped. MCP is **optional-with-fallback**: every required capability has a stable CLI path.
+Cross-cutting: MCP is **optional-with-fallback**: every required capability has a stable CLI path.
+
+**Amendment (2026-08-03):** the incremental clean-machine E2E fleet originally decided here was dropped by maintainer decision before any lane was built (#17, #18 closed as not planned). red-dev is a development environment for developers; validation happens by provisioning real environments — converge followed by a second converge with zero planned changes, plus the readiness report — not by CI-hosted clean-VM lanes. A phase closes when its promised behaviors are true on real environments and covered by the unit/integration suite.
 
 ## Consequences
 
