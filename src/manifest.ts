@@ -109,7 +109,8 @@ export type Provider =
         | "red-skills-vscode"
         | "red-skills-herdr"
         | "blender"
-        | "wsl-sync";
+        | "wsl-sync"
+        | "claude-keybindings";
     }
   /** Not installed here, deliberately. The reason is required. */
   | { kind: "skip"; reason: string };
@@ -214,7 +215,8 @@ const builtin = (
     | "red-skills"
     | "red-skills-vscode"
     | "red-skills-herdr"
-    | "blender",
+    | "blender"
+    | "claude-keybindings",
 ): Provider => ({ kind: "builtin", name });
 const skip = (reason: string): Provider => ({ kind: "skip", reason });
 
@@ -738,6 +740,17 @@ export const TOOLS: Tool[] = [
     managed: true,
     u24: builtin("red-skills"),
     win: builtin("red-skills"),
+  },
+  {
+    // Skipped silently when claude is not installed. Idempotent and
+    // non-destructive: malformed JSON and explicit conflicting bindings
+    // are never overwritten silently.
+    name: "claude-keybindings",
+    about: "Shift+Enter → newline in Claude Code Chat",
+    scope: "core",
+    managed: true,
+    u24: builtin("claude-keybindings"),
+    win: builtin("claude-keybindings"),
   },
   {
     name: "wsl-interop",

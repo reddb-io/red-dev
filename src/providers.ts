@@ -800,6 +800,11 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
         await convergeRedSkills(ctx.platform);
         return;
       }
+      if (pr.name === "claude-keybindings") {
+        const { convergeClaudeKeybindings } = await import("./claude-keybindings.ts");
+        await convergeClaudeKeybindings();
+        return;
+      }
       if (pr.name === "hotkeys") {
         const { installWindowsHotkeys } = await import("./hotkeys.ts");
         await installWindowsHotkeys(ctx.platform);
