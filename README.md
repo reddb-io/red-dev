@@ -254,6 +254,9 @@ a third-party wrapper and winget's `T3Tools.T3Code` is the publisher's own.
 Picking any CLI agent then offers
 [red-skills](https://github.com/reddb-io/red-skills), which registers its
 marketplace in Claude Code and Codex and generates plugin modules for OpenCode.
+Convergence also writes `~/.claude/keybindings.json` to map Shift+Enter to a
+newline in Chat — non-destructively: malformed JSON and explicit conflicting
+bindings are never overwritten silently, and re-running is a no-op.
 
 **Web apps** — a page in its own window, its own icon and its own alt-tab entry, the way omakub's `web2app` does it. Desktop sessions only: a `.desktop` file needs a menu to appear in.
 
