@@ -4,9 +4,8 @@ name: CI
 # PR, because with bun the whole thing finishes in well under a minute —
 # there is no expensive tier to defer post-merge the way reddb does.
 #
-# Runner: Blacksmith, 2 vCPU (the smallest tier; there is no "nano").
-# The Blacksmith GitHub App must be installed on the org, otherwise a
-# Blacksmith label leaves the job queued forever rather than failing.
+# Runner: the free standard Ubuntu runner available to this public repository.
+# Blacksmith remains reserved for the explicit release build in release.yml.
 
 on:
   push:
@@ -24,7 +23,7 @@ permissions:
 jobs:
   check:
     name: typecheck, test, build
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
@@ -95,7 +94,7 @@ jobs:
 
   shell:
     name: shell and bootstrap
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
