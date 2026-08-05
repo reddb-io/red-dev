@@ -1,8 +1,8 @@
 name: Release
 
-# reddb-style release pipeline: a `plan` job resolving stable (tag
-# v*.*.*) versus `next` (push to main → prerelease), a build, a GitHub
-# Release with checksums and build attestations.
+# reddb-style release pipeline: a `plan` job resolving stable tags or an
+# explicitly requested `next` channel, a build, and a GitHub Release with
+# checksums and build attestations.
 #
 # One deliberate simplification against reddb and toon: there is no OS
 # matrix. bun cross-compiles the Windows executable from Linux, verified
@@ -16,7 +16,6 @@ name: Release
 on:
   push:
     tags: ["v*.*.*"]
-    branches: [main]
   workflow_dispatch:
     inputs:
       channel:
@@ -41,7 +40,7 @@ concurrency:
 jobs:
   plan:
     name: Plan release
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       should_skip: ${{ steps.plan.outputs.should_skip }}
@@ -56,8 +55,6 @@ jobs:
 
       - name: Decide release target
         id: plan
-        env:
-          HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           set -euo pipefail
           EVENT="${{ github.event_name }}"
@@ -78,18 +75,6 @@ jobs:
             CHANNEL="stable"
             TAG="${REF#refs/tags/}"
             VERSION="$(normalize "$TAG")"
-          elif [[ "$EVENT" == "push" && "$REF" == "refs/heads/main" ]]; then
-            # Every merge to main publishes a prerelease, so `next` always
-            # has something installable without waiting for a tag. Release
-            # commits are skipped or the tag push would double-publish.
-            if [[ "${HEAD_COMMIT_MESSAGE}" =~ ^chore:\ release ]]; then
-              SHOULD_SKIP=true
-            else
-              VERSION="$(manifest_version)-next.${GITHUB_RUN_NUMBER}"
-              CHANNEL="next"
-              TAG="v${VERSION}"
-              PRERELEASE=true
-            fi
           elif [[ "$EVENT" == "workflow_dispatch" ]]; then
             if [[ "$IN_CHANNEL" == "stable" ]]; then
               [[ -z "$IN_VERSION" ]] && { echo "stable requires a version input"; exit 1; }
@@ -209,7 +194,7 @@ jobs:
     name: GitHub Release
     needs: [plan, build]
     if: needs.plan.outputs.should_skip != 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: write
