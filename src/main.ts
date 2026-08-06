@@ -10,6 +10,8 @@ import { log } from "./log.ts";
 import {
   applicableScopes,
   describeProvider,
+  installedVersion,
+  installState,
   isInstalled,
   providerFor,
   toolsInScope,
@@ -54,7 +56,9 @@ async function cmdPlan(p: Platform, inv: Invocation): Promise<number> {
             ? " (managed)"
             : isInstalled(tool)
               ? " (present)"
-              : "";
+              : installState(tool) === "outdated"
+                ? ` (outdated, wants ${tool.minVersion})`
+                : "";
       log.plain(`  ${tool.name.padEnd(17)}${describeProvider(pr)}${state}`);
     }
   }
@@ -63,6 +67,7 @@ async function cmdPlan(p: Platform, inv: Invocation): Promise<number> {
 
 async function cmdDoctor(p: Platform, inv: Invocation): Promise<number> {
   let missing = 0;
+  let outdated = 0;
 
   log.plain("\n[tools]");
   for (const scope of resolveScopes(p, inv.scope)) {
@@ -76,6 +81,14 @@ async function cmdDoctor(p: Platform, inv: Invocation): Promise<number> {
         continue;
       } else if (isInstalled(tool)) {
         log.ok(tool.name);
+      } else if (installState(tool) === "outdated") {
+        // Named apart from missing because the fix is different: an
+        // absent tool needs installing, this one needs a source that
+        // carries something newer. Reporting it as missing sent someone
+        // looking for a binary that was sitting on PATH the whole time.
+        const found = installedVersion(tool) ?? "unknown";
+        log.err(`${tool.name} ${found} — older than ${tool.minVersion} (${describeProvider(pr)})`);
+        outdated++;
       } else {
         log.err(`${tool.name} missing (${describeProvider(pr)})`);
         missing++;
@@ -103,8 +116,11 @@ async function cmdDoctor(p: Platform, inv: Invocation): Promise<number> {
   }
 
   log.plain("");
-  if (missing > 0 || drifted > 0) {
-    log.warn(`${missing} tool(s) missing, ${drifted} config drift(s)`);
+  if (missing > 0 || outdated > 0 || drifted > 0) {
+    const parts = [`${missing} tool(s) missing`];
+    if (outdated > 0) parts.push(`${outdated} outdated`);
+    parts.push(`${drifted} config drift(s)`);
+    log.warn(parts.join(", "));
     return 1;
   }
   log.ok("no drift");
