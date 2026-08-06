@@ -121,6 +121,27 @@ for _red_part in path shared zellij init aliases functions prompt; do
 done
 unset _red_part _red_file
 
+# Yours, and sourced last so it wins.
+#
+# Everything above is generated and rewritten on every converge, so an
+# alias added to any of it survives until the next install and then
+# quietly does not. These two files are never written by red-dev after
+# they are created, which makes them the only place a personal setting
+# can actually live.
+#
+# Two, because "personal" splits in a way one file cannot serve: the
+# shared one travels with the configuration to every machine, and the
+# local one is for what is true here and nowhere else — a work proxy, a
+# path to a checkout, a key that exists on this laptop. Local is sourced
+# after shared, so this machine gets the last word about itself.
+for _red_mine in "${RED_SHARE:+$RED_SHARE/config/bash/local.sh}" "$HOME/.config/red-dev/local.sh"; do
+  if [ -n "$_red_mine" ] && [ -r "$_red_mine" ]; then
+    # shellcheck disable=SC1090
+    . "$_red_mine"
+  fi
+done
+unset _red_mine
+
 # Attach last, after every keybinding above is registered. Guarded on
 # BLE_VERSION so this is inert when ble.sh was never loaded.
 if [ -n "${BLE_VERSION-}" ]; then

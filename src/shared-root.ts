@@ -252,13 +252,19 @@ const ADOPTABLE: Record<string, { from: string; to: string; dir?: boolean }> = {
  *
  * alacritty's config does not live in ~/.config at all; on the target
  * that matters it is %APPDATA%\alacritty, on the Windows side of the
- * boundary. bash's is rendered from this repo's config/bash. Claude's
- * keybindings are written by claude-keybindings.ts. `share adopt
- * alacritty` would have nothing to pick up, so it is deliberately not
- * offered — being shared and being adoptable are different questions
- * and conflating them is what put the share behind a migration step.
+ * boundary. bash's shared half is local.sh, which red-dev creates once
+ * and then never touches. `share adopt alacritty` would have nothing to
+ * pick up, so it is deliberately not offered — being shared and being
+ * adoptable are different questions, and conflating them is what put
+ * the share behind a migration step.
+ *
+ * Claude is deliberately absent. Its keybindings are written identically
+ * on both sides by claude-keybindings.ts, and the only indirection
+ * Claude Code offers relocates the whole of ~/.claude — sessions, cache
+ * and projects, hundreds of megabytes — rather than the one file worth
+ * sharing.
  */
-const GENERATED = new Set(["alacritty", "bash", "claude"]);
+const GENERATED = new Set(["alacritty", "bash"]);
 
 /** Tools whose configuration lives in the share, however it got there. */
 export function sharedTools(): string[] {
@@ -377,6 +383,45 @@ export async function adoptConfig(p: Platform, tool: string): Promise<number> {
  */
 const TREE = ["config", "bin", "bin/linux", "bin/windows"];
 
+/**
+ * The one bash file red-dev creates and then never writes again.
+ *
+ * Everything in config/bash is regenerated on every converge, so an
+ * alias added to any of it survives until the next install and then
+ * quietly does not — there was nowhere in this project to put a
+ * personal setting and have it stay. rc.sh sources this last, after the
+ * generated files, so it wins.
+ *
+ * Created with content rather than left as an empty directory. TREE
+ * deliberately avoids pre-creating per-tool directories because an
+ * empty one made "is this shared" unanswerable; this is the opposite
+ * case, where the file has to exist to be found at all. Nobody guesses
+ * a path they were never shown.
+ */
+const LOCAL_TEMPLATE = `# Yours. red-dev created this file once and will not write it again.
+#
+# Sourced last, after everything red-dev generates, so anything here
+# wins. This copy lives in the shared root, so it follows the
+# configuration to every machine that reads the share.
+#
+# For settings true on one machine only — a work proxy, a path to a
+# checkout, a key that exists on this laptop — use
+# ~/.config/red-dev/local.sh instead. That one is sourced after this
+# one, so the machine gets the last word about itself.
+
+# alias k='kubectl'
+# export EDITOR=nvim
+`;
+
+async function ensureLocalTemplate(root: SharedRoot): Promise<void> {
+  const dir = `${root.local}/config/bash`;
+  const file = `${dir}/local.sh`;
+  if (existsSync(file)) return;
+  mkdirSync(dir, { recursive: true });
+  await Bun.write(file, LOCAL_TEMPLATE);
+  log.ok(`created ${root.windows}\\config\\bash\\local.sh — your aliases go there`);
+}
+
 export async function ensureSharedRoot(p: Platform): Promise<void> {
   const root = sharedRootFor(p);
   if (!root) {
@@ -397,6 +442,8 @@ export async function ensureSharedRoot(p: Platform): Promise<void> {
     mkdirSync(dir, { recursive: true });
     created++;
   }
+
+  await ensureLocalTemplate(root);
 
   if (created > 0) log.ok(`shared root ready at ${root.windows} (${created} new)`);
   else log.skip(`shared root already at ${root.windows}`);
