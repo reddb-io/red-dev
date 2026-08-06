@@ -69,6 +69,24 @@ async function cmdDoctor(p: Platform, inv: Invocation): Promise<number> {
   let missing = 0;
   let outdated = 0;
 
+  // Which of the two this machine currently is.
+  //
+  // Everything below is answered per-target, and reading a report
+  // without knowing which target it describes is how "the theme did not
+  // apply" turns into an hour of looking at the wrong side.
+  if (p.os === "windows" || p.env === "wsl") {
+    log.plain("\n[mode]");
+    const { resolveTerminalShell, readPreferences } = await import("./preferences.ts");
+    const prefs = await readPreferences(p);
+    const mode = await resolveTerminalShell(p);
+    const where = mode === "wsl" ? (prefs.distro ?? "WSL") : "Git Bash";
+    // A recorded choice and an inferred one look identical afterwards,
+    // and only one of them is an answer.
+    const how = prefs.terminalShell ? "recorded" : "defaulted, never chosen";
+    log.ok(`a new terminal opens into ${where} — ${how}`);
+    log.plain("       change it with: red-dev shell");
+  }
+
   log.plain("\n[tools]");
   for (const scope of resolveScopes(p, inv.scope)) {
     for (const tool of toolsInScope(scope)) {
