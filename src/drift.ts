@@ -542,7 +542,7 @@ async function checkSharedRoot(p: Platform): Promise<DriftCheck> {
     return { name, status: "n/a", detail: "spans WSL and Windows; this machine is neither" };
   }
 
-  const { sharedRootFor, adoptableTools } = await import("./shared-root.ts");
+  const { sharedRootFor, sharedTools } = await import("./shared-root.ts");
   const root = sharedRootFor(p);
   if (!root) {
     return {
@@ -583,8 +583,13 @@ async function checkSharedRoot(p: Platform): Promise<DriftCheck> {
     }
   };
 
+  // sharedTools, not adoptableTools: alacritty's config is written
+  // straight into the share and has no ~/.config original to adopt, so
+  // listing only the adoptable ones reported "sharing zellij, atuin,
+  // bat" over a directory that also held the theme, font and keys the
+  // terminal was reading at that moment.
   const cfg = `${root.local}/config`;
-  const shared = adoptableTools().filter(
+  const shared = sharedTools().filter(
     (t) =>
       hasContent(`${cfg}/${t}`) ||
       hasContent(`${cfg}/${t}.toml`) ||
