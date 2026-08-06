@@ -467,7 +467,63 @@ export async function collectDrift(p: Platform): Promise<DriftCheck[]> {
   checks.push(await checkToolchainParity(p));
   checks.push(await checkBlesh());
   checks.push(await checkSharedRoot(p));
+  checks.push(await checkHotkeys(p));
   return checks;
+}
+
+/**
+ * The shortcut exists — but does the key still reach it?
+ *
+ * Writing the .lnk was treated as the whole job, and it is only half.
+ * The file keeps its HotKey property forever; the *registration* is
+ * Explorer's and happens at runtime, first come first served. Anything
+ * that starts earlier and claims Ctrl+Alt+T takes it, Explorer's claim
+ * fails, and the shortcut goes dead with no error anywhere — converge
+ * still reports it written, because it is.
+ *
+ * The probe can prove the dead case and not the stolen one: Windows
+ * answers "somebody holds this" and never says who. So a free key is
+ * reported as drift, and a held key is reported as ok with the caveat
+ * stated rather than implied.
+ */
+async function checkHotkeys(p: Platform): Promise<DriftCheck> {
+  const name = "windows hotkeys";
+
+  if (p.env !== "wsl" && p.env !== "windows") {
+    return { name, status: "n/a", detail: "a Windows host claims these" };
+  }
+
+  const { WINDOWS_HOTKEYS, probeHotkeys, hotkeyVerdict } = await import("./hotkeys.ts");
+  const states = await probeHotkeys(p);
+  const claimed = WINDOWS_HOTKEYS.filter((h) => h.combo);
+
+  const dead: string[] = [];
+  let unknown = 0;
+  for (const h of claimed) {
+    const state = states[h.combo as string] ?? "unknown";
+    if (state === "unknown") unknown++;
+    // Shortcut presence is not re-checked here: installWindowsHotkeys
+    // writes them and its own step reports failure. What it cannot see
+    // is whether the key was accepted afterwards.
+    else if (hotkeyVerdict(true, state) === "drift") dead.push(h.combo as string);
+  }
+
+  if (unknown === claimed.length) {
+    return { name, status: "n/a", detail: "could not ask Windows which keys are taken" };
+  }
+  if (dead.length > 0) {
+    return {
+      name,
+      status: "drift",
+      detail: `${dead.join(", ")} registered by nothing — the shortcut will not fire`,
+      fix: "restart Explorer, then: red-dev install desktop",
+    };
+  }
+  return {
+    name,
+    status: "ok",
+    detail: `${claimed.length} claimed and held (Windows does not say by whom)`,
+  };
 }
 
 /**
