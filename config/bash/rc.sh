@@ -71,14 +71,14 @@ fi
 
 # The shared root: one directory, reachable from both sides.
 #
-# RED_SHARE_WIN holds it the way Windows spells it — `C:\Users\me\.reddev`
+# RED_SHARE_WIN holds it the way Windows spells it — `C:\Users\me\.red\dev`
 # — because that is the only spelling both environments can agree to
 # store. Each side then translates, and there are three spellings rather
 # than the two you would expect:
 #
-#   C:\Users\me\.reddev       PowerShell, and any GUI application
-#   /c/Users/me/.reddev       Git Bash on native Windows
-#   /mnt/c/Users/me/.reddev   WSL
+#   C:\Users\me\.red\dev       PowerShell, and any GUI application
+#   /c/Users/me/.red/dev       Git Bash on native Windows
+#   /mnt/c/Users/me/.red/dev   WSL
 #
 # Translated here in shell rather than by calling wslpath, because this
 # runs before PATH is built and cannot assume any binary exists yet.

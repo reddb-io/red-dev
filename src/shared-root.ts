@@ -86,12 +86,48 @@ export function sharedRootFor(p: Platform): SharedRoot | null {
 /**
  * The default, and the reason for it.
  *
- * Inside the profile rather than at C:\reddev: it disappears with the
+ * Inside the profile rather than at C:\red: it disappears with the
  * profile when a machine is rebuilt, and it does not add a directory to
  * the root of the system drive.
+ *
+ * `.red\dev` and not `.reddev` because `.red` is a namespace the rest of
+ * the toolchain already writes into — .red/adr, .red/CONTEXT.md — and
+ * dev is one product inside it. A flat `.reddev` would be the only thing
+ * sitting outside that namespace, which leaves the next tool to invent
+ * its own spelling and the profile to collect one dotfile per product.
+ * Machines that already have the old root are moved by
+ * 2026-08-06-share-root-namespace rather than left behind.
  */
 export function defaultRoot(windowsHome: string): string {
+  return `${windowsHome.replace(/[\\/]$/, "")}\\.red\\dev`;
+}
+
+/** The pre-namespace spelling, still on every machine set up before it. */
+export function legacyRoot(windowsHome: string): string {
   return `${windowsHome.replace(/[\\/]$/, "")}\\.reddev`;
+}
+
+/**
+ * Whether a recorded root is the old default, and where it should go.
+ *
+ * Matched against the default this project itself wrote, not against any
+ * path that happens to end in `.reddev`. A root the user pointed
+ * somewhere else by hand is a deliberate choice, and relocating it
+ * because the spelling looks familiar is the kind of helpfulness that
+ * moves a directory out from under someone.
+ *
+ * Case-insensitive because Windows paths are, and a root recorded as
+ * `C:\Users\Filip\.reddev` against a profile reported as
+ * `C:\Users\filip` is the same directory.
+ */
+export function namespaceMove(
+  recorded: string | null,
+  profile: string,
+): { from: string; to: string } | null {
+  if (!recorded) return null;
+  const norm = (s: string): string => s.replace(/[\\/]+$/, "").toLowerCase();
+  if (norm(recorded) !== norm(legacyRoot(profile))) return null;
+  return { from: recorded.replace(/[\\/]+$/, ""), to: defaultRoot(profile) };
 }
 
 /**
@@ -171,7 +207,7 @@ async function addWindowsBinToPath(root: string): Promise<void> {
 }
 
 /** The Windows profile directory, whichever side we are asking from. */
-async function windowsHome(p: Platform): Promise<string> {
+export async function windowsHome(p: Platform): Promise<string> {
   if (p.env === "windows") {
     const h = process.env["USERPROFILE"];
     if (h) return h;

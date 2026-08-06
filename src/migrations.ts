@@ -22,6 +22,7 @@
  *    machine does not look like it silently did something.
  */
 
+import { existsSync } from "node:fs";
 import { log } from "./log.ts";
 import type { Platform } from "./platform.ts";
 import { readPreferences, writePreferences } from "./preferences.ts";
@@ -123,6 +124,65 @@ export const MIGRATIONS: Migration[] = [
       const { installNerdFont } = await import("./wsl.ts");
       const prefs = await readPreferences(p);
       await installNerdFont(prefs.font ?? "firacode");
+    },
+  },
+  {
+    id: "2026-08-06-share-root-namespace",
+    describe: "move the shared root out of .reddev and into .red\\dev",
+    /**
+     * The share was a flat `.reddev` in the profile, which put it outside
+     * the `.red` namespace everything else in the toolchain writes into.
+     * Machines set up before the rename have a working root at the old
+     * spelling, so nothing looks broken and converge has no reason to
+     * touch it — which is exactly the shape a migration exists for.
+     */
+    applies: async (p) => {
+      if (p.env !== "wsl" && p.env !== "windows") return false;
+      const { namespaceMove, recordedShareRoot, windowsHome, localPath } = await import(
+        "./shared-root.ts"
+      );
+      const move = namespaceMove(recordedShareRoot(), await windowsHome(p));
+      if (!move) return false;
+      // A recorded root whose directory is gone is a different problem,
+      // and copying nothing over it would not fix that one either.
+      return existsSync(localPath(move.from, p.env));
+    },
+    /**
+     * Copied, not moved, and the old tree is left where it is.
+     *
+     * This runs unattended during install, across a filesystem boundary,
+     * over the directory holding every config the user has. A copy that
+     * half-finishes leaves both trees intact; a move that half-finishes
+     * leaves neither. The old one costs a few hundred kilobytes and is
+     * removed by hand, once, by someone who can see both.
+     */
+    run: async (p) => {
+      const { namespaceMove, recordedShareRoot, windowsHome, localPath, ensureSharedRoot } =
+        await import("./shared-root.ts");
+      const { recordShellEnv } = await import("./firstrun.ts");
+
+      const move = namespaceMove(recordedShareRoot(), await windowsHome(p));
+      if (!move) return;
+
+      const from = localPath(move.from, p.env);
+      const to = localPath(move.to, p.env);
+
+      if (existsSync(to)) {
+        log.skip(`${move.to} already exists — leaving it as it is`);
+      } else {
+        const { cpSync, mkdirSync } = await import("node:fs");
+        mkdirSync(to, { recursive: true });
+        cpSync(from, to, { recursive: true });
+        log.ok(`copied the share to ${move.to}`);
+      }
+
+      // Recorded before ensureSharedRoot, which reads it back.
+      await recordShellEnv({ RED_SHARE_WIN: move.to });
+      process.env["RED_SHARE_WIN"] = move.to;
+      await ensureSharedRoot(p);
+
+      log.plain(`       ${move.from} is left in place and is no longer read —`);
+      log.plain(`       delete it yourself once you have looked inside both`);
     },
   },
 ];
