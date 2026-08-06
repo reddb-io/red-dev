@@ -342,10 +342,57 @@ action = 'ToggleFullscreen'
 `;
 }
 
-/** The files alacritty.toml has to import for red-dev to reach it. */
-const REQUIRED_IMPORTS = ['theme.toml', 'font.toml', 'shell.toml', 'keys.toml'] as const;
+/**
+ * The parts that are the same on every machine, so they go in the share.
+ *
+ * Colours, a font family and a set of key bindings describe a preference
+ * and name nothing local. One copy, read by the Alacritty on this
+ * machine and by the one on the next.
+ */
+const SHARED_PARTS = ["theme.toml", "font.toml", "keys.toml"] as const;
 
-function mainToml(opacity: number): string {
+/**
+ * The part that cannot be shared, and the reason the split exists.
+ *
+ * shell.toml names `wsl.exe -d Ubuntu-24.04` or a path to bash.exe —
+ * it *is* the WSL-or-native choice, written down. Sharing it would make
+ * two machines fight over which one they both are.
+ */
+const LOCAL_PARTS = ["shell.toml"] as const;
+
+/**
+ * What alacritty.toml has to import, given where the share is.
+ *
+ * Absolute Windows paths for the shared parts, because alacritty.exe
+ * resolves relative imports against the file's own directory and the
+ * share is not there. Spelled in TOML literal strings — single quotes —
+ * so the backslashes stay backslashes.
+ *
+ * A null share is a machine with no second environment to share with,
+ * and everything stays beside alacritty.toml exactly as before.
+ */
+export function requiredImports(shareWinRoot: string | null): string[] {
+  const local = [...LOCAL_PARTS];
+  if (!shareWinRoot) return [...SHARED_PARTS, ...local];
+  const dir = `${shareWinRoot.replace(/[\\/]+$/, "")}\\config\\alacritty`;
+  return [...SHARED_PARTS.map((p) => `${dir}\\${p}`), ...local];
+}
+
+/** Whether an import entry is one red-dev owns, wherever it points. */
+function isOurs(entry: string): boolean {
+  const base = entry.split(/[\\/]/).pop() ?? entry;
+  return ([...SHARED_PARTS, ...LOCAL_PARTS] as string[]).includes(base);
+}
+
+/** Same entries in any order. */
+function sameEntries(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const x = [...a].sort();
+  const y = [...b].sort();
+  return x.every((v, i) => v === y[i]);
+}
+
+function mainToml(opacity: number, required: string[]): string {
   return `# red-dev — Alacritty.
 #
 # This file is created once and never rewritten, so it is yours to edit.
@@ -362,10 +409,7 @@ function mainToml(opacity: number): string {
 # once and never rewritten, so an install from before the rename keeps
 # warning until this file is replaced by hand.
 import = [
-  'theme.toml',
-  'font.toml',
-  'shell.toml',
-  'keys.toml',
+${required.map((i) => `  '${i}',`).join("\n")}
 ]
 
 [window]
@@ -448,13 +492,38 @@ export async function configureAlacritty(opts: AlacrittyOptions): Promise<void> 
     else await Bun.write(`${dir}${sep}${name}`, content);
   };
 
-  // theme and font are regenerated; the main file is written once so a
-  // user who tunes padding or bindings does not lose it on every run.
-  await put("theme.toml", colorsToml(opts.theme.terminal));
-  await put("font.toml", fontToml(opts.fontFamily, opts.fontSize ?? 11));
-  await put("keys.toml", keysToml());
-  // Regenerated, not written-once: which shell to launch is red-dev's
-  // decision, not a user preference we would be clobbering.
+  // The share, when this machine has one.
+  //
+  // Written straight through the filesystem rather than through the
+  // host, unlike %APPDATA%\alacritty above: the dual-NTFS-record problem
+  // documented there is a property of that directory, not of /mnt/c, and
+  // the shared zellij config has been read and written this way from
+  // both sides since the share existed.
+  const { recordedShareRoot, localPath } = await import("./shared-root.ts");
+  const shareWin = recordedShareRoot();
+  const shareLocal = shareWin ? localPath(shareWin, opts.platform.env) : null;
+  const shared =
+    shareWin && shareLocal && existsSync(shareLocal)
+      ? { win: shareWin, dir: `${shareLocal}/config/alacritty` }
+      : null;
+
+  const putShared = async (name: string, content: string): Promise<void> => {
+    if (!shared) return put(name, content);
+    mkdirSync(shared.dir, { recursive: true });
+    await Bun.write(`${shared.dir}/${name}`, content);
+  };
+
+  const required = requiredImports(shared?.win ?? null);
+
+  // theme, font and keys are the same on every machine, so they go to
+  // the share when there is one; the main file is written once so a user
+  // who tunes padding or bindings does not lose it on every run.
+  await putShared("theme.toml", colorsToml(opts.theme.terminal));
+  await putShared("font.toml", fontToml(opts.fontFamily, opts.fontSize ?? 11));
+  await putShared("keys.toml", keysToml());
+  // Local and regenerated. Local because it encodes WSL-or-native, which
+  // is this machine's answer; regenerated because which shell to launch
+  // is red-dev's decision, not a user preference we would be clobbering.
   await put("shell.toml", await shellToml(opts.platform));
 
   // Existence is asked of the host too, for the same reason: from the
@@ -463,8 +532,9 @@ export async function configureAlacritty(opts: AlacrittyOptions): Promise<void> 
   const mainExists = winDir ? await hostFileExists(`${winDir}\\alacritty.toml`) : existsSync(main);
 
   if (!mainExists) {
-    await put("alacritty.toml", mainToml(opts.opacity));
+    await put("alacritty.toml", mainToml(opts.opacity, required));
     log.ok(`alacritty: config written to ${winDir ?? dir}`);
+    if (shared) log.plain(`       theme, font and keys shared from ${shared.win}`);
     return;
   }
 
@@ -474,11 +544,12 @@ export async function configureAlacritty(opts: AlacrittyOptions): Promise<void> 
   const current = winDir
     ? await readThroughHost(`${winDir}\\alacritty.toml`)
     : await Bun.file(main).text();
-  const repaired = current === null ? null : repairedImports(current);
+  const repaired = current === null ? null : repairedImports(current, required);
 
   if (repaired !== null) {
     await put("alacritty.toml", repaired);
-    log.ok(`alacritty.toml: import block repaired — ${REQUIRED_IMPORTS.join(", ")}`);
+    log.ok(`alacritty.toml: import block repaired — ${required.length} entries`);
+    if (shared) log.plain(`       theme, font and keys now read from ${shared.win}`);
   } else {
     log.skip(`alacritty.toml exists — theme, font and keys updated, yours left alone`);
   }
@@ -497,8 +568,8 @@ export async function configureAlacritty(opts: AlacrittyOptions): Promise<void> 
  * no [general] section already, and only when the block is the shape
  * this file writes. Anything else is the user's and is left alone.
  */
-export async function migrateImportKey(path: string): Promise<boolean> {
-  const repaired = repairedImports(await Bun.file(path).text());
+export async function migrateImportKey(path: string, required: string[]): Promise<boolean> {
+  const repaired = repairedImports(await Bun.file(path).text(), required);
   if (repaired === null) return false;
   await Bun.write(path, repaired);
   return true;
@@ -514,7 +585,7 @@ export async function migrateImportKey(path: string): Promise<boolean> {
  * repair never ran on the one target whose config lives on the other
  * side of a boundary, which is the target that needs it most.
  */
-export function repairedImports(text: string): string | null {
+export function repairedImports(text: string, required: string[]): string | null {
   const block = /(^\s*\[general\]\r?\n(?:[^[]*?))?^(\s*)import = \[\r?\n([^\]]*?)\r?\n\s*\]/m;
   const m = block.exec(text);
   if (!m) return null;
@@ -525,17 +596,26 @@ export function repairedImports(text: string): string | null {
     .map((l) => l.trim().replace(/^['"]|['"],?$/g, ""))
     .filter(Boolean);
 
-  // Missing entries matter more than the deprecation did.
+  // Ours are replaced; theirs are kept.
   //
-  // The file is written once, so one that predates a new import never
-  // gains it: this machine's had theme and font and no shell, which is
-  // why `red-dev shell` had no effect on that side — the choice was
-  // being written to a file nothing read. Adding is safe in a way
-  // rewriting is not; anything the user put there is kept.
-  const missing = REQUIRED_IMPORTS.filter((r) => !listed.includes(r));
-  if (hasGeneral && missing.length === 0) return null;
+  // Replaced rather than appended, which the previous version did. Once
+  // theme.toml moved into the share, appending the absolute path left
+  // the bare `theme.toml` beside it — two imports of the same file, the
+  // stale local copy still on disk, and the answer depending on which
+  // Alacritty merges last. Ownership is decided by the file name, so a
+  // path that moved is still recognised as the entry it replaces.
+  //
+  // Anything the user added is not ours and survives untouched, which is
+  // the property that makes rewriting safe at all here.
+  const theirs = listed.filter((e) => !isOurs(e));
+  const merged = [...required, ...theirs];
 
-  const merged = [...listed, ...missing];
+  // Compared as a set, not as a sequence. Our four files touch disjoint
+  // keys — colours, font, bindings, shell — so their order decides
+  // nothing, and comparing positionally would rewrite the block on every
+  // converge just to reorder it.
+  if (hasGeneral && sameEntries(merged, listed)) return null;
+
   const rebuilt = `[general]\nimport = [\n${merged.map((i) => `  '${i}',`).join("\n")}\n]`;
   return text.replace(block, rebuilt);
 }

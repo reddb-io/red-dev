@@ -241,6 +241,30 @@ const ADOPTABLE: Record<string, { from: string; to: string; dir?: boolean }> = {
   git: { from: "", to: "gitconfig" },
 };
 
+/**
+ * Shared, but with nothing to adopt.
+ *
+ * ADOPTABLE answers "can `share adopt` move a file the user already
+ * has": it names a path under ~/.config to copy from. These have no such
+ * original. red-dev generates them itself, so the only question is which
+ * directory it generates them into — and the answer is the share, from
+ * the first install rather than after a migration.
+ *
+ * alacritty's config does not live in ~/.config at all; on the target
+ * that matters it is %APPDATA%\alacritty, on the Windows side of the
+ * boundary. bash's is rendered from this repo's config/bash. Claude's
+ * keybindings are written by claude-keybindings.ts. `share adopt
+ * alacritty` would have nothing to pick up, so it is deliberately not
+ * offered — being shared and being adoptable are different questions
+ * and conflating them is what put the share behind a migration step.
+ */
+const GENERATED = new Set(["alacritty", "bash", "claude"]);
+
+/** Tools whose configuration lives in the share, however it got there. */
+export function sharedTools(): string[] {
+  return [...Object.keys(ADOPTABLE), ...GENERATED].sort();
+}
+
 export function adoptableTools(): string[] {
   return Object.keys(ADOPTABLE);
 }
@@ -284,7 +308,7 @@ export function configHome(p: Platform, tool?: string): string {
   // config names /home/<user>/.config/btop/themes/... and a gitconfig on
   // this machine calls /usr/bin/gh, both of which exist on exactly one
   // of the two sides.
-  if (tool && !(tool in ADOPTABLE)) return `${home}/.config`;
+  if (tool && !(tool in ADOPTABLE) && !GENERATED.has(tool)) return `${home}/.config`;
   return `${share}/config`;
 }
 
