@@ -15,6 +15,7 @@
 import { aptInstall, applyProvider, type ApplyContext } from "./providers.ts";
 import {
   describeProvider,
+  installState,
   isInstalled,
   providerFor,
   toolsInScope,
@@ -43,6 +44,22 @@ export interface ConvergeObserver {
   scopeStart?: (scope: Scope, total: number) => void;
   /** A note that is not a step — the apt batch, mostly. */
   note?: (message: string) => void;
+  /**
+   * The batched apt transaction, bracketed like a step.
+   *
+   * It needs its own pair because it is the one piece of work that runs
+   * between scopeStart and the first stepStart, and the fullscreen view
+   * only redirects child output while a step is open. Without this the
+   * largest, longest and loudest command of the whole run — a hundred
+   * packages, hundreds of lines, minutes of progress bars — was the one
+   * command writing straight to the terminal, painting over the frame
+   * the renderer believes it owns.
+   *
+   * batchEnd fires even when the transaction throws. A view that opens a
+   * redirect here and never closes it loses every line that follows.
+   */
+  batchStart?: (packages: string[]) => void;
+  batchEnd?: (error: string | null) => void;
   stepStart?: (event: StepEvent) => void;
   stepEnd?: (result: StepResult) => void;
 }
@@ -62,6 +79,31 @@ export interface ConvergeSummary {
 /** Total steps across every scope, so a progress bar has a denominator. */
 export function countSteps(scopes: Scope[]): number {
   return scopes.reduce((n, s) => n + toolsInScope(s).length, 0);
+}
+
+/**
+ * Run the batched apt transaction inside its observer bracket.
+ *
+ * Its own function so the bracket can be tested without a package
+ * manager: `install` is the real aptInstall everywhere but the test.
+ *
+ * Returns the failure message, or null. Throwing instead would skip
+ * batchEnd, and the caller has to report a failed batch per tool anyway.
+ */
+export async function runAptBatch(
+  pkgs: string[],
+  observer: ConvergeObserver,
+  install: (pkgs: string[]) => Promise<void> = aptInstall,
+): Promise<string | null> {
+  observer.batchStart?.(pkgs);
+  let error: string | null = null;
+  try {
+    await install(pkgs);
+  } catch (err) {
+    error = (err as Error).message;
+  }
+  observer.batchEnd?.(error);
+  return error;
 }
 
 export async function converge(
@@ -93,11 +135,7 @@ export async function converge(
     let aptError: string | null = null;
     if (!dryRun && aptPkgs.length > 0) {
       observer.note?.(`apt: ${aptPkgs.length} packages in one transaction`);
-      try {
-        await aptInstall(aptPkgs);
-      } catch (err) {
-        aptError = (err as Error).message;
-      }
+      aptError = await runAptBatch(aptPkgs, observer);
     }
 
     for (const tool of tools) {
@@ -138,7 +176,12 @@ export async function converge(
         // rather than claiming a per-tool install that never ran.
         if (aptError) finish("failed", aptError);
         else if (isInstalled(tool)) finish("installed");
-        else finish("failed", "apt reported success but the binary is absent");
+        else if (installState(tool) === "outdated") {
+          // Present and runnable, just too old — the archive has nothing
+          // newer. Saying "absent" here sends the reader hunting for a
+          // missing binary that is sitting right there on PATH.
+          finish("failed", `apt has nothing newer than ${tool.minVersion} for ${tool.name}`);
+        } else finish("failed", "apt reported success but the binary is absent");
         continue;
       }
 

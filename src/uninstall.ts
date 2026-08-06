@@ -19,7 +19,7 @@
 
 import { existsSync } from "node:fs";
 import { log, RedError } from "./log.ts";
-import { providerFor, toolsInScope, isInstalled, type Tool } from "./manifest.ts";
+import { providerFor, toolsInScope, isPresent, type Tool } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
 
 export interface Removal {
@@ -111,7 +111,9 @@ export function removableTools(p: Platform): { tool: Tool; removal: Removal }[] 
   const out: { tool: Tool; removal: Removal }[] = [];
   for (const scope of ["core", "desktop", "wsl", "optional"] as const) {
     for (const tool of toolsInScope(scope)) {
-      if (tool.managed || !isInstalled(tool)) continue;
+      // isPresent, not isInstalled: a tool below its version floor is
+      // still on disk, and still the user's to remove.
+      if (tool.managed || !isPresent(tool)) continue;
       const removal = removalFor(tool, p);
       if (removal) out.push({ tool, removal });
     }

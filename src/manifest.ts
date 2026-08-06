@@ -101,6 +101,7 @@ export type Provider =
         | "dotfiles"
         | "alacritty"
         | "wsl-interop"
+        | "wsl-runtime-dir"
         | "blesh"
         | "runtimes"
         | "shared-root"
@@ -152,6 +153,22 @@ export interface Tool {
    * a process per check.
    */
   signature?: RegExp;
+  /**
+   * Below this, present is not installed.
+   *
+   * Probing for a name answers "is something here", which is the wrong
+   * question whenever the archive ships a version the rest of the stack
+   * has moved past. noble's neovim is 0.9.5; LazyVim refuses to start
+   * under 0.11.2 and exits with a message. Since red-dev also sets
+   * EDITOR=nvim, that is not a degraded editor, it is every caller of
+   * $EDITOR broken — and converge reported `present` on every run,
+   * because a binary was there.
+   *
+   * Only worth declaring where a floor is known and enforced by
+   * something downstream. Compared numerically, segment by segment; no
+   * prerelease ordering, because no tool here needs it.
+   */
+  minVersion?: string;
   scope: Scope;
   /**
    * True when presence cannot be answered by probing for a command —
@@ -207,6 +224,7 @@ const builtin = (
     | "dotfiles"
     | "alacritty"
     | "wsl-interop"
+    | "wsl-runtime-dir"
     | "wsl-sync"
     | "blesh"
     | "runtimes"
@@ -416,11 +434,18 @@ export const TOOLS: Tool[] = [
   {
     name: "neovim",
     cmd: ["nvim"],
+    // LazyVim's own floor. Below it nvim starts, prints "LazyVim
+    // requires Neovim >= 0.11.2" and exits.
+    minVersion: "0.11.2",
     scope: "core",
-    // The archive ships 0.9.5 on noble. LazyVim runs on it but the
-    // ecosystem has moved on, and the upstream tarball is not a drop-in
-    // either: nvim needs its runtime tree, so installing just the
-    // binary produces a broken editor. The PPA packages both properly.
+    // The archive ships 0.9.5 on noble, and LazyVim refuses to start on
+    // it — it requires 0.11.2 or newer and exits with a message. Since
+    // red-dev also sets EDITOR=nvim, an archive nvim does not degrade
+    // the editor, it breaks every caller of $EDITOR: git commit, zellij's
+    // EditScrollback, Claude Code's external editor. The upstream tarball
+    // is not a drop-in either: nvim needs its runtime tree, so installing
+    // just the binary produces a broken editor. The PPA packages both
+    // properly.
     u24: ppa("neovim-ppa/unstable", "neovim"),
     win: winget("Neovim.Neovim"),
   },
@@ -760,6 +785,17 @@ export const TOOLS: Tool[] = [
     win: skip("native Windows needs no interop shim"),
   },
   {
+    // WSL exports XDG_RUNTIME_DIR but never creates it, and the parent
+    // is root-owned — so the programs that trust the variable get EACCES
+    // rather than a fallback. zellij is the visible casualty.
+    name: "wsl-runtime-dir",
+    about: "XDG_RUNTIME_DIR that exists, so zellij can start",
+    scope: "wsl",
+    managed: true,
+    u24: builtin("wsl-runtime-dir"),
+    win: skip("native Windows has no XDG runtime dir"),
+  },
+  {
     name: "nerd-font",
     scope: "desktop",
     managed: true,
@@ -856,12 +892,85 @@ export function applicableScopes(p: Platform): Scope[] {
   return scopes;
 }
 
-export function isInstalled(tool: Tool): boolean {
-  if (tool.managed) return false; // the provider decides; see Tool.managed
+/**
+ * The three answers, kept apart so a report can tell them apart.
+ *
+ * "absent" and "outdated" both mean there is work to do, but they fail
+ * differently and a converge that says "the binary is absent" about a
+ * binary sitting on PATH sends whoever reads it looking in the wrong
+ * place.
+ */
+export type InstallState = "ok" | "absent" | "outdated";
+
+export function installState(tool: Tool): InstallState {
+  if (tool.managed) return "absent"; // the provider decides; see Tool.managed
   const candidates = tool.cmd ?? [tool.name];
-  if (!candidates.some(present)) return false;
+  if (!candidates.some(present)) return "absent";
   // A name on PATH is not proof it is the right program — see Tool.signature.
-  return tool.signature ? identify(candidates, tool.signature) : true;
+  if (tool.signature && !identify(candidates, tool.signature)) return "absent";
+  if (tool.minVersion && versionBelow(candidates, tool.minVersion)) return "outdated";
+  return "ok";
+}
+
+export function isInstalled(tool: Tool): boolean {
+  return installState(tool) === "ok";
+}
+
+/**
+ * On the machine at all, at whatever version.
+ *
+ * What removal cares about, and the reason it cannot reuse isInstalled:
+ * once a version floor exists, "not installed" stops meaning "not
+ * there". A tool below its floor would vanish from the uninstall list
+ * while still sitting on disk — offering no way to remove the very thing
+ * the doctor is complaining about.
+ */
+export function isPresent(tool: Tool): boolean {
+  return installState(tool) !== "absent";
+}
+
+/**
+ * The version this machine actually has, or null when it cannot be read.
+ *
+ * For reporting only. The decision is installState's; this exists so a
+ * message can say which version is the problem instead of leaving the
+ * reader to run --version themselves.
+ */
+export function installedVersion(tool: Tool): string | null {
+  for (const c of tool.cmd ?? [tool.name]) {
+    if (!commandExists(c)) continue;
+    return parseVersion(versionOutput(c) ?? "");
+  }
+  return null;
+}
+
+/** The first dotted numeric run in --version output: "NVIM v0.9.5" -> "0.9.5". */
+export function parseVersion(output: string): string | null {
+  const m = /(\d+)\.(\d+)(?:\.(\d+))?/.exec(output);
+  return m ? `${m[1]}.${m[2]}.${m[3] ?? "0"}` : null;
+}
+
+/** -1, 0 or 1, comparing segment by segment with missing segments as zero. */
+export function compareVersions(a: string, b: string): number {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d !== 0) return d < 0 ? -1 : 1;
+  }
+  return 0;
+}
+
+function versionBelow(candidates: string[], min: string): boolean {
+  for (const c of candidates) {
+    if (!commandExists(c)) continue;
+    const found = parseVersion(versionOutput(c) ?? "");
+    // Unreadable output is not evidence of an old version, and treating
+    // it as one would reinstall the tool on every single converge with
+    // no run ever reaching a fixed point. Fail open and say nothing.
+    return found === null ? false : compareVersions(found, min) < 0;
+  }
+  return false;
 }
 
 /**
@@ -892,28 +1001,35 @@ function present(candidate: string): boolean {
  * go on. Failure to run at all counts as "not ours": a program that
  * cannot answer `--version` is not one we can claim is installed.
  */
+/**
+ * Whatever `<cmd> --version` prints, both streams, or null if it will not run.
+ *
+ * stdin detached, and that is not defensive tidiness.
+ *
+ * The command being probed is by definition one whose name we do not
+ * trust. /usr/bin/red is GNU ed, and an editor handed a terminal it can
+ * read will sit on it forever — which is exactly what happened: the
+ * converge stopped dead at step 13 with no child process and no output,
+ * because the probe itself was waiting for someone to type.
+ */
+function versionOutput(cmd: string): string | null {
+  try {
+    const proc = Bun.spawnSync([cmd, "--version"], {
+      stdout: "pipe",
+      stderr: "pipe",
+      stdin: "ignore",
+    });
+    return `${proc.stdout?.toString() ?? ""}${proc.stderr?.toString() ?? ""}`;
+  } catch {
+    return null;
+  }
+}
+
 function identify(candidates: string[], signature: RegExp): boolean {
   for (const c of candidates) {
     if (!commandExists(c)) continue;
-    try {
-      // stdin detached, and that is not defensive tidiness.
-      //
-      // The command being probed is by definition one whose name we do
-      // not trust. /usr/bin/red is GNU ed, and an editor handed a
-      // terminal it can read will sit on it forever — which is exactly
-      // what happened: the converge stopped dead at step 13 with no
-      // child process and no output, because the probe itself was
-      // waiting for someone to type.
-      const proc = Bun.spawnSync([c, "--version"], {
-        stdout: "pipe",
-        stderr: "pipe",
-        stdin: "ignore",
-      });
-      const out = `${proc.stdout?.toString() ?? ""}${proc.stderr?.toString() ?? ""}`;
-      if (signature.test(out)) return true;
-    } catch {
-      // Unrunnable; try the next candidate.
-    }
+    const out = versionOutput(c);
+    if (out !== null && signature.test(out)) return true;
   }
   return false;
 }
