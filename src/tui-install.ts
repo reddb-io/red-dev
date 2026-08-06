@@ -32,7 +32,7 @@ import {
 import { createScrollArea, type ScrollAreaState } from "tuiuiu.js";
 import { VERSION } from "./cli.ts";
 import { converge, countSteps, type StepResult } from "./converge.ts";
-import { captureStart, captureStop } from "./log.ts";
+import { captureStart, captureStop, captureTo } from "./log.ts";
 import { Accented, Header, Screen, Section, StatusLine, Surface } from "./tui-chrome.ts";
 import { muted, subtle, text, ui } from "./tui-theme.ts";
 import type { Scope } from "./manifest.ts";
@@ -162,7 +162,19 @@ export function useInstallModel(
   // creating it during render is the mistake createWizard already taught
   // — signals rebuilt thirty times a second.
 
-  const push = (line: string): void => setLines((prev) => [...prev, line]);
+  // Streaming apt into the log changed what this buffer holds: a step
+  // line per tool is dozens, a hundred-package transaction is thousands,
+  // and every push copies the whole array. Capped at a depth no one
+  // scrolls past by hand — the failures are read at the tail.
+  const MAX_LINES = 2000;
+  const push = (line: string): void =>
+    setLines((prev) => (prev.length < MAX_LINES ? [...prev, line] : [...prev.slice(1), line]));
+
+  /** Closes the batch's log redirect. Non-null only while apt is running. */
+  let releaseBatch: (() => void) | null = null;
+
+  /** Log lines carry colour; the viewer takes plain strings. */
+  const plain = (line: string): string => line.replace(/\x1b\[[0-9;]*m/g, "").trim();
 
   useEffect(() => {
     if (!started()) return;
@@ -176,6 +188,20 @@ export function useInstallModel(
           push(`-- ${s} · ${n} items`);
         },
         note: (m) => push(`   ${m}`),
+        // captureTo rather than captureStart: this transaction runs for
+        // minutes, and holding its output until the end would trade a
+        // corrupted frame for a frozen one. Streaming puts apt's
+        // progress in the log pane, which is where the eye already is.
+        batchStart: (pkgs) => {
+          setCurrent("apt");
+          releaseBatch = captureTo((line) => push(`    ${plain(line)}`));
+          push(`   apt: ${pkgs.length} packages`);
+        },
+        batchEnd: (error) => {
+          releaseBatch?.();
+          releaseBatch = null;
+          if (error) push(`    ${error}`);
+        },
         stepStart: (e) => {
           setCurrent(e.tool);
           // Hold provider chatter so it lands under its own step rather
@@ -189,7 +215,7 @@ export function useInstallModel(
           const glyph =
             r.outcome === "failed" ? "✗" : r.outcome === "present" || r.outcome === "skipped" ? "·" : "✓";
           push(`${glyph} ${r.tool.padEnd(16)} ${r.outcome}${r.ms >= 1000 ? `  ${human(r.ms)}` : ""}`);
-          for (const h of held) push(`    ${h.replace(/\x1b\[[0-9;]*m/g, "").trim()}`);
+          for (const h of held) push(`    ${plain(h)}`);
           if (r.detail && r.outcome === "failed") push(`    ${r.detail}`);
           setResults((prev) => [...prev, r]);
         },
