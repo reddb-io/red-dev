@@ -3,11 +3,22 @@
  *
  * Claude Code reads ~/.claude/keybindings.json for per-context bindings.
  * The file format is an object with a "bindings" array; each entry carries
- * a "context" string and a "bindings" map of key to action.
+ * a "context" string and a "bindings" map of key to action. A null action
+ * unbinds a Claude Code default.
  *
- * The one binding every machine wants: Shift+Enter inserts a newline in
- * Chat rather than submitting the message. Without it, every multi-line
- * prompt has to be built somewhere else and pasted in.
+ * Two bindings, both in the Chat context:
+ *
+ *   Shift+Enter -> chat:newline. Without it, every multi-line prompt has
+ *   to be built somewhere else and pasted in.
+ *
+ *   Ctrl+G -> nothing. Claude Code binds it to chat:externalEditor by
+ *   default, and config/zellij/config.kdl already spends Ctrl+G on the
+ *   unlock. Two owners for one key means the key does different things
+ *   depending on whether the shell happens to be inside zellij, which is
+ *   exactly what the zellij table was arranged to avoid. zellij is the
+ *   layer that cannot move — it has to catch the key before the pane
+ *   sees it — so Claude Code yields, and chat:externalEditor stays
+ *   reachable on its second default, Ctrl+X Ctrl+E.
  *
  * Three constraints shape this:
  *   - idempotent: re-running on a machine that already has it does nothing
@@ -20,8 +31,19 @@ import { existsSync } from "node:fs";
 import { log } from "./log.ts";
 
 const CONTEXT = "Chat";
-const KEY = "shift+enter";
-const ACTION = "chat:newline";
+
+/** A key red-dev owns in the Chat context. A null action unbinds it. */
+type Managed = { key: string; action: string | null };
+
+const MANAGED: readonly Managed[] = [
+  { key: "shift+enter", action: "chat:newline" },
+  { key: "ctrl+g", action: null },
+];
+
+/** How a managed binding reads in the file, for logs. */
+function describe(b: Managed): string {
+  return b.action === null ? `${b.key} unbound` : `${b.key} → ${b.action}`;
+}
 
 function defaultPath(): string {
   const home = process.env["HOME"] ?? process.env["USERPROFILE"] ?? "";
@@ -30,30 +52,46 @@ function defaultPath(): string {
 
 export type BindingOutcome = "wrote" | "already-set" | "conflict" | "malformed";
 
-type BindingEntry = { context?: string; bindings?: Record<string, string> } & Record<
-  string,
-  unknown
->;
+/** One outcome per managed key. Keys that share a file still differ here. */
+export type ConvergeResult = Record<string, BindingOutcome>;
+
+type BindingMap = Record<string, string | null>;
+type BindingEntry = { context?: string; bindings?: BindingMap } & Record<string, unknown>;
 type KeybindingFile = { bindings?: BindingEntry[] } & Record<string, unknown>;
 
+/** The same verdict for every managed key — the file-level failures. */
+function uniform(outcome: BindingOutcome): ConvergeResult {
+  return Object.fromEntries(MANAGED.map((b) => [b.key, outcome]));
+}
+
+/** Every managed binding as Claude Code stores it. */
+function managedMap(): BindingMap {
+  return Object.fromEntries(MANAGED.map((b) => [b.key, b.action]));
+}
+
+function save(target: string, file: KeybindingFile): Promise<number> {
+  return Bun.write(target, JSON.stringify(file, null, 2) + "\n");
+}
+
+/** What the file currently says, phrased for a warning. */
+function render(action: string | null | undefined): string {
+  return action === null ? "null" : `"${action}"`;
+}
+
 /**
- * Ensure ~/.claude/keybindings.json maps Shift+Enter to chat:newline in Chat.
+ * Converge every binding in MANAGED into ~/.claude/keybindings.json.
+ *
+ * One read and at most one write, so a malformed file warns once rather
+ * than once per key.
  *
  * Accepts an explicit path for tests; omit to use the real Claude config dir.
  */
-export async function convergeClaudeKeybinding(path?: string): Promise<BindingOutcome> {
+export async function convergeClaudeKeybinding(path?: string): Promise<ConvergeResult> {
   const target = path ?? defaultPath();
 
   if (!existsSync(target)) {
-    await Bun.write(
-      target,
-      JSON.stringify(
-        { bindings: [{ context: CONTEXT, bindings: { [KEY]: ACTION } }] },
-        null,
-        2,
-      ) + "\n",
-    );
-    return "wrote";
+    await save(target, { bindings: [{ context: CONTEXT, bindings: managedMap() }] });
+    return uniform("wrote");
   }
 
   let raw: string;
@@ -61,7 +99,7 @@ export async function convergeClaudeKeybinding(path?: string): Promise<BindingOu
     raw = await Bun.file(target).text();
   } catch {
     log.warn(`claude keybindings: cannot read ${target} — leaving it alone`);
-    return "malformed";
+    return uniform("malformed");
   }
 
   let parsed: unknown;
@@ -69,27 +107,23 @@ export async function convergeClaudeKeybinding(path?: string): Promise<BindingOu
     parsed = JSON.parse(raw);
   } catch {
     log.warn(`claude keybindings: ${target} is not valid JSON — leaving it alone`);
-    return "malformed";
+    return uniform("malformed");
   }
 
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     log.warn(`claude keybindings: ${target} has an unexpected root type — leaving it alone`);
-    return "malformed";
+    return uniform("malformed");
   }
 
   const obj = parsed as KeybindingFile;
   const bindings = obj.bindings;
 
   if (!Array.isArray(bindings)) {
-    await Bun.write(
-      target,
-      JSON.stringify(
-        { ...obj, bindings: [{ context: CONTEXT, bindings: { [KEY]: ACTION } }] },
-        null,
-        2,
-      ) + "\n",
-    );
-    return "wrote";
+    await save(target, {
+      ...obj,
+      bindings: [{ context: CONTEXT, bindings: managedMap() }],
+    });
+    return uniform("wrote");
   }
 
   const chatEntry = bindings.find(
@@ -97,49 +131,51 @@ export async function convergeClaudeKeybinding(path?: string): Promise<BindingOu
   );
 
   if (!chatEntry) {
-    await Bun.write(
-      target,
-      JSON.stringify(
-        { ...obj, bindings: [...bindings, { context: CONTEXT, bindings: { [KEY]: ACTION } }] },
-        null,
-        2,
-      ) + "\n",
-    );
-    return "wrote";
+    await save(target, {
+      ...obj,
+      bindings: [...bindings, { context: CONTEXT, bindings: managedMap() }],
+    });
+    return uniform("wrote");
   }
 
-  const existing = chatEntry.bindings?.[KEY];
-  if (existing === ACTION) return "already-set";
+  // hasOwnProperty rather than a truthiness or undefined check: null is a
+  // value Claude Code gives meaning to, and one this module writes.
+  const current = chatEntry.bindings ?? {};
+  const result: ConvergeResult = {};
+  const additions: BindingMap = {};
 
-  if (existing !== undefined) {
+  for (const b of MANAGED) {
+    if (!Object.prototype.hasOwnProperty.call(current, b.key)) {
+      additions[b.key] = b.action;
+      result[b.key] = "wrote";
+      continue;
+    }
+    if (current[b.key] === b.action) {
+      result[b.key] = "already-set";
+      continue;
+    }
     log.warn(
-      `claude keybindings: ${KEY} is already bound to "${existing}" — leaving it alone`,
+      `claude keybindings: ${b.key} is already bound to ${render(current[b.key])} — leaving it alone`,
     );
-    return "conflict";
+    result[b.key] = "conflict";
   }
 
-  await Bun.write(
-    target,
-    JSON.stringify(
-      {
-        ...obj,
-        bindings: bindings.map((b) =>
-          b === chatEntry
-            ? { ...b, bindings: { ...(b.bindings ?? {}), [KEY]: ACTION } }
-            : b,
-        ),
-      },
-      null,
-      2,
-    ) + "\n",
-  );
-  return "wrote";
+  if (Object.keys(additions).length > 0) {
+    await save(target, {
+      ...obj,
+      bindings: bindings.map((b) =>
+        b === chatEntry ? { ...b, bindings: { ...current, ...additions } } : b,
+      ),
+    });
+  }
+
+  return result;
 }
 
 /**
  * Convergence entry-point called from the builtin dispatcher.
  *
- * Skipped silently when Claude Code is not installed: the keybinding has
+ * Skipped silently when Claude Code is not installed: the keybindings have
  * nowhere to go without the CLI.
  */
 export async function convergeClaudeKeybindings(): Promise<void> {
@@ -148,17 +184,19 @@ export async function convergeClaudeKeybindings(): Promise<void> {
     return;
   }
 
-  const outcome = await convergeClaudeKeybinding();
-  switch (outcome) {
-    case "wrote":
-      log.ok(`claude keybindings: ${KEY} → ${ACTION}`);
-      break;
-    case "already-set":
-      log.skip(`claude keybindings: ${KEY} already maps to ${ACTION}`);
-      break;
-    case "conflict":
-    case "malformed":
-      // Warning already emitted inside convergeClaudeKeybinding.
-      break;
+  const result = await convergeClaudeKeybinding();
+  for (const b of MANAGED) {
+    switch (result[b.key]) {
+      case "wrote":
+        log.ok(`claude keybindings: ${describe(b)}`);
+        break;
+      case "already-set":
+        log.skip(`claude keybindings: ${describe(b)} already`);
+        break;
+      case "conflict":
+      case "malformed":
+        // Warning already emitted inside convergeClaudeKeybinding.
+        break;
+    }
   }
 }
