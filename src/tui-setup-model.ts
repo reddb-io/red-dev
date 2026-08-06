@@ -103,7 +103,7 @@ export function questions(
         {
           key: "yes",
           label: "Share configuration",
-          note: "%LOCALAPPDATA%\\..\\.reddev — 43ms per shell, measured",
+          note: "%USERPROFILE%\\.red\\dev — 43ms per shell, measured",
         },
         { key: "no", label: "Keep each side separate", note: "every config stays local" },
       ],

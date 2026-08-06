@@ -825,6 +825,10 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
         await wsl.ensureWslInterop();
         return;
       }
+      if (pr.name === "wsl-runtime-dir") {
+        await wsl.ensureUserRuntimeDir();
+        return;
+      }
       if (pr.name === "nerd-font") {
         await wsl.installNerdFont(ctx.font, ctx.platform);
       } else {

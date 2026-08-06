@@ -84,18 +84,18 @@ async function writeIfChanged(path: string, content: string): Promise<boolean> {
  * only when our marker is absent — keeps a re-run harmless and keeps a
  * pre-existing configuration intact.
  */
-async function wireShellRc(): Promise<void> {
-  const bashrc = `${home()}/.bashrc`;
+async function wireShellRc(homeDir: string, label: string): Promise<void> {
+  const bashrc = `${homeDir}/.bashrc`;
   const existing = existsSync(bashrc) ? await Bun.file(bashrc).text() : "";
 
   if (existing.includes(MARKER)) {
-    log.skip("~/.bashrc already sources red-dev");
+    log.skip(`${label} .bashrc already sources red-dev`);
     return;
   }
 
   if (existing.length > 0) {
     await Bun.write(`${bashrc}.red-dev-backup`, existing);
-    log.step(`backed up ~/.bashrc to ~/.bashrc.red-dev-backup`);
+    log.step(`backed up ${label} .bashrc to .bashrc.red-dev-backup`);
   }
 
   const block = [
@@ -108,11 +108,17 @@ async function wireShellRc(): Promise<void> {
   ].join("\n");
 
   await Bun.write(bashrc, block);
-  log.ok("~/.bashrc now sources red-dev");
+  log.ok(`${label} .bashrc now sources red-dev`);
 }
 
-export async function installDotfiles(p: Platform): Promise<void> {
-  const dest = `${home()}/.local/share/red-dev/config/bash`;
+/**
+ * Render the bash config into one home and hook that home's .bashrc.
+ *
+ * Takes the home rather than asking for it, because there are two. See
+ * installDotfiles.
+ */
+async function deployTo(homeDir: string, label: string): Promise<void> {
+  const dest = `${homeDir}/.local/share/red-dev/config/bash`;
   // node:fs rather than shelling out to mkdir, which native Windows
   // does not have. Git Bash understands the forward-slash HOME it
   // reports, so the path itself needs no translation.
@@ -123,13 +129,70 @@ export async function installDotfiles(p: Platform): Promise<void> {
     if (await writeIfChanged(`${dest}/${name}`, content)) changed++;
   }
 
-  if (changed > 0) {
-    log.ok(`dotfiles: ${changed} file(s) written to ${dest}`);
-  } else {
-    log.skip("dotfiles already current");
+  if (changed > 0) log.ok(`dotfiles: ${changed} file(s) written to ${dest}`);
+  else log.skip(`dotfiles already current in ${label}`);
+
+  await wireShellRc(homeDir, label);
+}
+
+/**
+ * The Windows profile, as this distro reaches it — or null.
+ *
+ * Null rather than throwing: a distro with interop switched off, or a
+ * C: that did not mount, is a machine that simply has no second home to
+ * converge. That is not a reason to fail the install of the first one.
+ */
+async function windowsHomeFromWsl(): Promise<string | null> {
+  try {
+    const { windowsUserProfile } = await import("./wsl.ts");
+    const { localPath } = await import("./shared-root.ts");
+    const dir = localPath(await windowsUserProfile(), "wsl");
+    return existsSync(dir) ? dir : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Both homes, one converge.
+ *
+ * A Windows machine running WSL has two of everything, and the shell
+ * config is the pair that silently drifts. Converging from inside the
+ * distro used to write the distro's copy only, so the Git Bash side kept
+ * whatever it had from the last time red-dev happened to run as a native
+ * Windows binary — on this machine, dotfiles from eight days earlier,
+ * with a prompt.sh still missing the TERM=dumb guard. Nothing failed.
+ * The mode you were not in was just quietly older.
+ *
+ * wsl-sync.ts crosses the same boundary the other way and states the
+ * rule this follows: whoever is converging owns the crossing. The files
+ * are byte-identical by construction, so the second write is a no-op
+ * whenever the two sides already agree — which is the point.
+ */
+export function deployTargets(
+  env: Platform["env"],
+  ownHome: string,
+  windowsHome: string | null,
+): { dir: string; label: string }[] {
+  const targets = [{ dir: ownHome, label: "this" }];
+  // Only from the distro outwards. Native Windows reaches its distro
+  // through wsl-sync, which runs a full install in there rather than
+  // reaching into its filesystem, and a Linux desktop has no other side.
+  if (env === "wsl" && windowsHome && windowsHome !== ownHome) {
+    targets.push({ dir: windowsHome, label: "the Windows profile" });
+  }
+  return targets;
+}
+
+export async function installDotfiles(p: Platform): Promise<void> {
+  const winHome = p.env === "wsl" ? await windowsHomeFromWsl() : null;
+  const targets = deployTargets(p.env, home(), winHome);
+
+  for (const t of targets) await deployTo(t.dir, t.label);
+  if (p.env === "wsl" && targets.length === 1) {
+    log.skip("no reachable Windows profile — Git Bash side left as it is");
   }
 
-  await wireShellRc();
   await installZellijConfig(p);
   await wireDelta();
   await primeTldr();

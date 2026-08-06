@@ -24,6 +24,7 @@
  * that still carries an old one.
  */
 
+import type { DriftStatus } from "./drift.ts";
 import { log, RedError } from "./log.ts";
 import type { Platform } from "./platform.ts";
 
@@ -45,6 +46,52 @@ export const WINDOWS_HOTKEYS: Hotkey[] = [
   { label: "Terminal", combo: "CTRL+ALT+T", note: "bash inside WSL, through Alacritty when it is there" },
   { label: "PowerShell (Administrator)", combo: "CTRL+ALT+SHIFT+T", note: "elevated" },
 ];
+
+export type HotkeyState = "held" | "free" | "unknown";
+
+/**
+ * Translate a combo into RegisterHotKey's arguments.
+ *
+ * MOD_ALT 1, MOD_CONTROL 2, MOD_SHIFT 4, MOD_WIN 8. Only the letter keys
+ * this project claims are supported, because that is all it claims.
+ */
+export function hotkeyArgs(combo: string): { mods: number; vk: number } | null {
+  const parts = combo.toUpperCase().split("+").map((s) => s.trim()).filter(Boolean);
+  let mods = 0;
+  let key: string | null = null;
+  for (const part of parts) {
+    if (part === "ALT") mods |= 1;
+    else if (part === "CTRL" || part === "CONTROL") mods |= 2;
+    else if (part === "SHIFT") mods |= 4;
+    else if (part === "WIN") mods |= 8;
+    else if (/^[A-Z]$/.test(part)) key = part;
+    else return null;
+  }
+  if (!key || mods === 0) return null;
+  return { mods, vk: key.charCodeAt(0) };
+}
+
+/**
+ * What a probe result means for a shortcut we wrote.
+ *
+ * A .lnk carries its hotkey forever, but the *registration* belongs to
+ * Explorer and happens at runtime — and RegisterHotKey is first come,
+ * first served. An application that starts early and claims Ctrl+Alt+T
+ * wins it, Explorer's own claim fails, and the shortcut stops working
+ * with nothing anywhere reporting a fault. That is the failure this
+ * exists to name.
+ *
+ * "held" is honestly ambiguous and says so. The API answers "somebody
+ * has this", never who, so a working shortcut and a stolen one are
+ * indistinguishable from here. "free" is the unambiguous one: our
+ * shortcut declares the key, nothing holds it, so nothing will happen
+ * when it is pressed.
+ */
+export function hotkeyVerdict(shortcutExists: boolean, state: HotkeyState): DriftStatus {
+  if (!shortcutExists) return "drift";
+  if (state === "free") return "drift";
+  return "ok";
+}
 
 /**
  * Everything is resolved on the Windows side, deliberately.
@@ -132,4 +179,66 @@ export async function installWindowsHotkeys(p: Platform): Promise<void> {
   for (const line of lines) log.plain(`       ${line}`);
   log.plain("       the elevated one prompts for consent when it opens");
   log.ok(`${lines.length} hotkey(s) in the Start Menu`);
+}
+
+/**
+ * Ask Windows whether each combo is spoken for.
+ *
+ * RegisterHotKey succeeding means nobody holds the key, so the probe
+ * takes it for an instant and gives it straight back. Failing with 1409
+ * — ERROR_HOTKEY_ALREADY_REGISTERED — means somebody does. The API
+ * never says who, which is the whole reason a stolen hotkey is so quiet:
+ * there is no list to look at and nothing logs the loss.
+ *
+ * Every other failure is reported as unknown rather than as held. A
+ * probe that cannot run is not evidence about the machine, and calling
+ * it "held" would turn a broken check into a clean bill of health.
+ */
+export async function probeHotkeys(p: Platform): Promise<Record<string, HotkeyState>> {
+  const out: Record<string, HotkeyState> = {};
+  if (p.os !== "windows" && p.env !== "wsl") return out;
+
+  const probes = WINDOWS_HOTKEYS.map((h) => (h.combo ? hotkeyArgs(h.combo) : null));
+  const script = `
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class RedHK {
+  [DllImport("user32.dll", SetLastError=true)]
+  public static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
+  [DllImport("user32.dll", SetLastError=true)]
+  public static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+}
+"@
+${WINDOWS_HOTKEYS.map((h, i) => {
+  const a = probes[i];
+  if (!h.combo || !a) return "";
+  return `if ([RedHK]::RegisterHotKey([IntPtr]::Zero, ${9100 + i}, ${a.mods}, ${a.vk})) {
+  [RedHK]::UnregisterHotKey([IntPtr]::Zero, ${9100 + i}) | Out-Null
+  '${h.combo}=free'
+} else { '${h.combo}=held' }`;
+}).join("\n")}
+`.trim();
+
+  try {
+    const exe = p.os === "windows" ? "powershell.exe" : (Bun.which("powershell.exe") ?? "powershell.exe");
+    const proc = Bun.spawn([exe, "-NoProfile", "-Command", script], {
+      stdout: "pipe",
+      stderr: "ignore",
+      stdin: "ignore",
+    });
+    const text = (await new Response(proc.stdout).text()).replace(/\r/g, "");
+    if ((await proc.exited) !== 0) throw new Error("probe failed");
+    for (const line of text.split("\n")) {
+      const [combo, state] = line.trim().split("=");
+      if (combo && (state === "free" || state === "held")) out[combo] = state;
+    }
+  } catch {
+    // Left empty; the caller reads a missing entry as unknown.
+  }
+
+  for (const h of WINDOWS_HOTKEYS) {
+    if (h.combo && !(h.combo in out)) out[h.combo] = "unknown";
+  }
+  return out;
 }

@@ -15,7 +15,7 @@ import { describe, expect, test } from "bun:test";
 import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { zellijConfigAction, zellijConfigFor } from "./dotfiles.ts";
-import { repairedImports } from "./alacritty.ts";
+import { repairedImports, requiredImports } from "./alacritty.ts";
 import type { Platform } from "./platform.ts";
 
 function platform(over: Partial<Platform>): Platform {
@@ -110,15 +110,13 @@ describe("paste", () => {
     // In alacritty.toml it would never reach a machine that already had
     // one — the mistake that kept a deprecation warning alive for two
     // releases.
-    expect(src).toContain("await put(\"keys.toml\", keysToml());");
+    expect(src).toContain("await putShared(\"keys.toml\", keysToml());");
   });
 
   test("and that file is repaired into an existing config", () => {
-    // REQUIRED_IMPORTS is what the repair pass adds to an alacritty.toml
-    // that predates it.
-    expect(src).toContain("'keys.toml'");
-    const block = src.slice(src.indexOf("const REQUIRED_IMPORTS"));
-    expect(block.slice(0, 120)).toContain("keys.toml");
+    // requiredImports is what the repair pass writes into an
+    // alacritty.toml that predates it.
+    expect(requiredImports(null)).toContain("keys.toml");
   });
 });
 
@@ -184,7 +182,7 @@ copy_command "powershell.exe -NoProfile -EncodedCommand ${encoded}"
       "[window]",
       "opacity = 0.98",
     ].join("\n");
-    const after = repairedImports(before);
+    const after = repairedImports(before, requiredImports(null));
     expect(after).not.toBeNull();
     expect(after).toContain("keys.toml");
     // And keeps what was already there.
@@ -202,7 +200,7 @@ copy_command "powershell.exe -NoProfile -EncodedCommand ${encoded}"
       "  'keys.toml',",
       "]",
     ].join("\n");
-    expect(repairedImports(complete)).toBeNull();
+    expect(repairedImports(complete, requiredImports(null))).toBeNull();
   });
 
   test("is a pure function, so it can repair across the WSL boundary", () => {
@@ -211,6 +209,81 @@ copy_command "powershell.exe -NoProfile -EncodedCommand ${encoded}"
     // target whose config lives on the far side of a boundary was the
     // one target that could never be repaired.
     const before = "[general]\nimport = [\n  'theme.toml',\n]";
-    expect(repairedImports(before)).toContain("keys.toml");
+    expect(repairedImports(before, requiredImports(null))).toContain("keys.toml");
+  });
+});
+
+/**
+ * Moving theme, font and keys into the share changes what an existing
+ * alacritty.toml has to say, on a file this project promises to write
+ * once and leave alone. The repair pass is the only way those machines
+ * ever point at the share.
+ */
+describe("imports when there is a shared root", () => {
+  const SHARE = "C:\\Users\\filip\\.red\\dev";
+  const shareDir = `${SHARE}\\config\\alacritty`;
+
+  test("the shared parts are absolute and the local one is not", () => {
+    const req = requiredImports(SHARE);
+    expect(req).toContain(`${shareDir}\\theme.toml`);
+    expect(req).toContain(`${shareDir}\\font.toml`);
+    expect(req).toContain(`${shareDir}\\keys.toml`);
+    // shell.toml names wsl.exe or bash.exe: it is the machine's answer
+    // to WSL-or-native and must not follow the theme to another machine.
+    expect(req).toContain("shell.toml");
+    expect(req).not.toContain(`${shareDir}\\shell.toml`);
+  });
+
+  test("a relative entry is replaced by the shared one, not joined by it", () => {
+    // The bug this guards: appending left both 'theme.toml' and the
+    // absolute path in the list, with the stale local copy still on
+    // disk. Which one won depended on merge order.
+    const before = [
+      "[general]",
+      "import = [",
+      "  'theme.toml',",
+      "  'font.toml',",
+      "  'shell.toml',",
+      "  'keys.toml',",
+      "]",
+    ].join("\n");
+    const after = repairedImports(before, requiredImports(SHARE));
+    expect(after).not.toBeNull();
+    expect(after).toContain(`${shareDir}\\theme.toml`);
+    expect(after).not.toMatch(/^\s*'theme\.toml',$/m);
+    expect(after).toMatch(/^\s*'shell\.toml',$/m);
+  });
+
+  test("an import the user added is kept", () => {
+    const before = [
+      "[general]",
+      "import = [",
+      "  'theme.toml',",
+      "  'my-overrides.toml',",
+      "]",
+    ].join("\n");
+    const after = repairedImports(before, requiredImports(SHARE));
+    expect(after).toContain("my-overrides.toml");
+  });
+
+  test("a root that moved is repointed rather than duplicated", () => {
+    // Exactly what the .reddev to .red\dev migration leaves behind: a
+    // valid absolute import at an address nothing writes to any more.
+    const before = [
+      "[general]",
+      "import = [",
+      "  'C:\\Users\\filip\\.reddev\\config\\alacritty\\theme.toml',",
+      "  'shell.toml',",
+      "]",
+    ].join("\n");
+    const after = repairedImports(before, requiredImports(SHARE));
+    expect(after).toContain(`${shareDir}\\theme.toml`);
+    expect(after).not.toContain(".reddev");
+  });
+
+  test("nothing to repair once it already points at the share", () => {
+    const req = requiredImports(SHARE);
+    const settled = `[general]\nimport = [\n${req.map((i) => `  '${i}',`).join("\n")}\n]`;
+    expect(repairedImports(settled, req)).toBeNull();
   });
 });

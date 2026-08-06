@@ -86,12 +86,48 @@ export function sharedRootFor(p: Platform): SharedRoot | null {
 /**
  * The default, and the reason for it.
  *
- * Inside the profile rather than at C:\reddev: it disappears with the
+ * Inside the profile rather than at C:\red: it disappears with the
  * profile when a machine is rebuilt, and it does not add a directory to
  * the root of the system drive.
+ *
+ * `.red\dev` and not `.reddev` because `.red` is a namespace the rest of
+ * the toolchain already writes into — .red/adr, .red/CONTEXT.md — and
+ * dev is one product inside it. A flat `.reddev` would be the only thing
+ * sitting outside that namespace, which leaves the next tool to invent
+ * its own spelling and the profile to collect one dotfile per product.
+ * Machines that already have the old root are moved by
+ * 2026-08-06-share-root-namespace rather than left behind.
  */
 export function defaultRoot(windowsHome: string): string {
+  return `${windowsHome.replace(/[\\/]$/, "")}\\.red\\dev`;
+}
+
+/** The pre-namespace spelling, still on every machine set up before it. */
+export function legacyRoot(windowsHome: string): string {
   return `${windowsHome.replace(/[\\/]$/, "")}\\.reddev`;
+}
+
+/**
+ * Whether a recorded root is the old default, and where it should go.
+ *
+ * Matched against the default this project itself wrote, not against any
+ * path that happens to end in `.reddev`. A root the user pointed
+ * somewhere else by hand is a deliberate choice, and relocating it
+ * because the spelling looks familiar is the kind of helpfulness that
+ * moves a directory out from under someone.
+ *
+ * Case-insensitive because Windows paths are, and a root recorded as
+ * `C:\Users\Filip\.reddev` against a profile reported as
+ * `C:\Users\filip` is the same directory.
+ */
+export function namespaceMove(
+  recorded: string | null,
+  profile: string,
+): { from: string; to: string } | null {
+  if (!recorded) return null;
+  const norm = (s: string): string => s.replace(/[\\/]+$/, "").toLowerCase();
+  if (norm(recorded) !== norm(legacyRoot(profile))) return null;
+  return { from: recorded.replace(/[\\/]+$/, ""), to: defaultRoot(profile) };
 }
 
 /**
@@ -171,7 +207,7 @@ async function addWindowsBinToPath(root: string): Promise<void> {
 }
 
 /** The Windows profile directory, whichever side we are asking from. */
-async function windowsHome(p: Platform): Promise<string> {
+export async function windowsHome(p: Platform): Promise<string> {
   if (p.env === "windows") {
     const h = process.env["USERPROFILE"];
     if (h) return h;
@@ -204,6 +240,36 @@ const ADOPTABLE: Record<string, { from: string; to: string; dir?: boolean }> = {
   // per-platform half stays in ~/.gitconfig where it belongs.
   git: { from: "", to: "gitconfig" },
 };
+
+/**
+ * Shared, but with nothing to adopt.
+ *
+ * ADOPTABLE answers "can `share adopt` move a file the user already
+ * has": it names a path under ~/.config to copy from. These have no such
+ * original. red-dev generates them itself, so the only question is which
+ * directory it generates them into — and the answer is the share, from
+ * the first install rather than after a migration.
+ *
+ * alacritty's config does not live in ~/.config at all; on the target
+ * that matters it is %APPDATA%\alacritty, on the Windows side of the
+ * boundary. bash's shared half is local.sh, which red-dev creates once
+ * and then never touches. `share adopt alacritty` would have nothing to
+ * pick up, so it is deliberately not offered — being shared and being
+ * adoptable are different questions, and conflating them is what put
+ * the share behind a migration step.
+ *
+ * Claude is deliberately absent. Its keybindings are written identically
+ * on both sides by claude-keybindings.ts, and the only indirection
+ * Claude Code offers relocates the whole of ~/.claude — sessions, cache
+ * and projects, hundreds of megabytes — rather than the one file worth
+ * sharing.
+ */
+const GENERATED = new Set(["alacritty", "bash"]);
+
+/** Tools whose configuration lives in the share, however it got there. */
+export function sharedTools(): string[] {
+  return [...Object.keys(ADOPTABLE), ...GENERATED].sort();
+}
 
 export function adoptableTools(): string[] {
   return Object.keys(ADOPTABLE);
@@ -248,7 +314,7 @@ export function configHome(p: Platform, tool?: string): string {
   // config names /home/<user>/.config/btop/themes/... and a gitconfig on
   // this machine calls /usr/bin/gh, both of which exist on exactly one
   // of the two sides.
-  if (tool && !(tool in ADOPTABLE)) return `${home}/.config`;
+  if (tool && !(tool in ADOPTABLE) && !GENERATED.has(tool)) return `${home}/.config`;
   return `${share}/config`;
 }
 
@@ -317,6 +383,45 @@ export async function adoptConfig(p: Platform, tool: string): Promise<number> {
  */
 const TREE = ["config", "bin", "bin/linux", "bin/windows"];
 
+/**
+ * The one bash file red-dev creates and then never writes again.
+ *
+ * Everything in config/bash is regenerated on every converge, so an
+ * alias added to any of it survives until the next install and then
+ * quietly does not — there was nowhere in this project to put a
+ * personal setting and have it stay. rc.sh sources this last, after the
+ * generated files, so it wins.
+ *
+ * Created with content rather than left as an empty directory. TREE
+ * deliberately avoids pre-creating per-tool directories because an
+ * empty one made "is this shared" unanswerable; this is the opposite
+ * case, where the file has to exist to be found at all. Nobody guesses
+ * a path they were never shown.
+ */
+const LOCAL_TEMPLATE = `# Yours. red-dev created this file once and will not write it again.
+#
+# Sourced last, after everything red-dev generates, so anything here
+# wins. This copy lives in the shared root, so it follows the
+# configuration to every machine that reads the share.
+#
+# For settings true on one machine only — a work proxy, a path to a
+# checkout, a key that exists on this laptop — use
+# ~/.config/red-dev/local.sh instead. That one is sourced after this
+# one, so the machine gets the last word about itself.
+
+# alias k='kubectl'
+# export EDITOR=nvim
+`;
+
+async function ensureLocalTemplate(root: SharedRoot): Promise<void> {
+  const dir = `${root.local}/config/bash`;
+  const file = `${dir}/local.sh`;
+  if (existsSync(file)) return;
+  mkdirSync(dir, { recursive: true });
+  await Bun.write(file, LOCAL_TEMPLATE);
+  log.ok(`created ${root.windows}\\config\\bash\\local.sh — your aliases go there`);
+}
+
 export async function ensureSharedRoot(p: Platform): Promise<void> {
   const root = sharedRootFor(p);
   if (!root) {
@@ -337,6 +442,8 @@ export async function ensureSharedRoot(p: Platform): Promise<void> {
     mkdirSync(dir, { recursive: true });
     created++;
   }
+
+  await ensureLocalTemplate(root);
 
   if (created > 0) log.ok(`shared root ready at ${root.windows} (${created} new)`);
   else log.skip(`shared root already at ${root.windows}`);

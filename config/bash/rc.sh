@@ -71,14 +71,14 @@ fi
 
 # The shared root: one directory, reachable from both sides.
 #
-# RED_SHARE_WIN holds it the way Windows spells it — `C:\Users\me\.reddev`
+# RED_SHARE_WIN holds it the way Windows spells it — `C:\Users\me\.red\dev`
 # — because that is the only spelling both environments can agree to
 # store. Each side then translates, and there are three spellings rather
 # than the two you would expect:
 #
-#   C:\Users\me\.reddev       PowerShell, and any GUI application
-#   /c/Users/me/.reddev       Git Bash on native Windows
-#   /mnt/c/Users/me/.reddev   WSL
+#   C:\Users\me\.red\dev       PowerShell, and any GUI application
+#   /c/Users/me/.red/dev       Git Bash on native Windows
+#   /mnt/c/Users/me/.red/dev   WSL
 #
 # Translated here in shell rather than by calling wslpath, because this
 # runs before PATH is built and cannot assume any binary exists yet.
@@ -120,6 +120,27 @@ for _red_part in path shared zellij init aliases functions prompt; do
   fi
 done
 unset _red_part _red_file
+
+# Yours, and sourced last so it wins.
+#
+# Everything above is generated and rewritten on every converge, so an
+# alias added to any of it survives until the next install and then
+# quietly does not. These two files are never written by red-dev after
+# they are created, which makes them the only place a personal setting
+# can actually live.
+#
+# Two, because "personal" splits in a way one file cannot serve: the
+# shared one travels with the configuration to every machine, and the
+# local one is for what is true here and nowhere else — a work proxy, a
+# path to a checkout, a key that exists on this laptop. Local is sourced
+# after shared, so this machine gets the last word about itself.
+for _red_mine in "${RED_SHARE:+$RED_SHARE/config/bash/local.sh}" "$HOME/.config/red-dev/local.sh"; do
+  if [ -n "$_red_mine" ] && [ -r "$_red_mine" ]; then
+    # shellcheck disable=SC1090
+    . "$_red_mine"
+  fi
+done
+unset _red_mine
 
 # Attach last, after every keybinding above is registered. Guarded on
 # BLE_VERSION so this is inert when ble.sh was never loaded.

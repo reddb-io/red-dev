@@ -13,7 +13,8 @@
  * which is why config/bash/path.sh prepends instead.
  */
 
-import { copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, rmSync, statSync } from "node:fs";
+import { userInfo } from "node:os";
 import { log, RedError } from "./log.ts";
 import type { Platform } from "./platform.ts";
 import { THEMES, type Theme } from "./themes.ts";
@@ -158,6 +159,104 @@ export async function ensureWslInterop(): Promise<void> {
     log.ok("WSL interop restored");
   } else {
     throw new RedError("could not register WSLInterop; .exe calls will fail");
+  }
+}
+
+// ----------------------------------------------------- runtime dir
+
+/**
+ * What XDG_RUNTIME_DIR is actually doing on this machine.
+ *
+ * Split from the effectful half so the three cases can be tested without
+ * a systemd, a uid or a real /run.
+ */
+export type RuntimeDirState = "unset" | "usable" | "unusable";
+
+/**
+ * `ownerUid` is the directory's owner, or null when it does not exist.
+ *
+ * Ownership rather than existence, because the failure this guards
+ * against is a path that resolves to something we cannot write into. A
+ * runtime dir belonging to another uid is as useless as an absent one.
+ */
+export function runtimeDirState(
+  dir: string | undefined,
+  ownerUid: number | null,
+  selfUid: number,
+): RuntimeDirState {
+  if (!dir) return "unset";
+  if (ownerUid === null) return "unusable";
+  return ownerUid === selfUid ? "usable" : "unusable";
+}
+
+function ownerUid(dir: string): number | null {
+  try {
+    return statSync(dir).uid;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Make XDG_RUNTIME_DIR real, because WSL exports it without creating it.
+ *
+ * With systemd enabled, WSL puts XDG_RUNTIME_DIR=/run/user/<uid> in the
+ * environment of every shell. Nothing creates that directory:
+ * systemd-logind makes it when a login session opens, and `wsl.exe`
+ * starts the shell without going through PAM, so `loginctl
+ * list-sessions` reports none and the path never appears.
+ *
+ * An exported variable pointing at nothing is worse than an unset one.
+ * Programs that would have fallen back to /tmp instead trust the
+ * variable and try to create the directory, whose parent /run/user is
+ * root-owned — so they do not get ENOENT and a fallback, they get EACCES
+ * and a crash. zellij is the one that shows up first here, since
+ * config/bash/zellij.sh starts it for every interactive shell: it
+ * panics, and because that script deliberately does not `exec`, the
+ * terminal silently comes up as a plain shell with no multiplexer and no
+ * explanation.
+ *
+ * enable-linger is the durable half: a lingering user gets user@<uid>.service,
+ * and the runtime dir with it, at boot and without a session. The mkdir is
+ * the fallback for a machine where logind will not do it, and repairs the
+ * running boot either way.
+ */
+export async function ensureUserRuntimeDir(): Promise<void> {
+  const dir = process.env["XDG_RUNTIME_DIR"];
+  const uid = process.getuid?.() ?? -1;
+
+  if (runtimeDirState(dir, dir ? ownerUid(dir) : null, uid) === "unset") {
+    // Nothing points anywhere, so nothing is broken: callers fall back
+    // to /tmp on their own.
+    log.skip("XDG_RUNTIME_DIR not set — nothing to repair");
+    return;
+  }
+
+  const path = dir as string;
+  if (runtimeDirState(path, ownerUid(path), uid) === "usable") {
+    log.skip(`user runtime dir present (${path})`);
+    return;
+  }
+
+  log.step(`XDG_RUNTIME_DIR points at ${path}, which does not exist — repairing`);
+
+  const user = process.env["USER"] ?? userInfo().username;
+  const linger = Bun.spawn(["sudo", "loginctl", "enable-linger", user], {
+    stdout: "ignore",
+    stderr: "ignore",
+  });
+  await linger.exited;
+
+  if (runtimeDirState(path, ownerUid(path), uid) !== "usable") {
+    await run(["sudo", "mkdir", "-p", path]);
+    await run(["sudo", "chown", `${uid}:${process.getgid?.() ?? uid}`, path]);
+    await run(["sudo", "chmod", "700", path]);
+  }
+
+  if (runtimeDirState(path, ownerUid(path), uid) === "usable") {
+    log.ok(`user runtime dir ready (${path}) — zellij can start`);
+  } else {
+    throw new RedError(`could not create ${path}; zellij will not start`);
   }
 }
 

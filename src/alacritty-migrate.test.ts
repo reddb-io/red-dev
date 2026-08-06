@@ -12,7 +12,7 @@
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { migrateImportKey } from "./alacritty.ts";
+import { migrateImportKey, requiredImports } from "./alacritty.ts";
 
 const OLD = `# red-dev — Alacritty.
 
@@ -30,7 +30,7 @@ async function migrate(content: string): Promise<string> {
   const dir = mkdtempSync(`${tmpdir()}/alacritty-`);
   const path = `${dir}/alacritty.toml`;
   await Bun.write(path, content);
-  await migrateImportKey(path);
+  await migrateImportKey(path, requiredImports(null));
   return await Bun.file(path).text();
 }
 
