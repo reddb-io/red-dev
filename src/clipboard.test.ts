@@ -97,9 +97,10 @@ describe("paste", () => {
   // write-once config where a later correction could never reach it.
   const src = readFileSync("src/alacritty.ts", "utf8");
 
-  test("binds Ctrl+V, which is what the rest of Windows uses", () => {
-    expect(src).toContain("mods = 'Control'");
-    expect(src).toContain("action = 'Paste'");
+  test("leaves Ctrl+V for agent image paste", () => {
+    expect(src).not.toContain(
+      "key = 'V'\nmods = 'Control'\naction = 'Paste'",
+    );
   });
 
   test("keeps Ctrl+Shift+V, which is what Alacritty ships", () => {
