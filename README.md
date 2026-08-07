@@ -310,7 +310,7 @@ red-dev plan [scope]         # what would change, changes nothing
 red-dev install [scope]      # converge toward the manifest
 red-dev install --dry-run    # print the plan, touch nothing
 red-dev update               # upgrade what the package managers own
-red-dev theme [name]         # tokyo-night | catppuccin | gruvbox
+red-dev theme [name]         # dark | light | obsidian | marble | cobalt | flare
 red-dev apps                 # choose optional tools
 red-dev lang                 # choose runtimes for mise to manage
 red-dev shell                # Windows + WSL: where a terminal lands
@@ -448,7 +448,7 @@ recovery path, not an edge case — one tool failing never aborts the rest:
 
 ```console
 warn alacritty: ENOEXEC: unknown error, posix_spawn 'cmd.exe'
- ok  themed: zellij, btop
+ ok  themed: wallpaper, windows
  ok  converged — restart your shell
 ```
 
@@ -647,9 +647,9 @@ focused application — so claiming it took that away from the whole machine.
 #### The desktop, not just the terminal
 
 A theme switch also sets Windows' dark mode and accent colour, from the same
-per-theme intent GNOME uses — so "gruvbox is orange" means one thing on both
-sides. Windows shows the accent on title bars and the taskbar only when colour
-prevalence is on, so that is set too. **Already-open windows keep their old
+intent GNOME reads. Windows shows the accent on title bars and the taskbar only
+when colour prevalence is on, so that is set too — and turned off, with a
+neutral accent written beside it, for the two themes that have none. **Already-open windows keep their old
 colour until reopened.**
 
 Tiling is the one place Windows needs help. Windows 11 has Snap Layouts
@@ -692,59 +692,74 @@ red-dev shell
 Windows Terminal has profiles and does not need this; red-dev already sets its
 default to the distro, opening in your Linux home rather than under `/mnt/c`.
 
-<img src="docs/themes.svg" alt="Themes — one palette applied to terminal, multiplexer, monitor, editor and wallpaper" width="100%">
+<img src="docs/themes.svg" alt="Themes — six RedDB themes across wallpaper, system accent and editor" width="100%">
 
 ## Themes
 
 ```bash
-red-dev theme gruvbox
+red-dev theme obsidian
 ```
 
 ```console
- ok  themed: zellij, btop, neovim, vscode, bat, delta, lazygit, opencode, herdr, windows
- ok  wallpaper set
- ok  Windows Terminal configured (backup at .../settings.json.red-dev-backup)
- ok  theme: Gruvbox Dark — open a new terminal to see it
+ ok  themed: wallpaper, windows
+       accent #333949, dark mode, no accent, chrome left neutral
+ ok  theme: Obsidian — open a new terminal to see it
 ```
 
-Ten of them, the same set omakub ships: `tokyo-night` · `catppuccin` ·
-`gruvbox` · `everforest` · `kanagawa` · `matte-black` · `nord` ·
-`osaka-jade` · `ristretto` · `rose-pine`.
+Six, built from the [brand tokens](vendor/brand/): `dark` · `light` ·
+`obsidian` · `marble` · `cobalt` · `flare`.
 
-A theme in Omakub is eight files, not a palette. Colouring only the terminal is
-what makes a switch feel half-done: the multiplexer keeps its old blue, the
-editor keeps its old background, and the seams show immediately.
+| theme | ground | accent |
+| --- | --- | --- |
+| `dark` | ink `#07080a` | `#ff2056` |
+| `light` | paper `#f4f5f7` | `#ff2056` |
+| `obsidian` | ink | **none** — the identity with the accent removed |
+| `marble` | paper | **none** — obsidian's opposite |
+| `cobalt` | grey `#333949` | `#ff2056` |
+| `flare` | ink, with red panels | `#ff2056` |
 
-Omakub themes eight surfaces and every one is an application with a window. The
-command-line tools it installs keep whatever colours they shipped with — so a
-Kanagawa terminal shows you a Monokai diff and a Dracula file browser. Those are
-surfaces too, and unlike the desktop ones they work on all five targets:
+### The terminal is not one of them
+
+It used to be. A theme carried a twenty-value ANSI palette and wrote it to
+alacritty, zellij, btop, neovim, bat, delta and lazygit — and switching theme
+looked like it had done nothing. The cause is structural rather than a bug:
+every program inside a terminal window carries its own palette and paints over
+the sixteen slots underneath. Spread a theme across a dozen of those and the
+result is neither the old one nor the new one.
+
+So the terminal gets **one** RedDB palette, written on every converge, that
+never varies — and a theme changes the things nothing else overrides:
 
 | surface | how |
 | --- | --- |
-| alacritty, zellij, btop, neovim | a generated theme file each |
-| VS Code | `workbench.colorTheme` in a settings file parsed as JSONC — comments and trailing commas survive the edit, and where no exact theme is published (Osaka Jade) it says so rather than picking a lookalike |
-| `bat` | written twice, since Debian renames the binary and the config follows it |
-| `delta` | through git config, where red-dev already made it the pager |
-| `lazygit` | our block only; anything else in the file survives |
-| `opencode`, `herdr` | told to follow the terminal rather than given a copied palette |
-| Windows | dark mode and accent colour |
+| wallpaper | a brand sheet, embedded, named by its own content hash |
+| Windows | dark mode, accent colour, and colour prevalence |
 | GNOME | light/dark preference and accent |
-| wallpaper | generated from the palette, not shipped as an image |
+| VS Code | `workbench.colorTheme`, in a settings file parsed as JSONC so comments and trailing commas survive |
 
-Telling an agent to follow the terminal instead of copying sixteen hex values
-is [omarchy](https://github.com/basecamp/omarchy)'s idea, and it is the better
-one: following cannot drift. Where `herdr` ships a theme with our name — it has
-`tokyo-night`, `catppuccin`, `gruvbox` and `nord` — that wins, because its
-author tuned those for its own interface.
+The full reasoning, including where the five hues the brand does not publish
+come from, is in [ADR 0002](.red/adr/0002-the-terminal-palette-is-fixed.md).
+
+### Two of them have no accent
+
+`obsidian` and `marble` are the brand test hiding inside a colour question: if
+RedDB still reads as RedDB with `#ff2056` removed, the identity is carried by
+the cut and the type. Expressing that takes more than leaving a field blank —
+on Windows, turning colour prevalence off still leaves the stored accent
+tinting Start and focus rings, so absence has to be written as a colour.
+
+### Contrast is measured, not intended
+
+The brand machine-checks its own palette and says *"a guardrail that lies fails
+the build"*. `vendor/brand/tokens/tokens.json` is vendored whole rather than
+distilled so those guardrails come with it, and
+[two test files](src/theme-contrast.test.ts) run them here: one pins this
+repo's contrast maths against the brand's published ratios, the other measures
+every role pair in every theme. A theme that puts `red.500` text on
+`neutral.800` fails arithmetic rather than review.
 
 Each writer owns a generated file and **references** your config rather than
 rewriting it — your zellij keybindings and the rest of `btop.conf` are yours.
-
-Wallpapers are **generated from the palette**, not shipped as photographs: no
-licensing question, an exact match to the theme, and no download. The PNG
-encoder is [120 lines](src/png.ts) with no image library, so it works inside the
-compiled binary on every target.
 
 ---
 
@@ -876,7 +891,7 @@ build instead.
 | Terminal and multiplexer config | [`src/alacritty.ts`](src/alacritty.ts), [`config/zellij/`](config/zellij/) |
 | Themes and where they are applied | [`src/themes.ts`](src/themes.ts), [`src/theme-apply.ts`](src/theme-apply.ts) |
 | The WSL-to-Windows boundary | [`src/wsl.ts`](src/wsl.ts) |
-| Wallpaper generation | [`src/wallpaper.ts`](src/wallpaper.ts), [`src/png.ts`](src/png.ts) |
+| Wallpapers | [`src/wallpaper.ts`](src/wallpaper.ts), [`assets/wallpapers/`](assets/wallpapers) |
 | Bootstrap scripts | [`boot.sh`](boot.sh), [`boot.ps1`](boot.ps1) |
 
 ## Develop
@@ -948,7 +963,7 @@ Then, in order:
 2. `red-dev` — the interface. **Install** asks its questions first; nothing
    converges until you answer.
 3. Try `Ctrl+Alt+T` and `Ctrl+Alt+Shift+T`.
-4. `red-dev theme gruvbox`, then look at a title bar. Windows applies the accent
+4. `red-dev theme flare`, then look at a title bar. Windows applies the accent
    to windows opened *after* the switch.
 5. `red-dev doctor` — it should report no drift.
 

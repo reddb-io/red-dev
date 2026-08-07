@@ -1,0 +1,49 @@
+{
+  "source": "reddb-io/brand",
+  "ref": "main",
+  "commit": "bbcff9bb12a323257d794c8fb5038f1d17b4393f",
+  "nearestTag": "2026.08",
+  "why": [
+    "A commit, not a release, and that is a gap rather than a shortcut.",
+    "brand ADR 0003 makes the Assets release the distribution unit, and tokens/ IS one of the bundle CATEGORIES. But assets/wallpaper/ is deliberately excluded from that bundle, and the wallpaper set landed in bbcff9b on 2026-08-06, three days after the 2026.08 tag. There is no release containing everything red-dev needs.",
+    "tokens.json also moved after the tag: every hex is byte-identical, but the $extensions.reddb.contrastGuardrail blocks are new, and those are the reason for vendoring the source rather than a distillation of it.",
+    "Filed upstream: cut a release containing the wallpaper set, and add assets/wallpaper/ to CATEGORIES in scripts/bundle.mjs."
+  ],
+  "files": {
+    "tokens/tokens.json": "a9505806e857bb9352875f8cdae2b1c11f27b2455a738e13d7d4ab802b284205"
+  },
+  "wallpaperCommit": "d96e5386c56794e411eefcafa23189ab0c7ad581",
+  "wallpaperNote": "reddb-io/brand#98, merged. The wallpapers here are byte-identical to that commit's assets/wallpaper/, vendored unaltered \u2014 the 8-bit encoding is the brand's own artefact, not something re-encoded on this side, which is what keeps LICENSE-assets.md out of it. Still a commit rather than a release: assets/wallpaper/ is excluded from the bundle CATEGORIES, filed as reddb-io/brand#102.",
+  "wallpaper": {
+    "assets/wallpapers/dark.png": {
+      "from": "assets/wallpaper/reddb-wallpaper-01-signature-dark-3840x2160.png",
+      "sha256": "fbc8914b7797f88c073bb22df69f28779cf59865b04f4b74d91ddcc7128dd3d3",
+      "unaltered": true
+    },
+    "assets/wallpapers/light.png": {
+      "from": "assets/wallpaper/reddb-wallpaper-02-classic-paper-3840x2160.png",
+      "sha256": "5cca285d099fca74338616fa02c6f888d513bb39d365c739c572d43b21f00b0b",
+      "unaltered": true
+    },
+    "assets/wallpapers/obsidian.png": {
+      "from": "assets/wallpaper/reddb-wallpaper-26-monochrome-3840x2160.png",
+      "sha256": "381f8cc4b54b3eb6373f34d54290d297dda1f6eede0ea7bf90fd9e4484c88aa7",
+      "unaltered": true
+    },
+    "assets/wallpapers/marble.png": {
+      "from": "assets/wallpaper/reddb-wallpaper-25-mist-3840x2160.png",
+      "sha256": "2894fc6d38243427fd7946fddecbf21c7b316d50af7c1d882cbac4cd73cd6a26",
+      "unaltered": true
+    },
+    "assets/wallpapers/cobalt.png": {
+      "from": "assets/wallpaper/reddb-wallpaper-22-graphite-3840x2160.png",
+      "sha256": "3f0c9f0e31afde9c342d8d8d983a352c640cbe07d49160802335a9241e6e8c93",
+      "unaltered": true
+    },
+    "assets/wallpapers/flare.png": {
+      "from": "assets/wallpaper/reddb-wallpaper-14-red-ground-3840x2160.png",
+      "sha256": "48833448475a73e461f518d5c7b3ea88576709bd150d5544d216f79f07eb7f63",
+      "unaltered": true
+    }
+  }
+}

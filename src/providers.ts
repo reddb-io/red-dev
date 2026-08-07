@@ -750,8 +750,8 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
       }
       if (pr.name === "alacritty") {
         const { configureAlacritty } = await import("./alacritty.ts");
-        const { THEMES } = await import("./themes.ts");
-        const theme = THEMES[ctx.theme];
+        const { themeFor } = await import("./themes.ts");
+        const theme = themeFor(ctx.theme);
         if (!theme) throw new RedError(`unknown theme '${ctx.theme}'`);
         const { NERD_FONTS } = await import("./wsl.ts");
         const spec = NERD_FONTS[ctx.font];
@@ -763,7 +763,6 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
         try {
           await configureAlacritty({
             platform: ctx.platform,
-            theme,
             fontFamily: spec.family,
             fontSize: ctx.fontSize,
             opacity: ctx.opacity,
@@ -772,12 +771,15 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
           log.warn(`alacritty: ${(err as Error).message}`);
         }
 
-        const { applyThemeEverywhere } = await import("./theme-apply.ts");
-        const { applied } = await applyThemeEverywhere(theme, ctx.platform);
-        if (applied.length > 0) log.ok(`themed: ${applied.join(", ")}`);
+        const { applyTerminalPalette } = await import("./terminal-surfaces.ts");
+        await applyTerminalPalette(ctx.platform);
 
-        const { applyWallpaperLogged } = await import("./wallpaper.ts");
-        await applyWallpaperLogged(theme, ctx.theme, ctx.platform);
+        // ctx.theme, not a slug derived from theme.name. Deriving it is
+        // what made a converge miss every slug-indexed map while
+        // `red-dev theme <name>` looked fine.
+        const { applyThemeEverywhere } = await import("./theme-apply.ts");
+        const { applied } = await applyThemeEverywhere(ctx.theme, ctx.platform);
+        if (applied.length > 0) log.ok(`themed: ${applied.join(", ")}`);
         return;
       }
       if (pr.name === "red-skills-vscode") {
@@ -832,14 +834,13 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
       if (pr.name === "nerd-font") {
         await wsl.installNerdFont(ctx.font, ctx.platform);
       } else {
-        const { THEMES } = await import("./themes.ts");
-        const theme = THEMES[ctx.theme];
+        const { themeFor } = await import("./themes.ts");
+        const theme = themeFor(ctx.theme);
         if (!theme) throw new RedError(`unknown theme '${ctx.theme}'`);
         const spec = wsl.NERD_FONTS[ctx.font];
         if (!spec) throw new RedError(`unknown font '${ctx.font}'`);
         await wsl.configureWindowsTerminal({
           fontFace: spec.family,
-          theme,
           opacity: ctx.opacity,
           distro: process.env["WSL_DISTRO_NAME"] ?? undefined,
           home: process.env["HOME"] ?? undefined,

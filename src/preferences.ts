@@ -18,6 +18,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import type { ApplyContext } from "./providers.ts";
 import type { Platform } from "./platform.ts";
+import { resolveThemeSlug } from "./themes.ts";
 
 export type TerminalShell = "wsl" | "gitbash";
 
@@ -111,7 +112,12 @@ export async function applyContextForEntry(
   const prefs = await readPreferences(p);
   return {
     platform: p,
-    theme: prefs.theme ?? inv.themeName,
+    // resolveThemeSlug, not the raw value: every machine red-dev has
+    // touched has one of the ten retired slugs recorded here, and this
+    // is the read that heals it. No write and no ledger, so it is
+    // idempotent by construction and correct even against a preferences
+    // file restored from a backup.
+    theme: resolveThemeSlug(prefs.theme ?? inv.themeName),
     font: prefs.font ?? inv.font,
     fontSize: prefs.fontSize,
     opacity: inv.opacity,

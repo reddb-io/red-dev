@@ -465,14 +465,14 @@ async function installZellijConfig(p: Platform): Promise<void> {
   }
 
   // The config references theme "red-dev", so that theme has to exist
-  // even when the theme step has not run or failed. Writing a default
-  // here means the reference always resolves; a later theme switch
-  // overwrites this file with the chosen palette. Now that config.kdl
-  // already says `theme "red-dev"`, applyZellij leaves it untouched.
-  const { THEMES, DEFAULT_THEME } = await import("./themes.ts");
-  const fallback = THEMES[DEFAULT_THEME];
-  if (fallback && !existsSync(`${dir}/themes/red-dev.kdl`)) {
-    const { applyZellij } = await import("./theme-apply.ts");
-    await applyZellij(fallback, p);
-  }
+  // even when the theme step has not run or failed. Writing it here
+  // means the reference always resolves.
+  //
+  // Unconditional now, where it used to be guarded on the file being
+  // absent. The guard existed because the content depended on which
+  // theme was chosen and a default would have clobbered a real one;
+  // there is only one palette to write, so reasserting it is free and
+  // repairs a file edited by hand.
+  const { applyZellij } = await import("./terminal-surfaces.ts");
+  await applyZellij(p);
 }

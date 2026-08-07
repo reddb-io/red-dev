@@ -18,14 +18,14 @@ const linux: Platform = {
   caps: { apt: true, gui: false, systemd: true, winget: false, flatpak: true },
 };
 
-async function withHome<T>(run: () => Promise<T>): Promise<T> {
+async function withHome<T>(run: () => Promise<T>, theme = "cobalt"): Promise<T> {
   const previous = process.env["HOME"];
   process.env["HOME"] = mkdtempSync(`${tmpdir()}/red-dev-prefs-`);
   try {
     mkdirSync(`${process.env["HOME"]}/.config/alacritty`, { recursive: true });
     await Bun.write(
       `${process.env["HOME"]}/.config/alacritty/red-dev.json`,
-      JSON.stringify({ theme: "gruvbox", font: "jetbrainsmono", fontSize: 14 }) + "\n",
+      JSON.stringify({ theme, font: "jetbrainsmono", fontSize: 14 }) + "\n",
     );
     return await run();
   } finally {
@@ -35,7 +35,7 @@ async function withHome<T>(run: () => Promise<T>): Promise<T> {
 }
 
 const defaults: InvocationDefaults = {
-  themeName: "tokyo-night",
+  themeName: "dark",
   font: "firacode",
   opacity: 90,
 };
@@ -46,11 +46,39 @@ describe("apply context preferences", () => {
       const ctx = await applyContextForEntry(linux, defaults, "theme");
 
       expect(ctx).toMatchObject({
-        theme: "gruvbox",
+        theme: "cobalt",
         font: "jetbrainsmono",
         fontSize: 14,
       });
     });
+  });
+
+  test("a retired theme heals on the way through, without touching the file", async () => {
+    // Every machine red-dev has ever configured has one of the ten
+    // omakub slugs recorded. This seam is where they stop existing —
+    // read-time, no write, so a preferences file restored from a backup
+    // heals again rather than staying broken.
+    await withHome(async () => {
+      const ctx = await applyContextForEntry(linux, defaults, "install");
+      expect(ctx.theme).toBe("dark");
+      // The font beside it is untouched: healing the theme must not
+      // reset everything else recorded in the same file.
+      expect(ctx.font).toBe("jetbrainsmono");
+
+      const onDisk = JSON.parse(
+        await Bun.file(`${process.env["HOME"]}/.config/alacritty/red-dev.json`).text(),
+      ) as { theme: string };
+      expect(onDisk.theme).toBe("gruvbox");
+    }, "gruvbox");
+  });
+
+  test("the one light palette heals to the light theme, not the default", async () => {
+    // rose-pine was the only theme with appearance: "light". Sending it
+    // to dark would darken a machine that had chosen not to be.
+    await withHome(async () => {
+      const ctx = await applyContextForEntry(linux, defaults, "install");
+      expect(ctx.theme).toBe("light");
+    }, "rose-pine");
   });
 
   test("all apply entry paths hydrate through the same preference seam", async () => {
@@ -61,10 +89,10 @@ describe("apply context preferences", () => {
       );
 
       expect(contexts.map((ctx) => [ctx.theme, ctx.font, ctx.fontSize])).toEqual([
-        ["gruvbox", "jetbrainsmono", 14],
-        ["gruvbox", "jetbrainsmono", 14],
-        ["gruvbox", "jetbrainsmono", 14],
-        ["gruvbox", "jetbrainsmono", 14],
+        ["cobalt", "jetbrainsmono", 14],
+        ["cobalt", "jetbrainsmono", 14],
+        ["cobalt", "jetbrainsmono", 14],
+        ["cobalt", "jetbrainsmono", 14],
       ]);
     });
   });

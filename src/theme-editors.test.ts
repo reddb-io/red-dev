@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { codeArgv, gnomeColorScheme, VSCODE_THEMES, vscodeSettingsJson } from "./theme-editors.ts";
+import { codeArgv, gnomeColorScheme, vscodeSettingsJson } from "./theme-editors.ts";
 import { THEMES } from "./themes.ts";
 
 describe("codeArgv", () => {
@@ -52,18 +52,13 @@ describe("VS Code themes", () => {
     });
   });
 
-  test("reports Osaka Jade as unsupported instead of exact", () => {
-    expect(VSCODE_THEMES["osaka-jade"]).toEqual({
-      status: "unsupported",
-      reason:
-        "no exact Osaka Jade VS Code theme is published; Solarized Osaka is a different palette",
-    });
-  });
 });
 
 describe("gnomeColorScheme", () => {
-  test("uses Rose Pine's explicit light appearance", () => {
-    const theme = THEMES["rose-pine"]!;
-    expect(gnomeColorScheme(theme)).toBe("prefer-light");
+  test("follows the theme's declared appearance, not a guess at its palette", () => {
+    expect(gnomeColorScheme(THEMES.light)).toBe("prefer-light");
+    expect(gnomeColorScheme(THEMES.marble)).toBe("prefer-light");
+    expect(gnomeColorScheme(THEMES.dark)).toBe("prefer-dark");
+    expect(gnomeColorScheme(THEMES.obsidian)).toBe("prefer-dark");
   });
 });

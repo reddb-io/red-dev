@@ -21,7 +21,7 @@ const wsl: Platform = {
   caps: { apt: true, gui: false, systemd: true, winget: true, flatpak: true },
 };
 
-const ctx = { platform: wsl, theme: "tokyo-night", font: "firacode", opacity: 90 };
+const ctx = { platform: wsl, theme: "dark", font: "firacode", opacity: 90 };
 
 async function run(scopes: Parameters<typeof countSteps>[0]) {
   const events: string[] = [];

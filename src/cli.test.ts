@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { buildCli, parseArgs } from "./cli.ts";
+import { DEFAULT_THEME, themeNames } from "./themes.ts";
 
 const cli = buildCli();
 const parse = (argv: string[]) => parseArgs(cli, argv);
@@ -46,7 +47,7 @@ describe("validation", () => {
   });
 
   test("accepts every theme it advertises", () => {
-    for (const name of ["tokyo-night", "catppuccin", "gruvbox"]) {
+    for (const name of themeNames()) {
       expect(parse(["theme", name]).errors).toEqual([]);
     }
   });
@@ -87,6 +88,6 @@ describe("flags", () => {
   test("font and theme carry their defaults", () => {
     const inv = parse(["install"]);
     expect(inv.font).toBe("firacode");
-    expect(inv.themeName).toBe("tokyo-night");
+    expect(inv.themeName).toBe(DEFAULT_THEME);
   });
 });

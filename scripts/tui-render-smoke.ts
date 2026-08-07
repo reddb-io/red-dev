@@ -11,7 +11,7 @@
  */
 
 import { Box, ListItem, MultiProgressBar, ProgressBar, Text, renderToString } from "tuiuiu.js";
-import { THEMES, themeNames } from "../src/themes.ts";
+import { swatches, THEMES, themeNames, type ThemeSlug } from "../src/themes.ts";
 import { Accented, Header, Screen, Section, StatusLine, Surface } from "../src/tui-chrome.ts";
 import { ui } from "../src/tui-theme.ts";
 
@@ -50,15 +50,8 @@ function assertPainted(label: string, out: string, expected: string): void {
   }
 }
 
-function paletteOf(slug: string): string[] {
-  const t = THEMES[slug];
-  if (!t) return [];
-  const c = t.terminal;
-  return [c.background, c.red, c.green, c.yellow, c.blue, c.purple, c.cyan, c.foreground];
-}
-
 // ---------------------------------------------------------------- setup
-const active = "kanagawa";
+const active: ThemeSlug = "cobalt";
 const setup = renderToString(
   Screen(
     100,
@@ -85,9 +78,9 @@ const setup = renderToString(
           Text({}, ""),
           ...themeNames()
             .slice(2, 6)
-            .map((n, i) => ListItem({ primary: THEMES[n]?.name ?? n, selected: i === 2 })),
+            .map((n, i) => ListItem({ primary: THEMES[n].name, selected: i === 2 })),
           Text({}, ""),
-          Box({ flexDirection: "row" }, ...paletteOf(active).map((h) => Text({ backgroundColor: h }, "    "))),
+          Box({ flexDirection: "row" }, ...swatches(active).map((h) => Text({ backgroundColor: h }, "    "))),
         ),
       ),
     ),
@@ -98,8 +91,10 @@ const setup = renderToString(
 
 console.log(setup);
 
-for (const name of themeNames().slice(2, 6)) {
-  const label = THEMES[name]?.name ?? name;
+// A slice, not the whole set: the list is rendered into a fixed height
+// and the first rows scroll out of the captured frame.
+for (const name of themeNames().slice(2)) {
+  const label = THEMES[name].name;
   if (!strip(setup).includes(label)) problems.push(`theme missing from setup list: ${label}`);
 }
 // The swatches are the reason this screen exists; without a background
@@ -107,8 +102,15 @@ for (const name of themeNames().slice(2, 6)) {
 if (!/\x1b\[48;2;\d+;\d+;\d+m/.test(setup)) {
   problems.push("no truecolor background escapes — swatches did not render as colour");
 }
-if (!setup.includes("\x1b[48;2;31;31;40m")) {
-  problems.push("kanagawa background swatch missing its actual colour (#1F1F28)");
+// The active theme's own ground, as an escape. A swatch strip that
+// renders in *some* colour but not the theme's is the failure this
+// catches — cobalt's ground is neutral.700 #333949 = rgb(51,57,73).
+if (!setup.includes("\x1b[48;2;51;57;73m")) {
+  problems.push("cobalt ground swatch missing its actual colour (#333949)");
+}
+// Accent absence has to survive rendering: obsidian is seven cells.
+if (swatches("obsidian").length !== 7 || swatches("cobalt").length !== 8) {
+  problems.push("the swatch strip lost the accent distinction");
 }
 // No boxes: the whole point of the restyle. A round border here means a
 // Panel crept back in.

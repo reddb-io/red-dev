@@ -20,7 +20,7 @@ import {
 import { detect, summary, type Platform } from "./platform.ts";
 import { applyProvider, systemUpdate, type ApplyContext } from "./providers.ts";
 import { applyContextForEntry, type ApplyContextEntryPath } from "./preferences.ts";
-import { THEMES, themeNames } from "./themes.ts";
+import { themeFor, themeNames } from "./themes.ts";
 import { interactive, select } from "./ui.ts";
 
 function resolveScopes(p: Platform, arg?: string): Scope[] {
@@ -266,7 +266,7 @@ async function cmdTheme(p: Platform, inv: Invocation, name?: string): Promise<nu
   const ctx = await contextFor(p, inv, "theme");
   const chosen =
     name ?? (await select("Theme?", themeNames() as [string, ...string[]], ctx.theme));
-  const theme = THEMES[chosen];
+  const theme = themeFor(chosen);
   if (!theme) {
     log.err(`unknown theme '${chosen}' (known: ${themeNames().join(", ")})`);
     return 1;
@@ -288,7 +288,6 @@ async function cmdTheme(p: Platform, inv: Invocation, name?: string): Promise<nu
     const { configureAlacritty } = await import("./alacritty.ts");
     await configureAlacritty({
       platform: p,
-      theme,
       fontFamily: spec.family,
       fontSize: ctx.fontSize,
       opacity: ctx.opacity,
@@ -298,26 +297,31 @@ async function cmdTheme(p: Platform, inv: Invocation, name?: string): Promise<nu
     failures++;
   }
 
-  // Everything that is not the terminal emulator: multiplexer, system
-  // monitor, editor. Colouring only the terminal is what makes a theme
-  // switch feel half-applied.
+  // The terminal, which does not vary. Reasserted here so `red-dev
+  // theme` repairs a hand-edited config even though it is not changing
+  // one — the command people reach for when colours look wrong.
+  try {
+    const { applyTerminalPalette } = await import("./terminal-surfaces.ts");
+    const { applied } = await applyTerminalPalette(p);
+    if (applied.length > 0) log.skip(`terminal palette unchanged: ${applied.join(", ")}`);
+  } catch (err) {
+    log.warn(`terminal palette: ${(err as Error).message}`);
+  }
+
+  // The desktop, which does.
   try {
     const { applyThemeEverywhere } = await import("./theme-apply.ts");
-    const { applied, skipped } = await applyThemeEverywhere(theme, p, chosen);
+    const { applied, skipped } = await applyThemeEverywhere(chosen, p);
     if (applied.length > 0) log.ok(`themed: ${applied.join(", ")}`);
     if (skipped.length > 0) log.skip(`not present: ${skipped.join(", ")}`);
   } catch (err) {
     log.warn(`theme surfaces: ${(err as Error).message}`);
   }
 
-  const { applyWallpaperLogged } = await import("./wallpaper.ts");
-  await applyWallpaperLogged(theme, chosen, p);
-
   if (p.env === "wsl" || p.os === "windows") {
     try {
       await wsl.configureWindowsTerminal({
         fontFace: spec.family,
-        theme,
         opacity: ctx.opacity,
         distro: process.env["WSL_DISTRO_NAME"] ?? undefined,
         home: process.env["HOME"] ?? undefined,
@@ -432,12 +436,11 @@ async function cmdShell(p: Platform, inv: Invocation): Promise<number> {
     const { configureAlacritty } = await import("./alacritty.ts");
     const wsl = await import("./wsl.ts");
     const ctx = await contextFor(p, inv, "theme");
-    const theme = THEMES[ctx.theme];
+    const theme = themeFor(ctx.theme);
     const spec = wsl.NERD_FONTS[ctx.font];
     if (theme && spec) {
       await configureAlacritty({
         platform: p,
-        theme,
         fontFamily: spec.family,
         fontSize: ctx.fontSize,
         opacity: ctx.opacity,
@@ -769,12 +772,10 @@ async function cmdMenu(p: Platform, inv: Invocation, cliHelp: string): Promise<n
       const wsl = await import("./wsl.ts");
       const spec = wsl.NERD_FONTS[font];
       const ctx = await contextFor(p, inv, "theme");
-      const theme = THEMES[ctx.theme];
-      if (!spec || !theme) return;
+      if (!spec) return;
       const { configureAlacritty } = await import("./alacritty.ts");
       await configureAlacritty({
         platform: p,
-        theme,
         fontFamily: spec.family,
         fontSize: size,
         opacity: ctx.opacity,

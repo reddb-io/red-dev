@@ -17,7 +17,31 @@ import { copyFileSync, existsSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { userInfo } from "node:os";
 import { log, RedError } from "./log.ts";
 import type { Platform } from "./platform.ts";
-import { THEMES, type Theme } from "./themes.ts";
+import { ANSI_SCHEME_NAME, wtScheme } from "./terminal-palette.ts";
+
+/**
+ * Scheme names red-dev used to write, and now removes.
+ *
+ * A .lnk keeps its hotkey and a settings.json keeps its schemes: neither
+ * disappears because the code that wrote it did. These are the display
+ * names of the ten omakub-derived themes, and a machine that passed
+ * through several is carrying one entry per theme it ever wore.
+ *
+ * A literal list rather than a lookup into THEMES, because these are
+ * history. The point of the list is to survive the themes being deleted.
+ */
+const LEGACY_WT_SCHEMES = new Set([
+  "Tokyo Night",
+  "Catppuccin Macchiato",
+  "Gruvbox Dark",
+  "Everforest",
+  "Kanagawa",
+  "Matte Black",
+  "Nord",
+  "Osaka Jade",
+  "Ristretto",
+  "Rose Pine",
+]);
 
 /**
  * Resolve a Windows interop binary without trusting PATH.
@@ -775,7 +799,6 @@ interface WtSettings {
 
 export interface TerminalOptions {
   fontFace: string;
-  theme: Theme;
   /**
    * Background opacity, 0–100. Omakub gets this from Alacritty's
    * window.opacity; Windows Terminal spells it `opacity` and needs
@@ -818,7 +841,7 @@ export async function configureWindowsTerminal(opts: TerminalOptions): Promise<v
 
   settings.profiles ??= {};
   settings.profiles.defaults ??= {};
-  settings.profiles.defaults["colorScheme"] = opts.theme.name;
+  settings.profiles.defaults["colorScheme"] = ANSI_SCHEME_NAME;
   settings.profiles.defaults["font"] = {
     ...(settings.profiles.defaults["font"] as Record<string, unknown> | undefined),
     face: opts.fontFace,
@@ -833,10 +856,21 @@ export async function configureWindowsTerminal(opts: TerminalOptions): Promise<v
     settings.profiles.defaults["useAcrylic"] = true;
   }
 
-  // Replace our scheme by name; leave any other scheme alone.
+  // Replace our scheme, and retire the ones we used to write.
+  //
+  // The filter used to match on the theme's display name, so it only
+  // ever removed the scheme it was about to rewrite: every theme a
+  // machine had passed through stayed in the list forever. Ten dead
+  // schemes is not a functional problem, but it makes the picker a
+  // museum of decisions the project has since reversed.
+  //
+  // Doing it here rather than in a migration also repairs a machine that
+  // skipped a release, since it runs on every converge.
   settings.schemes ??= [];
-  settings.schemes = settings.schemes.filter((s) => s["name"] !== opts.theme.name);
-  settings.schemes.push({ name: opts.theme.name, ...opts.theme.terminal });
+  settings.schemes = settings.schemes.filter(
+    (s) => s["name"] !== ANSI_SCHEME_NAME && !LEGACY_WT_SCHEMES.has(String(s["name"] ?? "")),
+  );
+  settings.schemes.push(wtScheme());
 
   if (opts.distro) {
     const list = settings.profiles.list ?? [];
@@ -858,19 +892,3 @@ export async function configureWindowsTerminal(opts: TerminalOptions): Promise<v
   log.ok(`Windows Terminal configured (backup at ${path}.red-dev-backup)`);
 }
 
-// -------------------------------------------------------- entrypoint
-
-export async function applyWslScope(themeKey: string, fontKey: string): Promise<void> {
-  const theme = THEMES[themeKey];
-  if (!theme) throw new RedError(`unknown theme '${themeKey}'`);
-  const font = NERD_FONTS[fontKey];
-  if (!font) throw new RedError(`unknown font '${fontKey}'`);
-
-  await installNerdFont(fontKey);
-  await configureWindowsTerminal({
-    fontFace: font.family,
-    theme,
-    distro: process.env["WSL_DISTRO_NAME"] ?? undefined,
-    home: process.env["HOME"] ?? undefined,
-  });
-}

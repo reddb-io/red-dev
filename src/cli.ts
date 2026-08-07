@@ -11,7 +11,7 @@
 
 import { createCLI, type CLI } from "cli-args-parser";
 import pkg from "../package.json" with { type: "json" };
-import { themeNames, DEFAULT_THEME } from "./themes.ts";
+import { isThemeSlug, themeNames, DEFAULT_THEME } from "./themes.ts";
 
 /**
  * One source of truth, inlined at build time.
@@ -203,7 +203,7 @@ export function parseArgs(cli: CLI, argv: string[]): Invocation {
   }
 
   const rawName = pos["name"];
-  if (typeof rawName === "string" && !themeNames().includes(rawName)) {
+  if (typeof rawName === "string" && !isThemeSlug(rawName)) {
     errors.push(`unknown theme '${rawName}' (known: ${themeNames().join(", ")})`);
   }
 

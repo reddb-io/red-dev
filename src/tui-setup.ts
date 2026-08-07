@@ -32,7 +32,7 @@ import type { Platform } from "./platform.ts";
 import { summary } from "./platform.ts";
 import { Screen, Surface } from "./tui-chrome.ts";
 import { muted, ui } from "./tui-theme.ts";
-import { THEMES } from "./themes.ts";
+import { swatches } from "./themes.ts";
 // The questions live in tui-setup-model.ts and only there. They were
 // declared in both files, identically, for two interfaces that ask the
 // same interview — which is a copy that drifts the first time one of
@@ -46,13 +46,6 @@ import {
 } from "./tui-setup-model.ts";
 
 
-/** The palette, in the order that reads best as a strip. */
-function paletteOf(slug: string): string[] {
-  const t = THEMES[slug];
-  if (!t) return [];
-  const c = t.terminal;
-  return [c.background, c.red, c.green, c.yellow, c.blue, c.purple, c.cyan, c.foreground];
-}
 
 export async function runSetupTui(
   p: Platform,
@@ -241,7 +234,7 @@ export async function runSetupTui(
                   Text({}, ""),
                   Box(
                     { flexDirection: "row" },
-                    ...paletteOf(activeKey).map((hex) => Text({ backgroundColor: hex }, "    ")),
+                    ...swatches(activeKey).map((hex) => Text({ backgroundColor: hex }, "    ")),
                   ),
                 ]
               : []),
