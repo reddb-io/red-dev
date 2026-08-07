@@ -207,9 +207,9 @@ export function questions(
       id: "theme",
       title: "Theme",
       description:
-        "One palette reaches the terminal, zellij, btop, Neovim, VS Code, GNOME " +
-        "and the wallpaper — which is generated from these colours, not shipped " +
-        "as an image.",
+        "The wallpaper, the system accent and VS Code. The terminal keeps one " +
+        "fixed RedDB palette either way — every program inside it paints over " +
+        "the ANSI colours, so varying them made a switch look like it failed.",
       multi: false,
       choices: themeNames().map((n) => ({
         key: n,
