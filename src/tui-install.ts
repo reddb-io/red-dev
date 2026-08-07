@@ -145,6 +145,8 @@ export function useInstallModel(
   const [current, setCurrent] = useState("");
   const [scope, setScope] = useState("");
   const [finished, setFinished] = useState(false);
+  // When it stopped, so Elapsed can stop with it.
+  const [finishedAt, setFinishedAt] = useState(0);
   // Whether the log is pinned to the tail. Starts true, and the arrow
   // keys are what turn it off.
   const [following, setFollowing] = useState(true);
@@ -221,6 +223,7 @@ export function useInstallModel(
         },
       },
     ).then((summary) => {
+      setFinishedAt(Date.now());
       setFinished(true);
       clearInterval(timer);
       onFinish(summary.failed);
@@ -236,7 +239,18 @@ export function useInstallModel(
     scope,
     finished,
     following,
-    elapsedMs: () => (startedAt() === 0 ? 0 : Date.now() - startedAt()),
+    // Frozen once the run ends.
+    //
+    // This read Date.now() on every render, and clearInterval only stops
+    // the once-a-second tick — it does not stop the frame re-rendering
+    // when someone scrolls the log, which every arrow key does. So a
+    // finished converge went on counting for as long as its result was
+    // left on screen: a 14-second run reading "4m 48s" because the
+    // reader was still looking at it.
+    elapsedMs: () => {
+      if (startedAt() === 0) return 0;
+      return (finishedAt() === 0 ? Date.now() : finishedAt()) - startedAt();
+    },
     total,
     logScroll,
     begin: () => {

@@ -13,6 +13,7 @@
  * which is why config/bash/path.sh prepends instead.
  */
 
+import { removeTemp, tempDir } from "./temp.ts";
 import { copyFileSync, existsSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { userInfo } from "node:os";
 import { log, RedError } from "./log.ts";
@@ -371,9 +372,11 @@ async function installWindowsNerdFont(key: string): Promise<void> {
   const url = await ghAsset("ryanoasis/nerd-fonts", `${spec.asset}.zip`);
   log.step(`nerd font: ${spec.asset} -> ${spec.family}`);
 
-  const tmp = `/tmp/red-dev-font-${spec.asset}`;
-  await run(["rm", "-rf", tmp]);
-  await run(["mkdir", "-p", tmp]);
+  // This was /tmp plus `rm` and `mkdir`, and native Windows has none of
+  // the three. nerd-font failed there with
+  // `Executable not found in $PATH: "rm"` — reported as the font's
+  // failure rather than as red-dev's plumbing.
+  const tmp = tempDir(`font-${spec.asset}`);
 
   const res = await fetch(url);
   if (!res.ok) throw new RedError(`font download failed ${res.status}`);
@@ -394,7 +397,7 @@ async function installWindowsNerdFont(key: string): Promise<void> {
   }
 
   await registerFontsOnWindows(spec.asset);
-  await run(["rm", "-rf", tmp]);
+  removeTemp(tmp);
   log.ok(`${spec.family} installed (${faces.length} faces)`);
   await ensureFontVisible(spec);
 }
@@ -431,9 +434,11 @@ async function installLinuxNerdFont(key: string): Promise<void> {
   const url = await ghAsset("ryanoasis/nerd-fonts", `${spec.asset}.zip`);
   log.step(`nerd font: ${spec.asset} -> ${spec.family}`);
 
-  const tmp = `/tmp/red-dev-font-${spec.asset}`;
-  await run(["rm", "-rf", tmp]);
-  await run(["mkdir", "-p", tmp]);
+  // This was /tmp plus `rm` and `mkdir`, and native Windows has none of
+  // the three. nerd-font failed there with
+  // `Executable not found in $PATH: "rm"` — reported as the font's
+  // failure rather than as red-dev's plumbing.
+  const tmp = tempDir(`font-${spec.asset}`);
 
   const res = await fetch(url);
   if (!res.ok) throw new RedError(`font download failed ${res.status}`);
@@ -457,7 +462,7 @@ async function installLinuxNerdFont(key: string): Promise<void> {
   }
 
   await run(["fc-cache", "-f", fontDir]);
-  await run(["rm", "-rf", tmp]);
+  removeTemp(tmp);
 
   if (!(await fontVisibleToLinux(spec.family))) {
     throw new RedError(`${spec.family} installed but fontconfig cannot resolve it`);
@@ -551,7 +556,7 @@ async function installFontsMachineWide(assetPrefix: string): Promise<boolean> {
   const localAppData = await windowsLocalAppData();
   const scriptPath = `${localAppData}/Temp/red-dev-fonts-machine.ps1`;
   const resultPath = `${localAppData}/Temp/red-dev-fonts-machine.log`;
-  await run(["rm", "-f", resultPath]);
+  removeTemp(resultPath);
 
   const script = machineWideFontScript(assetPrefix, await toWindowsPath(resultPath));
   await Bun.write(scriptPath, script);
@@ -572,12 +577,12 @@ async function installFontsMachineWide(assetPrefix: string): Promise<boolean> {
     log.warn("elevation declined — the font stays per-user");
     return false;
   } finally {
-    await run(["rm", "-f", scriptPath]);
+    removeTemp(scriptPath);
   }
 
   if (!existsSync(resultPath)) return false;
   const outcome = (await Bun.file(resultPath).text()).trim();
-  await run(["rm", "-f", resultPath]);
+  removeTemp(resultPath);
   if (!outcome.startsWith("installed")) {
     log.warn(`machine-wide font install ${outcome}`);
     return false;
@@ -736,7 +741,7 @@ Write-Output "registered $count"
     "-File",
     winScript,
   ]);
-  await run(["rm", "-f", scriptPath]);
+  removeTemp(scriptPath);
 }
 
 // -------------------------------------------------- windows terminal

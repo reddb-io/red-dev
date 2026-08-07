@@ -8,6 +8,7 @@
  * lost one to a full host disk while writing this.
  */
 
+import { removeTemp, tempDir, tempFile } from "./temp.ts";
 import { copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { log, logIsCaptured, RedError } from "./log.ts";
 import type { Provider } from "./manifest.ts";
@@ -206,6 +207,17 @@ export async function wingetInstall(id: string): Promise<void> {
       "--silent",
       "--accept-package-agreements",
       "--accept-source-agreements",
+      // Piping stdout is not enough to keep winget off the screen.
+      // Its progress UI is drawn with the Windows console API against
+      // CONOUT$, which ignores a redirected stdout entirely — so inside
+      // the fullscreen converge it painted through the right-hand panel:
+      //
+      //   Elapsed
+      //   4m 48sinformation on key differences w
+      //
+      // --disable-interactivity turns that UI off and leaves the plain
+      // lines, which the pipe does capture.
+      "--disable-interactivity",
     ]),
     { stdout: "pipe", stderr: "pipe" },
   );
@@ -310,8 +322,9 @@ export async function ghInstall(
   const file = url.split("/").pop() ?? "asset";
   log.step(`github: ${repo} -> ${file}`);
 
-  const tmp = `/tmp/red-${Date.now()}`;
-  await run(["mkdir", "-p", tmp]);
+  // tempDir, not /tmp and mkdir: on native Windows /tmp is not the
+  // directory a spawned shell resolves, and there is no mkdir binary.
+  const tmp = tempDir(`gh-${Date.now()}`);
 
   // A download with no deadline can wedge a converge forever, and one
   // did: `red` stopped at step 13 with no child process, no output and
@@ -364,7 +377,7 @@ export async function ghInstall(
     );
   }
 
-  await run(["rm", "-rf", tmp], { allowFailure: true });
+  removeTemp(tmp);
 }
 
 /**
@@ -531,8 +544,7 @@ export async function installerInstall(
   // os.tmpdir() gives the real directory on both, and forward slashes
   // with a drive letter — C:/Users/.../Temp/x.sh — is a spelling Git
   // Bash accepts and Bun writes to correctly.
-  const { tmpdir } = await import("node:os");
-  const tmp = `${tmpdir().replace(/\\/g, "/")}/red-dev-installer-${Date.now()}.sh`;
+  const tmp = tempFile(`installer-${Date.now()}.sh`);
   const res = await fetch(url);
   if (!res.ok) throw new RedError(`installer download failed ${res.status}: ${url}`);
   const body = await res.text();
@@ -569,12 +581,7 @@ export async function installerInstall(
   // failed with `Executable not found in $PATH: "rm"` — reported as the
   // installer's own failure, which sent the reader looking at the vendor
   // script instead of at this line.
-  const { rmSync } = await import("node:fs");
-  try {
-    rmSync(tmp, { force: true });
-  } catch {
-    // A temp file left behind is not worth failing an install over.
-  }
+  removeTemp(tmp);
 
   if (code !== 0) throw new RedError(`installer exited ${code}: ${url}`);
 }

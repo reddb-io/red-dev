@@ -252,6 +252,11 @@ export async function installAgent(a: AgentSpec, p: Platform): Promise<void> {
         "--exact",
         "--accept-package-agreements",
         "--accept-source-agreements",
+        // See wingetInstall: winget's progress UI is drawn against
+        // CONOUT$ and ignores a redirected stdout, so without this it
+        // paints over the converge frame no matter how the child is
+        // spawned.
+        "--disable-interactivity",
       ]),
     );
     return;
@@ -268,6 +273,11 @@ export async function installAgent(a: AgentSpec, p: Platform): Promise<void> {
         "--silent",
         "--accept-package-agreements",
         "--accept-source-agreements",
+        // See wingetInstall: winget's progress UI is drawn against
+        // CONOUT$ and ignores a redirected stdout, so without this it
+        // paints over the converge frame no matter how the child is
+        // spawned.
+        "--disable-interactivity",
       ]),
     );
     return;
