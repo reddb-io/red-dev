@@ -14,7 +14,20 @@ name: Release
 # failing, which is a confusing way to discover the requirement.
 
 on:
+  # Every push to main is a release.
+  #
+  # The alternative — remembering to bump package.json and push a tag —
+  # was tried and lost: main carried five merged changes across two days
+  # while the last release stayed on the version before them, so the only
+  # way to run the current code was to build it locally. A release nobody
+  # cuts is a release nobody can install.
+  #
+  # This does not loop. The version bump is committed and tagged with
+  # GITHUB_TOKEN, and GitHub deliberately does not trigger workflows for
+  # pushes made with that token — so the tag this job creates arrives as
+  # data, not as a second run.
   push:
+    branches: ["main"]
     tags: ["v*.*.*"]
   workflow_dispatch:
     inputs:
@@ -75,6 +88,27 @@ jobs:
             CHANNEL="stable"
             TAG="${REF#refs/tags/}"
             VERSION="$(normalize "$TAG")"
+          elif [[ "$EVENT" == "push" && "$REF" == "refs/heads/main" ]]; then
+            # A push to main releases. Which version depends on whether
+            # the manifest was already bumped by hand in the change that
+            # landed: honour that if its tag is free, otherwise take the
+            # next patch. Bumping a hand-written 0.23.0 to 0.23.1 because
+            # nothing had tagged it yet would silently discard a
+            # deliberate minor.
+            CHANNEL="stable"
+            MANIFEST="$(manifest_version)"
+            if git rev-parse -q --verify "refs/tags/v${MANIFEST}" >/dev/null; then
+              VERSION="$(node -e '
+                const [maj, min, pat] = process.argv[1].split(".").map(Number);
+                console.log(`${maj}.${min}.${pat + 1}`);
+              ' "$MANIFEST")"
+              BUMP=true
+            else
+              VERSION="${MANIFEST}"
+              BUMP=false
+            fi
+            TAG="v${VERSION}"
+            echo "manifest=${MANIFEST} -> ${VERSION} (bump=${BUMP})"
           elif [[ "$EVENT" == "workflow_dispatch" ]]; then
             if [[ "$IN_CHANNEL" == "stable" ]]; then
               [[ -z "$IN_VERSION" ]] && { echo "stable requires a version input"; exit 1; }
@@ -94,7 +128,10 @@ jobs:
           # A stable tag must match the committed manifest. The binary
           # reads its version from package.json, so a mismatch here would
           # ship a release whose contents disagree with its own name.
-          if [[ "$SHOULD_SKIP" != "true" && "$CHANNEL" == "stable" ]]; then
+          #
+          # Only checked for a tag push. On a main push the manifest is
+          # about to be made to match, below.
+          if [[ "$SHOULD_SKIP" != "true" && "$CHANNEL" == "stable" && "$REF" == refs/tags/v* ]]; then
             MANIFEST="$(manifest_version)"
             if [[ "$MANIFEST" != "$VERSION" ]]; then
               echo "${TAG} resolves to ${VERSION}, but package.json is ${MANIFEST}."
@@ -112,6 +149,45 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
           echo "channel=${CHANNEL} tag=${TAG} version=${VERSION} skip=${SHOULD_SKIP}"
+
+      # Make main say the version this release is about to carry, and
+      # tag the commit that says it.
+      #
+      # Committed rather than only tagged because the binary reads its
+      # version out of package.json — a tag whose commit still says the
+      # previous number ships a `--version` that lies. The bump lands on
+      # main so the next push computes from a truthful base.
+      #
+      # `git push` here uses GITHUB_TOKEN, whose pushes GitHub does not
+      # turn into new workflow runs. That is what keeps this from being
+      # an infinite loop rather than any [skip ci] marker.
+      - name: Bump the manifest and tag it
+        if: >-
+          steps.plan.outputs.should_skip != 'true' &&
+          github.event_name == 'push' &&
+          github.ref == 'refs/heads/main'
+        env:
+          TAG: ${{ steps.plan.outputs.release_tag }}
+          VERSION: ${{ steps.plan.outputs.package_version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if [[ "$(node -p "require('./package.json').version")" != "$VERSION" ]]; then
+            node -e '
+              const fs = require("fs");
+              const p = JSON.parse(fs.readFileSync("package.json", "utf8"));
+              p.version = process.argv[1];
+              fs.writeFileSync("package.json", JSON.stringify(p, null, 2) + "\n");
+            ' "$VERSION"
+            git add package.json
+            git commit -m "chore: ${VERSION}"
+            git push origin HEAD:main
+          fi
+
+          git tag -a "$TAG" -m "red-dev ${VERSION}"
+          git push origin "$TAG"
 
   build:
     name: Build binaries
