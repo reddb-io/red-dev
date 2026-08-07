@@ -8,28 +8,18 @@
  * to a record, because the set of applications is fixed and small.
  */
 
-export interface TerminalPalette {
-  background: string;
-  foreground: string;
-  cursorColor: string;
-  selectionBackground: string;
-  black: string;
-  red: string;
-  green: string;
-  yellow: string;
-  blue: string;
-  purple: string;
-  cyan: string;
-  white: string;
-  brightBlack: string;
-  brightRed: string;
-  brightGreen: string;
-  brightYellow: string;
-  brightBlue: string;
-  brightPurple: string;
-  brightCyan: string;
-  brightWhite: string;
-}
+/**
+ * Re-exported, not defined here, and on its way out of this file
+ * entirely.
+ *
+ * The palette living beside the themes is what made every theme carry
+ * one, and what made the Windows accent and the wallpaper derive their
+ * colour from ANSI slots. It now belongs to terminal-palette.ts, which
+ * owns the single fixed palette; `Theme.terminal` below is the last
+ * consumer and goes when the RedDB themes land.
+ */
+export type { TerminalPalette } from "./terminal-palette.ts";
+import type { TerminalPalette } from "./terminal-palette.ts";
 
 export interface Theme {
   name: string;

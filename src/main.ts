@@ -288,7 +288,6 @@ async function cmdTheme(p: Platform, inv: Invocation, name?: string): Promise<nu
     const { configureAlacritty } = await import("./alacritty.ts");
     await configureAlacritty({
       platform: p,
-      theme,
       fontFamily: spec.family,
       fontSize: ctx.fontSize,
       opacity: ctx.opacity,
@@ -437,7 +436,6 @@ async function cmdShell(p: Platform, inv: Invocation): Promise<number> {
     if (theme && spec) {
       await configureAlacritty({
         platform: p,
-        theme,
         fontFamily: spec.family,
         fontSize: ctx.fontSize,
         opacity: ctx.opacity,
@@ -774,7 +772,6 @@ async function cmdMenu(p: Platform, inv: Invocation, cliHelp: string): Promise<n
       const { configureAlacritty } = await import("./alacritty.ts");
       await configureAlacritty({
         platform: p,
-        theme,
         fontFamily: spec.family,
         fontSize: size,
         opacity: ctx.opacity,

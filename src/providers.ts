@@ -763,7 +763,6 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
         try {
           await configureAlacritty({
             platform: ctx.platform,
-            theme,
             fontFamily: spec.family,
             fontSize: ctx.fontSize,
             opacity: ctx.opacity,
