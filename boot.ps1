@@ -127,7 +127,36 @@ if ((Get-Item $Tmp).Length -ne $match.size) {
     Fail "downloaded $Got MB, expected $SizeMb MB -- transfer was incomplete"
 }
 
-Move-Item -Path $Tmp -Destination $Bin -Force
+# Windows keeps a running executable open. A setup window from the old
+# version may still be winding down while another terminal runs this
+# bootstrap, and Move-Item cannot overwrite that file even with -Force.
+# Rename the held image out of the canonical path, then put the completed
+# download in its place. The running process keeps its existing image;
+# every new process gets the new one.
+try {
+    Move-Item -Path $Tmp -Destination $Bin -Force -ErrorAction Stop
+} catch {
+    $Held = "$Bin.running-$((Get-Date).ToString('yyyyMMddHHmmssfff'))"
+    try {
+        Rename-Item -Path $Bin -NewName $Held -ErrorAction Stop
+        Move-Item -Path $Tmp -Destination $Bin -ErrorAction Stop
+        Say 'previous red-dev is still running; its old executable will be cleaned after it closes'
+    } catch {
+        # If the second move failed after the rename, restore the working
+        # binary so the bootstrap never leaves the command absent.
+        if ((-not (Test-Path $Bin)) -and (Test-Path $Held)) {
+            Rename-Item -Path $Held -NewName $Bin -ErrorAction SilentlyContinue
+        }
+        if (Test-Path $Tmp) { Remove-Item $Tmp -Force -ErrorAction SilentlyContinue }
+        Fail "cannot replace $Bin; close every red-dev window and retry"
+    }
+}
+
+# A renamed running image becomes removable once that old process exits.
+# Best effort only: the one still held by this exact update remains until
+# the next bootstrap, and must never turn a successful update into failure.
+Get-ChildItem -Path "$Bin.running-*" -ErrorAction SilentlyContinue |
+    Remove-Item -Force -ErrorAction SilentlyContinue
 Say "installed $Bin ($Got MB)"
 
 # Put the bin directory on the user's PATH permanently. Read the stored

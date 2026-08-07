@@ -39,6 +39,23 @@ describe("winget invocation", () => {
   });
 });
 
+describe("native Windows bootstrap replacement", () => {
+  test("installs beside an executable still held by an older process", async () => {
+    const script = await Bun.file(new URL("../boot.ps1", import.meta.url)).text();
+    const replacement = script.slice(
+      script.indexOf("try {\n    Move-Item -Path $Tmp"),
+      script.indexOf('Say "installed $Bin'),
+    );
+
+    expect(replacement).toContain("Rename-Item -Path $Bin -NewName $Held");
+    expect(replacement).toContain("Move-Item -Path $Tmp -Destination $Bin");
+    expect(replacement.indexOf("Rename-Item -Path $Bin")).toBeLessThan(
+      replacement.lastIndexOf("Move-Item -Path $Tmp"),
+    );
+    expect(replacement).toContain("close every red-dev window and retry");
+  });
+});
+
 /**
  * The `next` channel served the stable release to everyone who asked
  * for it, because /releases is not ordered newest-prerelease-first and
