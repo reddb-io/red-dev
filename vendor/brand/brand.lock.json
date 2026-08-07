@@ -1,0 +1,15 @@
+{
+  "source": "reddb-io/brand",
+  "ref": "main",
+  "commit": "bbcff9bb12a323257d794c8fb5038f1d17b4393f",
+  "nearestTag": "2026.08",
+  "why": [
+    "A commit, not a release, and that is a gap rather than a shortcut.",
+    "brand ADR 0003 makes the Assets release the distribution unit, and tokens/ IS one of the bundle CATEGORIES. But assets/wallpaper/ is deliberately excluded from that bundle, and the wallpaper set landed in bbcff9b on 2026-08-06, three days after the 2026.08 tag. There is no release containing everything red-dev needs.",
+    "tokens.json also moved after the tag: every hex is byte-identical, but the $extensions.reddb.contrastGuardrail blocks are new, and those are the reason for vendoring the source rather than a distillation of it.",
+    "Filed upstream: cut a release containing the wallpaper set, and add assets/wallpaper/ to CATEGORIES in scripts/bundle.mjs."
+  ],
+  "files": {
+    "tokens/tokens.json": "a9505806e857bb9352875f8cdae2b1c11f27b2455a738e13d7d4ab802b284205"
+  }
+}
