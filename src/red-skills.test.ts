@@ -42,6 +42,12 @@ function platform(over: Partial<Platform>): Platform {
 const tool = TOOLS.find((t) => t.name === "red-skills");
 
 describe("red-skills as a converge step", () => {
+  test("uses the current v3 installer contract", () => {
+    const src = readFileSync("src/agents.ts", "utf8");
+    expect(src).toContain("red-skills/v3/scripts/install.sh");
+    expect(src).not.toContain("red-skills/v2/scripts/install.sh");
+  });
+
   test("is in the manifest", () => {
     expect(tool).toBeDefined();
   });

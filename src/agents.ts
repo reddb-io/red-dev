@@ -577,7 +577,7 @@ export async function installAgent(a: AgentSpec, p: Platform): Promise<void> {
  * nothing and report success.
  */
 export async function installRedSkills(): Promise<void> {
-  const url = "https://raw.githubusercontent.com/reddb-io/red-skills/v2/scripts/install.sh";
+  const url = "https://raw.githubusercontent.com/reddb-io/red-skills/v3/scripts/install.sh";
   const { installerInstall } = await import("./providers.ts");
   const { runtimeTool } = await import("./runtimes.ts");
   const node = await runtimeTool("node");
