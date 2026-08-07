@@ -44,6 +44,21 @@ describe("what the distro needs", () => {
   });
 });
 
+describe("explicit tooling commands", () => {
+  test("update a stale distro before executing its selected tools", async () => {
+    const source = await Bun.file(new URL("./wsl-sync.ts", import.meta.url)).text();
+    const tooling = source.slice(
+      source.indexOf("export async function syncSelectedTooling"),
+      source.indexOf("/** Run a command inside the distro"),
+    );
+
+    expect(tooling).toContain("await ensureDistroRedDev(selected.name)");
+    expect(tooling.indexOf("ensureDistroRedDev")).toBeLessThan(
+      tooling.indexOf("for (const command of commands)"),
+    );
+  });
+});
+
 /** The platform shapes the manifest branches on. */
 function platform(over: Partial<Platform>): Platform {
   return {

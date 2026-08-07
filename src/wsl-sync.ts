@@ -92,6 +92,18 @@ export async function syncSelectedTooling(
     return 1;
   }
 
+  // `lang` and `agents` are public entry points too, not merely the tail
+  // of a full desktop converge.  They can therefore reach a distro whose
+  // red-dev predates the Windows binary.  Update that binary before asking
+  // it to interpret today's runtime/agent choices; otherwise an old child
+  // can silently run an old installer (the v2 RedSkills URL was observed
+  // here while Windows was already on the v3 contract).
+  const bootstrapCode = await ensureDistroRedDev(selected.name);
+  if (bootstrapCode !== 0) {
+    log.warn(`${selected.name}: updating red-dev failed (${bootstrapCode})`);
+    return 1;
+  }
+
   let failures = 0;
   for (const command of commands) {
     log.step(`${selected.name}: ${command}`);
@@ -179,6 +191,26 @@ export function planFor(distroVersion: string | null, ours: string = VERSION): S
   return { install: false, reason: `distro already on ${ours}` };
 }
 
+/** Ensure a child distro understands the same contracts as its Windows host. */
+async function ensureDistroRedDev(distro: string): Promise<number> {
+  const plan = planFor(await distroVersion(distro));
+  log.step(`wsl sync: ${distro} — ${plan.reason}`);
+  if (!plan.install) return 0;
+
+  // The env prefix goes on `sh`, not on curl: it is the script that
+  // must not hand over to the interface, and there is nobody inside
+  // the distro to hand over to.
+  return spawnLogged([
+    "wsl.exe",
+    "-d",
+    distro,
+    "--",
+    "bash",
+    "-lc",
+    `curl -fsSL ${BOOT_URL} | RED_DEV_NO_LAUNCH=1 sh`,
+  ]);
+}
+
 /**
  * Bring the distro up to this machine's red-dev, converge it, then
  * reproduce the selected command-line tools there.
@@ -222,25 +254,9 @@ export async function syncWslDistro(p: Platform): Promise<void> {
 
   const distro = selected.name;
 
-  const plan = planFor(await distroVersion(distro));
-  log.step(`wsl sync: ${distro} — ${plan.reason}`);
-
-  if (plan.install) {
-    // The env prefix goes on `sh`, not on curl: it is the script that
-    // must not hand over to the interface, and there is nobody inside
-    // the distro to hand over to.
-    const code = await spawnLogged([
-      "wsl.exe",
-      "-d",
-      distro,
-      "--",
-      "bash",
-      "-lc",
-      `curl -fsSL ${BOOT_URL} | RED_DEV_NO_LAUNCH=1 sh`,
-    ]);
-    if (code !== 0) {
-      throw new RedError(`installing red-dev in ${distro} failed (${code})`);
-    }
+  const bootstrapCode = await ensureDistroRedDev(distro);
+  if (bootstrapCode !== 0) {
+    throw new RedError(`installing red-dev in ${distro} failed (${bootstrapCode})`);
   }
 
   // Said before the distro's own output arrives, and again after.
