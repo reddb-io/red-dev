@@ -18,6 +18,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import {
   legacyRoot,
   looksGenerated,
@@ -198,5 +199,32 @@ describe("the two records, and the loop they caused", () => {
 
   test("case does not decide it, because Windows paths are case-insensitive", () => {
     expect(namespaceMove("C:\\Users\\Filip\\.RedDev", "C:\\Users\\filip")).not.toBeNull();
+  });
+});
+
+describe("both entry points heal, not just one", () => {
+  const src = readFileSync(`${import.meta.dir}/shared-root.ts`, "utf8");
+
+  test("chooseSharedRoot heals before it reads the record", () => {
+    // The bug this pins. healLegacyRecord lived only in
+    // ensureSharedRoot, and chooseSharedRoot returns from its
+    // already-recorded branch without ever reaching it — so the entry
+    // point firstrun uses on every run reported the stale .reddev and
+    // healed nothing, while the converge step further down healed it and
+    // printed the right one. Two answers in one run, wrong one first.
+    const heal = src.indexOf("await healLegacyRecord(p);\n\n  const current = recordedShareRoot();");
+    expect(heal).toBeGreaterThan(-1);
+  });
+
+  test("ensureSharedRoot heals too, for the converge path", () => {
+    expect(src).toContain("export async function ensureSharedRoot");
+    const fn = src.slice(src.indexOf("export async function ensureSharedRoot"));
+    expect(fn.slice(0, 200)).toContain("healLegacyRecord");
+  });
+
+  test("and healing is idempotent, because both run on every converge", () => {
+    // namespaceMove returns null for a root already on the new spelling,
+    // so the steady state is one comparison and no write.
+    expect(namespaceMove("C:\\Users\\filip\\.red\\dev", "C:\\Users\\filip")).toBeNull();
   });
 });

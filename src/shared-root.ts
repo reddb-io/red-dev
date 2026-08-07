@@ -143,6 +143,16 @@ export async function chooseSharedRoot(p: Platform, requested?: string): Promise
     return 0;
   }
 
+  // Before reading it, not after.
+  //
+  // healLegacyRecord lived only at the top of ensureSharedRoot, and this
+  // function returns from the branch below without ever reaching it — so
+  // the entry point that firstrun uses on every run reported the stale
+  // .reddev and healed nothing, while the converge step further down
+  // healed it and printed the right one. Two answers in one run, and the
+  // wrong one came first.
+  await healLegacyRecord(p);
+
   const current = recordedShareRoot();
   if (!requested && current) {
     log.ok(`shared root is ${current}`);
