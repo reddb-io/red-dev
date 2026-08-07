@@ -771,6 +771,9 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
           log.warn(`alacritty: ${(err as Error).message}`);
         }
 
+        const { applyTerminalPalette } = await import("./terminal-surfaces.ts");
+        await applyTerminalPalette(ctx.platform);
+
         const { applyThemeEverywhere } = await import("./theme-apply.ts");
         const { applied } = await applyThemeEverywhere(theme, ctx.platform);
         if (applied.length > 0) log.ok(`themed: ${applied.join(", ")}`);

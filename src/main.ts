@@ -297,9 +297,18 @@ async function cmdTheme(p: Platform, inv: Invocation, name?: string): Promise<nu
     failures++;
   }
 
-  // Everything that is not the terminal emulator: multiplexer, system
-  // monitor, editor. Colouring only the terminal is what makes a theme
-  // switch feel half-applied.
+  // The terminal, which does not vary. Reasserted here so `red-dev
+  // theme` repairs a hand-edited config even though it is not changing
+  // one — the command people reach for when colours look wrong.
+  try {
+    const { applyTerminalPalette } = await import("./terminal-surfaces.ts");
+    const { applied } = await applyTerminalPalette(p);
+    if (applied.length > 0) log.skip(`terminal palette unchanged: ${applied.join(", ")}`);
+  } catch (err) {
+    log.warn(`terminal palette: ${(err as Error).message}`);
+  }
+
+  // The desktop, which does.
   try {
     const { applyThemeEverywhere } = await import("./theme-apply.ts");
     const { applied, skipped } = await applyThemeEverywhere(theme, p, chosen);
