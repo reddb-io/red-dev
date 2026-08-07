@@ -423,6 +423,8 @@ async function ensureLocalTemplate(root: SharedRoot): Promise<void> {
 }
 
 export async function ensureSharedRoot(p: Platform): Promise<void> {
+  await healLegacyRecord(p);
+
   const root = sharedRootFor(p);
   if (!root) {
     log.skip("no shared root chosen — run `red-dev share` to pick one");
@@ -619,4 +621,45 @@ export async function pruneLegacyRoot(p: Platform, root: SharedRoot): Promise<bo
 export function windowsProfileOf(windowsRoot: string): string | null {
   const m = /^([A-Za-z]:\\Users\\[^\\]+)\\/.exec(windowsRoot.replace(/[\\/]+$/, "") + "\\");
   return m?.[1] ?? null;
+}
+
+/**
+ * Re-record a root still spelled the old way, on every converge.
+ *
+ * 2026-08-06-share-root-namespace did this once, in the ledger, on the
+ * side it happened to run on. That was not enough: env.sh is per-home
+ * and a WSL machine has two. The migration ran inside the distro and
+ * updated /home/me/.config; C:\Users\me\.config kept saying .reddev. So
+ * the distro converged on .red\dev, the Windows converge read the stale
+ * record and recreated .reddev beside it, and each side undid the other
+ * — silently, because neither can see the other's record.
+ *
+ * A ledger entry cannot fix that, because it has already run. This is a
+ * converge-time repair for the same reason wsl.ts sweeps schemes there:
+ * it reaches a machine whatever state it is in, and once both records
+ * agree it costs one string comparison.
+ *
+ * recordShellEnv writes both homes now, so healing either side heals
+ * both. Only the exact legacy default is touched — a root the user
+ * pointed at .reddev on purpose is theirs, the same rule namespaceMove
+ * and pruneLegacyRoot already follow.
+ */
+export async function healLegacyRecord(p: Platform): Promise<boolean> {
+  if (p.env !== "wsl" && p.env !== "windows") return false;
+
+  const recorded = recordedShareRoot();
+  if (!recorded) return false;
+
+  const profile = windowsProfileOf(recorded);
+  if (!profile) return false;
+
+  const move = namespaceMove(recorded, profile);
+  if (!move) return false;
+
+  const { recordShellEnv } = await import("./firstrun.ts");
+  await recordShellEnv({ RED_SHARE_WIN: move.to });
+  process.env["RED_SHARE_WIN"] = move.to;
+  log.ok(`shared root re-recorded: ${move.from} -> ${move.to}`);
+  log.plain(`       both sides of the boundary now agree`);
+  return true;
 }

@@ -273,6 +273,24 @@ export async function installAgent(a: AgentSpec, p: Platform): Promise<void> {
     return;
   }
 
+  // npm before the vendor installer on native Windows.
+  //
+  // The order used to be installer-then-npm everywhere, and on Windows
+  // that picked the wrong one for every agent that has both. OpenClaw
+  // and Hermes ship POSIX shell installers that expect sudo and a Unix
+  // filesystem; run there they failed with `Executable not found in
+  // $PATH: "sudo"` while a perfectly good npm package sat unused in the
+  // same spec.
+  //
+  // Only on native Windows. Under WSL the installer is the better
+  // choice — it is what the vendor tests, and npm is the fallback.
+  if (p.os === "windows" && a.npm) {
+    const npm = Bun.which("npm");
+    if (!npm) throw new RedError("npm not on PATH — install a Node runtime first (red-dev lang)");
+    await run([npm, "install", "-g", a.npm]);
+    return;
+  }
+
   if (a.installer) {
     const { installerInstall } = await import("./providers.ts");
     await installerInstall(a.installer, `${a.label} official installer`);

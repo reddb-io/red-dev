@@ -518,7 +518,21 @@ export async function installerInstall(
   log.step(`installer: ${url}`);
   log.plain(`       ${note}`);
 
-  const tmp = `/tmp/red-dev-installer-${Date.now()}.sh`;
+  // A path the writer and the interpreter agree on.
+  //
+  // This was `/tmp/red-dev-installer-N.sh`, which is two different
+  // directories on native Windows: the Bun process writes it to C:\tmp,
+  // and Git Bash resolves /tmp to %LOCALAPPDATA%\Temp. So bash was
+  // handed a path to a file that, from where it was standing, did not
+  // exist:
+  //
+  //   /bin/bash: /tmp/red-dev-installer-1786098097590.sh: No such file
+  //
+  // os.tmpdir() gives the real directory on both, and forward slashes
+  // with a drive letter — C:/Users/.../Temp/x.sh — is a spelling Git
+  // Bash accepts and Bun writes to correctly.
+  const { tmpdir } = await import("node:os");
+  const tmp = `${tmpdir().replace(/\\/g, "/")}/red-dev-installer-${Date.now()}.sh`;
   const res = await fetch(url);
   if (!res.ok) throw new RedError(`installer download failed ${res.status}: ${url}`);
   const body = await res.text();
@@ -542,10 +556,25 @@ export async function installerInstall(
   // into a password prompt against a converge whose output the TUI is
   // capturing. requireSudo answers "would this block?" without blocking
   // and fails with an instruction instead.
-  if (body.includes("sudo ")) await requireSudo();
+  // Not on native Windows, where there is no sudo to prime and asking
+  // for one threw `Executable not found in $PATH: "sudo"` — a message
+  // about red-dev's own guard, reported as the vendor script failing.
+  // A script that genuinely needs root cannot run here regardless; that
+  // is a reason to not reach this function, which installAgent now
+  // handles by preferring npm on Windows.
+  if (process.platform !== "win32" && body.includes("sudo ")) await requireSudo();
 
   const code = await spawnLogged([shell, tmp, ...args]);
-  await run(["rm", "-f", tmp], { allowFailure: true });
+  // node:fs, not `rm`. There is no rm on native Windows, so cleaning up
+  // failed with `Executable not found in $PATH: "rm"` — reported as the
+  // installer's own failure, which sent the reader looking at the vendor
+  // script instead of at this line.
+  const { rmSync } = await import("node:fs");
+  try {
+    rmSync(tmp, { force: true });
+  } catch {
+    // A temp file left behind is not worth failing an install over.
+  }
 
   if (code !== 0) throw new RedError(`installer exited ${code}: ${url}`);
 }

@@ -387,7 +387,45 @@ export async function writeShellEnv(p: Platform, blesh: boolean): Promise<void> 
 export async function recordShellEnv(vars: Record<string, string>): Promise<void> {
   const home = process.env["HOME"] ?? process.env["USERPROFILE"];
   if (!home) return;
+  await writeShellEnvAt(home, vars);
 
+  // And the other side of the boundary, when there is one.
+  //
+  // env.sh is per-home and a WSL machine has two homes. The namespace
+  // migration ran inside the distro, updated /home/me/.config, and left
+  // C:\Users\me\.config still saying .reddev — so the distro converged
+  // on .red\dev, the Windows converge read the stale record and
+  // recreated .reddev beside it, and each side kept undoing the other.
+  // Nothing reported a conflict because neither side can see the other's
+  // record.
+  //
+  // dotfiles.ts already reaches both homes for exactly this reason; the
+  // shell environment had been left out of it.
+  const other = await otherHome();
+  if (other && other !== home) await writeShellEnvAt(other, vars);
+}
+
+/**
+ * The home on the far side of the WSL boundary, if this machine has one.
+ *
+ * Resolved through the same interop the rest of the WSL scope uses.
+ * Returns null on a plain Linux desktop, and on native Windows where
+ * the distro's home is not reachable as a path this process can write.
+ */
+async function otherHome(): Promise<string | null> {
+  if (process.platform === "win32") return null;
+  const { detect } = await import("./platform.ts");
+  if (detect().env !== "wsl") return null;
+  try {
+    const { windowsUserProfile } = await import("./wsl.ts");
+    const { localPath } = await import("./shared-root.ts");
+    return localPath(await windowsUserProfile(), "wsl");
+  } catch {
+    return null;
+  }
+}
+
+async function writeShellEnvAt(home: string, vars: Record<string, string>): Promise<void> {
   const dir = `${home}/.config/red-dev`;
   const { mkdirSync, existsSync } = await import("node:fs");
   mkdirSync(dir, { recursive: true });

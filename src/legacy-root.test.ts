@@ -174,3 +174,29 @@ describe("an older copy of red-dev's own output", () => {
     expect(v.unaccounted).toEqual(["config/bash/local.sh"]);
   });
 });
+
+describe("the two records, and the loop they caused", () => {
+  test("the legacy default is recognised as needing a re-record", () => {
+    // env.sh is per-home and a WSL machine has two homes. The namespace
+    // migration ran inside the distro and updated /home/me/.config;
+    // C:\Users\me\.config kept saying .reddev. So the distro converged
+    // on .red\dev, the Windows converge read the stale record and
+    // recreated .reddev beside it, and each side undid the other —
+    // silently, because neither can see the other's record.
+    const move = namespaceMove("C:\\Users\\filip\\.reddev", "C:\\Users\\filip");
+    expect(move).toEqual({
+      from: "C:\\Users\\filip\\.reddev",
+      to: "C:\\Users\\filip\\.red\\dev",
+    });
+  });
+
+  test("a record already on the new spelling is left alone", () => {
+    // healLegacyRecord runs on every converge, so the steady state has
+    // to cost one comparison and write nothing.
+    expect(namespaceMove("C:\\Users\\filip\\.red\\dev", "C:\\Users\\filip")).toBeNull();
+  });
+
+  test("case does not decide it, because Windows paths are case-insensitive", () => {
+    expect(namespaceMove("C:\\Users\\Filip\\.RedDev", "C:\\Users\\filip")).not.toBeNull();
+  });
+});
