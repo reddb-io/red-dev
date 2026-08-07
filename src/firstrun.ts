@@ -137,6 +137,26 @@ export async function carryOutChoices(
   p: Platform,
   choices: { agents?: string[]; runtimes: string[]; apps: string[] },
 ): Promise<void> {
+  // Runtimes first, because agents are installed with them.
+  //
+  // This ran agents then runtimes, and on native Windows that is the
+  // wrong way round: Gemini, OpenClaw and Hermes are npm packages there,
+  // so all three failed with "npm not on PATH — install a Node runtime
+  // first" and mise installed node@lts four lines later. The advice was
+  // correct and the run had already been told to follow it.
+  //
+  // Harmless on Linux and WSL, where the agents use vendor installers
+  // and do not care. Ordering a dependency before its dependent is right
+  // everywhere; it just only showed on the target that had one.
+  if (choices.runtimes.length > 0) {
+    const { useRuntimes } = await import("./runtimes.ts");
+    try {
+      await useRuntimes(choices.runtimes);
+    } catch (err) {
+      log.warn(`runtimes: ${(err as Error).message}`);
+    }
+  }
+
   const agents = choices.agents ?? [];
   if (agents.length > 0) {
     const { availableAgents, installAgent, isAgentInstalled, installRedSkills } = await import(
@@ -170,14 +190,6 @@ export async function carryOutChoices(
     }
   }
 
-  if (choices.runtimes.length > 0) {
-    const { useRuntimes } = await import("./runtimes.ts");
-    try {
-      await useRuntimes(choices.runtimes);
-    } catch (err) {
-      log.warn(`runtimes: ${(err as Error).message}`);
-    }
-  }
 }
 
 export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> {

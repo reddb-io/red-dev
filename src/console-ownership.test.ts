@@ -78,3 +78,25 @@ describe("console ownership", () => {
     }
   });
 });
+
+describe("the shell that can see the file", () => {
+  const src = readFileSync(`${import.meta.dir}/providers.ts`, "utf8");
+
+  test("Windows resolves bash by absolute path, not through PATH", () => {
+    // `bash` on a Windows PATH is usually C:\Windows\System32\bash.exe —
+    // the WSL launcher, which runs inside the distro. Handed a script
+    // under %LOCALAPPDATA%\Temp it reported
+    //
+    //   /bin/bash: C:/Users/.../red-dev-installer-N.sh: No such file
+    //
+    // which reads like the temp path being wrong a second time. It was
+    // not: the file was there and the interpreter was standing in
+    // another filesystem.
+    expect(src).toContain("windowsShellPath");
+    expect(src).toContain("C:\\\\Program Files\\\\Git\\\\bin\\\\");
+  });
+
+  test("and says so rather than spawning something doomed", () => {
+    expect(src).toContain("there is no Git Bash to run it");
+  });
+});

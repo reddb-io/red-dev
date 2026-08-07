@@ -523,6 +523,36 @@ export function shellFor(body: string): "bash" | "sh" {
   return /(^|\/)bash$/.test(interpreter) ? "bash" : "sh";
 }
 
+/**
+ * The shell binary to actually spawn, which on Windows is not `bash`.
+ *
+ * `bash` on a Windows PATH is usually C:\Windows\System32\bash.exe — the
+ * WSL launcher. It runs inside the distro, where a Windows path means
+ * nothing, so handing it a script under %LOCALAPPDATA%\Temp produced
+ *
+ *   /bin/bash: C:/Users/filip/AppData/Local/Temp/red-dev-installer-N.sh:
+ *   No such file or directory
+ *
+ * which reads like the temp path being wrong a second time. It was not:
+ * the file was there, and the interpreter was standing in another
+ * filesystem.
+ *
+ * Git Bash is the one that shares a filesystem with this process. Named
+ * by absolute path rather than found on PATH, because the whole problem
+ * is that PATH answers `bash` with the wrong one.
+ *
+ * Returns null when neither is present, so the caller can say what is
+ * missing instead of spawning something that will fail confusingly.
+ */
+export function windowsShellPath(name: "bash" | "sh"): string | null {
+  const candidates = [
+    `C:\\Program Files\\Git\\bin\\${name}.exe`,
+    `C:\\Program Files (x86)\\Git\\bin\\${name}.exe`,
+    `C:\\Program Files\\Git\\usr\\bin\\${name}.exe`,
+  ];
+  return candidates.find((c) => existsSync(c)) ?? null;
+}
+
 export async function installerInstall(
   url: string,
   note: string,
@@ -559,7 +589,18 @@ export async function installerInstall(
   // every vendor script through it would have failed that one with a
   // syntax error partway through — after it had already installed the
   // binary, which is the worst place to stop.
-  const shell = shellFor(body);
+  const want = shellFor(body);
+
+  // On Windows, resolve to the shell that can see this file. See
+  // windowsShellPath: `bash` on PATH there is the WSL launcher, which
+  // runs in another filesystem entirely.
+  const shell = process.platform === "win32" ? windowsShellPath(want) : want;
+  if (!shell) {
+    throw new RedError(
+      `${url} is a ${want} script and there is no Git Bash to run it.\n` +
+        "      Install Git for Windows, or use the WSL side.",
+    );
+  }
 
   // Primed before handing over, not after it blocks.
   //

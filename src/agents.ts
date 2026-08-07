@@ -236,13 +236,51 @@ async function run(cmd: string[]): Promise<void> {
   if ((await spawnLogged(cmd)) !== 0) throw new RedError(`${cmd[0]} exited non-zero`);
 }
 
+/**
+ * winget, with the reason it failed kept.
+ *
+ * `run` above reports `cmd.exe exited non-zero`, which is true and
+ * useless — three agents failed with that line and none of them said
+ * whether the package was missing, the source was unreachable or the
+ * installer had refused. providers.ts::wingetInstall already captures
+ * and interprets the output; this is that treatment for the agent path,
+ * which had grown its own thinner copy.
+ *
+ * A non-zero exit is not automatically a failure: winget signals
+ * "installed, nothing newer" that way too, and treating it as an error
+ * turns the steady state of an idempotent converge into a red line.
+ */
+async function runWinget(argv: string[], label: string): Promise<void> {
+  const proc = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+  const out = (await new Response(proc.stdout).text()) + (await new Response(proc.stderr).text());
+  const code = await proc.exited;
+  if (code === 0) return;
+
+  if (/No available upgrade found|already installed|No newer package versions/i.test(out)) {
+    log.skip(`${label} already current`);
+    return;
+  }
+
+  const detail = out
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && !/^[-\\|/]+$/.test(l))
+    .slice(-2)
+    .join(" ");
+  throw new RedError(
+    /No package found/i.test(out)
+      ? `winget has no package for ${label} — the id is case-sensitive`
+      : `winget exited ${code}${detail ? `: ${detail}` : ""}`,
+  );
+}
+
 export async function installAgent(a: AgentSpec, p: Platform): Promise<void> {
   if (p.os === "windows" && a.msstore) {
     // --source msstore is load-bearing, not a detail: without it winget
     // resolves the id against the community repository, where the
     // ChatGPT entries belong to third parties rather than OpenAI.
     const { wingetArgv } = await import("./providers.ts");
-    await run(
+    await runWinget(
       wingetArgv([
         "install",
         "--id",
@@ -258,13 +296,14 @@ export async function installAgent(a: AgentSpec, p: Platform): Promise<void> {
         // spawned.
         "--disable-interactivity",
       ]),
+      a.label,
     );
     return;
   }
 
   if (p.os === "windows" && a.winget) {
     const { wingetArgv } = await import("./providers.ts");
-    await run(
+    await runWinget(
       wingetArgv([
         "install",
         "--id",
@@ -279,6 +318,7 @@ export async function installAgent(a: AgentSpec, p: Platform): Promise<void> {
         // spawned.
         "--disable-interactivity",
       ]),
+      a.label,
     );
     return;
   }
