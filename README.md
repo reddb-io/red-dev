@@ -254,6 +254,11 @@ a third-party wrapper and winget's `T3Tools.T3Code` is the publisher's own.
 Picking any CLI agent then offers
 [red-skills](https://github.com/reddb-io/red-skills), which registers its
 marketplace in Claude Code and Codex and generates plugin modules for OpenCode.
+On native Windows, a WSL terminal choice makes the selection a workstation
+choice: compatible CLI agents and runtimes are installed on Windows **and** in
+the selected WSL 2 distro. Desktop applications remain on Windows. Choosing Git
+Bash keeps the selection native-Windows only. The unattended forms are
+`red-dev agents claude-code,codex` and `red-dev lang node@lts,bun@latest`.
 Convergence also writes `~/.claude/keybindings.json` to map Shift+Enter to a
 newline in Chat — non-destructively: malformed JSON and explicit conflicting
 bindings are never overwritten silently, and re-running is a no-op.
@@ -313,8 +318,10 @@ red-dev update               # upgrade what the package managers own
 red-dev theme [name]         # dark | light | obsidian | marble | cobalt | flare
 red-dev apps                 # choose optional tools
 red-dev lang                 # choose runtimes for mise to manage
+red-dev lang node@lts,bun@latest # unattended runtime selection
 red-dev shell                # Windows + WSL: where a terminal lands
 red-dev agents               # choose coding agents, wire in red-skills
+red-dev agents claude-code,codex # unattended agent selection
 red-dev share [path]         # one directory both WSL and Windows read
 red-dev share adopt <tool>   # move that tool's configuration into it
 red-dev uninstall            # remove tools, or red-dev's own config
@@ -617,8 +624,10 @@ error anywhere and the feature you had just installed simply absent.
 
 The `desktop` scope now reaches across. It finds the default distro, compares
 its red-dev to this one's, installs the matching version inside it when they
-differ, and then runs `red-dev install core` there. That converge is idempotent
-and costs seconds on a distro that is already current; the expensive case is the
+differ, and then runs `red-dev install core` there. When Alacritty is configured
+to open WSL, it also repeats the selected runtimes and compatible CLI agents in
+the distro; graphical apps stay on Windows. That converge is idempotent and
+costs seconds on a distro that is already current; the expensive case is the
 one that needed the work.
 
 The `wsl` scope is the same boundary crossed the other way — distro reaching out
@@ -680,7 +689,9 @@ sequential navigation, and reaching a specific one means calling
 ### Both on one machine
 
 Installing on the Windows side and inside WSL is normal and supported — they
-converge different scopes and share the host's terminal configuration.
+converge different scopes and share the host's terminal configuration. With WSL
+as the recorded terminal shell, agent and runtime choices are deliberately
+installed on both sides; with Git Bash, they stay on native Windows.
 
 One thing they cannot share: Alacritty has no profiles, so it opens exactly one
 shell. Which one is a recorded choice rather than whichever side converged last:

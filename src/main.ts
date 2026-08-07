@@ -453,6 +453,10 @@ async function cmdShell(p: Platform, inv: Invocation): Promise<number> {
     log.warn(`alacritty: ${(err as Error).message}`);
   }
 
+  if (p.os === "windows" && choice === "wsl") {
+    const { syncSelectedTooling } = await import("./wsl-sync.ts");
+    return (await syncSelectedTooling(p)) > 0 ? 1 : 0;
+  }
   return 0;
 }
 
@@ -547,8 +551,10 @@ async function cmdUi(p: Platform, inv: Invocation): Promise<number> {
   const setup = {
     steps,
     wizard,
-    apply: (answers: Awaited<ReturnType<typeof applySetupAnswers>>["answers"]) =>
-      applySetupAnswers(p, inv, answers),
+    apply: (
+      answers: Awaited<ReturnType<typeof applySetupAnswers>>["answers"],
+      observer?: Parameters<typeof applySetupAnswers>[3],
+    ) => applySetupAnswers(p, inv, answers, observer),
   };
 
   // The converge is handed to the interface rather than run after it.
@@ -640,7 +646,55 @@ async function cmdWsl(p: Platform): Promise<number> {
  * default outcome is unchanged and the decision is now made rather than
  * assumed.
  */
-async function cmdAgents(p: Platform): Promise<number> {
+async function cmdAgents(p: Platform, inv: Invocation): Promise<number> {
+  const { AGENTS, availableAgents, isAgentInstalled, installAgent, installRedSkills } =
+    await import("./agents.ts");
+  const available = availableAgents(p);
+
+  // This is the path the Windows side uses to reproduce the selection
+  // inside WSL. It is deliberately prompt-free and accepts only keys
+  // from the closed catalog before any installer or shell is reached.
+  if (inv.agentKeys !== undefined) {
+    const unknown = inv.agentKeys.filter((key) => !AGENTS.some((agent) => agent.key === key));
+    if (unknown.length > 0) {
+      log.err(`unknown agent(s): ${unknown.join(", ")}`);
+      log.plain(`     known agents: ${AGENTS.map((agent) => agent.key).join(", ")}`);
+      return 1;
+    }
+
+    const hostKeys = inv.agentKeys.filter((key) =>
+      available.some((agent) => agent.key === key),
+    );
+    for (const key of inv.agentKeys.filter((candidate) => !hostKeys.includes(candidate))) {
+      log.skip(`${key}: no compatible installer for this side`);
+    }
+
+    let failures = 0;
+    if (hostKeys.length > 0) {
+      const { carryOutChoices } = await import("./firstrun.ts");
+      await carryOutChoices(
+        p,
+        { agents: hostKeys, runtimes: [], apps: [] },
+        {
+          stepEnd: (result) => {
+            if (result.outcome === "failed") failures++;
+          },
+        },
+      );
+    }
+
+    // An explicit command executed inside WSL is the far side of this
+    // bridge. Only the native Windows invocation owns the shared choice
+    // and may trigger another sync, which makes recursion impossible.
+    if (p.os === "windows") {
+      const { writePreferences } = await import("./preferences.ts");
+      await writePreferences(p, { agents: inv.agentKeys });
+      const { syncSelectedTooling } = await import("./wsl-sync.ts");
+      failures += await syncSelectedTooling(p);
+    }
+    return failures > 0 ? 1 : 0;
+  }
+
   // The pre-ticked list is a starting point for a human, not a default
   // to act on unattended. checkbox() returns its fallback without a
   // TTY, so leaving this unguarded meant `red-dev agents` in a script
@@ -648,16 +702,11 @@ async function cmdAgents(p: Platform): Promise<number> {
   if (!interactive()) {
     log.err("choosing agents needs a terminal");
     log.plain("     For unattended installs, name them explicitly:");
-    log.plain("       red-dev install core");
+    log.plain("       red-dev agents claude-code,codex");
     return 1;
   }
 
   const { checkbox, confirm } = await import("./ui.ts");
-  const { availableAgents, isAgentInstalled, installAgent, installRedSkills } = await import(
-    "./agents.ts"
-  );
-
-  const available = availableAgents(p);
   const labels = available.map(
     (a) => `${a.key} — ${a.label}, ${a.about}${isAgentInstalled(a) ? "  (installed)" : ""}`,
   );
@@ -671,6 +720,9 @@ async function cmdAgents(p: Platform): Promise<number> {
 
   const keys = picked.map((l) => l.split(" ")[0]!);
   let failures = 0;
+
+  const { writePreferences } = await import("./preferences.ts");
+  await writePreferences(p, { agents: keys });
 
   for (const key of keys) {
     const agent = available.find((a) => a.key === key);
@@ -691,7 +743,7 @@ async function cmdAgents(p: Platform): Promise<number> {
   // red-skills configures whichever agents exist, so it only means
   // anything once at least one does — and it is worth asking about
   // rather than assuming, since it writes into each agent's own config.
-  const anyCli = keys.some((k) => k !== "claude-desktop");
+  const anyCli = keys.some((key) => !available.find((agent) => agent.key === key)?.desktopOnly);
   if (anyCli) {
     log.plain("");
     if (await confirm("Install red-skills for these agents?", true)) {
@@ -705,34 +757,76 @@ async function cmdAgents(p: Platform): Promise<number> {
     }
   }
 
+  if (p.os === "windows") {
+    const { syncSelectedTooling } = await import("./wsl-sync.ts");
+    failures += await syncSelectedTooling(p);
+  }
+
   return failures > 0 ? 1 : 0;
 }
 
 /** Choose which language runtimes mise manages. */
-async function cmdLang(): Promise<number> {
+async function cmdLang(p: Platform, inv: Invocation): Promise<number> {
   const { checkbox } = await import("./ui.ts");
   const { OFFERED_RUNTIMES, useRuntimes, currentRuntimes } = await import("./runtimes.ts");
 
-  const current = await currentRuntimes();
-  const labels = OFFERED_RUNTIMES.map((r) => {
-    const name = r.id.split("@")[0]!;
-    return `${r.id} — ${r.about}${current.includes(name) ? "  (installed)" : ""}`;
-  });
+  let ids = inv.runtimeIds;
+  if (ids !== undefined) {
+    const known = new Set(OFFERED_RUNTIMES.map((runtime) => runtime.id));
+    const unknown = ids.filter((id) => !known.has(id));
+    if (unknown.length > 0) {
+      log.err(`unknown runtime(s): ${unknown.join(", ")}`);
+      log.plain(`     known runtimes: ${OFFERED_RUNTIMES.map((runtime) => runtime.id).join(", ")}`);
+      return 1;
+    }
+  } else {
+    if (!interactive()) {
+      log.err("choosing runtimes needs a terminal");
+      log.plain("     For unattended installs, name them explicitly:");
+      log.plain("       red-dev lang node@lts,bun@latest");
+      return 1;
+    }
 
-  const picked = await checkbox("Which runtimes?", labels as [string, ...string[]], []);
-  if (picked.length === 0) {
+    const current = await currentRuntimes();
+    const labels = OFFERED_RUNTIMES.map((r) => {
+      const name = r.id.split("@")[0]!;
+      return `${r.id} — ${r.about}${current.includes(name) ? "  (installed)" : ""}`;
+    });
+
+    const picked = await checkbox("Which runtimes?", labels as [string, ...string[]], []);
+    ids = picked.map((label) => label.split(" ")[0]!.trim());
+  }
+
+  if (ids.length === 0) {
     log.skip("nothing selected");
     return 0;
   }
 
+  let failures = 0;
   try {
-    await useRuntimes(picked.map((l) => l.split(" ")[0]!.trim()));
-    log.ok("runtimes updated — open a new shell");
-    return 0;
+    await useRuntimes(ids, {
+      stepEnd: (_id, error) => {
+        if (error) failures++;
+      },
+    });
   } catch (err) {
     log.err((err as Error).message);
-    return 1;
+    if (failures === 0) failures++;
   }
+
+  // The child WSL command is explicit, so it applies the selection but
+  // does not rewrite the workstation preference or call back to Windows.
+  if (inv.runtimeIds === undefined || p.os === "windows") {
+    const { writePreferences } = await import("./preferences.ts");
+    await writePreferences(p, { runtimes: ids });
+  }
+  if (p.os === "windows") {
+    const { syncSelectedTooling } = await import("./wsl-sync.ts");
+    failures += await syncSelectedTooling(p);
+  }
+
+  if (failures === 0) log.ok("runtimes updated — open a new shell");
+  return failures > 0 ? 1 : 0;
 }
 
 /**
@@ -766,7 +860,7 @@ async function cmdMenu(p: Platform, inv: Invocation, cliHelp: string): Promise<n
     plan: () => cmdPlan(p, inv),
     platform: () => cmdPlatform(p),
     apps: () => cmdApps(p, inv),
-    lang: () => cmdLang(),
+    lang: () => cmdLang(p, inv),
     shell: () => cmdShell(p, inv),
     uninstall: () => cmdUninstall(p),
     applyTheme: (name) => cmdTheme(p, inv, name),
@@ -908,9 +1002,9 @@ async function main(): Promise<number> {
     case "apps":
       return await cmdApps(p, inv);
     case "agents":
-      return await cmdAgents(p);
+      return await cmdAgents(p, inv);
     case "lang":
-      return await cmdLang();
+      return await cmdLang(p, inv);
     case "shell":
       return await cmdShell(p, inv);
     case "share": {

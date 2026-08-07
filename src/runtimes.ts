@@ -47,18 +47,34 @@ export const OFFERED_RUNTIMES: { id: string; about: string }[] = [
   { id: "java@lts", about: "Java LTS" },
 ];
 
+export interface RuntimeObserver {
+  stepStart?: (id: string) => void;
+  stepEnd?: (id: string, error: string | null) => void;
+}
+
 /** Install a specific set of runtimes, as chosen interactively. */
-export async function useRuntimes(ids: string[]): Promise<void> {
+export async function useRuntimes(ids: string[], observer: RuntimeObserver = {}): Promise<void> {
   const mise = await miseBin();
-  if (!mise) throw new RedError("mise is not on PATH — run `red-dev install core` first");
+  if (!mise) {
+    const detail = "mise is not on PATH — run `red-dev install core` first";
+    for (const id of ids) {
+      observer.stepStart?.(id);
+      observer.stepEnd?.(id, detail);
+    }
+    throw new RedError(detail);
+  }
 
   for (const id of ids) {
+    observer.stepStart?.(id);
     log.step(`mise: ${id}`);
     const { code, out } = await run([mise, "use", "-g", id]);
     if (code !== 0) {
-      log.err(`${id}: ${out.trim().split("\n").slice(-2).join(" ")}`);
+      const detail = out.trim().split("\n").slice(-2).join(" ");
+      log.err(`${id}: ${detail}`);
+      observer.stepEnd?.(id, detail || `mise exited ${code}`);
     } else {
       log.ok(id);
+      observer.stepEnd?.(id, null);
     }
   }
 }

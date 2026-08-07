@@ -25,13 +25,92 @@
  */
 
 import { VERSION } from "./cli.ts";
+import { AGENTS } from "./agents.ts";
 import { log, RedError } from "./log.ts";
 import type { Platform } from "./platform.ts";
+import { readPreferences, type TerminalShell } from "./preferences.ts";
 import { spawnLogged } from "./providers.ts";
+import { OFFERED_RUNTIMES } from "./runtimes.ts";
 import { detectWsl, setWsl2Default, type WslDistribution } from "./wsl-provision.ts";
 import { readWindowsOutput } from "./windows-output.ts";
 
 const BOOT_URL = "https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.sh";
+
+/** Commands that reproduce the chosen CLI environment inside WSL. */
+export function distroSetupCommands(
+  terminalShell: TerminalShell | undefined,
+  agentKeys: string[],
+  runtimeIds: string[],
+): string[] {
+  if (terminalShell !== "wsl") return [];
+
+  // Preferences are user-editable JSON and eventually cross a shell
+  // boundary. Resolve them against closed catalogs before constructing
+  // argv text: unknown data is ignored, never interpolated.
+  const knownRuntimes = new Set(OFFERED_RUNTIMES.map((runtime) => runtime.id));
+  const runtimes = runtimeIds.filter((id) => knownRuntimes.has(id));
+  const cliAgents = agentKeys.filter((key) => {
+    const agent = AGENTS.find((candidate) => candidate.key === key);
+    return agent !== undefined && !agent.desktopOnly;
+  });
+
+  return [
+    ...(runtimes.length > 0 ? [`red-dev lang ${runtimes.join(",")}`] : []),
+    ...(cliAgents.length > 0 ? [`red-dev agents ${cliAgents.join(",")}`] : []),
+  ];
+}
+
+/**
+ * Reproduce the workstation's selected command-line tools in its WSL distro.
+ *
+ * Explicit `agents` and `lang` commands make this safe and deterministic:
+ * there is no prompt inside the child distro, desktop-only applications are
+ * absent from the command, and the Linux-side command never calls back into
+ * Windows because this function only runs for a native Windows platform.
+ */
+export async function syncSelectedTooling(
+  p: Platform,
+  knownDistro?: WslDistribution,
+): Promise<number> {
+  if (p.os !== "windows" || process.env["RED_DEV_NO_WSL_SYNC"] === "1") return 0;
+
+  const prefs = await readPreferences(p);
+  const commands = distroSetupCommands(
+    prefs.terminalShell,
+    prefs.agents ?? [],
+    prefs.runtimes ?? [],
+  );
+  if (commands.length === 0) return 0;
+
+  const selected = knownDistro ?? (await defaultDistroInfo());
+  if (!selected) {
+    log.warn("selected tools were not copied to WSL: no distro is installed");
+    return 1;
+  }
+  if (selected.version !== 2) {
+    log.warn(`selected tools were not copied to ${selected.name}: it is not WSL 2`);
+    return 1;
+  }
+
+  let failures = 0;
+  for (const command of commands) {
+    log.step(`${selected.name}: ${command}`);
+    const code = await spawnLogged([
+      "wsl.exe",
+      "-d",
+      selected.name,
+      "--",
+      "bash",
+      "-lc",
+      command,
+    ]);
+    if (code !== 0) {
+      log.warn(`${selected.name}: \`${command}\` failed (${code})`);
+      failures++;
+    }
+  }
+  return failures;
+}
 
 /** Run a command inside the distro and return its stdout. */
 async function inDistro(distro: string, script: string): Promise<{ out: string; code: number }> {
@@ -101,7 +180,8 @@ export function planFor(distroVersion: string | null, ours: string = VERSION): S
 }
 
 /**
- * Bring the distro up to this machine's red-dev, then converge it.
+ * Bring the distro up to this machine's red-dev, converge it, then
+ * reproduce the selected command-line tools there.
  *
  * The converge runs whether or not the binary changed. Same version is
  * not the same state — a distro can carry this exact binary and have
@@ -191,8 +271,15 @@ export async function syncWslDistro(p: Platform): Promise<void> {
       `${distro} did not converge cleanly (${converged}) — ` +
         `run \`red-dev install core\` inside it to see why`,
     );
-    return;
+  } else {
+    log.ok(`${distro} converged`);
   }
 
-  log.ok(`${distro} converged`);
+  const toolingFailures = await syncSelectedTooling(p, selected);
+  if (toolingFailures === 0) {
+    const prefs = await readPreferences(p);
+    if (distroSetupCommands(prefs.terminalShell, prefs.agents ?? [], prefs.runtimes ?? []).length > 0) {
+      log.ok(`${distro}: selected CLI tools synchronized`);
+    }
+  }
 }

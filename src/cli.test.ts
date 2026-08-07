@@ -6,6 +6,17 @@ const cli = buildCli();
 const parse = (argv: string[]) => parseArgs(cli, argv);
 
 describe("command parsing", () => {
+  test("reads explicit unattended agent and runtime selections", () => {
+    expect(parse(["agents", "claude-code,codex"]).agentKeys).toEqual([
+      "claude-code",
+      "codex",
+    ]);
+    expect(parse(["lang", "node@lts,bun@latest"]).runtimeIds).toEqual([
+      "node@lts",
+      "bun@latest",
+    ]);
+  });
+
   test("reads the command and its positional", () => {
     const inv = parse(["install", "core"]);
     expect(inv.command).toBe("install");

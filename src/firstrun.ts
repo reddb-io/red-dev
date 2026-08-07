@@ -14,6 +14,7 @@
  */
 
 import { log } from "./log.ts";
+import type { StepOutcome } from "./converge.ts";
 import type { Platform } from "./platform.ts";
 import type { SetupAnswers } from "./tui-setup-model.ts";
 import { readPreferences, writePreferences, type Preferences } from "./preferences.ts";
@@ -30,6 +31,55 @@ export interface FirstRunChoices {
   /** Agent keys chosen, when the fullscreen setup ran. */
   agents?: string[];
   blesh: boolean;
+}
+
+export interface SetupPlanStep {
+  key: string;
+  tool: string;
+  kind: "runtime" | "agent" | "red-skills";
+}
+
+export interface SetupStepResult {
+  tool: string;
+  outcome: StepOutcome;
+  detail?: string;
+}
+
+export interface SetupProgressObserver {
+  begin?: (steps: SetupPlanStep[]) => void;
+  stepStart?: (step: SetupPlanStep) => void;
+  stepEnd?: (result: SetupStepResult) => void;
+}
+
+type SetupChoices = { agents?: string[]; runtimes: string[]; apps: string[] };
+
+const NON_SKILL_HOSTS = new Set(["claude-desktop", "codex-desktop", "t3code"]);
+
+/** The exact units the pre-converge setup is about to perform. */
+export async function setupPlan(p: Platform, choices: SetupChoices): Promise<SetupPlanStep[]> {
+  const { availableAgents } = await import("./agents.ts");
+  const agents = choices.agents ?? [];
+  const available = availableAgents(p);
+  const chosen = agents
+    .map((key) => available.find((agent) => agent.key === key))
+    .filter((agent) => agent !== undefined);
+
+  const runtimes = [...choices.runtimes];
+  if (!runtimes.some((runtime) => runtime.startsWith("node"))) {
+    const needsNpm = chosen.some((agent) =>
+      p.os === "windows" ? Boolean(agent.npm) : Boolean(agent.npm && !agent.installer),
+    );
+    if (needsNpm) runtimes.unshift("node@lts");
+  }
+
+  const plan: SetupPlanStep[] = [
+    ...runtimes.map((key) => ({ key, tool: key, kind: "runtime" as const })),
+    ...chosen.map((agent) => ({ key: agent.key, tool: agent.label, kind: "agent" as const })),
+  ];
+  if (chosen.some((agent) => !NON_SKILL_HOSTS.has(agent.key))) {
+    plan.push({ key: "red-skills", tool: "red-skills", kind: "red-skills" });
+  }
+  return plan;
 }
 
 const FONTS = [
@@ -89,6 +139,7 @@ export async function applySetupAnswers(
   p: Platform,
   inv: { scope?: string | undefined },
   answers: SetupAnswers,
+  observer: SetupProgressObserver = {},
 ): Promise<{ answers: SetupAnswers }> {
   if (answers.share) {
     const { chooseSharedRoot } = await import("./shared-root.ts");
@@ -104,6 +155,8 @@ export async function applySetupAnswers(
     theme: answers.theme,
     font: answers.font,
     blesh: answers.blesh,
+    agents: answers.agents,
+    runtimes: answers.runtimes,
     ...(answers.terminalShell ? { terminalShell: answers.terminalShell } : {}),
     ...(answers.terminalShell === "wsl" && process.env["WSL_DISTRO_NAME"]
       ? { distro: process.env["WSL_DISTRO_NAME"] }
@@ -114,7 +167,7 @@ export async function applySetupAnswers(
     agents: answers.agents,
     runtimes: answers.runtimes,
     apps: answers.apps,
-  });
+  }, observer);
   void inv;
   return { answers };
 }
@@ -135,7 +188,8 @@ export async function applySetupAnswers(
  */
 export async function carryOutChoices(
   p: Platform,
-  choices: { agents?: string[]; runtimes: string[]; apps: string[] },
+  choices: SetupChoices,
+  observer: SetupProgressObserver = {},
 ): Promise<void> {
   // Runtimes first, because agents are installed with them.
   //
@@ -149,32 +203,39 @@ export async function carryOutChoices(
   // and do not care. Ordering a dependency before its dependent is right
   // everywhere; it just only showed on the target that had one.
   const agents = choices.agents ?? [];
+  const plan = await setupPlan(p, choices);
+  observer.begin?.(plan);
 
   // An npm agent implies node, whether or not anyone ticked it.
   //
   // On Windows, Gemini, OpenClaw and Hermes install through npm. A user
-  // who picks Gemini and does not pick node@lts has not contradicted
   // themselves — they have named an end and left the means to the tool
   // whose job that is. Without this the converge failed those agents
   // with "npm not on PATH", which is the tool reporting its own missing
   // prerequisite as the user's mistake.
-  const runtimes = [...choices.runtimes];
-  if (agents.length > 0 && !runtimes.some((r) => r.startsWith("node"))) {
-    const { availableAgents } = await import("./agents.ts");
-    const chosen = availableAgents(p).filter((a) => agents.includes(a.key));
-    const needsNpm = chosen.some((a) =>
-      p.os === "windows" ? Boolean(a.npm) : Boolean(a.npm && !a.installer),
-    );
-    if (needsNpm) {
-      log.plain("       an npm-installed agent was chosen, so node@lts comes with it");
-      runtimes.unshift("node@lts");
-    }
+  const runtimes = plan.filter((step) => step.kind === "runtime");
+  if (runtimes.some((step) => step.key === "node@lts") && !choices.runtimes.includes("node@lts")) {
+    log.plain("       an npm-installed agent was chosen, so node@lts comes with it");
   }
 
   if (runtimes.length > 0) {
     const { useRuntimes } = await import("./runtimes.ts");
     try {
-      await useRuntimes(runtimes);
+      await useRuntimes(runtimes.map((step) => step.key), {
+        stepStart: (id) => {
+          const step = runtimes.find((candidate) => candidate.key === id);
+          if (step) observer.stepStart?.(step);
+        },
+        stepEnd: (id, error) => {
+          const step = runtimes.find((candidate) => candidate.key === id);
+          if (!step) return;
+          observer.stepEnd?.({
+            tool: step.tool,
+            outcome: error ? "failed" : "installed",
+            ...(error ? { detail: error } : {}),
+          });
+        },
+      });
     } catch (err) {
       log.warn(`runtimes: ${(err as Error).message}`);
     }
@@ -185,29 +246,39 @@ export async function carryOutChoices(
       "./agents.ts"
     );
     const available = availableAgents(p);
-    for (const key of agents) {
-      const agent = available.find((a) => a.key === key);
+    for (const step of plan.filter((candidate) => candidate.kind === "agent")) {
+      const agent = available.find((a) => a.key === step.key);
       if (!agent) continue;
+      observer.stepStart?.(step);
       if (isAgentInstalled(agent)) {
         log.skip(`${agent.label} already present`);
+        observer.stepEnd?.({ tool: step.tool, outcome: "present" });
         continue;
       }
       try {
         await installAgent(agent, p);
         log.ok(agent.label);
+        observer.stepEnd?.({ tool: step.tool, outcome: "installed" });
       } catch (err) {
         // One agent failing never stops the others, the same policy the
         // converge has for tools.
-        log.err(`${agent.label}: ${(err as Error).message}`);
+        const detail = (err as Error).message;
+        log.err(`${agent.label}: ${detail}`);
+        observer.stepEnd?.({ tool: step.tool, outcome: "failed", detail });
       }
     }
     // The desktop apps host no skills, so picking only those is not a
     // reason to run the installer.
-    if (agents.some((k) => k !== "claude-desktop" && k !== "codex-desktop" && k !== "t3code")) {
+    const skills = plan.find((step) => step.kind === "red-skills");
+    if (skills) {
+      observer.stepStart?.(skills);
       try {
         await installRedSkills();
+        observer.stepEnd?.({ tool: skills.tool, outcome: "installed" });
       } catch (err) {
-        log.warn(`red-skills: ${(err as Error).message}`);
+        const detail = (err as Error).message;
+        log.warn(`red-skills: ${detail}`);
+        observer.stepEnd?.({ tool: skills.tool, outcome: "failed", detail });
       }
     }
   }
@@ -268,6 +339,8 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
       theme: answers.theme,
       font: answers.font,
       blesh: answers.blesh,
+      agents: answers.agents,
+      runtimes: answers.runtimes,
       ...(answers.terminalShell ? { terminalShell: answers.terminalShell } : {}),
       ...(answers.terminalShell === "wsl" && process.env["WSL_DISTRO_NAME"]
         ? { distro: process.env["WSL_DISTRO_NAME"] }
@@ -387,6 +460,7 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
     theme,
     font,
     blesh,
+    runtimes: choices.runtimes,
     ...(terminalShell ? { terminalShell } : {}),
     ...(terminalShell === "wsl" && process.env["WSL_DISTRO_NAME"]
       ? { distro: process.env["WSL_DISTRO_NAME"] }

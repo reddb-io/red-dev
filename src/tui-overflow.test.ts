@@ -35,6 +35,8 @@ function frame(lines: string[]): string[] {
   const model = {
     lines: () => lines,
     results: () => [],
+    setupResults: () => [],
+    setupTotal: () => 0,
     current: () => "dotfiles",
     scope: () => "core",
     finished: () => false,

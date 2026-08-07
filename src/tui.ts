@@ -30,6 +30,7 @@ import {
 } from "tuiuiu.js";
 import { createScrollArea } from "tuiuiu.js";
 import { VERSION } from "./cli.ts";
+import type { SetupProgressObserver } from "./firstrun.ts";
 import { captureTo } from "./log.ts";
 import type { Platform } from "./platform.ts";
 import { summary } from "./platform.ts";
@@ -153,7 +154,7 @@ export interface TuiActions {
   setup?: {
     steps: SetupModel["steps"];
     wizard: SetupModel["wizard"];
-    apply: (answers: SetupAnswers) => Promise<unknown>;
+    apply: (answers: SetupAnswers, observer?: SetupProgressObserver) => Promise<unknown>;
   };
 }
 
@@ -268,7 +269,11 @@ export async function runTui(
           // 0/46 and 0s through all of it reads as broken.
           model?.prelude("agents & runtimes");
           void actions.setup
-            .apply(answers)
+            .apply(answers, {
+              begin: (steps) => model?.setupBegin(steps),
+              stepStart: (step) => model?.setupStepStart(step),
+              stepEnd: (step) => model?.setupStepEnd(step),
+            })
             .catch((err: unknown) => model?.note(`failed: ${(err as Error).message}`))
             .finally(() => {
               release();

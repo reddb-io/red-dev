@@ -13,7 +13,14 @@
  * one agent exists. Installing it alone would configure nothing.
  */
 
-import { existsSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  linkSync,
+  mkdirSync,
+  readdirSync,
+  unlinkSync,
+} from "node:fs";
 import { log, RedError } from "./log.ts";
 import type { Platform } from "./platform.ts";
 
@@ -251,11 +258,19 @@ async function run(cmd: string[], env?: Record<string, string | undefined>): Pro
  * is prepended for the child. Both spellings of the variable, because
  * the child is cmd.exe and inherits whichever casing exists.
  */
-function npmEnv(npm: string): Record<string, string | undefined> {
+export function npmEnvironment(
+  npm: string,
+  platform: string = process.platform,
+  current: Record<string, string | undefined> = process.env,
+): Record<string, string | undefined> {
   const dir = npm.replace(/[\\/][^\\/]+$/, "");
-  const sep = process.platform === "win32" ? ";" : ":";
-  const path = `${dir}${sep}${process.env["PATH"] ?? process.env["Path"] ?? ""}`;
-  return { ...process.env, PATH: path, Path: path };
+  const sep = platform === "win32" ? ";" : ":";
+  const inherited =
+    platform === "win32"
+      ? current["Path"] ?? current["PATH"] ?? ""
+      : current["PATH"] ?? current["Path"] ?? "";
+  const path = `${dir}${sep}${inherited}`;
+  return { ...current, PATH: path, Path: path };
 }
 
 /**
@@ -324,6 +339,69 @@ async function resolveNpm(): Promise<string | null> {
   return await runtimeTool("npm");
 }
 
+/** The real Codex binary winget currently leaves without a `codex` alias. */
+export function codexPortableExecutable(files: string[]): string | null {
+  return (
+    files.find((file) => /^codex-(?:x86_64|aarch64)-pc-windows-msvc\.exe$/i.test(file)) ?? null
+  );
+}
+
+function prependProcessPath(dir: string): void {
+  const current = process.env["Path"] ?? process.env["PATH"] ?? "";
+  const entries = current.split(";");
+  if (entries.some((entry) => entry.toLowerCase() === dir.toLowerCase())) return;
+  const path = `${dir};${current}`;
+  process.env["Path"] = path;
+  process.env["PATH"] = path;
+}
+
+/**
+ * Make a winget-installed agent usable before this process is restarted.
+ *
+ * Winget updates the user PATH but cannot update the environment of the
+ * red-dev process that launched it. Codex also currently has a second issue:
+ * its portable package contains the real executable but publishes no `codex`
+ * link under WinGet/Links. Refreshing only PATH therefore still leaves that
+ * package listed as installed and impossible to invoke.
+ */
+async function exposeWindowsAgentCommand(a: AgentSpec): Promise<void> {
+  if (!a.winget || !a.cmd) return;
+  const local = process.env["LOCALAPPDATA"];
+  if (!local) return;
+
+  const packageDir = `${local}\\Microsoft\\WinGet\\Packages\\${a.winget}_Microsoft.Winget.Source_8wekyb3d8bbwe`;
+  if (existsSync(packageDir)) prependProcessPath(packageDir);
+  if (a.key !== "codex") return;
+
+  let executable: string | null = null;
+  try {
+    executable = codexPortableExecutable(readdirSync(packageDir));
+  } catch {
+    return;
+  }
+  if (!executable) return;
+
+  const { windowsBinDir } = await import("./providers.ts");
+  const bin = windowsBinDir();
+  mkdirSync(bin, { recursive: true });
+  const target = `${packageDir}\\${executable}`;
+  const exposed = `${bin}\\codex.exe`;
+  // A .cmd wrapper is visible to PowerShell but Git Bash does not find
+  // it by the extensionless name. An .exe works in both shells. Refresh
+  // the command every time winget runs so an agent upgrade cannot leave
+  // it on the previous version. Both paths live under LOCALAPPDATA and
+  // therefore on one volume, so a hard link normally costs no second
+  // 343 MB copy; the copy is the conservative fallback.
+  try {
+    if (existsSync(exposed)) unlinkSync(exposed);
+    linkSync(target, exposed);
+  } catch {
+    copyFileSync(target, exposed);
+  }
+  prependProcessPath(bin);
+  log.ok("Codex CLI command exposed as codex");
+}
+
 export async function installAgent(a: AgentSpec, p: Platform): Promise<void> {
   if (p.os === "windows" && a.msstore) {
     // --source msstore is load-bearing, not a detail: without it winget
@@ -370,6 +448,7 @@ export async function installAgent(a: AgentSpec, p: Platform): Promise<void> {
       ]),
       a.label,
     );
+    await exposeWindowsAgentCommand(a);
     return;
   }
 
@@ -387,7 +466,7 @@ export async function installAgent(a: AgentSpec, p: Platform): Promise<void> {
   if (p.os === "windows" && a.npm) {
     const npm = await resolveNpm();
     if (!npm) throw new RedError("no npm anywhere — not on PATH, and mise has no node. Run `red-dev lang`");
-    await run(npmArgv(npm, ["install", "-g", a.npm]), npmEnv(npm));
+    await run(npmArgv(npm, ["install", "-g", a.npm]), npmEnvironment(npm));
     return;
   }
 
@@ -400,7 +479,7 @@ export async function installAgent(a: AgentSpec, p: Platform): Promise<void> {
   if (a.npm) {
     const npm = await resolveNpm();
     if (!npm) throw new RedError("no npm anywhere — not on PATH, and mise has no node. Run `red-dev install core`");
-    await run(npmArgv(npm, ["install", "-g", a.npm]), npmEnv(npm));
+    await run(npmArgv(npm, ["install", "-g", a.npm]), npmEnvironment(npm));
     return;
   }
 

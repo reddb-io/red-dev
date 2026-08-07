@@ -38,6 +38,7 @@ import { muted, subtle, text, ui } from "./tui-theme.ts";
 import type { Scope } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
 import type { ApplyContext } from "./providers.ts";
+import type { SetupPlanStep, SetupStepResult } from "./firstrun.ts";
 
 function human(ms: number): string {
   const s = Math.floor(ms / 1000);
@@ -103,6 +104,8 @@ export interface InstallTuiOptions {
 export interface InstallModel {
   lines: () => string[];
   results: () => StepResult[];
+  setupResults: () => SetupStepResult[];
+  setupTotal: () => number;
   current: () => string;
   scope: () => string;
   finished: () => boolean;
@@ -112,6 +115,9 @@ export interface InstallModel {
   logScroll: ScrollAreaState;
   /** Start converging. Idempotent; the menu calls it when you pick Install. */
   prelude: (label: string) => void;
+  setupBegin: (steps: SetupPlanStep[]) => void;
+  setupStepStart: (step: SetupPlanStep) => void;
+  setupStepEnd: (result: SetupStepResult) => void;
   begin: () => void;
   /**
    * Add a line to the log from outside the converge.
@@ -127,11 +133,51 @@ export interface InstallModel {
   handleKey: (input: string, key: KeyPress) => boolean;
 }
 
-interface KeyPress {
+export interface KeyPress {
   upArrow?: boolean;
   downArrow?: boolean;
   pageUp?: boolean;
   pageDown?: boolean;
+}
+
+/** Apply one install-log navigation key to the real scroll state. */
+export function handleInstallScroll(
+  logScroll: ScrollAreaState,
+  setFollowing: (following: boolean) => void,
+  input: string,
+  key: KeyPress,
+): boolean {
+  if (key.upArrow || input === "k") {
+    logScroll.scrollBy(-1);
+    setFollowing(false);
+    return true;
+  }
+  if (key.downArrow || input === "j") {
+    logScroll.scrollBy(1);
+    setFollowing(logScroll.scrollTop() >= logScroll.maxScroll());
+    return true;
+  }
+  if (key.pageUp) {
+    logScroll.pageUp();
+    setFollowing(false);
+    return true;
+  }
+  if (key.pageDown) {
+    logScroll.pageDown();
+    setFollowing(logScroll.scrollTop() >= logScroll.maxScroll());
+    return true;
+  }
+  if (input === "g") {
+    logScroll.scrollToTop();
+    setFollowing(false);
+    return true;
+  }
+  if (input === "G") {
+    logScroll.scrollToBottom();
+    setFollowing(true);
+    return true;
+  }
+  return false;
 }
 
 export function useInstallModel(
@@ -143,6 +189,8 @@ export function useInstallModel(
 
   const [lines, setLines] = useState<string[]>([]);
   const [results, setResults] = useState<StepResult[]>([]);
+  const [setupResults, setSetupResults] = useState<SetupStepResult[]>([]);
+  const [setupTotal, setSetupTotal] = useState(0);
   const [current, setCurrent] = useState("");
   const [scope, setScope] = useState("");
   const [finished, setFinished] = useState(false);
@@ -190,7 +238,6 @@ export function useInstallModel(
 
   useEffect(() => {
     if (!started()) return;
-    const timer = setInterval(() => setTick((n) => n + 1), 1000);
 
     void converge(
       { platform: opts.platform, ctx: opts.ctx, scopes: opts.scopes, dryRun: false },
@@ -235,16 +282,16 @@ export function useInstallModel(
     ).then((summary) => {
       setFinishedAt(Date.now());
       setFinished(true);
-      clearInterval(timer);
-      onFinish(summary.failed);
+      const setupFailed = setupResults().filter((result) => result.outcome === "failed").length;
+      onFinish(summary.failed + setupFailed);
     });
-
-    return () => clearInterval(timer);
   });
 
   return {
     lines,
     results,
+    setupResults,
+    setupTotal,
     current,
     scope,
     finished,
@@ -271,6 +318,9 @@ export function useInstallModel(
       setScope("setup");
       setCurrent(label);
     },
+    setupBegin: (steps) => setSetupTotal(steps.length),
+    setupStepStart: (step) => setCurrent(step.tool),
+    setupStepEnd: (result) => setSetupResults((previous) => [...previous, result]),
     begin: () => {
       if (started()) return;
       if (startedAt() === 0) setStartedAt(Date.now());
@@ -282,37 +332,7 @@ export function useInstallModel(
       // the one thing you would want to do — read the error that
       // scrolled past — impossible. Moving up stops the follow; reaching
       // the bottom resumes it, so there is no mode to remember.
-      if (key.upArrow || input === "k") {
-        logScroll.scrollBy(-1);
-        setFollowing(false);
-        return true;
-      }
-      if (key.downArrow || input === "j") {
-        logScroll.scrollBy(1);
-        setFollowing(logScroll.scrollTop() >= logScroll.maxScroll());
-        return true;
-      }
-      if (key.pageUp) {
-        logScroll.pageUp();
-        setFollowing(false);
-        return true;
-      }
-      if (key.pageDown) {
-        logScroll.pageDown();
-        setFollowing(logScroll.scrollTop() >= logScroll.maxScroll());
-        return true;
-      }
-      if (input === "g") {
-        logScroll.scrollToTop();
-        setFollowing(false);
-        return true;
-      }
-      if (input === "G") {
-        logScroll.scrollToBottom();
-        setFollowing(true);
-        return true;
-      }
-      return false;
+      return handleInstallScroll(logScroll, setFollowing, input, key);
     },
   };
 }
@@ -325,7 +345,8 @@ export function useInstallModel(
  * between frames.
  */
 export function InstallLayout(m: InstallModel, width: number, height: number) {
-  const results = m.results();
+  const results = [...m.setupResults(), ...m.results()];
+  const total = m.total + m.setupTotal();
   const finished = m.finished();
 
   // Two columns need room for both. Below that the status column would
@@ -405,7 +426,7 @@ export function InstallLayout(m: InstallModel, width: number, height: number) {
           Text({ color: muted, bold: true }, finished ? "Done" : "Progress"),
           ProgressBar({
             value: results.length,
-            max: m.total,
+            max: total,
             width: rightWidth - 14,
             style: "block",
             color: failures.length > 0 ? ui.warn : ui.accent,
@@ -414,7 +435,7 @@ export function InstallLayout(m: InstallModel, width: number, height: number) {
           // the terminal and asks it to darken whatever that was.
           Text(
             { color: muted },
-            `${results.length}/${m.total}${etaText(results.length, m.total, elapsedMs, finished)}`,
+            `${results.length}/${total}${etaText(results.length, total, elapsedMs, finished)}`,
           ),
           Text({}, ""),
 
@@ -424,7 +445,7 @@ export function InstallLayout(m: InstallModel, width: number, height: number) {
               { value: by("present"), color: subtle },
               { value: by("failed"), color: ui.danger },
             ],
-            total: m.total,
+            total,
             width: rightWidth - 6,
             showLegend: false,
           }),

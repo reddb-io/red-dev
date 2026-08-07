@@ -11,11 +11,37 @@
 
 import { describe, expect, test } from "bun:test";
 import { LogViewer, createScrollArea, renderToString } from "tuiuiu.js";
+import { handleInstallScroll } from "./tui-install.ts";
 
 const LINES = Array.from({ length: 40 }, (_, i) => `linha ${i}`);
 const strip = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "");
 
 describe("the converge log", () => {
+  test("the install key handler moves up and pauses tail-following", () => {
+    const state = createScrollArea({ height: 5, content: LINES, autoScroll: false });
+    state.scrollToBottom();
+    const before = state.scrollTop();
+    let following = true;
+
+    const handled = handleInstallScroll(state, (value) => (following = value), "", {
+      upArrow: true,
+    });
+
+    expect(handled).toBe(true);
+    expect(state.scrollTop()).toBeLessThan(before);
+    expect(following).toBe(false);
+  });
+
+  test("G returns to the tail and resumes following", () => {
+    const state = createScrollArea({ height: 5, content: LINES, autoScroll: false });
+    state.scrollToTop();
+    let following = false;
+
+    expect(handleInstallScroll(state, (value) => (following = value), "G", {})).toBe(true);
+    expect(state.scrollTop()).toBe(state.maxScroll());
+    expect(following).toBe(true);
+  });
+
   test("an external scroll state decides what is shown", () => {
     const state = createScrollArea({ height: 5, content: LINES, autoScroll: false });
     state.scrollToTop();

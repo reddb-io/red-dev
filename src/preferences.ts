@@ -39,6 +39,10 @@ export interface Preferences {
   /** Terminal font size in points. omakub offers 7 to 14. */
   fontSize?: number;
   blesh?: boolean;
+  /** Agent keys chosen for this workstation, mirrored into WSL when selected. */
+  agents?: string[];
+  /** mise runtime ids chosen for this workstation. */
+  runtimes?: string[];
   /** Ids of one-off repairs already applied; see src/migrations.ts. */
   migrations?: string[];
 }

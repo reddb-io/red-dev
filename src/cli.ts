@@ -118,9 +118,23 @@ export function buildCli(): CLI {
       },
       agents: {
         description: "choose coding agents, and wire red-skills into them",
+        positional: [
+          {
+            name: "agent_selection",
+            description: "comma-separated agent keys for an unattended install",
+            required: false,
+          },
+        ],
       },
       lang: {
         description: "choose language runtimes for mise to manage",
+        positional: [
+          {
+            name: "runtime_selection",
+            description: "comma-separated runtime ids for an unattended install",
+            required: false,
+          },
+        ],
       },
       shell: {
         description: "choose whether the terminal opens WSL or Git Bash",
@@ -179,6 +193,9 @@ export interface Invocation {
    * scope, and reusing `name` would reject it as an unknown theme.
    */
   logsWhich: string | undefined;
+  /** Explicit selections make agents/lang safe to invoke across WSL unattended. */
+  agentKeys: string[] | undefined;
+  runtimeIds: string[] | undefined;
   /**
    * Parse and validation failures. Strict mode means an unrecognised
    * command lands here too, with the list of real ones — so there is no
@@ -229,6 +246,14 @@ export function parseArgs(cli: CLI, argv: string[]): Invocation {
     // under their own key; the caller reads whichever applies.
     scope: scope ?? (typeof rawName === "string" ? rawName : undefined),
     logsWhich: typeof pos["which"] === "string" ? pos["which"] : undefined,
+    agentKeys:
+      typeof pos["agent_selection"] === "string"
+        ? pos["agent_selection"].split(",").map((value) => value.trim()).filter(Boolean)
+        : undefined,
+    runtimeIds:
+      typeof pos["runtime_selection"] === "string"
+        ? pos["runtime_selection"].split(",").map((value) => value.trim()).filter(Boolean)
+        : undefined,
     themeName: typeof opts["theme"] === "string" ? opts["theme"] : DEFAULT_THEME,
     font: typeof opts["font"] === "string" ? opts["font"] : "firacode",
     opacity: clampOpacity(opts["opacity"], errors),
