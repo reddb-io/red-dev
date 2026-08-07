@@ -52,6 +52,25 @@ export interface RuntimeObserver {
   stepEnd?: (id: string, error: string | null) => void;
 }
 
+export interface RuntimeInstallRequest {
+  id: string;
+  env: Record<string, string>;
+}
+
+/** Stable installation request behind a user-facing runtime channel. */
+export function runtimeInstallRequest(id: string): RuntimeInstallRequest {
+  if (id === "python@3.13") {
+    return {
+      // 3.13.15 briefly had no python-build-standalone artifact. Mise
+      // fell back to compiling without libsqlite3-dev and produced a
+      // Python that started successfully but could not import sqlite3.
+      id: "python@3.13.14",
+      env: { MISE_PYTHON_COMPILE: "0" },
+    };
+  }
+  return { id, env: {} };
+}
+
 /** Install a specific set of runtimes, as chosen interactively. */
 export async function useRuntimes(ids: string[], observer: RuntimeObserver = {}): Promise<void> {
   const mise = await miseBin();
@@ -67,15 +86,30 @@ export async function useRuntimes(ids: string[], observer: RuntimeObserver = {})
   for (const id of ids) {
     observer.stepStart?.(id);
     log.step(`mise: ${id}`);
-    const { code, out } = await run([mise, "use", "-g", id]);
+    const request = runtimeInstallRequest(id);
+    const { code, out } = await run([mise, "use", "-g", request.id], request.env);
     if (code !== 0) {
       const detail = out.trim().split("\n").slice(-2).join(" ");
       log.err(`${id}: ${detail}`);
       observer.stepEnd?.(id, detail || `mise exited ${code}`);
-    } else {
-      log.ok(id);
-      observer.stepEnd?.(id, null);
+      continue;
     }
+
+    if (id.startsWith("python@")) {
+      const probe = await run(
+        [mise, "exec", request.id, "--", "python", "-c", "import sqlite3"],
+        request.env,
+      );
+      if (probe.code !== 0) {
+        const detail = "Python installed without SQLite support";
+        log.err(`${id}: ${detail}`);
+        observer.stepEnd?.(id, detail);
+        continue;
+      }
+    }
+
+    log.ok(id);
+    observer.stepEnd?.(id, null);
   }
 }
 
@@ -94,8 +128,15 @@ async function miseBin(): Promise<string | null> {
   return Bun.which("mise");
 }
 
-async function run(cmd: string[]): Promise<{ code: number; out: string }> {
-  const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
+async function run(
+  cmd: string[],
+  extraEnv: Record<string, string> = {},
+): Promise<{ code: number; out: string }> {
+  const proc = Bun.spawn(cmd, {
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...process.env, ...extraEnv },
+  });
   const out = await new Response(proc.stdout).text();
   const code = await proc.exited;
   return { code, out };
@@ -181,15 +222,21 @@ export async function toolchainParity(p: Platform): Promise<string | null> {
  *
  * `mise which npm` answers from mise's own state rather than from this
  * process's environment, which is the difference between "was it ever
- * installed" and "did my PATH happen to see it".
+ * installed" and "did my PATH happen to see it". It must win even when
+ * PATH contains an executable: that entry can be a stale global shim
+ * whose package directory has already disappeared.
  */
+export function preferManagedTool(
+  managed: { code: number; out: string } | null,
+  direct: string | null,
+): string | null {
+  const path = managed?.out.trim().split("\n")[0]?.trim() ?? "";
+  return managed?.code === 0 && path.length > 0 ? path : direct;
+}
+
 export async function runtimeTool(name: string): Promise<string | null> {
   const direct = Bun.which(name);
-  if (direct) return direct;
-
   const mise = await miseBin();
-  if (!mise) return null;
-  const { code, out } = await run([mise, "which", name]);
-  const path = out.trim().split("\n")[0]?.trim() ?? "";
-  return code === 0 && path.length > 0 ? path : null;
+  if (!mise) return direct;
+  return preferManagedTool(await run([mise, "which", name]), direct);
 }

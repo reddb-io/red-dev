@@ -57,7 +57,7 @@ const NON_SKILL_HOSTS = new Set(["claude-desktop", "codex-desktop", "t3code"]);
 
 /** The exact units the pre-converge setup is about to perform. */
 export async function setupPlan(p: Platform, choices: SetupChoices): Promise<SetupPlanStep[]> {
-  const { availableAgents } = await import("./agents.ts");
+  const { agentInstallMethod, availableAgents } = await import("./agents.ts");
   const agents = choices.agents ?? [];
   const available = availableAgents(p);
   const chosen = agents
@@ -66,16 +66,12 @@ export async function setupPlan(p: Platform, choices: SetupChoices): Promise<Set
 
   const runtimes = [...choices.runtimes];
   if (!runtimes.some((runtime) => runtime.startsWith("node"))) {
-    const needsNpm = chosen.some((agent) =>
-      p.os === "windows" ? Boolean(agent.npm) : Boolean(agent.npm && !agent.installer),
-    );
+    const needsNpm = chosen.some((agent) => agentInstallMethod(agent, p) === "npm");
     if (needsNpm) runtimes.unshift("node@lts");
   }
-  if (
-    chosen.some((agent) => agent.key === "hermes") &&
-    !runtimes.some((runtime) => runtime.startsWith("python"))
-  ) {
-    runtimes.push("python@3.13");
+  for (const runtime of chosen.flatMap((agent) => agent.runtimeNeeds ?? [])) {
+    const name = runtime.split("@")[0]!;
+    if (!runtimes.some((selected) => selected.startsWith(name))) runtimes.push(runtime);
   }
 
   const plan: SetupPlanStep[] = [
@@ -254,7 +250,7 @@ export async function carryOutChoices(
   }
 
   if (agents.length > 0) {
-    const { availableAgents, installAgent, isAgentInstalled, installRedSkills } = await import(
+    const { availableAgents, installAgent, isAgentReady, installRedSkills } = await import(
       "./agents.ts"
     );
     const available = availableAgents(p);
@@ -262,7 +258,7 @@ export async function carryOutChoices(
       const agent = available.find((a) => a.key === step.key);
       if (!agent) continue;
       observer.stepStart?.(step);
-      if (isAgentInstalled(agent)) {
+      if (await isAgentReady(agent)) {
         log.skip(`${agent.label} already present`);
         observer.stepEnd?.({ tool: step.tool, outcome: "present" });
         continue;

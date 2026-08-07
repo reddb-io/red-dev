@@ -17,8 +17,10 @@ import {
   copyFileSync,
   existsSync,
   linkSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
+  rmSync,
   unlinkSync,
 } from "node:fs";
 import { log, RedError } from "./log.ts";
@@ -49,6 +51,10 @@ export interface AgentSpec {
   msstore?: string;
   /** npm package, when neither of the above fits the platform. */
   npm?: string;
+  /** Runtimes an npm lifecycle script needs in addition to Node itself. */
+  runtimeNeeds?: string[];
+  /** A command that must start successfully before presence counts as ready. */
+  probeArgs?: string[];
   /** Desktop applications have no CLI and only exist on some targets. */
   desktopOnly?: boolean;
 }
@@ -153,6 +159,8 @@ export const AGENTS: AgentSpec[] = [
     // an unrelated project at 0.4.x, and installing it would put a
     // completely different binary on PATH under the expected name.
     npm: "hermes-agent",
+    runtimeNeeds: ["python@3.13"],
+    probeArgs: ["--version"],
   },
   {
     key: "muse",
@@ -217,6 +225,25 @@ export function isAgentInstalled(a: AgentSpec): boolean {
   return a.cmd.length > 0 && Bun.which(a.cmd) !== null;
 }
 
+/** Presence plus the runtime-backed health check declared by the agent. */
+export async function isAgentReady(a: AgentSpec): Promise<boolean> {
+  if (!isAgentInstalled(a)) return false;
+  if (!a.probeArgs) return true;
+  const executable = Bun.which(a.cmd);
+  if (!executable) return false;
+  try {
+    const proc = Bun.spawn(npmArgv(executable, a.probeArgs), {
+      stdout: "ignore",
+      stderr: "ignore",
+      stdin: "ignore",
+      env: await agentRuntimeEnvironment(executable, a),
+    });
+    return (await proc.exited) === 0;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Every agent install, routed through the log rather than the console.
  *
@@ -260,19 +287,34 @@ async function run(cmd: string[], env?: Record<string, string | undefined>): Pro
  * spellings of the variable are set because Windows inherits whichever
  * casing already exists.
  */
-export function executableEnvironment(
-  executable: string,
+export function executablesEnvironment(
+  executables: string[],
   platform: string = process.platform,
   current: Record<string, string | undefined> = process.env,
 ): Record<string, string | undefined> {
-  const dir = executable.replace(/[\\/][^\\/]+$/, "");
   const sep = platform === "win32" ? ";" : ":";
   const inherited =
     platform === "win32"
       ? current["Path"] ?? current["PATH"] ?? ""
       : current["PATH"] ?? current["Path"] ?? "";
-  const path = `${dir}${sep}${inherited}`;
+  const dirs = executables
+    .map((executable) => executable.replace(/[\\/][^\\/]+$/, ""))
+    .filter((dir, index, all) => {
+      const key = platform === "win32" ? dir.toLowerCase() : dir;
+      return all.findIndex((candidate) =>
+        (platform === "win32" ? candidate.toLowerCase() : candidate) === key
+      ) === index;
+    });
+  const path = [...dirs, inherited].filter(Boolean).join(sep);
   return { ...current, PATH: path, Path: path };
+}
+
+export function executableEnvironment(
+  executable: string,
+  platform: string = process.platform,
+  current: Record<string, string | undefined> = process.env,
+): Record<string, string | undefined> {
+  return executablesEnvironment([executable], platform, current);
 }
 
 export function npmEnvironment(
@@ -281,6 +323,23 @@ export function npmEnvironment(
   current: Record<string, string | undefined> = process.env,
 ): Record<string, string | undefined> {
   return executableEnvironment(npm, platform, current);
+}
+
+async function agentRuntimeEnvironment(
+  executable: string,
+  agent: AgentSpec,
+): Promise<Record<string, string | undefined>> {
+  const { runtimeTool } = await import("./runtimes.ts");
+  const executables = [executable];
+  for (const runtime of agent.runtimeNeeds ?? []) {
+    const name = runtime.split("@")[0]!;
+    const executable = await runtimeTool(name);
+    if (!executable) {
+      throw new RedError(`${agent.label} needs ${runtime}, but mise cannot resolve ${name}`);
+    }
+    executables.push(executable);
+  }
+  return executablesEnvironment(executables);
 }
 
 /**
@@ -412,8 +471,25 @@ async function exposeWindowsAgentCommand(a: AgentSpec): Promise<void> {
   log.ok("Codex CLI command exposed as codex");
 }
 
+export type AgentInstallMethod = "msstore" | "winget" | "npm" | "installer";
+
+/** Choose a method that can run unattended on this target. */
+export function agentInstallMethod(a: AgentSpec, p: Platform): AgentInstallMethod | null {
+  if (p.os === "windows" && a.msstore) return "msstore";
+  if (p.os === "windows" && a.winget) return "winget";
+  if (p.os === "windows" && a.npm) return "npm";
+  // WSL synchronization has no terminal from which sudo can read a
+  // password. The npm packages are the vendor-published unattended path.
+  if (p.env === "wsl" && a.npm) return "npm";
+  if (a.installer) return "installer";
+  if (a.npm) return "npm";
+  return null;
+}
+
 export async function installAgent(a: AgentSpec, p: Platform): Promise<void> {
-  if (p.os === "windows" && a.msstore) {
+  const method = agentInstallMethod(a, p);
+
+  if (method === "msstore" && a.msstore) {
     // --source msstore is load-bearing, not a detail: without it winget
     // resolves the id against the community repository, where the
     // ChatGPT entries belong to third parties rather than OpenAI.
@@ -439,7 +515,7 @@ export async function installAgent(a: AgentSpec, p: Platform): Promise<void> {
     return;
   }
 
-  if (p.os === "windows" && a.winget) {
+  if (method === "winget" && a.winget) {
     const { wingetArgv } = await import("./providers.ts");
     await runWinget(
       wingetArgv([
@@ -462,7 +538,7 @@ export async function installAgent(a: AgentSpec, p: Platform): Promise<void> {
     return;
   }
 
-  // npm before the vendor installer on native Windows.
+  // npm before the vendor installer where the installer cannot run.
   //
   // The order used to be installer-then-npm everywhere, and on Windows
   // that picked the wrong one for every agent that has both. OpenClaw
@@ -471,25 +547,22 @@ export async function installAgent(a: AgentSpec, p: Platform): Promise<void> {
   // $PATH: "sudo"` while a perfectly good npm package sat unused in the
   // same spec.
   //
-  // Only on native Windows. Under WSL the installer is the better
-  // choice — it is what the vendor tests, and npm is the fallback.
-  if (p.os === "windows" && a.npm) {
-    const npm = await resolveNpm();
-    if (!npm) throw new RedError("no npm anywhere — not on PATH, and mise has no node. Run `red-dev lang`");
-    await run(npmArgv(npm, ["install", "-g", a.npm]), npmEnvironment(npm));
-    return;
-  }
-
-  if (a.installer) {
+  // Native Linux keeps the official installer. WSL uses npm for agents
+  // that publish it because the Windows-side synchronizer is deliberately
+  // non-interactive and cannot prime or answer a sudo password prompt.
+  if (method === "installer" && a.installer) {
     const { installerInstall } = await import("./providers.ts");
     await installerInstall(a.installer, `${a.label} official installer`);
     return;
   }
 
-  if (a.npm) {
+  if (method === "npm" && a.npm) {
     const npm = await resolveNpm();
     if (!npm) throw new RedError("no npm anywhere — not on PATH, and mise has no node. Run `red-dev install core`");
-    await run(npmArgv(npm, ["install", "-g", a.npm]), npmEnvironment(npm));
+    await run(
+      npmArgv(npm, ["install", "-g", a.npm]),
+      await agentRuntimeEnvironment(npm, a),
+    );
     return;
   }
 
@@ -511,12 +584,49 @@ export async function installRedSkills(): Promise<void> {
   log.step("red-skills");
   log.plain("     Registers the RedSkills marketplace in Claude Code and Codex,");
   log.plain("     and generates plugin modules for OpenCode. User-level, global.");
-  await installerInstall(
-    url,
-    "reddb-io/red-skills",
-    [],
-    node ? executableEnvironment(node) : undefined,
-  );
+  const home = process.env["USERPROFILE"] ?? process.env["HOME"];
+  if (home && repairCopiedRedSkillsCurrent(home)) {
+    log.plain("       replacing Git Bash's copied current snapshot with the managed source");
+  }
+  const install = async () =>
+    await installerInstall(
+      url,
+      "reddb-io/red-skills",
+      [],
+      node ? executableEnvironment(node) : undefined,
+    );
+  try {
+    await install();
+  } catch (error) {
+    if (!home || !repairCopiedRedSkillsCurrent(home)) throw error;
+    log.plain("       retrying with the release assets now cached");
+    await install();
+  }
+}
+
+/**
+ * Remove Git Bash's directory-copy emulation of the RedSkills `current` link.
+ *
+ * Its installer owns this path and recreates it immediately. The two markers
+ * keep a similarly named user directory out of scope.
+ */
+export function repairCopiedRedSkillsCurrent(
+  home: string,
+  platform: string = process.platform,
+): boolean {
+  if (platform !== "win32") return false;
+  const root = home.replace(/\\/g, "/");
+  const current = `${root}/.red-skills/current`;
+  try {
+    const stat = lstatSync(current);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) return false;
+    if (!existsSync(`${current}/.claude-plugin/marketplace.json`)) return false;
+    if (!existsSync(`${current}/.upstream`)) return false;
+    rmSync(current, { recursive: true });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

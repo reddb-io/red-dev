@@ -77,6 +77,15 @@ describe("console ownership", () => {
       expect(sources, name).toContain(name);
     }
   });
+
+  test("the non-interactive WSL default command goes through the captured log", () => {
+    const src = readFileSync(`${dir}/wsl-provision.ts`, "utf8");
+    const start = src.indexOf("export async function setWsl2Default");
+    const end = src.indexOf("export async function convertDistroToWsl2", start);
+    const body = src.slice(start, end);
+    expect(body).toContain("spawnLogged");
+    expect(body).not.toMatch(/stdout:\s*"inherit"/);
+  });
 });
 
 describe("the shell that can see the file", () => {

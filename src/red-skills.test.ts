@@ -14,7 +14,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { TOOLS, applicableScopes, providerFor } from "./manifest.ts";
 import {
@@ -22,6 +22,7 @@ import {
   SKILL_HOSTS,
   claudeMarketplaceIsGithub,
   codexMarketplaceIsGithub,
+  repairCopiedRedSkillsCurrent,
 } from "./agents.ts";
 import type { Platform } from "./platform.ts";
 
@@ -70,6 +71,38 @@ describe("red-skills as a converge step", () => {
     const names = TOOLS.map((t) => t.name);
     const agents = names.indexOf("agents");
     if (agents !== -1) expect(names.indexOf("red-skills")).toBeGreaterThan(agents);
+  });
+});
+
+describe("the copied Windows current snapshot", () => {
+  test("is removed only when RedSkills' managed markers are present", () => {
+    const home = mkdtempSync(`${tmpdir()}/red-skills-current-`);
+    const current = `${home}/.red-skills/current`;
+    mkdirSync(`${current}/.claude-plugin`, { recursive: true });
+    writeFileSync(`${current}/.claude-plugin/marketplace.json`, "{}");
+    writeFileSync(`${current}/.upstream`, "red-skills");
+
+    expect(repairCopiedRedSkillsCurrent(home, "win32")).toBe(true);
+    expect(existsSync(current)).toBe(false);
+  });
+
+  test("an unrelated current directory is never removed", () => {
+    const home = mkdtempSync(`${tmpdir()}/red-skills-current-user-`);
+    const current = `${home}/.red-skills/current`;
+    mkdirSync(current, { recursive: true });
+    writeFileSync(`${current}/mine.txt`, "keep");
+
+    expect(repairCopiedRedSkillsCurrent(home, "win32")).toBe(false);
+    expect(existsSync(`${current}/mine.txt`)).toBe(true);
+  });
+
+  test("a first-run copy made before release assets arrive gets one retry", () => {
+    const src = readFileSync("src/agents.ts", "utf8");
+    const start = src.indexOf("export async function installRedSkills");
+    const end = src.indexOf("export async function updateRedSkills", start);
+    const body = src.slice(start, end);
+    expect(body.match(/repairCopiedRedSkillsCurrent/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(body).toContain("retrying with the release assets now cached");
   });
 });
 

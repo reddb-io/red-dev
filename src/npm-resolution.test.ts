@@ -19,7 +19,16 @@
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { codexPortableExecutable, npmEnvironment } from "./agents.ts";
+import {
+  agentInstallMethod,
+  AGENTS,
+  codexPortableExecutable,
+  executablesEnvironment,
+  npmEnvironment,
+} from "./agents.ts";
+import type { Platform } from "./platform.ts";
+import { windowsInstallerEnvironment } from "./providers.ts";
+import { preferManagedTool, runtimeInstallRequest } from "./runtimes.ts";
 
 const agents = readFileSync(`${import.meta.dir}/agents.ts`, "utf8");
 const firstrun = readFileSync(`${import.meta.dir}/firstrun.ts`, "utf8");
@@ -38,6 +47,31 @@ describe("resolving npm", () => {
       "C:\\Windows\\System32";
     expect(env.Path).toBe(expected);
     expect(env.PATH).toBe(expected);
+  });
+
+  test("puts Python beside Node for Hermes' npm postinstall", () => {
+    const env = executablesEnvironment(
+      [
+        "C:\\mise\\node\\npm.cmd",
+        "C:\\mise\\python\\python.exe",
+      ],
+      "win32",
+      { Path: "C:\\Windows\\System32" },
+    );
+
+    expect(env.Path).toBe(
+      "C:\\mise\\node;C:\\mise\\python;C:\\Windows\\System32",
+    );
+    expect(env.PATH).toBe(env.Path);
+  });
+
+  test("a mise-owned npm wins over a stale executable already on PATH", () => {
+    expect(
+      preferManagedTool(
+        { code: 0, out: "/home/me/.local/share/mise/installs/node/lts/bin/npm\n" },
+        "/home/me/.local/bin/npm",
+      ),
+    ).toBe("/home/me/.local/share/mise/installs/node/lts/bin/npm");
   });
 
   test("asks mise, not only the process PATH", () => {
@@ -64,6 +98,59 @@ describe("resolving npm", () => {
     const body = agents.slice(start, end);
     expect(body).toContain('runtimeTool("node")');
     expect(body).toContain("executableEnvironment(node)");
+  });
+
+  test("Git Bash keeps its own utilities when red-skills receives a runtime PATH", () => {
+    const env = windowsInstallerEnvironment(
+      "C:\\Program Files\\Git\\bin\\bash.exe",
+      { Path: "C:\\mise\\node;C:\\Windows\\System32", PATH: "stale" },
+      "win32",
+    );
+
+    expect(env.Path).toBe(
+      "C:\\Program Files\\Git\\usr\\bin;C:\\mise\\node;C:\\Windows\\System32",
+    );
+    expect(env.PATH).toBe(env.Path);
+  });
+});
+
+describe("Python runtime integrity", () => {
+  test("the Python 3.13 choice resolves to the verified precompiled patch", () => {
+    expect(runtimeInstallRequest("python@3.13")).toEqual({
+      id: "python@3.13.14",
+      env: { MISE_PYTHON_COMPILE: "0" },
+    });
+  });
+
+  test("installation proves SQLite exists before reporting Python as ready", () => {
+    const start = runtimes.indexOf("export async function useRuntimes");
+    const end = runtimes.indexOf("export async function currentRuntimes", start);
+    expect(runtimes.slice(start, end)).toContain("import sqlite3");
+  });
+});
+
+describe("agent install method", () => {
+  const wsl: Platform = {
+    os: "linux",
+    env: "wsl",
+    distro: "ubuntu",
+    version: "24.04",
+    codename: "noble",
+    arch: "x64",
+    caps: { apt: true, gui: false, systemd: true, winget: true, flatpak: false },
+  };
+
+  test("WSL uses the non-interactive npm packages for OpenClaw and Hermes", () => {
+    for (const key of ["openclaw", "hermes"]) {
+      const agent = AGENTS.find((candidate) => candidate.key === key)!;
+      expect(agentInstallMethod(agent, wsl), key).toBe("npm");
+    }
+  });
+
+  test("Hermes is present only when its Python-backed command starts", () => {
+    const hermes = AGENTS.find((candidate) => candidate.key === "hermes")!;
+    expect(hermes.probeArgs).toEqual(["--version"]);
+    expect(firstrun).toContain("await isAgentReady(agent)");
   });
 });
 

@@ -22,6 +22,16 @@ const windows: Platform = {
   caps: { apt: false, gui: true, systemd: false, winget: true, flatpak: false },
 };
 
+const wsl: Platform = {
+  os: "linux",
+  env: "wsl",
+  distro: "ubuntu",
+  version: "24.04",
+  codename: "noble",
+  arch: "x64",
+  caps: { apt: true, gui: false, systemd: true, winget: true, flatpak: false },
+};
+
 const strip = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "");
 
 describe("the setup work plan", () => {
@@ -60,6 +70,22 @@ describe("the setup work plan", () => {
     expect(plan.map((step) => step.tool)).toEqual([
       "node@lts",
       "python@3.13",
+      "Hermes Agent",
+      "red-skills",
+    ]);
+  });
+
+  test("the unattended WSL copy brings the runtimes its npm agents need", async () => {
+    const plan = await setupPlan(wsl, {
+      agents: ["openclaw", "hermes"],
+      runtimes: [],
+      apps: [],
+    });
+
+    expect(plan.map((step) => step.tool)).toEqual([
+      "node@lts",
+      "python@3.13",
+      "OpenClaw",
       "Hermes Agent",
       "red-skills",
     ]);

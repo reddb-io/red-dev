@@ -647,7 +647,7 @@ async function cmdWsl(p: Platform): Promise<number> {
  * assumed.
  */
 async function cmdAgents(p: Platform, inv: Invocation): Promise<number> {
-  const { AGENTS, availableAgents, isAgentInstalled, installAgent, installRedSkills } =
+  const { AGENTS, availableAgents, isAgentInstalled, isAgentReady, installAgent, installRedSkills } =
     await import("./agents.ts");
   const available = availableAgents(p);
 
@@ -727,7 +727,7 @@ async function cmdAgents(p: Platform, inv: Invocation): Promise<number> {
   for (const key of keys) {
     const agent = available.find((a) => a.key === key);
     if (!agent) continue;
-    if (isAgentInstalled(agent)) {
+    if (await isAgentReady(agent)) {
       log.skip(`${agent.label} already present`);
       continue;
     }

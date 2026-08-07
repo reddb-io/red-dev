@@ -125,12 +125,8 @@ export async function detectWsl(): Promise<WslState> {
 /** Make every future distro choose the WSL 2 architecture. */
 export async function setWsl2Default(): Promise<boolean> {
   log.step("WSL 2: setting the default architecture for new distros");
-  const proc = Bun.spawn(["wsl.exe", "--set-default-version", "2"], {
-    stdout: "inherit",
-    stderr: "inherit",
-    stdin: "ignore",
-  });
-  const code = await proc.exited;
+  const { spawnLogged } = await import("./providers.ts");
+  const code = await spawnLogged(["wsl.exe", "--set-default-version", "2"]);
   if (code !== 0) {
     log.err(`wsl --set-default-version 2 exited ${code}`);
     return false;

@@ -88,6 +88,24 @@ export async function spawnLogged(
   return await proc.exited;
 }
 
+/** Keep Git's POSIX utilities visible when a caller supplies Windows PATH. */
+export function windowsInstallerEnvironment(
+  shell: string,
+  current: Record<string, string | undefined>,
+  platform: string = process.platform,
+): Record<string, string | undefined> {
+  if (platform !== "win32") return current;
+  const match = /^(.*)[\\/]bin[\\/]bash(?:\.exe)?$/i.exec(shell);
+  if (!match?.[1]) return current;
+  const utilities = `${match[1]}\\usr\\bin`;
+  const inherited = current["Path"] ?? current["PATH"] ?? "";
+  const entries = inherited.split(";");
+  const path = entries.some((entry) => entry.toLowerCase() === utilities.toLowerCase())
+    ? inherited
+    : `${utilities};${inherited}`;
+  return { ...current, Path: path, PATH: path };
+}
+
 async function run(
   cmd: string[],
   opts: { allowFailure?: boolean } = {},
@@ -618,7 +636,8 @@ export async function installerInstall(
   // handles by preferring npm on Windows.
   if (process.platform !== "win32" && body.includes("sudo ")) await requireSudo();
 
-  const code = await spawnLogged([shell, tmp, ...args], env ? { env } : {});
+  const childEnv = env ? windowsInstallerEnvironment(shell, env) : undefined;
+  const code = await spawnLogged([shell, tmp, ...args], childEnv ? { env: childEnv } : {});
   // node:fs, not `rm`. There is no rm on native Windows, so cleaning up
   // failed with `Executable not found in $PATH: "rm"` — reported as the
   // installer's own failure, which sent the reader looking at the vendor
