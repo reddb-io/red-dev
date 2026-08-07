@@ -294,6 +294,13 @@ function keysToml(): string {
 # quoted-insert, which types the next key literally — is reachable in
 # every shell red-dev configures through Ctrl+Q, which readline binds to
 # the same command.
+#
+# Image paste belongs to the terminal application, not to Alacritty: both
+# Claude Code and Codex react to the Ctrl+V byte by reading image data from
+# the system clipboard. Alacritty already consumes the physical Ctrl+V for
+# text paste, so Alt+V provides that byte without sacrificing the Windows
+# text-paste convention. It also matches Claude Code's documented Windows
+# image shortcut.
 
 [[keyboard.bindings]]
 key = 'V'
@@ -304,6 +311,11 @@ action = 'Paste'
 key = 'V'
 mods = 'Control|Shift'
 action = 'Paste'
+
+[[keyboard.bindings]]
+key = 'V'
+mods = 'Alt'
+chars = "\\u0016"
 
 [[keyboard.bindings]]
 key = 'C'

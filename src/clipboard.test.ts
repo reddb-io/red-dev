@@ -106,6 +106,13 @@ describe("paste", () => {
     expect(src).toContain("mods = 'Control|Shift'");
   });
 
+  test("sends Alt+V through as Ctrl+V so terminal agents can paste images", () => {
+    // Alacritty owns Ctrl+V for text paste. Claude and Codex therefore
+    // need a second key that reaches their image-clipboard handler rather
+    // than being consumed by the terminal before either app sees it.
+    expect(src).toContain("mods = 'Alt'\nchars = \"\\\\u0016\"");
+  });
+
   test("lives in a file red-dev rewrites", () => {
     // In alacritty.toml it would never reach a machine that already had
     // one — the mistake that kept a deprecation warning alive for two
