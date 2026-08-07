@@ -43,7 +43,7 @@ describe("native Windows bootstrap replacement", () => {
   test("installs beside an executable still held by an older process", async () => {
     const script = await Bun.file(new URL("../boot.ps1", import.meta.url)).text();
     const replacement = script.slice(
-      script.indexOf("try {\n    Move-Item -Path $Tmp"),
+      script.indexOf("Move-Item -Path $Tmp -Destination $Bin -Force -ErrorAction Stop"),
       script.indexOf('Say "installed $Bin'),
     );
 
