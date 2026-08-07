@@ -38,7 +38,7 @@ describe("theme surfaces", () => {
   test("a theme reaches the desktop and nothing inside the terminal", () => {
     // Nine of the eleven surfaces this used to name were terminal
     // programs. They take the fixed palette now — see
-    // src/terminal-surfaces.ts and .red/adr/0002 — so a name reappearing
+    // src/terminal-surfaces.ts and .red/adr/0003 — so a name reappearing
     // in this list is a theme leaking back into a pane.
     expect(themeSurfaceNames(windows)).toEqual(["vscode", "wallpaper", "windows"]);
   });

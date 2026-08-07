@@ -1,6 +1,6 @@
 # 0002 — The terminal palette is fixed, and the themes leave the terminal window
 
-- Status: accepted
+- Status: superseded by [0003](0003-red-dev-does-not-colour-the-terminal.md)
 - Date: 2026-08-06
 - Supersedes: the per-theme `TerminalPalette` in `src/themes.ts`, and the prose at `src/main.ts:301-304` ("colouring only the terminal is what makes a theme switch feel half-applied")
 

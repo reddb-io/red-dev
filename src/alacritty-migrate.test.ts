@@ -58,8 +58,12 @@ describe("the alacritty import key", () => {
     expect(old).not.toContain("shell.toml");
     const out = await migrate(old);
     expect(out).toContain("shell.toml");
-    expect(out).toContain("theme.toml");
     expect(out).toContain("font.toml");
+    // And theme.toml, which OLD still carries, is retired on the way
+    // past rather than kept — the same pass that adds a missing import
+    // is what drops the twenty-value palette.
+    expect(out).toContain("cursor.toml");
+    expect(out).not.toContain("theme.toml");
   });
 
   test("keeps an import the user added", async () => {

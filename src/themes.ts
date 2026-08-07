@@ -11,7 +11,7 @@
  *
  * A theme used to carry a twenty-value ANSI palette, and that palette
  * was its only colour data: the Windows accent and the wallpaper both
- * derived from it. .red/adr/0002 reversed that. Everything inside a
+ * derived from it. .red/adr/0002 reversed that, and .red/adr/0003 went further. Everything inside a
  * terminal window now takes one fixed palette that never varies, because
  * every program in there paints over the ANSI slots beneath it and a
  * theme spread across a dozen of them arrived as neither the old one nor

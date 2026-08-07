@@ -297,15 +297,17 @@ async function cmdTheme(p: Platform, inv: Invocation, name?: string): Promise<nu
     failures++;
   }
 
-  // The terminal, which does not vary. Reasserted here so `red-dev
-  // theme` repairs a hand-edited config even though it is not changing
-  // one — the command people reach for when colours look wrong.
+  // The terminal, which a theme does not touch. Reasserted here anyway,
+  // because `red-dev theme` is the command people reach for when colours
+  // look wrong — and on a machine carrying an old palette, this is the
+  // run that removes it.
   try {
-    const { applyTerminalPalette } = await import("./terminal-surfaces.ts");
-    const { applied } = await applyTerminalPalette(p);
-    if (applied.length > 0) log.skip(`terminal palette unchanged: ${applied.join(", ")}`);
+    const { applyTerminalDefaults } = await import("./terminal-surfaces.ts");
+    const { deferred, cleared } = await applyTerminalDefaults(p);
+    if (cleared.length > 0) log.ok(`colours handed back: ${cleared.join(", ")}`);
+    if (deferred.length > 0) log.skip(`following your terminal: ${deferred.join(", ")}`);
   } catch (err) {
-    log.warn(`terminal palette: ${(err as Error).message}`);
+    log.warn(`terminal defaults: ${(err as Error).message}`);
   }
 
   // The desktop, which does.

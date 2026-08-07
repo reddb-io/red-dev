@@ -79,11 +79,10 @@ const SECTIONS: MenuSection[] = [
     key: "theme",
     label: "Theme",
     notes: [
-      "One palette reaches eight surfaces:",
-      "terminal, multiplexer, monitor, editor,",
-      "VS Code, GNOME, and the wallpaper —",
-      "which is generated from the palette,",
-      "not shipped as a photograph.",
+      "The wallpaper, the Windows accent,",
+      "GNOME and VS Code. Not the terminal:",
+      "its colours are yours, and red-dev",
+      "sets only the cursor.",
     ],
   },
   {

@@ -17,9 +17,10 @@
  */
 
 import { existsSync, mkdirSync } from "node:fs";
+import { unlink } from "node:fs/promises";
 import { log, RedError } from "./log.ts";
 import type { Platform } from "./platform.ts";
-import { colorsToml } from "./terminal-palette.ts";
+import { cursorToml } from "./terminal-cursor.ts";
 import { readWindowsOutput } from "./windows-output.ts";
 
 async function capture(cmd: string[]): Promise<string> {
@@ -99,6 +100,23 @@ async function hostFileExists(winPath: string): Promise<boolean> {
   const out = (await new Response(proc.stdout).text()).trim();
   if ((await proc.exited) !== 0) return false;
   return out.includes("yes");
+}
+
+/**
+ * Delete through the host, the counterpart to writeThroughHost.
+ *
+ * Same reason: from inside the distro, %APPDATA%\alacritty can carry a
+ * second NTFS record that /mnt/c does not see, so an unlink here would
+ * report success against a file Windows still has.
+ */
+async function removeThroughHost(winPath: string): Promise<void> {
+  const script = `Remove-Item -LiteralPath '${winPath.replace(/'/g, "''")}' -Force -ErrorAction SilentlyContinue`;
+  const proc = Bun.spawn(["powershell.exe", "-NoProfile", "-Command", script], {
+    stdout: "ignore",
+    stderr: "ignore",
+    stdin: "ignore",
+  });
+  await proc.exited;
 }
 
 /** The Windows spelling of the Alacritty config directory. */
@@ -301,11 +319,28 @@ action = 'ToggleFullscreen'
 /**
  * The parts that are the same on every machine, so they go in the share.
  *
- * Colours, a font family and a set of key bindings describe a preference
- * and name nothing local. One copy, read by the Alacritty on this
- * machine and by the one on the next.
+ * A cursor colour, a font family and a set of key bindings describe a
+ * preference and name nothing local. One copy, read by the Alacritty on
+ * this machine and by the one on the next.
  */
-const SHARED_PARTS = ["theme.toml", "font.toml", "keys.toml"] as const;
+const SHARED_PARTS = ["cursor.toml", "font.toml", "keys.toml"] as const;
+
+/**
+ * Parts red-dev used to write and now removes.
+ *
+ * theme.toml held twenty ANSI values. It is not renamed to cursor.toml,
+ * it is deleted: a machine that converged before this release has the
+ * old palette sitting in its share, and Alacritty would keep importing
+ * and applying it forever. isOurs() counts these so the import line goes
+ * too — leaving the entry behind would be harmless (Alacritty skips
+ * missing files) but it would read as configuration rather than as
+ * something being cleaned up.
+ *
+ * Swept on every converge rather than by a ledger entry, which is how
+ * wsl.ts retires a Windows Terminal scheme: it repairs a machine that
+ * skipped a release, and there is nothing here to remember having done.
+ */
+const RETIRED_PARTS = ["theme.toml"] as const;
 
 /**
  * The part that cannot be shared, and the reason the split exists.
@@ -337,7 +372,7 @@ export function requiredImports(shareWinRoot: string | null): string[] {
 /** Whether an import entry is one red-dev owns, wherever it points. */
 function isOurs(entry: string): boolean {
   const base = entry.split(/[\\/]/).pop() ?? entry;
-  return ([...SHARED_PARTS, ...LOCAL_PARTS] as string[]).includes(base);
+  return ([...SHARED_PARTS, ...LOCAL_PARTS, ...RETIRED_PARTS] as string[]).includes(base);
 }
 
 /** Same entries in any order. */
@@ -408,8 +443,9 @@ action = 'ResetFontSize'
 }
 
 /**
- * No `theme`. The colours are fixed now — `colorsToml()` takes no
- * argument — and a field nothing reads is an invitation to pass one.
+ * No `theme`. red-dev does not colour a terminal — the only value it
+ * writes is the cursor, and that does not vary — so there is nothing to
+ * pass, and a field nothing reads is an invitation to pass one.
  */
 export interface AlacrittyOptions {
   platform: Platform;
@@ -474,12 +510,36 @@ export async function configureAlacritty(opts: AlacrittyOptions): Promise<void> 
 
   const required = requiredImports(shared?.win ?? null);
 
-  // theme, font and keys are the same on every machine, so they go to
+  // cursor, font and keys are the same on every machine, so they go to
   // the share when there is one; the main file is written once so a user
   // who tunes padding or bindings does not lose it on every run.
-  await putShared("theme.toml", colorsToml());
+  await putShared("cursor.toml", cursorToml());
   await putShared("font.toml", fontToml(opts.fontFamily, opts.fontSize ?? 11));
   await putShared("keys.toml", keysToml());
+
+  // The twenty-value palette, removed wherever this machine kept it.
+  //
+  // Both locations, because a machine that gained a share after its
+  // first converge has a copy in each, and the one Alacritty reads is
+  // whichever the import line points at. Removing only that one would
+  // leave the other to come back the next time the share is rebuilt.
+  for (const name of RETIRED_PARTS) {
+    let gone = false;
+    if (shared && existsSync(`${shared.dir}/${name}`)) {
+      await unlink(`${shared.dir}/${name}`);
+      gone = true;
+    }
+    if (winDir) {
+      if (await hostFileExists(`${winDir}\\${name}`)) {
+        await removeThroughHost(`${winDir}\\${name}`);
+        gone = true;
+      }
+    } else if (existsSync(`${dir}${sep}${name}`)) {
+      await unlink(`${dir}${sep}${name}`);
+      gone = true;
+    }
+    if (gone) log.plain(`       removed ${name} — the ANSI colours are yours again`);
+  }
   // Local and regenerated. Local because it encodes WSL-or-native, which
   // is this machine's answer; regenerated because which shell to launch
   // is red-dev's decision, not a user preference we would be clobbering.
@@ -493,7 +553,7 @@ export async function configureAlacritty(opts: AlacrittyOptions): Promise<void> 
   if (!mainExists) {
     await put("alacritty.toml", mainToml(opts.opacity, required));
     log.ok(`alacritty: config written to ${winDir ?? dir}`);
-    if (shared) log.plain(`       theme, font and keys shared from ${shared.win}`);
+    if (shared) log.plain(`       cursor, font and keys shared from ${shared.win}`);
     return;
   }
 
@@ -508,9 +568,9 @@ export async function configureAlacritty(opts: AlacrittyOptions): Promise<void> 
   if (repaired !== null) {
     await put("alacritty.toml", repaired);
     log.ok(`alacritty.toml: import block repaired — ${required.length} entries`);
-    if (shared) log.plain(`       theme, font and keys now read from ${shared.win}`);
+    if (shared) log.plain(`       cursor, font and keys now read from ${shared.win}`);
   } else {
-    log.skip(`alacritty.toml exists — theme, font and keys updated, yours left alone`);
+    log.skip(`alacritty.toml exists — cursor, font and keys updated, yours left alone`);
   }
 }
 
