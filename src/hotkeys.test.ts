@@ -63,16 +63,27 @@ describe("the shortcuts written", () => {
 describe("the shortcut is only rewritten when it is wrong", () => {
   const script = resolveScript("Ubuntu-24.04");
 
-  test("compares before saving", () => {
-    // The regression this guards is the reason CTRL+ALT+T kept dying.
-    // Explorer registers a Start Menu shortcut's hotkey by scanning the
-    // folder; rewriting the .lnk makes it drop the registration and
-    // re-scan, and the re-registration often does not happen until the
-    // next logon. An unconditional Save() therefore had a good chance of
-    // unbinding the key on every single converge.
-    expect(script).toContain("$same =");
-    expect(script).toContain("$s.TargetPath -eq $target");
-    expect(script).toContain("$s.HotKey -eq $combo");
+  test("compares before saving, through a spelling both sides can reach", () => {
+    // Two regressions deep. The first: an unconditional Save() unbinds
+    // the key on every converge, because Explorer drops the registration
+    // when the .lnk is rewritten. The second: the comparison added to
+    // fix that compared what we assign (CTRL+ALT+T) against what Windows
+    // reads back (Alt+Ctrl+T — re-spelled, reordered), so it was false
+    // every time and the Save() it guarded ran anyway. The fix shipped
+    // and the key went on dying, which is worse than no fix: it ended
+    // the search. Normal() collapses order and case on both sides.
+    expect(script).toContain("function Normal($combo)");
+    expect(script).toContain("(Normal $s.HotKey) -eq (Normal $combo)");
+    expect(script).not.toContain("$s.HotKey -eq $combo)");
+  });
+
+  test("a write that risks the registration is followed by a probe", () => {
+    // And a free key after a write means Explorer lost it — restarting
+    // Explorer makes it re-scan the Start Menu now rather than at next
+    // logon. Only after a real write: the steady state never touches it.
+    expect(script).toContain("if ($script:wrote)");
+    expect(script).toContain("RegisterHotKey");
+    expect(script).toContain("Stop-Process -Name explorer");
   });
 
   test("and returns before Save() when nothing differs", () => {

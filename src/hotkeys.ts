@@ -116,27 +116,34 @@ $alacritty = @(
   'C:\\Program Files\\Alacritty\\alacritty.exe'
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 
+# A hotkey combo reduced to something two spellings can agree on.
+#
+# Windows re-spells the property on read-back: write CTRL+ALT+T, read
+# Alt+Ctrl+T. Verified on this machine, in that order. So a literal
+# comparison against what we assign is false on every converge — which
+# silently revived the unconditional Save() the comparison was added to
+# prevent, and the hotkey went on dying "at random" with the fix
+# supposedly shipped. Order and case both have to go.
+function Normal($combo) {
+  if (-not $combo) { return '' }
+  (($combo -split '\+') | ForEach-Object { $_.Trim().ToUpper() } | Sort-Object) -join '+'
+}
+
+$script:wrote = $false
+
 function New-Hot($name, $combo, $target, $argv, $admin) {
   $p = Join-Path $dir "$name.lnk"
   $s = $sh.CreateShortcut($p)
 
   # Save() only when something actually differs.
   #
-  # This used to write unconditionally, and the comment defended it as
-  # "the repair" — a machine carrying an old binding needs the property
-  # rewritten to clear it. True, and it cost the feature.
-  #
   # Explorer registers a Start Menu shortcut's hotkey by scanning the
   # folder, and rewriting the .lnk makes it drop the registration and
   # re-scan. The re-registration is not reliable: often the key is simply
-  # gone until the next logon. So every converge had a good chance of
-  # silently unbinding CTRL+ALT+T, and on a day with a dozen converges
-  # the hotkey looked like it broke at random.
-  #
-  # Comparing first keeps the repair — a wrong value still gets written —
-  # and makes the steady state cost nothing, which is what a converge is
-  # supposed to be.
-  $same = ($s.TargetPath -eq $target) -and ($s.Arguments -eq $argv) -and ($s.HotKey -eq $combo)
+  # gone until the next logon. So an unnecessary write is not a wasted
+  # write, it is a good chance of unbinding CTRL+ALT+T.
+  $same = ($s.TargetPath -eq $target) -and ($s.Arguments -eq $argv) -and
+          ((Normal $s.HotKey) -eq (Normal $combo))
   if ($same -and (Test-Path $p)) {
     if ($combo) { "= $combo -> $name" } else { "= (no hotkey) $name" }
     return
@@ -148,6 +155,7 @@ function New-Hot($name, $combo, $target, $argv, $admin) {
   # clears a binding a previous version left behind.
   $s.HotKey = $combo
   $s.Save()
+  $script:wrote = $true
   if ($admin) {
     # Elevation is a flag in the file format, not a property the COM
     # object exposes.
@@ -165,6 +173,29 @@ if ($alacritty) {
 }
 
 New-Hot 'PowerShell (Administrator)' 'CTRL+ALT+SHIFT+T' (Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\powershell.exe') '-NoLogo' $true
+
+# When something was rewritten, make sure the key came back.
+#
+# A write makes Explorer drop the registration, and waiting for the next
+# logon is not an answer anyone accepts — the report that forced this
+# was literally "I just lost my Ctrl+Alt+T again". Probe the key; if it
+# is free, Explorer lost it, and restarting Explorer makes it re-scan
+# the Start Menu now. Windows relaunches Explorer on its own.
+#
+# Only after a real write, so the steady-state converge — which the
+# Normal() comparison above finally makes reachable — never touches
+# Explorer at all.
+if ($script:wrote) {
+  $sig = 'using System; using System.Runtime.InteropServices; public class RedHK { [DllImport("user32.dll", SetLastError=true)] public static extern bool RegisterHotKey(IntPtr h, int id, uint fs, uint vk); [DllImport("user32.dll")] public static extern bool UnregisterHotKey(IntPtr h, int id); }'
+  Add-Type -TypeDefinition $sig
+  Start-Sleep -Milliseconds 500
+  $free = [RedHK]::RegisterHotKey([IntPtr]::Zero, 9004, 3, 0x54)
+  if ($free) {
+    [RedHK]::UnregisterHotKey([IntPtr]::Zero, 9004) | Out-Null
+    Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
+    "explorer restarted so the hotkeys register now rather than at next logon"
+  }
+}
 `.trim();
 }
 
