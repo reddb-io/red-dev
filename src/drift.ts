@@ -568,7 +568,16 @@ async function checkHotkeys(p: Platform): Promise<DriftCheck> {
   return {
     name,
     status: "ok",
-    detail: `${claimed.length} claimed and held (Windows does not say by whom)`,
+    // The caveat earns its place in a health report: a held key that
+    // "does not work" is, more often than not, being pressed while an
+    // elevated window has focus. Explorer registers these hotkeys at
+    // medium integrity, and Windows does not deliver input across an
+    // integrity boundary (UIPI) — so from Administrator: PowerShell,
+    // which is exactly where people test right after installing, the
+    // key does nothing and everything is working as registered.
+    detail:
+      `${claimed.length} claimed and held (Windows does not say by whom) — ` +
+      `note: they do not fire while an elevated window has focus`,
   };
 }
 
