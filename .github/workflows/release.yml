@@ -9,9 +9,18 @@ name: Release
 # on both targets, so a single runner produces every asset. A matrix
 # here would buy nothing and cost two more runners per release.
 #
-# Runner: Blacksmith. The GitHub App must be installed on the org — a
-# Blacksmith label without it leaves the job queued forever rather than
-# failing, which is a confusing way to discover the requirement.
+# Runners: GitHub-hosted, on purpose.
+#
+# This pipeline was on Blacksmith, which is faster and is billed. Every
+# push to main cuts a release now, so the run count went from a handful
+# a week to one per merge — and at that rate the build is the only job
+# where the speed was worth anything, and it is under three minutes on a
+# free runner.
+#
+# Removing the label also removes a failure mode the old comment here
+# warned about: a Blacksmith label without the GitHub App installed on
+# the org leaves the job queued forever rather than failing, which is a
+# confusing way to discover a requirement.
 
 on:
   # Every push to main is a release.
@@ -193,8 +202,11 @@ jobs:
     name: Build binaries
     needs: [plan]
     if: needs.plan.outputs.should_skip != 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 15
+    # The last billed job. See the note at the top: releases are now one
+    # per merge, and two spare minutes per release is not worth paying
+    # for on repeat.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
