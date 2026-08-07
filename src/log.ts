@@ -55,7 +55,42 @@ export function logIsCaptured(): boolean {
   return buffer !== null || stream !== null;
 }
 
+/**
+ * A tee, deliberately not a third sink.
+ *
+ * `buffer` and `stream` compete: each one takes routing away from the
+ * console and from each other. A transcript must not compete with
+ * either, because the runs worth reading afterwards are exactly the ones
+ * where a fullscreen view has already claimed `stream`. So this runs
+ * before the routing decision and changes nothing about it.
+ *
+ * logIsCaptured() deliberately does not count it. That function answers
+ * "would a child process writing to the console damage a frame", and the
+ * answer must not become yes merely because a file is open — a child
+ * that started piping for that reason would lose its progress bar and
+ * its ability to prompt.
+ */
+let transcript: ((line: string) => void) | null = null;
+
+/** Tee every log line into `sink` until the returned function is called. */
+export function transcribeTo(sink: (line: string) => void): () => void {
+  const previous = transcript;
+  transcript = sink;
+  return () => {
+    transcript = previous;
+  };
+}
+
 const emit = (line: string, sink: (s: string) => void): void => {
+  // First, and outside the routing: a line that fails to reach the
+  // console must still reach the log, and the reverse.
+  if (transcript) {
+    try {
+      transcript(line);
+    } catch {
+      // Never let writing the log break the thing being logged.
+    }
+  }
   if (buffer) buffer.push(line);
   else if (stream) stream(line);
   else sink(line);

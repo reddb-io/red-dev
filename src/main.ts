@@ -897,6 +897,8 @@ async function main(): Promise<number> {
       return await cmdPlan(p, inv);
     case "doctor":
       return await cmdDoctor(p, inv);
+    case "logs":
+      return await cmdLogs(inv.logsWhich);
     case "install":
       return await cmdInstall(p, inv);
     case "update":
@@ -939,4 +941,79 @@ async function main(): Promise<number> {
   }
 }
 
-process.exit(await main());
+/**
+ * Show a transcript, or list them.
+ *
+ * The current run's own log is excluded from `red-dev logs` with no
+ * argument: it exists, it is one line long, and printing it instead of
+ * the converge someone is trying to read would be a small joke at their
+ * expense.
+ */
+async function cmdLogs(which?: string): Promise<number> {
+  const { recentTranscripts, transcriptDir, transcriptPath } = await import("./transcript.ts");
+  const mine = transcriptPath();
+  const all = recentTranscripts().filter((f) => f !== mine);
+
+  if (all.length === 0) {
+    log.skip(`no transcripts yet — they are written to ${transcriptDir()}`);
+    return 0;
+  }
+
+  if (which === "list") {
+    log.ok(`${all.length} transcript(s) in ${transcriptDir()}`);
+    for (const [i, f] of all.entries()) {
+      const size = Bun.file(f).size;
+      log.plain(`  ${String(i + 1).padStart(2)}  ${f.split("/").pop()}  ${(size / 1024).toFixed(1)}k`);
+    }
+    return 0;
+  }
+
+  const n = which ? Number.parseInt(which, 10) : 1;
+  if (!Number.isFinite(n) || n < 1) {
+    log.err(`'${which}' is neither 'list' nor a run number`);
+    return 1;
+  }
+  const target = all[n - 1];
+  if (!target) {
+    log.err(`there are only ${all.length} transcript(s)`);
+    return 1;
+  }
+
+  // Written through stdout rather than log.plain: a transcript is
+  // content, not a message about the run, and routing it through the
+  // logger would tee it straight back into the transcript being written.
+  process.stdout.write(await Bun.file(target).text());
+  return 0;
+}
+
+/**
+ * Run, and write down what happened.
+ *
+ * Wrapped around main rather than inside it so a throw is transcribed
+ * too — the run that ends in a stack trace is the one most worth having
+ * a log of, and a try/finally is the only way to be sure the exit line
+ * is written on every path out.
+ *
+ * `--version` and `--help` are excluded by the time this runs only in
+ * the sense that they are cheap; they get a transcript like everything
+ * else, and the rotation keeps that from mattering.
+ */
+async function run(): Promise<number> {
+  const { startTranscript, finishTranscript } = await import("./transcript.ts");
+  const command = process.argv.slice(2).join(" ") || "menu";
+  await startTranscript(command, VERSION, new Date());
+
+  let code = 70;
+  try {
+    code = await main();
+    return code;
+  } finally {
+    const path = finishTranscript(code);
+    // Printed after the interface has released the screen, and only
+    // when something went wrong: a path nobody needs, on every
+    // successful run, is noise that trains people to stop reading.
+    if (path && code !== 0) log.plain(`       log: ${path}`);
+  }
+}
+
+process.exit(await run());

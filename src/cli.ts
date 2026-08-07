@@ -93,6 +93,16 @@ export function buildCli(): CLI {
       doctor: {
         description: "report drift against the manifest",
       },
+      logs: {
+        description: "show the last run's transcript",
+        positional: [
+          {
+            name: "which",
+            description: "'list' for every kept run, or a number: 2 is the run before last",
+            required: false,
+          },
+        ],
+      },
       theme: {
         description: "apply a colour scheme",
         positional: [
@@ -164,6 +174,12 @@ export interface Invocation {
   shareTarget: string | undefined;
   shareTool: string | undefined;
   /**
+   * `logs [which]` — its own positional, for the same reason share has
+   * two of its own. Reusing `scope` would reject `list` as an invalid
+   * scope, and reusing `name` would reject it as an unknown theme.
+   */
+  logsWhich: string | undefined;
+  /**
    * Parse and validation failures. Strict mode means an unrecognised
    * command lands here too, with the list of real ones — so there is no
    * separate "unknown verb" channel to check.
@@ -212,6 +228,7 @@ export function parseArgs(cli: CLI, argv: string[]): Invocation {
     // `theme <name>` and `plan <scope>` both land in the positional map
     // under their own key; the caller reads whichever applies.
     scope: scope ?? (typeof rawName === "string" ? rawName : undefined),
+    logsWhich: typeof pos["which"] === "string" ? pos["which"] : undefined,
     themeName: typeof opts["theme"] === "string" ? opts["theme"] : DEFAULT_THEME,
     font: typeof opts["font"] === "string" ? opts["font"] : "firacode",
     opacity: clampOpacity(opts["opacity"], errors),
