@@ -18,7 +18,7 @@
 import { basename } from "node:path";
 import rc from "../config/bash/rc.sh" with { type: "text" };
 import aliases from "../config/bash/aliases.sh" with { type: "text" };
-import wallpaper from "../assets/wallpapers/tokyo-night.png" with { type: "file" };
+import wallpaper from "../assets/wallpapers/obsidian.png" with { type: "file" };
 
 console.log("rc.sh bytes:", rc.length);
 console.log("aliases.sh bytes:", aliases.length);

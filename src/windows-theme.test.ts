@@ -40,7 +40,7 @@ describe("accentDword", () => {
 
 describe("windowsLightThemeValue", () => {
   test("uses Rose Pine's explicit light appearance", () => {
-    const theme = THEMES["rose-pine"]!;
+    const theme = THEMES.light!;
     expect(windowsLightThemeValue(theme)).toBe(1);
   });
 });

@@ -1,316 +1,307 @@
 /**
- * Colour schemes, defined once and applied to every surface that can
- * take them: the Windows Terminal on Windows and WSL, Alacritty on the
- * desktop, and Neovim everywhere.
+ * The six RedDB themes.
  *
- * A theme is data, not a script. Omakub keeps one theme per directory
- * with a file per application; the shape here is the same idea reduced
- * to a record, because the set of applications is fixed and small.
+ * These replace ten palettes transcribed from omakub, which were chosen
+ * before this project had a brand to be. They are built from
+ * `vendor/brand/tokens/tokens.json` — no hex literal appears in this
+ * file, because a hex here would be a second source of truth waiting to
+ * disagree with the first.
+ *
+ * ## What a theme is now, and what it stopped being
+ *
+ * A theme used to carry a twenty-value ANSI palette, and that palette
+ * was its only colour data: the Windows accent and the wallpaper both
+ * derived from it. .red/adr/0002 reversed that. Everything inside a
+ * terminal window now takes one fixed palette that never varies, because
+ * every program in there paints over the ANSI slots beneath it and a
+ * theme spread across a dozen of them arrived as neither the old one nor
+ * the new one.
+ *
+ * So a theme is the desktop: the wallpaper, the system accent and
+ * light-dark, and the editor that is a window rather than a pane. The
+ * roles below are what those surfaces need, and nothing more.
+ *
+ * ## Contrast is enforced, not intended
+ *
+ * src/theme-contrast.test.ts measures every role pair in every theme
+ * against the brand's own published guardrails. A theme that puts
+ * red.500 text on neutral.800 fails arithmetic rather than review.
  */
 
-/**
- * Re-exported, not defined here, and on its way out of this file
- * entirely.
- *
- * The palette living beside the themes is what made every theme carry
- * one, and what made the Windows accent and the wallpaper derive their
- * colour from ANSI slots. It now belongs to terminal-palette.ts, which
- * owns the single fixed palette; `Theme.terminal` below is the last
- * consumer and goes when the RedDB themes land.
- */
-export type { TerminalPalette } from "./terminal-palette.ts";
-import type { TerminalPalette } from "./terminal-palette.ts";
+import { neutral, red, type Hex } from "./brand.ts";
 
-export interface Theme {
-  name: string;
-  appearance: "light" | "dark";
-  /** Neovim colorscheme name, for the LazyVim config. */
-  neovim: string;
-  terminal: TerminalPalette;
+export type { Hex };
+
+export const THEME_SLUGS = ["dark", "light", "obsidian", "marble", "cobalt", "flare"] as const;
+export type ThemeSlug = (typeof THEME_SLUGS)[number];
+
+/** Grounds, in depth order. Every value is a brand neutral or a brand red. */
+export interface ThemeSurface {
+  /** The deepest ground: the desktop, the wallpaper's base. */
+  bg: Hex;
+  /** One step up: panels, cards. */
+  panel: Hex;
+  /** Most raised: hovered rows, chips. */
+  raised: Hex;
+  /** Hairlines. Read only when hunted for. */
+  edge: Hex;
 }
 
-export const THEMES: Record<string, Theme> = {
-  "tokyo-night": {
-    name: "Tokyo Night",
+export interface ThemeText {
+  /** Body copy. Measured at 4.5 on both `bg` and `panel`. */
+  normal: Hex;
+  /** Headings — the line carrying the answer. Measured at 7 on `bg`. */
+  strong: Hex;
+  /**
+   * Labels and units. Measured at 3, not 4.5, and deliberately: the
+   * brand's own dark mapping uses neutral.500, which its own guardrail
+   * declares as failing 4.5 on every dark ground. This is the secondary
+   * bar, and calling it 4.5 would either fail the brand's own palette or
+   * quietly push muted text up until it stops reading as muted.
+   */
+  muted: Hex;
+}
+
+/** GNOME 47+ takes a name from a fixed list, never a hex. */
+export type GnomeAccent =
+  | "blue" | "teal" | "green" | "yellow"
+  | "orange" | "red" | "pink" | "purple" | "slate";
+
+/**
+ * The accent, or its deliberate absence.
+ *
+ * obsidian and marble have none — that is what they are for — and a
+ * theme reporting #ff2056 it never uses would paint the title bar of the
+ * one theme chosen to have no red. `kind` is the discriminant so each
+ * surface renders absence in its own vocabulary: GNOME gets `slate`,
+ * Windows gets a neutral accent with prevalence off, the swatch strip
+ * gets one cell fewer.
+ *
+ * `value` is always a FILL and never text. There is no accent-as-text
+ * role in this type, because red.500 fails as normal text on every
+ * ground lighter than neutral.900 and a role that cannot be used safely
+ * should not exist to be reached for.
+ */
+export type ThemeAccent =
+  | {
+      kind: "colour";
+      /** The fill: the Windows accent, the wallpaper's lift. */
+      value: Hex;
+      /** Text drawn on that fill. Measured at 4.5 against `value`. */
+      on: Hex;
+      gnome: GnomeAccent;
+    }
+  | { kind: "none" };
+
+export interface Theme {
+  /** Display name, e.g. "RedDB Dark". */
+  name: string;
+  /** One line for the TUI, where the Neovim colorscheme used to sit. */
+  blurb: string;
+  appearance: "light" | "dark";
+  surface: ThemeSurface;
+  text: ThemeText;
+  accent: ThemeAccent;
+  /**
+   * A VS Code *built-in* theme name.
+   *
+   * There is no published RedDB VS Code theme, so the honest maximum is
+   * light or dark. That is a real reduction — a theme drives VS Code's
+   * appearance and nothing more — and it buys something large: the
+   * marketplace install path leaves the theme hot path entirely, along
+   * with the `code.cmd` quoting bug and the one theme that had no
+   * extension to install.
+   */
+  vscode: string;
+}
+
+/** The accent every accented theme uses, since there is only one. */
+const ACCENT: ThemeAccent = {
+  kind: "colour",
+  value: red[500],
+  // The black R on the red field — color.brand.on-primary. Not white:
+  // white on the accent measures 3.75 and the brand's own guardrail
+  // declares it a failure.
+  on: neutral[950],
+  gnome: "red",
+};
+
+const NO_ACCENT: ThemeAccent = { kind: "none" };
+
+export const THEMES: Record<ThemeSlug, Theme> = {
+  dark: {
+    name: "RedDB Dark",
+    blurb: "ink, paper and the accent — the brand as it is written",
     appearance: "dark",
-    neovim: "tokyonight",
-    terminal: {
-      background: "#1A1B26",
-      foreground: "#A9B1D6",
-      cursorColor: "#C0CAF5",
-      selectionBackground: "#283457",
-      black: "#15161E",
-      red: "#F7768E",
-      green: "#9ECE6A",
-      yellow: "#E0AF68",
-      blue: "#7AA2F7",
-      purple: "#BB9AF7",
-      cyan: "#7DCFFF",
-      white: "#A9B1D6",
-      brightBlack: "#414868",
-      brightRed: "#F7768E",
-      brightGreen: "#9ECE6A",
-      brightYellow: "#E0AF68",
-      brightBlue: "#7AA2F7",
-      brightPurple: "#BB9AF7",
-      brightCyan: "#7DCFFF",
-      brightWhite: "#C0CAF5",
-    },
+    surface: { bg: neutral[950], panel: neutral[900], raised: neutral[800], edge: neutral[700] },
+    text: { normal: neutral[300], strong: neutral[50], muted: neutral[500] },
+    accent: ACCENT,
+    vscode: "Default Dark Modern",
   },
 
-  catppuccin: {
-    name: "Catppuccin Macchiato",
-    appearance: "dark",
-    neovim: "catppuccin-macchiato",
-    terminal: {
-      background: "#24273A",
-      foreground: "#CAD3F5",
-      cursorColor: "#F4DBD6",
-      selectionBackground: "#3A3E52",
-      black: "#494D64",
-      red: "#ED8796",
-      green: "#A6DA95",
-      yellow: "#EED49F",
-      blue: "#8AADF4",
-      purple: "#F5BDE6",
-      cyan: "#8BD5CA",
-      white: "#B8C0E0",
-      brightBlack: "#5B6078",
-      brightRed: "#ED8796",
-      brightGreen: "#A6DA95",
-      brightYellow: "#EED49F",
-      brightBlue: "#8AADF4",
-      brightPurple: "#F5BDE6",
-      brightCyan: "#8BD5CA",
-      brightWhite: "#A5ADCB",
-    },
-  },
-
-  gruvbox: {
-    name: "Gruvbox Dark",
-    appearance: "dark",
-    neovim: "gruvbox",
-    terminal: {
-      background: "#282828",
-      foreground: "#EBDBB2",
-      cursorColor: "#EBDBB2",
-      selectionBackground: "#504945",
-      black: "#282828",
-      red: "#CC241D",
-      green: "#98971A",
-      yellow: "#D79921",
-      blue: "#458588",
-      purple: "#B16286",
-      cyan: "#689D6A",
-      white: "#A89984",
-      brightBlack: "#928374",
-      brightRed: "#FB4934",
-      brightGreen: "#B8BB26",
-      brightYellow: "#FABD2F",
-      brightBlue: "#83A598",
-      brightPurple: "#D3869B",
-      brightCyan: "#8EC07C",
-      brightWhite: "#EBDBB2",
-    },
-  },
-
-  // Palettes taken from omakub's own alacritty.toml for each theme,
-  // generated rather than transcribed: 112 hex values copied by hand is
-  // a guaranteed typo, and a wrong one is invisible until someone
-  // notices their terminal's blue is slightly off.
-  "everforest": {
-    name: "Everforest",
-    appearance: "dark",
-    neovim: "everforest",
-    terminal: {
-      background: "#2D353B",
-      foreground: "#D3C6AA",
-      cursorColor: "#D3C6AA",
-      selectionBackground: "#2D353B",
-      black: "#475258",
-      red: "#E67E80",
-      green: "#A7C080",
-      yellow: "#DBBC7F",
-      blue: "#7FBBB3",
-      purple: "#D699B6",
-      cyan: "#83C092",
-      white: "#D3C6AA",
-      brightBlack: "#475258",
-      brightRed: "#E67E80",
-      brightGreen: "#A7C080",
-      brightYellow: "#DBBC7F",
-      brightBlue: "#7FBBB3",
-      brightPurple: "#D699B6",
-      brightCyan: "#83C092",
-      brightWhite: "#D3C6AA",
-    },
-  },
-  "kanagawa": {
-    name: "Kanagawa",
-    appearance: "dark",
-    neovim: "kanagawa",
-    terminal: {
-      background: "#1F1F28",
-      foreground: "#DCD7BA",
-      cursorColor: "#DCD7BA",
-      selectionBackground: "#2D4F67",
-      black: "#090618",
-      red: "#C34043",
-      green: "#76946A",
-      yellow: "#C0A36E",
-      blue: "#7E9CD8",
-      purple: "#957FB8",
-      cyan: "#6A9589",
-      white: "#C8C093",
-      brightBlack: "#727169",
-      brightRed: "#E82424",
-      brightGreen: "#98BB6C",
-      brightYellow: "#E6C384",
-      brightBlue: "#7FB4CA",
-      brightPurple: "#938AA9",
-      brightCyan: "#7AA89F",
-      brightWhite: "#DCD7BA",
-    },
-  },
-  "matte-black": {
-    name: "Matte Black",
-    appearance: "dark",
-    neovim: "matteblack",
-    terminal: {
-      background: "#121212",
-      foreground: "#BEBEBE",
-      cursorColor: "#EAEAEA",
-      selectionBackground: "#333333",
-      black: "#333333",
-      red: "#D35F5F",
-      green: "#FFC107",
-      yellow: "#B91C1C",
-      blue: "#E68E0D",
-      purple: "#D35F5F",
-      cyan: "#BEBEBE",
-      white: "#BEBEBE",
-      brightBlack: "#8A8A8D",
-      brightRed: "#B91C1C",
-      brightGreen: "#FFC107",
-      brightYellow: "#B90A0A",
-      brightBlue: "#F59E0B",
-      brightPurple: "#B91C1C",
-      brightCyan: "#EAEAEA",
-      brightWhite: "#FFFFFF",
-    },
-  },
-  "nord": {
-    name: "Nord",
-    appearance: "dark",
-    neovim: "nordfox",
-    terminal: {
-      background: "#2E3440",
-      foreground: "#D8DEE9",
-      cursorColor: "#D8DEE9",
-      selectionBackground: "#4C566A",
-      black: "#3B4252",
-      red: "#BF616A",
-      green: "#A3BE8C",
-      yellow: "#EBCB8B",
-      blue: "#81A1C1",
-      purple: "#B48EAD",
-      cyan: "#88C0D0",
-      white: "#E5E9F0",
-      brightBlack: "#4C566A",
-      brightRed: "#BF616A",
-      brightGreen: "#A3BE8C",
-      brightYellow: "#EBCB8B",
-      brightBlue: "#81A1C1",
-      brightPurple: "#B48EAD",
-      brightCyan: "#8FBCBB",
-      brightWhite: "#ECEFF4",
-    },
-  },
-  "osaka-jade": {
-    name: "Osaka Jade",
-    appearance: "dark",
-    neovim: "bamboo",
-    terminal: {
-      background: "#111C18",
-      foreground: "#C1C497",
-      cursorColor: "#D7C995",
-      selectionBackground: "#23372B",
-      black: "#23372B",
-      red: "#FF5345",
-      green: "#549E6A",
-      yellow: "#459451",
-      blue: "#509475",
-      purple: "#D2689C",
-      cyan: "#2DD5B7",
-      white: "#F6F5DD",
-      brightBlack: "#53685B",
-      brightRed: "#DB9F9C",
-      brightGreen: "#63B07A",
-      brightYellow: "#E5C736",
-      brightBlue: "#ACD4CF",
-      brightPurple: "#75BBB3",
-      brightCyan: "#8CD3CB",
-      brightWhite: "#9EEBB3",
-    },
-  },
-  "ristretto": {
-    name: "Ristretto",
-    appearance: "dark",
-    neovim: "monokai-pro",
-    terminal: {
-      background: "#2C2525",
-      foreground: "#E6D9DB",
-      cursorColor: "#C3B7B8",
-      selectionBackground: "#403E41",
-      black: "#2C2525",
-      red: "#FD6883",
-      green: "#ADDA78",
-      yellow: "#F9CC6C",
-      blue: "#F38D70",
-      purple: "#A8A9EB",
-      cyan: "#85DACC",
-      white: "#E6D9DB",
-      brightBlack: "#463A3A",
-      brightRed: "#FF8297",
-      brightGreen: "#C8E292",
-      brightYellow: "#FCD675",
-      brightBlue: "#F8A788",
-      brightPurple: "#BEBFFD",
-      brightCyan: "#9BF1E1",
-      brightWhite: "#F1E5E7",
-    },
-  },
-  "rose-pine": {
-    name: "Rose Pine",
+  light: {
+    name: "RedDB Light",
+    blurb: "the same argument on paper — support, not parity",
     appearance: "light",
-    neovim: "rose-pine-dawn",
-    terminal: {
-      background: "#FAF4ED",
-      foreground: "#575279",
-      cursorColor: "#CECACD",
-      selectionBackground: "#DFDAD9",
-      black: "#F2E9E1",
-      red: "#B4637A",
-      green: "#286983",
-      yellow: "#EA9D34",
-      blue: "#56949F",
-      purple: "#907AA9",
-      cyan: "#D7827E",
-      white: "#575279",
-      brightBlack: "#9893A5",
-      brightRed: "#B4637A",
-      brightGreen: "#286983",
-      brightYellow: "#EA9D34",
-      brightBlue: "#56949F",
-      brightPurple: "#907AA9",
-      brightCyan: "#D7827E",
-      brightWhite: "#575279",
-    },
+    surface: { bg: neutral[50], panel: neutral[100], raised: neutral[0], edge: neutral[200] },
+    text: { normal: neutral[700], strong: neutral[950], muted: neutral[500] },
+    accent: ACCENT,
+    vscode: "Default Light Modern",
+  },
+
+  obsidian: {
+    // The brand test hiding inside a colour question, and the one the
+    // brand already ran: wallpaper 26 exists to argue that RedDB still
+    // reads as RedDB with the accent removed. If it does, the identity
+    // is carried by the cut and the type; if not, the brand is the
+    // colour and everything else is packaging.
+    name: "Obsidian",
+    blurb: "the dark with the accent removed entirely",
+    appearance: "dark",
+    surface: { bg: neutral[950], panel: neutral[900], raised: neutral[800], edge: neutral[700] },
+    // Paper rather than neutral.50 for the strong line: with no accent,
+    // the hierarchy is the only thing left doing the work.
+    text: { normal: neutral[300], strong: neutral[0], muted: neutral[500] },
+    accent: NO_ACCENT,
+    vscode: "Default Dark Modern",
+  },
+
+  marble: {
+    name: "Marble",
+    blurb: "obsidian's opposite: light, and just as quiet",
+    appearance: "light",
+    // raised sits *below* panel on the ramp here, which is not a
+    // mistake: on a light ground, raising something means moving it
+    // toward white, and panel is already white.
+    surface: { bg: neutral[50], panel: neutral[0], raised: neutral[100], edge: neutral[200] },
+    text: { normal: neutral[700], strong: neutral[950], muted: neutral[500] },
+    accent: NO_ACCENT,
+    vscode: "Default Light Modern",
+  },
+
+  cobalt: {
+    name: "Cobalt",
+    blurb: "a grey ground, many greys, and the accent back",
+    appearance: "dark",
+    // The only theme whose ground is neither ink nor paper. Four grey
+    // steps distributed rather than two, which is the point of it.
+    surface: { bg: neutral[700], panel: neutral[800], raised: neutral[600], edge: neutral[500] },
+    text: { normal: neutral[100], strong: neutral[0], muted: neutral[300] },
+    // The accent measures 3.07 against this ground — above the non-text
+    // floor and below the text one. It is a fill here and nowhere near
+    // a letterform, which the type already guarantees.
+    accent: ACCENT,
+    vscode: "Default Dark Modern",
+  },
+
+  flare: {
+    name: "Flare",
+    blurb: "the accent as the surface, spent all at once",
+    appearance: "dark",
+    // Everywhere else the red earns attention by scarcity. Here the
+    // panels *are* red, three tones of it, against an ink ground.
+    surface: { bg: neutral[950], panel: red[700], raised: red[600], edge: red[500] },
+    text: { normal: neutral[50], strong: neutral[0], muted: neutral[300] },
+    accent: ACCENT,
+    vscode: "Default Dark Modern",
   },
 };
 
-export const DEFAULT_THEME = "tokyo-night";
+export const DEFAULT_THEME: ThemeSlug = "dark";
 
-export function themeNames(): string[] {
-  return Object.keys(THEMES);
+export function themeNames(): ThemeSlug[] {
+  return [...THEME_SLUGS];
+}
+
+export function isThemeSlug(s: string): s is ThemeSlug {
+  return (THEME_SLUGS as readonly string[]).includes(s);
+}
+
+/**
+ * A theme by slug, for the callers holding a string.
+ *
+ * THEMES is `Record<ThemeSlug, Theme>` rather than `Record<string,
+ * Theme>` on purpose: it makes every slug-indexed map exhaustive at
+ * compile time, which is how the six stay in step with the maps that
+ * key on them. The cost is that a plain string cannot index it, and
+ * this is the one place that narrowing happens.
+ */
+export function themeFor(slug: string): Theme | undefined {
+  return isThemeSlug(slug) ? THEMES[slug] : undefined;
+}
+
+// ------------------------------------------------------- retirement
+
+/**
+ * The ten that are gone, and what each becomes.
+ *
+ * Every machine red-dev has ever touched has one of these recorded in
+ * its preferences. Without a mapping, the next converge reads a slug
+ * that no longer exists — and the interesting question is not whether to
+ * handle that but *where*: `resolveThemeSlug` heals it on read, with no
+ * write and no ledger, so it is idempotent by construction and correct
+ * even on a preferences file restored from a backup.
+ *
+ * One rule, no taste in it: every retired dark palette lands on `dark`
+ * and the one light palette on `light`. matte-black has an argument for
+ * obsidian on the name alone, but it carried a red accent, and picking
+ * by vibe is how a mapping becomes ten separate opinions.
+ */
+export const RETIRED_THEMES: Record<string, ThemeSlug> = {
+  "tokyo-night": "dark",
+  catppuccin: "dark",
+  gruvbox: "dark",
+  everforest: "dark",
+  kanagawa: "dark",
+  "matte-black": "dark",
+  nord: "dark",
+  "osaka-jade": "dark",
+  ristretto: "dark",
+  "rose-pine": "light",
+};
+
+/**
+ * A live slug for whatever was recorded.
+ *
+ * Deliberately NOT used by the CLI parser. An explicit `--theme
+ * tokyo-night` should fail loudly with the six live names, because it is
+ * a command someone typed; a stale recorded preference should heal
+ * quietly, because it is a fact about the past. Different inputs, and
+ * treating them the same would either nag about history or silently
+ * accept a typo.
+ */
+export function resolveThemeSlug(s: string | undefined): ThemeSlug {
+  if (s && isThemeSlug(s)) return s;
+  if (s && RETIRED_THEMES[s]) return RETIRED_THEMES[s];
+  return DEFAULT_THEME;
+}
+
+// ---------------------------------------------------------- preview
+
+/**
+ * The strip the TUI draws: the ground ramp, then the accent when there
+ * is one.
+ *
+ * Seven cells or eight, and the difference is the feature. The absence
+ * of an accent is the single most important thing about obsidian and
+ * marble, and this is the only place anyone sees it before choosing.
+ * Padding to a fixed eight would make the type honest and the interface
+ * lie.
+ *
+ * One function where there were four copies of `paletteOf`, each
+ * reaching into a terminal palette that no longer varies.
+ */
+export function swatches(slug: string): Hex[] {
+  const t = THEMES[slug as ThemeSlug];
+  if (!t) return [];
+  const ramp = [
+    t.surface.bg,
+    t.surface.panel,
+    t.surface.raised,
+    t.surface.edge,
+    t.text.muted,
+    t.text.normal,
+    t.text.strong,
+  ];
+  return t.accent.kind === "colour" ? [...ramp, t.accent.value] : ramp;
 }

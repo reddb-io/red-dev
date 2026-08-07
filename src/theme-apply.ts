@@ -18,7 +18,7 @@
 
 import { log } from "./log.ts";
 import type { Platform } from "./platform.ts";
-import { THEMES, type Theme } from "./themes.ts";
+import { themeFor, type Theme } from "./themes.ts";
 
 export interface ThemeSurfaceSpec {
   name: string;
@@ -53,8 +53,16 @@ export const THEME_SURFACES: ThemeSurfaceSpec[] = [
     name: "wallpaper",
     applies: (p) => p.env !== "server",
     apply: async (theme, slug, p) => {
-      const { applyWallpaper } = await import("./wallpaper.ts");
-      return applyWallpaper(theme, slug, p);
+      const { applyWallpaper, sweepRetiredWallpapers } = await import("./wallpaper.ts");
+      const ok = await applyWallpaper(theme, slug, p);
+      // Swept after the desktop has been repointed, never before: the
+      // other order leaves a moment where the OS references a file that
+      // has just been deleted. Only red-dev's own directory is touched.
+      if (ok) {
+        const gone = await sweepRetiredWallpapers(p);
+        if (gone.length > 0) log.plain(`       removed ${gone.length} retired wallpaper(s)`);
+      }
+      return ok;
     },
   },
   {
@@ -113,7 +121,7 @@ export async function applyThemeEverywhere(
   p: Platform,
   surfaces: ThemeSurfaceSpec[] = THEME_SURFACES,
 ): Promise<ApplyThemeResult> {
-  const theme = THEMES[slug];
+  const theme = themeFor(slug);
   if (!theme) throw new Error(`unknown theme '${slug}'`);
 
   const applied: string[] = [];

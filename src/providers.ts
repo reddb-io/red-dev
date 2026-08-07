@@ -750,8 +750,8 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
       }
       if (pr.name === "alacritty") {
         const { configureAlacritty } = await import("./alacritty.ts");
-        const { THEMES } = await import("./themes.ts");
-        const theme = THEMES[ctx.theme];
+        const { themeFor } = await import("./themes.ts");
+        const theme = themeFor(ctx.theme);
         if (!theme) throw new RedError(`unknown theme '${ctx.theme}'`);
         const { NERD_FONTS } = await import("./wsl.ts");
         const spec = NERD_FONTS[ctx.font];
@@ -834,8 +834,8 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
       if (pr.name === "nerd-font") {
         await wsl.installNerdFont(ctx.font, ctx.platform);
       } else {
-        const { THEMES } = await import("./themes.ts");
-        const theme = THEMES[ctx.theme];
+        const { themeFor } = await import("./themes.ts");
+        const theme = themeFor(ctx.theme);
         if (!theme) throw new RedError(`unknown theme '${ctx.theme}'`);
         const spec = wsl.NERD_FONTS[ctx.font];
         if (!spec) throw new RedError(`unknown font '${ctx.font}'`);

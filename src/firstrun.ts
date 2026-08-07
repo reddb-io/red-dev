@@ -17,7 +17,7 @@ import { log } from "./log.ts";
 import type { Platform } from "./platform.ts";
 import type { SetupAnswers } from "./tui-setup-model.ts";
 import { readPreferences, writePreferences, type Preferences } from "./preferences.ts";
-import { themeNames } from "./themes.ts";
+import { DEFAULT_THEME, themeNames } from "./themes.ts";
 import { checkbox, confirm, interactive, select } from "./ui.ts";
 
 export interface FirstRunChoices {
@@ -337,7 +337,7 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
   const theme = await select(
     "Colour scheme?  (red-dev ui previews these)",
     themeNames() as [string, ...string[]],
-    "tokyo-night",
+    DEFAULT_THEME,
   );
 
   const choices: FirstRunChoices = {

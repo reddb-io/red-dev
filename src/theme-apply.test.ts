@@ -93,8 +93,8 @@ describe("the slug reaches every surface intact", () => {
     const seen: { name: string; slug: string; theme: string }[] = [];
     const surfaces = THEME_SURFACES.map((s) => ({
       ...s,
-      apply: async (theme: (typeof THEMES)[string], slug: string) => {
-        seen.push({ name: s.name, slug, theme: (theme as { name: string }).name });
+      apply: async (theme: { name: string }, slug: string) => {
+        seen.push({ name: s.name, slug, theme: theme.name });
         return true;
       },
     })) as ThemeSurfaceSpec[];
@@ -105,7 +105,7 @@ describe("the slug reaches every surface intact", () => {
     // A theme whose display name does not slugify back to its key is the
     // exact shape that broke: "Catppuccin Macchiato" -> catppuccin.
     const slug = Object.keys(THEMES).find(
-      (k) => THEMES[k]!.name.toLowerCase().replace(/\s+/g, "-") !== k,
+      (k) => THEMES[k as keyof typeof THEMES].name.toLowerCase().replace(/\s+/g, "-") !== k,
     );
     if (!slug) throw new Error("no theme whose name and slug differ — the test needs one");
 
@@ -119,7 +119,7 @@ describe("the slug reaches every surface intact", () => {
   test("the theme handed to a surface is the one the slug names", async () => {
     const { seen, surfaces } = spy();
     await applyThemeEverywhere(DEFAULT_THEME, wsl, surfaces);
-    for (const call of seen) expect(call.theme).toBe(THEMES[DEFAULT_THEME]!.name);
+    for (const call of seen) expect(call.theme).toBe(THEMES[DEFAULT_THEME].name);
   });
 
   test("an unknown slug throws rather than resolving to something", async () => {

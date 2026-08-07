@@ -20,7 +20,7 @@ import {
 import { detect, summary, type Platform } from "./platform.ts";
 import { applyProvider, systemUpdate, type ApplyContext } from "./providers.ts";
 import { applyContextForEntry, type ApplyContextEntryPath } from "./preferences.ts";
-import { THEMES, themeNames } from "./themes.ts";
+import { themeFor, themeNames } from "./themes.ts";
 import { interactive, select } from "./ui.ts";
 
 function resolveScopes(p: Platform, arg?: string): Scope[] {
@@ -266,7 +266,7 @@ async function cmdTheme(p: Platform, inv: Invocation, name?: string): Promise<nu
   const ctx = await contextFor(p, inv, "theme");
   const chosen =
     name ?? (await select("Theme?", themeNames() as [string, ...string[]], ctx.theme));
-  const theme = THEMES[chosen];
+  const theme = themeFor(chosen);
   if (!theme) {
     log.err(`unknown theme '${chosen}' (known: ${themeNames().join(", ")})`);
     return 1;
@@ -436,7 +436,7 @@ async function cmdShell(p: Platform, inv: Invocation): Promise<number> {
     const { configureAlacritty } = await import("./alacritty.ts");
     const wsl = await import("./wsl.ts");
     const ctx = await contextFor(p, inv, "theme");
-    const theme = THEMES[ctx.theme];
+    const theme = themeFor(ctx.theme);
     const spec = wsl.NERD_FONTS[ctx.font];
     if (theme && spec) {
       await configureAlacritty({
@@ -772,8 +772,7 @@ async function cmdMenu(p: Platform, inv: Invocation, cliHelp: string): Promise<n
       const wsl = await import("./wsl.ts");
       const spec = wsl.NERD_FONTS[font];
       const ctx = await contextFor(p, inv, "theme");
-      const theme = THEMES[ctx.theme];
-      if (!spec || !theme) return;
+      if (!spec) return;
       const { configureAlacritty } = await import("./alacritty.ts");
       await configureAlacritty({
         platform: p,

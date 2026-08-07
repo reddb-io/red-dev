@@ -33,7 +33,7 @@ import { VERSION } from "./cli.ts";
 import { captureTo } from "./log.ts";
 import type { Platform } from "./platform.ts";
 import { summary } from "./platform.ts";
-import { THEMES, themeNames } from "./themes.ts";
+import { swatches, THEMES, themeNames } from "./themes.ts";
 import { Header, Screen, StatusLine, Surface, Task } from "./tui-chrome.ts";
 import { InstallLayout, useInstallModel, type InstallTuiOptions } from "./tui-install.ts";
 import {
@@ -118,13 +118,6 @@ const SECTIONS: MenuSection[] = [
   },
 ];
 
-/** The palette in the order that reads best as a strip. */
-function paletteOf(slug: string): string[] {
-  const t = THEMES[slug];
-  if (!t) return [];
-  const c = t.terminal;
-  return [c.background, c.red, c.green, c.yellow, c.blue, c.purple, c.cyan, c.foreground];
-}
 
 export interface TuiResult {
   /** Command the user chose to run after leaving the interface. */
@@ -444,13 +437,13 @@ export async function runTui(
             ? [
                 Text({ color: text, bold: true }, THEMES[activeTheme]?.name ?? activeTheme),
                 Text({}, ""),
-                Swatches(paletteOf(activeTheme)),
+                Swatches(swatches(activeTheme)),
                 Text({}, ""),
                 Text({ color: muted }, "background · red · green · yellow"),
                 Text({ color: muted }, "blue · magenta · cyan · foreground"),
                 Text({}, ""),
                 Text({ color: muted }, "Neovim colorscheme:"),
-                Text({ color: text }, `  ${THEMES[activeTheme]?.neovim ?? "—"}`),
+                Text({ color: text }, `  ${THEMES[activeTheme]?.blurb ?? "—"}`),
               ]
             : [
                 Text({ color: text, bold: true }, section?.label ?? ""),

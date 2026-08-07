@@ -13,7 +13,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { log } from "./log.ts";
 import type { Platform } from "./platform.ts";
-import type { Theme } from "./themes.ts";
+import type { GnomeAccent, Theme } from "./themes.ts";
 
 /**
  * A batch file is not an executable, and CreateProcess knows it.
@@ -42,37 +42,21 @@ export function codeArgv(argv: string[], platform: string = process.platform): s
  * `workbench.colorTheme` to a theme that is not installed leaves VS
  * Code on its default with a notification nobody reads.
  */
-export type VsCodeThemeSpec =
-  | { status: "exact"; extension: string; label: string }
-  | { status: "unsupported"; reason: string };
-
-export const VSCODE_THEMES: Record<string, VsCodeThemeSpec> = {
-  "tokyo-night": { status: "exact", extension: "enkia.tokyo-night", label: "Tokyo Night" },
-  catppuccin: { status: "exact", extension: "Catppuccin.catppuccin-vsc", label: "Catppuccin Macchiato" },
-  gruvbox: { status: "exact", extension: "jdinhlife.gruvbox", label: "Gruvbox Dark Medium" },
-  everforest: { status: "exact", extension: "sainnhe.everforest", label: "Everforest Dark" },
-  kanagawa: { status: "exact", extension: "qufiwefefwoyn.kanagawa", label: "Kanagawa" },
-  // Was AndreiVoronkov.matte-black, which the marketplace has never
-  // published. Label taken from the extension's own contributes.themes
-  // rather than from its display name — "Matte Black Theme", not
-  // "Matte Black", and workbench.colorTheme wants the former.
-  "matte-black": { status: "exact", extension: "CleanThemes.matte-black-theme", label: "Matte Black Theme" },
-  nord: { status: "exact", extension: "arcticicestudio.nord-visual-studio-code", label: "Nord" },
-  // Was kaiwood.monokai-pro, which does not exist; this is the
-  // publisher's own.
-  ristretto: {
-    status: "exact",
-    extension: "monokai.theme-monokai-pro-vscode",
-    label: "Monokai Pro (Filter Ristretto)",
-  },
-  "rose-pine": { status: "exact", extension: "mvllow.rose-pine", label: "Rosé Pine" },
-  "osaka-jade": {
-    status: "unsupported",
-    reason:
-      "no exact Osaka Jade VS Code theme is published; Solarized Osaka is a different palette",
-  },
-};
-
+/**
+ * No mapping any more, and no extension to install.
+ *
+ * This was a per-slug table of marketplace ids, and it carried the scar
+ * tissue to prove it: two ids that had never been published, one theme
+ * with no extension at all, and a label taken from a extension's
+ * contributes.themes rather than its display name. A theme now names a
+ * VS Code *built-in*, so the install step — and the `code.cmd` quoting
+ * bug that lived in it — is gone.
+ *
+ * The cost is real and worth stating: a theme drives VS Code's
+ * appearance and nothing more, until a RedDB VS Code theme exists to
+ * point at. Extensions someone already installed stay installed and go
+ * inert; uninstalling them would be over-reach.
+ */
 function stripJsonComments(text: string): string {
   let out = "";
   let inString = false;
@@ -219,32 +203,7 @@ export async function applyVsCodeTheme(theme: Theme, p: Platform, slug: string):
     return false;
   }
 
-  const spec = VSCODE_THEMES[slug];
-  if (!spec) {
-    log.skip(`no VS Code theme mapped for ${slug}`);
-    return false;
-  }
-  if (spec.status === "unsupported") {
-    log.skip(`no VS Code theme mapped for ${slug}: ${spec.reason}`);
-    return false;
-  }
-
-  // Installing the extension first: setting a theme that is not there
-  // leaves the editor on its default.
-  const code = Bun.which("code") ?? Bun.which("code.cmd") ?? "code.cmd";
-  const install = Bun.spawn(codeArgv([code, "--install-extension", spec.extension, "--force"]), {
-    stdout: "ignore",
-    stderr: "ignore",
-  });
-  if ((await install.exited) !== 0) {
-    // Deliberately not "not installed": VS Code is here, its CLI ran,
-    // and the marketplace call is what failed. Reporting the two as the
-    // same thing sent someone looking for an editor that was already on
-    // their machine.
-    log.warn(`VS Code is here but installing ${spec.extension} failed; leaving the theme alone`);
-    return false;
-  }
-
+  void slug;
   const path = await codeSettingsPath(p);
   if (!path) {
     log.warn("could not locate VS Code's settings directory");
@@ -267,7 +226,7 @@ export async function applyVsCodeTheme(theme: Theme, p: Platform, slug: string):
     mkdirSync(path.replace(/[\\/][^\\/]+$/, ""), { recursive: true });
   }
 
-  await Bun.write(path, vscodeSettingsJson(original, spec.label));
+  await Bun.write(path, vscodeSettingsJson(original, theme.vscode));
   void theme;
   return true;
 }
@@ -280,18 +239,21 @@ export async function applyVsCodeTheme(theme: Theme, p: Platform, slug: string):
  * part is telling GNOME whether this palette is dark and which accent
  * belongs to it, which every GNOME 47+ desktop honours natively.
  */
-const GNOME_ACCENTS: Record<string, string> = {
-  "tokyo-night": "blue",
-  catppuccin: "purple",
-  gruvbox: "orange",
-  everforest: "green",
-  kanagawa: "purple",
-  "matte-black": "slate",
-  nord: "blue",
-  "osaka-jade": "teal",
-  ristretto: "pink",
-  "rose-pine": "pink",
-};
+/**
+ * GNOME's accent, or the absence of one.
+ *
+ * It used to be a per-slug map of nine different accents — blue for
+ * nord, orange for gruvbox — which made sense when the themes came from
+ * nine different projects. There is one accent now, and the only
+ * question a theme answers is whether it has it.
+ *
+ * `slate` is GNOME's own neutral, which is the closest thing its fixed
+ * list has to "none". Unlike Windows, saying so here is enough: GNOME
+ * has no second place the old accent keeps showing through.
+ */
+function gnomeAccentOf(theme: Theme): GnomeAccent {
+  return theme.accent.kind === "colour" ? theme.accent.gnome : "slate";
+}
 
 export function gnomeColorScheme(theme: Theme): "prefer-light" | "prefer-dark" {
   return theme.appearance === "light" ? "prefer-light" : "prefer-dark";
@@ -313,12 +275,10 @@ export async function applyGnomeTheme(p: Platform, theme: Theme, slug: string): 
 
   await run("org.gnome.desktop.interface", "color-scheme", gnomeColorScheme(theme));
 
-  const accent = GNOME_ACCENTS[slug];
-  if (accent) {
-    // Accent colours are GNOME 47+. On older versions the key does not
-    // exist and gsettings fails, which is fine and not worth a warning.
-    await run("org.gnome.desktop.interface", "accent-color", accent);
-  }
+  void slug;
+  // Accent colours are GNOME 47+. On older versions the key does not
+  // exist and gsettings fails, which is fine and not worth a warning.
+  await run("org.gnome.desktop.interface", "accent-color", gnomeAccentOf(theme));
 
   return true;
 }

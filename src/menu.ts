@@ -15,7 +15,7 @@
 import { log } from "./log.ts";
 import type { Platform } from "./platform.ts";
 import { readPreferences, writePreferences } from "./preferences.ts";
-import { THEMES, themeNames } from "./themes.ts";
+import { resolveThemeSlug, themeFor, themeNames } from "./themes.ts";
 import { banner, number, select } from "./ui.ts";
 import type { Invocation } from "./cli.ts";
 import { summary } from "./platform.ts";
@@ -58,13 +58,13 @@ type Handlers = {
 
 async function themeMenu(p: Platform, h: Handlers): Promise<void> {
   const prefs = await readPreferences(p);
-  const current = prefs.theme ?? "tokyo-night";
+  const current = resolveThemeSlug(prefs.theme);
 
   for (;;) {
     const choices = options(...themeNames(), BACK);
     const picked = await select(`Theme? (current: ${current})`, choices, current);
     if (picked === BACK) return;
-    if (!THEMES[picked]) {
+    if (!themeFor(picked)) {
       log.err(`unknown theme '${picked}'`);
       continue;
     }

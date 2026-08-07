@@ -28,7 +28,7 @@ import type { Platform } from "./platform.ts";
 import { summary } from "./platform.ts";
 import { Screen, Surface } from "./tui-chrome.ts";
 import { muted, ui } from "./tui-theme.ts";
-import { THEMES, themeNames } from "./themes.ts";
+import { DEFAULT_THEME, swatches, THEMES, themeNames } from "./themes.ts";
 
 export interface SetupAnswers {
   theme: string;
@@ -213,22 +213,15 @@ export function questions(
       multi: false,
       choices: themeNames().map((n) => ({
         key: n,
-        label: THEMES[n]?.name ?? n,
-        note: `neovim: ${THEMES[n]?.neovim ?? "—"}`,
+        label: THEMES[n].name,
+        note: THEMES[n].blurb,
       })),
-      preset: ["tokyo-night"],
+      preset: [DEFAULT_THEME],
       applies: () => true,
     },
   ].filter((q) => q.applies(p));
 }
 
-/** The palette, in the order that reads best as a strip. */
-function paletteOf(slug: string): string[] {
-  const t = THEMES[slug];
-  if (!t) return [];
-  const c = t.terminal;
-  return [c.background, c.red, c.green, c.yellow, c.blue, c.purple, c.cyan, c.foreground];
-}
 
 
 /**
@@ -281,7 +274,7 @@ export function useSetupModel(steps: Question[], wizard: ReturnType<typeof creat
     pickedFor: get,
     wizard,
     answers: () => ({
-      theme: get("theme")[0] ?? "tokyo-night",
+      theme: get("theme")[0] ?? DEFAULT_THEME,
       font: get("font")[0] ?? "firacode",
       apps: get("apps"),
       runtimes: get("runtimes"),
@@ -434,7 +427,7 @@ export function SetupLayout(m: SetupModel, p: Platform, width: number, height: n
                 Text({}, ""),
                 Box(
                   { flexDirection: "row" },
-                  ...paletteOf(activeKey).map((hex) => Text({ backgroundColor: hex }, "    ")),
+                  ...swatches(activeKey).map((hex) => Text({ backgroundColor: hex }, "    ")),
                 ),
               ]
             : []),
