@@ -12,37 +12,38 @@
   "files": {
     "tokens/tokens.json": "a9505806e857bb9352875f8cdae2b1c11f27b2455a738e13d7d4ab802b284205"
   },
-  "wallpaperCommit": "d96e5386c56794e411eefcafa23189ab0c7ad581",
-  "wallpaperNote": "reddb-io/brand#98, merged. The wallpapers here are byte-identical to that commit's assets/wallpaper/, vendored unaltered \u2014 the 8-bit encoding is the brand's own artefact, not something re-encoded on this side, which is what keeps LICENSE-assets.md out of it. Still a commit rather than a release: assets/wallpaper/ is excluded from the bundle CATEGORIES, filed as reddb-io/brand#102.",
+  "wallpaperCommit": "864b3731e65f6b602cb5013c22bc670646b6af42",
+  "wallpaperNote": "reddb-io/brand#107, merged. Re-vendored from that commit's assets/wallpaper/, unaltered. Five of the six are pixel-identical to the previous vendor (brand#98) and simply carry a better zlib pass; obsidian was palette-quantised and is the one that changed — see its encoding note. Total 1.3 MB to 1.1 MB. Still a commit rather than a release: assets/wallpaper/ remains excluded from the bundle CATEGORIES, filed as reddb-io/brand#102.",
   "wallpaper": {
     "assets/wallpapers/dark.png": {
       "from": "assets/wallpaper/reddb-wallpaper-01-signature-dark-3840x2160.png",
-      "sha256": "fbc8914b7797f88c073bb22df69f28779cf59865b04f4b74d91ddcc7128dd3d3",
+      "sha256": "602916f947e0a68b1707bac5c2ff750d9b040f05661e118d5163dc02b0c7f816",
       "unaltered": true
     },
     "assets/wallpapers/light.png": {
       "from": "assets/wallpaper/reddb-wallpaper-02-classic-paper-3840x2160.png",
-      "sha256": "5cca285d099fca74338616fa02c6f888d513bb39d365c739c572d43b21f00b0b",
+      "sha256": "7aac4e7ee8d99063f3b2bb835fa75e87bf7b4101cb3b1e77c2bb8067ba8efa41",
       "unaltered": true
     },
     "assets/wallpapers/obsidian.png": {
       "from": "assets/wallpaper/reddb-wallpaper-26-monochrome-3840x2160.png",
-      "sha256": "381f8cc4b54b3eb6373f34d54290d297dda1f6eede0ea7bf90fd9e4484c88aa7",
-      "unaltered": true
+      "sha256": "05bfd40b726f055ccea9b9627433f425d6f45b21497832c94046687af62cddbf",
+      "unaltered": true,
+      "encoding": "Palette, 145 colours — the only one of the six the brand quantised. It is the monochrome sheet, and flat art is where quantisation wins: 86 KB to 51 KB. Measured against the previous truecolor copy: 349,173 pixels differ (4.2%), RMSE 0.000512, peak error 7/255. The other five are halo gradients, which quantise LARGER, and are pixel-identical to what they replaced."
     },
     "assets/wallpapers/marble.png": {
       "from": "assets/wallpaper/reddb-wallpaper-25-mist-3840x2160.png",
-      "sha256": "2894fc6d38243427fd7946fddecbf21c7b316d50af7c1d882cbac4cd73cd6a26",
+      "sha256": "e78d1e46b286b6fdd5e982f341752ebffb80f125cb450143ca3b81f4e6d66c44",
       "unaltered": true
     },
     "assets/wallpapers/cobalt.png": {
       "from": "assets/wallpaper/reddb-wallpaper-22-graphite-3840x2160.png",
-      "sha256": "3f0c9f0e31afde9c342d8d8d983a352c640cbe07d49160802335a9241e6e8c93",
+      "sha256": "2c46b8c8ed7f871c5e26c30741cbc7dbbe5d76a36cad9f358e3d80f48471195d",
       "unaltered": true
     },
     "assets/wallpapers/flare.png": {
       "from": "assets/wallpaper/reddb-wallpaper-14-red-ground-3840x2160.png",
-      "sha256": "48833448475a73e461f518d5c7b3ea88576709bd150d5544d216f79f07eb7f63",
+      "sha256": "7bf0cb642aadc8af87decd1d98db241e881b9d79da39998b53d3f631bcdfd723",
       "unaltered": true
     }
   }
