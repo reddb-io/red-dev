@@ -12,6 +12,7 @@
  * signal. Neither knows anything about the other.
  */
 
+import { transcribeStep } from "./transcript.ts";
 import { aptInstall, applyProvider, type ApplyContext } from "./providers.ts";
 import {
   describeProvider,
@@ -156,6 +157,17 @@ export async function converge(
         };
         results.push(result);
         observer.stepEnd?.(result);
+        // Written here rather than at the end, and straight to the file
+        // rather than through `log`.
+        //
+        // Straight to the file because the fullscreen view renders these
+        // rows from its own model — they have never passed through the
+        // logger, so a transcript teed off `log` had every provider's
+        // chatter and none of the outcomes it belonged to. Here because
+        // a converge that is killed, or that takes down the terminal
+        // with it, still leaves the rows up to the point it stopped,
+        // which is the run most likely to be worth reading.
+        transcribeStep(result);
       };
 
       if (pr.kind === "skip") {
