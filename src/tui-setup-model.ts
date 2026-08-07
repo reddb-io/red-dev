@@ -207,9 +207,8 @@ export function questions(
       id: "theme",
       title: "Theme",
       description:
-        "The wallpaper, the system accent and VS Code. The terminal keeps one " +
-        "fixed RedDB palette either way — every program inside it paints over " +
-        "the ANSI colours, so varying them made a switch look like it failed.",
+        "The wallpaper, the system accent and VS Code. Never the terminal — " +
+        "its sixteen colours are yours, and red-dev sets only the cursor.",
       multi: false,
       choices: themeNames().map((n) => ({
         key: n,

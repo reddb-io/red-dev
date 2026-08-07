@@ -12,13 +12,10 @@
 // terminal itself, and that changes what belongs in it: every key zellij
 // binds is a key the shell no longer gets.
 //
-// This file is installed once and then left alone.
-//
-// No `theme`. red-dev used to write themes/red-dev.kdl and point this
-// line at it; it does not colour terminals any more, so zellij keeps its
-// own default and follows whatever your terminal's sixteen ANSI slots
-// are. Set `theme` here if you want a different one — nothing will
-// overwrite it. See .red/adr/0002.
+// This file is installed once and then left alone. The theme lives in
+// themes/red-dev.kdl, which red-dev regenerates on every theme switch.
+
+theme "red-dev"
 
 // One status line instead of a tab bar and a status bar. Two rows of
 // chrome is a fair price for a tool opened on purpose and a poor one

@@ -718,17 +718,35 @@ Six, built from the [brand tokens](vendor/brand/): `dark` · `light` ·
 | `cobalt` | grey `#333949` | `#ff2056` |
 | `flare` | ink, with red panels | `#ff2056` |
 
-### The terminal is not one of them
+### The terminal is not one of them, and neither is its palette
 
-It used to be. A theme carried a twenty-value ANSI palette and wrote it to
-alacritty, zellij, btop, neovim, bat, delta and lazygit — and switching theme
-looked like it had done nothing. The cause is structural rather than a bug:
-every program inside a terminal window carries its own palette and paints over
-the sixteen slots underneath. Spread a theme across a dozen of those and the
-result is neither the old one nor the new one.
+A theme used to carry twenty ANSI values and write them into alacritty, zellij,
+btop, neovim, bat, delta and lazygit — and switching theme looked like it had
+done nothing. The cause is structural rather than a bug: every program inside a
+terminal window carries its own palette and paints over the sixteen slots
+underneath. Spread a theme across a dozen of those and the result is neither the
+old one nor the new one.
 
-So the terminal gets **one** RedDB palette, written on every converge, that
-never varies — and a theme changes the things nothing else overrides:
+The first fix was one fixed palette instead of ten varying ones. It worked, and
+it exposed the real problem: **a terminal's colours are not red-dev's to
+choose.** So red-dev writes exactly one colour into a terminal now —
+
+```toml
+[colors.cursor]
+cursor = '#ff2056'
+text = 'CellBackground'
+```
+
+— and that is the whole of it. The sixteen slots, the background and the
+foreground are yours, in your own `alacritty.toml` or your Windows Terminal
+scheme, and nothing here will touch them.
+
+The tools that can defer still do: `bat` and `delta` on `base16`, `opencode` on
+`system`, `herdr` on `terminal`, `btop` on `TTY`. Those settings pick no colour
+— they are what stops each program picking one, so removing them is how you get
+a purple pager inside a terminal you just chose the colours for.
+
+A theme changes the things nothing else overrides:
 
 | surface | how |
 | --- | --- |
@@ -737,8 +755,9 @@ never varies — and a theme changes the things nothing else overrides:
 | GNOME | light/dark preference and accent |
 | VS Code | `workbench.colorTheme`, in a settings file parsed as JSONC so comments and trailing commas survive |
 
-The full reasoning, including where the five hues the brand does not publish
-come from, is in [ADR 0002](.red/adr/0002-the-terminal-palette-is-fixed.md).
+Both steps are written down: [ADR 0002](.red/adr/0002-the-terminal-palette-is-fixed.md)
+made the palette fixed, [ADR 0003](.red/adr/0003-red-dev-does-not-colour-the-terminal.md)
+removed it.
 
 ### Two of them have no accent
 

@@ -120,10 +120,26 @@ describe("paste", () => {
   });
 });
 
+/**
+ * The base these two reconstruct, pinned rather than read live.
+ *
+ * They used to build a historical artifact by appending an old
+ * copy_command to whatever config/zellij/config.kdl says today, which
+ * only produced the real 0.15.0 bytes for as long as that file never
+ * changed. It changed — `theme "red-dev"` came out — and both tests
+ * started asserting that a config which was never shipped is one red-dev
+ * shipped. They failed loudly, which was luck: the same construction
+ * would have gone on passing for an edit that happened not to alter the
+ * hash-relevant part.
+ *
+ * A fixture cannot drift. This is config.kdl at v0.21.0, and it hashes
+ * to the 0.11.0-through-0.21.0 entry in SHIPPED_ZELLIJ_CONFIGS.
+ */
+const BASE_0_21_0 = readFileSync("src/fixtures/zellij-config-0.21.0.kdl", "utf8");
+
 describe("reaching a machine that already has a config", () => {
   test("upgrades the generated clip.exe config that corrupts UTF-8", () => {
-    const base = readFileSync("config/zellij/config.kdl", "utf8");
-    const old = `${base}
+    const old = `${BASE_0_21_0}
 // Generated for this target by red-dev.
 //
 // The clipboard zellij should write to. Without it zellij uses OSC 52,
@@ -137,7 +153,6 @@ copy_command "clip.exe"
   });
 
   test("upgrades the generated PowerShell bridge that Zellij times out", () => {
-    const base = readFileSync("config/zellij/config.kdl", "utf8");
     const script =
       "$ProgressPreference='SilentlyContinue';" +
       "$s=[Console]::OpenStandardInput();" +
@@ -145,7 +160,7 @@ copy_command "clip.exe"
       "$s.CopyTo($m);" +
       "Set-Clipboard -Value ([Text.Encoding]::UTF8.GetString($m.ToArray()))";
     const encoded = Buffer.from(script, "utf16le").toString("base64");
-    const old = `${base}
+    const old = `${BASE_0_21_0}
 // Generated for this target by red-dev.
 //
 // The clipboard zellij should write to. Without it zellij uses OSC 52,
@@ -174,7 +189,7 @@ copy_command "powershell.exe -NoProfile -EncodedCommand ${encoded}"
     const before = [
       "[general]",
       "import = [",
-      "  'theme.toml',",
+      "  'cursor.toml',",
       "  'font.toml',",
       "  'shell.toml',",
       "]",
@@ -186,15 +201,34 @@ copy_command "powershell.exe -NoProfile -EncodedCommand ${encoded}"
     expect(after).not.toBeNull();
     expect(after).toContain("keys.toml");
     // And keeps what was already there.
-    expect(after).toContain("theme.toml");
+    expect(after).toContain("cursor.toml");
     expect(after).toContain("opacity = 0.98");
+  });
+
+  test("the retired theme.toml is dropped rather than carried", () => {
+    // theme.toml held twenty ANSI values. A machine that converged
+    // before red-dev stopped colouring terminals still imports it, and
+    // Alacritty would keep applying it — so the entry has to go, not
+    // just the file. It is counted as ours precisely so this can happen.
+    const before = [
+      "[general]",
+      "import = [",
+      "  'theme.toml',",
+      "  'font.toml',",
+      "  'shell.toml',",
+      "]",
+    ].join("\n");
+    const after = repairedImports(before, requiredImports(null));
+    expect(after).not.toBeNull();
+    expect(after).not.toContain("theme.toml");
+    expect(after).toContain("cursor.toml");
   });
 
   test("says nothing to repair when the imports are complete", () => {
     const complete = [
       "[general]",
       "import = [",
-      "  'theme.toml',",
+      "  'cursor.toml',",
       "  'font.toml',",
       "  'shell.toml',",
       "  'keys.toml',",
@@ -208,13 +242,13 @@ copy_command "powershell.exe -NoProfile -EncodedCommand ${encoded}"
     // was guarded on not being WSL at its only call site — so the one
     // target whose config lives on the far side of a boundary was the
     // one target that could never be repaired.
-    const before = "[general]\nimport = [\n  'theme.toml',\n]";
+    const before = "[general]\nimport = [\n  'cursor.toml',\n]";
     expect(repairedImports(before, requiredImports(null))).toContain("keys.toml");
   });
 });
 
 /**
- * Moving theme, font and keys into the share changes what an existing
+ * Moving cursor, font and keys into the share changes what an existing
  * alacritty.toml has to say, on a file this project promises to write
  * once and leave alone. The repair pass is the only way those machines
  * ever point at the share.
@@ -225,7 +259,7 @@ describe("imports when there is a shared root", () => {
 
   test("the shared parts are absolute and the local one is not", () => {
     const req = requiredImports(SHARE);
-    expect(req).toContain(`${shareDir}\\theme.toml`);
+    expect(req).toContain(`${shareDir}\\cursor.toml`);
     expect(req).toContain(`${shareDir}\\font.toml`);
     expect(req).toContain(`${shareDir}\\keys.toml`);
     // shell.toml names wsl.exe or bash.exe: it is the machine's answer
@@ -235,13 +269,13 @@ describe("imports when there is a shared root", () => {
   });
 
   test("a relative entry is replaced by the shared one, not joined by it", () => {
-    // The bug this guards: appending left both 'theme.toml' and the
+    // The bug this guards: appending left both 'cursor.toml' and the
     // absolute path in the list, with the stale local copy still on
     // disk. Which one won depended on merge order.
     const before = [
       "[general]",
       "import = [",
-      "  'theme.toml',",
+      "  'cursor.toml',",
       "  'font.toml',",
       "  'shell.toml',",
       "  'keys.toml',",
@@ -249,8 +283,8 @@ describe("imports when there is a shared root", () => {
     ].join("\n");
     const after = repairedImports(before, requiredImports(SHARE));
     expect(after).not.toBeNull();
-    expect(after).toContain(`${shareDir}\\theme.toml`);
-    expect(after).not.toMatch(/^\s*'theme\.toml',$/m);
+    expect(after).toContain(`${shareDir}\\cursor.toml`);
+    expect(after).not.toMatch(/^\s*'cursor\.toml',$/m);
     expect(after).toMatch(/^\s*'shell\.toml',$/m);
   });
 
@@ -258,7 +292,7 @@ describe("imports when there is a shared root", () => {
     const before = [
       "[general]",
       "import = [",
-      "  'theme.toml',",
+      "  'cursor.toml',",
       "  'my-overrides.toml',",
       "]",
     ].join("\n");
@@ -277,7 +311,10 @@ describe("imports when there is a shared root", () => {
       "]",
     ].join("\n");
     const after = repairedImports(before, requiredImports(SHARE));
-    expect(after).toContain(`${shareDir}\\theme.toml`);
+    // The old address goes and the new one arrives — and theme.toml does
+    // not come back under it, because it is retired rather than moved.
+    expect(after).toContain(`${shareDir}\\cursor.toml`);
+    expect(after).not.toContain("theme.toml");
     expect(after).not.toContain(".reddev");
   });
 

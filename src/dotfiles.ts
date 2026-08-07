@@ -294,6 +294,13 @@ const SHIPPED_ZELLIJ_CONFIGS = new Set([
   // isolation, but Zellij kills copy commands after one second and Windows
   // PowerShell startup can exceed that from WSL, leaving the old clipboard.
   "386a88423e2c91e3af3341ac82f9402d0cf81ae2ed325859236e1dbfa400db12",
+  // 0.22.0: `theme "red-dev"` removed. red-dev no longer colours
+  // terminals, so the line pointed at a themes/red-dev.kdl that this
+  // release deletes — and zellij refuses to start on a theme it cannot
+  // resolve. clearZellij() cuts the same two lines out of a config.kdl
+  // already on disk, which is the branch that reaches everyone whose
+  // file hashes to one of the four above.
+  "d1a2cbf38939ff698a9a3cd48376ff69ad0ac8eda2b25bbc05833fb9d4d48117",
 ]);
 
 /**
@@ -464,15 +471,15 @@ async function installZellijConfig(p: Platform): Promise<void> {
       break;
   }
 
-  // The config references theme "red-dev", so that theme has to exist
-  // even when the theme step has not run or failed. Writing it here
-  // means the reference always resolves.
+  // The shipped config used to reference theme "red-dev", so the theme
+  // had to be written here too — zellij refuses to start on a theme name
+  // it cannot resolve, and the theme step can fail or not have run.
   //
-  // Unconditional now, where it used to be guarded on the file being
-  // absent. The guard existed because the content depended on which
-  // theme was chosen and a default would have clobbered a real one;
-  // there is only one palette to write, so reasserting it is free and
-  // repairs a file edited by hand.
-  const { applyZellij } = await import("./terminal-surfaces.ts");
-  await applyZellij(p);
+  // Both are gone. What is left is the reverse job: a machine installed
+  // before this release has the theme file and the reference, and the
+  // "keep" branch above leaves its config.kdl alone precisely because it
+  // is the user's. clearZellij removes red-dev's own two lines from it
+  // without touching the rest.
+  const { clearZellij } = await import("./terminal-surfaces.ts");
+  await clearZellij(p);
 }

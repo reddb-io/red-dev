@@ -106,7 +106,7 @@ describe("with a shared root", () => {
     // that. The install check is what covers a missing config.
     machine(CURRENT, null);
     expect(await zellij("zellij keys")).toBeUndefined();
-    expect(await zellij("zellij theme")).toBeUndefined();
+    expect(await zellij("zellij colours")).toBeUndefined();
   });
 });
 
@@ -120,6 +120,37 @@ describe("without a shared root", () => {
     delete process.env["RED_SHARE_WIN"];
 
     expect((await zellij("zellij keys"))?.status).toBe("ok");
-    expect((await zellij("zellij theme"))?.status).toBe("ok");
+    // A leftover themes/red-dev.kdl is drift now rather than health:
+    // red-dev stopped colouring terminals, so the file it used to check
+    // for is the one thing that should not be there.
+    expect((await zellij("zellij colours"))?.status).toBe("drift");
+  });
+
+  test("and it is clean once both halves are gone", async () => {
+    // Both, because either one alone is a problem. A config that still
+    // selects "red-dev" with no theme file to resolve is worse than
+    // cosmetic: zellij refuses to start.
+    const root = mkdtempSync(`${tmpdir()}/red-drift-`);
+    mkdirSync(`${root}/.config/zellij`, { recursive: true });
+    writeFileSync(
+      `${root}/.config/zellij/config.kdl`,
+      CURRENT.replace('theme "red-dev"\n', ""),
+    );
+    process.env["HOME"] = root;
+    delete process.env["RED_SHARE_WIN"];
+
+    expect((await zellij("zellij colours"))?.status).toBe("ok");
+  });
+
+  test("a config still selecting the theme is caught even with the file gone", async () => {
+    const root = mkdtempSync(`${tmpdir()}/red-drift-`);
+    mkdirSync(`${root}/.config/zellij`, { recursive: true });
+    writeFileSync(`${root}/.config/zellij/config.kdl`, CURRENT);
+    process.env["HOME"] = root;
+    delete process.env["RED_SHARE_WIN"];
+
+    const c = await zellij("zellij colours");
+    expect(c?.status).toBe("drift");
+    expect(c?.detail).toContain("still selects");
   });
 });

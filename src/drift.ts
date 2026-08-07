@@ -90,23 +90,33 @@ async function checkShellWiring(): Promise<DriftCheck> {
 export async function checkTheme(p: Platform): Promise<DriftCheck[]> {
   const checks: DriftCheck[] = [];
 
+  // Both directions, because this check inverted.
+  //
+  // It used to report a missing theme.toml as drift. theme.toml is the
+  // twenty-value ANSI palette red-dev no longer writes, so its *presence*
+  // is now what needs reporting: a machine that converged before 0.22.0
+  // has one, and Alacritty keeps applying it until something removes it.
   const { configDir } = await import("./alacritty.ts");
   try {
+    const { configHome: sharedConfigHome } = await import("./shared-root.ts");
     const dir = await configDir(p);
     const sep = p.os === "windows" ? "\\" : "/";
+    const shared = `${sharedConfigHome(p, "alacritty")}/alacritty`;
+    const stale = [`${dir}${sep}theme.toml`, `${shared}/theme.toml`].find((f) => existsSync(f));
+
     checks.push(
-      existsSync(`${dir}${sep}theme.toml`)
-        ? { name: "alacritty theme", status: "ok", detail: dir }
-        : {
-            name: "alacritty theme",
+      stale
+        ? {
+            name: "alacritty colours",
             status: "drift",
-            detail: "no theme.toml",
+            detail: `theme.toml still sets all sixteen ANSI colours: ${stale}`,
             fix: "red-dev theme <name>",
-          },
+          }
+        : { name: "alacritty colours", status: "ok", detail: "yours" },
     );
   } catch (err) {
     checks.push({
-      name: "alacritty theme",
+      name: "alacritty colours",
       status: "n/a",
       detail: (err as Error).message,
     });
@@ -128,13 +138,22 @@ export async function checkTheme(p: Platform): Promise<DriftCheck[]> {
   const zellijDir = `${configHome(p, "zellij")}/zellij`;
   const zellijConfig = `${zellijDir}/config.kdl`;
   if (existsSync(zellijConfig)) {
+    // Inverted for the same reason as alacritty above, with one extra
+    // hazard: zellij refuses to start on a theme name it cannot resolve.
+    // So a half-swept machine — theme file gone, `theme "red-dev"` still
+    // in config.kdl — is not a cosmetic problem, it is a multiplexer that
+    // will not open. Report either half being present.
+    const themeFile = existsSync(`${zellijDir}/themes/red-dev.kdl`);
+    const referenced = /^\s*theme\s+"red-dev"\s*$/m.test(readFileSync(zellijConfig, "utf8"));
     checks.push(
-      existsSync(`${zellijDir}/themes/red-dev.kdl`)
-        ? { name: "zellij theme", status: "ok", detail: "resolved" }
+      !themeFile && !referenced
+        ? { name: "zellij colours", status: "ok", detail: "yours" }
         : {
-            name: "zellij theme",
+            name: "zellij colours",
             status: "drift",
-            detail: 'config.kdl references theme "red-dev" which is not there',
+            detail: referenced
+              ? 'config.kdl still selects theme "red-dev"'
+              : "a red-dev theme file is still in themes/",
             fix: "red-dev theme <name>",
           },
     );

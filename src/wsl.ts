@@ -17,7 +17,7 @@ import { copyFileSync, existsSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { userInfo } from "node:os";
 import { log, RedError } from "./log.ts";
 import type { Platform } from "./platform.ts";
-import { ANSI_SCHEME_NAME, wtScheme } from "./terminal-palette.ts";
+import { CURSOR } from "./terminal-cursor.ts";
 
 /**
  * Scheme names red-dev used to write, and now removes.
@@ -41,6 +41,10 @@ const LEGACY_WT_SCHEMES = new Set([
   "Osaka Jade",
   "Ristretto",
   "Rose Pine",
+  // The fixed palette that replaced the ten, and lasted one release.
+  // red-dev does not colour a terminal at all now — see .red/adr/0003 —
+  // so this joins the list it was written to clean up.
+  "RedDB",
 ]);
 
 /**
@@ -841,7 +845,11 @@ export async function configureWindowsTerminal(opts: TerminalOptions): Promise<v
 
   settings.profiles ??= {};
   settings.profiles.defaults ??= {};
-  settings.profiles.defaults["colorScheme"] = ANSI_SCHEME_NAME;
+  // The cursor, and only the cursor. Set on the profile rather than in a
+  // scheme, which is what makes "no scheme" possible at all: cursorColor
+  // is a profile setting, so it survives the user picking Campbell, One
+  // Half Dark or anything else in the dropdown.
+  settings.profiles.defaults["cursorColor"] = CURSOR;
   settings.profiles.defaults["font"] = {
     ...(settings.profiles.defaults["font"] as Record<string, unknown> | undefined),
     face: opts.fontFace,
@@ -856,7 +864,7 @@ export async function configureWindowsTerminal(opts: TerminalOptions): Promise<v
     settings.profiles.defaults["useAcrylic"] = true;
   }
 
-  // Replace our scheme, and retire the ones we used to write.
+  // Retire every scheme red-dev ever wrote, and push nothing back.
   //
   // The filter used to match on the theme's display name, so it only
   // ever removed the scheme it was about to rewrite: every theme a
@@ -868,9 +876,21 @@ export async function configureWindowsTerminal(opts: TerminalOptions): Promise<v
   // skipped a release, since it runs on every converge.
   settings.schemes ??= [];
   settings.schemes = settings.schemes.filter(
-    (s) => s["name"] !== ANSI_SCHEME_NAME && !LEGACY_WT_SCHEMES.has(String(s["name"] ?? "")),
+    (s) => !LEGACY_WT_SCHEMES.has(String(s["name"] ?? "")),
   );
-  settings.schemes.push(wtScheme());
+
+  // And release the profile that was pointed at one of them.
+  //
+  // Deleting a scheme while profiles.defaults still names it leaves
+  // Windows Terminal resolving a scheme that is not there — it falls
+  // back, but silently, and the user is left with a colorScheme entry
+  // referring to nothing. Only our own names are cleared: a user who has
+  // since picked Campbell keeps Campbell.
+  const named = String(settings.profiles.defaults["colorScheme"] ?? "");
+  if (LEGACY_WT_SCHEMES.has(named)) {
+    delete settings.profiles.defaults["colorScheme"];
+    log.plain(`       dropped the '${named}' scheme — Windows Terminal's own colours are back`);
+  }
 
   if (opts.distro) {
     const list = settings.profiles.list ?? [];

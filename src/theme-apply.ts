@@ -2,7 +2,8 @@
  * Apply a theme to the surfaces a theme still owns.
  *
  * It used to own eleven, nine of which were inside the terminal window.
- * That is the arrangement .red/adr/0002 reverses: every program in a
+ * That is the arrangement .red/adr/0002 reversed and .red/adr/0003
+ * finished: every program in a
  * terminal paints over the ANSI slots beneath it, so a theme spread
  * across nine of them arrived as neither the old one nor the new one,
  * and switching looked like it had failed. The terminal now takes one

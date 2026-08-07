@@ -771,8 +771,8 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
           log.warn(`alacritty: ${(err as Error).message}`);
         }
 
-        const { applyTerminalPalette } = await import("./terminal-surfaces.ts");
-        await applyTerminalPalette(ctx.platform);
+        const { applyTerminalDefaults } = await import("./terminal-surfaces.ts");
+        await applyTerminalDefaults(ctx.platform);
 
         // ctx.theme, not a slug derived from theme.name. Deriving it is
         // what made a converge miss every slug-indexed map while
