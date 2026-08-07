@@ -68,7 +68,7 @@ function home(): string {
  * reads it across the 9p bridge. The host's own disk has neither
  * problem.
  */
-async function wallpaperDir(p: Platform): Promise<string> {
+export async function wallpaperDir(p: Platform): Promise<string> {
   if (p.env === "wsl") {
     const { windowsLocalAppData } = await import("./wsl.ts");
     return `${await windowsLocalAppData()}/red-dev/wallpapers`;

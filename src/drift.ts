@@ -169,17 +169,44 @@ async function checkWallpaper(p: Platform): Promise<DriftCheck> {
     return { name: "wallpaper", status: "n/a", detail: "no desktop" };
   }
   try {
-    const { wallpaperPathInUse } = await import("./wallpaper.ts");
+    const { wallpaperPathInUse, expectedWallpaperNames, wallpaperDir } = await import(
+      "./wallpaper.ts"
+    );
     const path = await wallpaperPathInUse(p);
     if (!path) return { name: "wallpaper", status: "n/a", detail: "not set" };
-    return existsSync(path)
-      ? { name: "wallpaper", status: "ok", detail: path }
-      : {
+
+    if (!existsSync(path)) {
+      return {
+        name: "wallpaper",
+        status: "drift",
+        detail: `points at a missing file: ${path}`,
+        fix: "red-dev theme <name>",
+      };
+    }
+
+    // An image that exists but that red-dev no longer produces.
+    //
+    // Reported only inside red-dev's own wallpaper directory. A path
+    // anywhere else is somebody's own photograph, and calling a
+    // deliberate choice "drift" is how a doctor becomes noise. Names are
+    // content-addressed, so this also catches an image whose bytes
+    // changed under a slug that did not.
+    const dir = await wallpaperDir(p);
+    const ours = path.replace(/\\/g, "/").startsWith(dir.replace(/\\/g, "/"));
+    if (ours) {
+      const expected = await expectedWallpaperNames();
+      const name = path.replace(/\\/g, "/").split("/").pop() ?? "";
+      if (!expected.has(name)) {
+        return {
           name: "wallpaper",
           status: "drift",
-          detail: `points at a missing file: ${path}`,
+          detail: `points at a retired image: ${name}`,
           fix: "red-dev theme <name>",
         };
+      }
+    }
+
+    return { name: "wallpaper", status: "ok", detail: path };
   } catch (err) {
     return { name: "wallpaper", status: "n/a", detail: (err as Error).message };
   }
