@@ -73,6 +73,13 @@ describe("the shortcut is only rewritten when it is wrong", () => {
     // and the key went on dying, which is worse than no fix: it ended
     // the search. Normal() collapses order and case on both sides.
     expect(script).toContain("function Normal($combo)");
+    // The escape that broke it in production: the TS template ate the
+    // backslash and PowerShell received -split '+', an invalid regex —
+    // "Quantifier {x,y} following nothing" — which failed the whole
+    // hotkeys step. Assert on the EMITTED script, where PowerShell
+    // reads, not on the source.
+    expect(script).toContain("-split '\\+'");
+    expect(script).not.toContain("-split '+'");
     expect(script).toContain("(Normal $s.HotKey) -eq (Normal $combo)");
     expect(script).not.toContain("$s.HotKey -eq $combo)");
   });

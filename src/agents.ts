@@ -231,9 +231,31 @@ export function isAgentInstalled(a: AgentSpec): boolean {
  * into the log when something is capturing it. The bug was that this
  * file had its own two-line copy of the wrong half.
  */
-async function run(cmd: string[]): Promise<void> {
+async function run(cmd: string[], env?: Record<string, string | undefined>): Promise<void> {
   const { spawnLogged } = await import("./providers.ts");
-  if ((await spawnLogged(cmd)) !== 0) throw new RedError(`${cmd[0]} exited non-zero`);
+  const code = await spawnLogged(cmd, env ? { env } : {});
+  if (code !== 0) throw new RedError(`${cmd[0]} exited non-zero`);
+}
+
+/**
+ * The environment npm's own children need, when npm came from mise.
+ *
+ * Resolving npm.cmd by absolute path gets npm running — and then npm
+ * spawns the package's lifecycle scripts through cmd.exe, which looks
+ * `node` up on PATH and does not find it, because mise's install dir
+ * was never on this process's PATH either:
+ *
+ *   npm error 'node' is not recognized as an internal or external command
+ *
+ * So the same directory that npm.cmd lives in — where node.exe also is —
+ * is prepended for the child. Both spellings of the variable, because
+ * the child is cmd.exe and inherits whichever casing exists.
+ */
+function npmEnv(npm: string): Record<string, string | undefined> {
+  const dir = npm.replace(/[\\/][^\\/]+$/, "");
+  const sep = process.platform === "win32" ? ";" : ":";
+  const path = `${dir}${sep}${process.env["PATH"] ?? process.env["Path"] ?? ""}`;
+  return { ...process.env, PATH: path, Path: path };
 }
 
 /**
@@ -365,7 +387,7 @@ export async function installAgent(a: AgentSpec, p: Platform): Promise<void> {
   if (p.os === "windows" && a.npm) {
     const npm = await resolveNpm();
     if (!npm) throw new RedError("no npm anywhere — not on PATH, and mise has no node. Run `red-dev lang`");
-    await run(npmArgv(npm, ["install", "-g", a.npm]));
+    await run(npmArgv(npm, ["install", "-g", a.npm]), npmEnv(npm));
     return;
   }
 
@@ -378,7 +400,7 @@ export async function installAgent(a: AgentSpec, p: Platform): Promise<void> {
   if (a.npm) {
     const npm = await resolveNpm();
     if (!npm) throw new RedError("no npm anywhere — not on PATH, and mise has no node. Run `red-dev install core`");
-    await run(npmArgv(npm, ["install", "-g", a.npm]));
+    await run(npmArgv(npm, ["install", "-g", a.npm]), npmEnv(npm));
     return;
   }
 

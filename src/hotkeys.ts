@@ -126,7 +126,7 @@ $alacritty = @(
 # supposedly shipped. Order and case both have to go.
 function Normal($combo) {
   if (-not $combo) { return '' }
-  (($combo -split '\+') | ForEach-Object { $_.Trim().ToUpper() } | Sort-Object) -join '+'
+  (($combo -split '\\+') | ForEach-Object { $_.Trim().ToUpper() } | Sort-Object) -join '+'
 }
 
 $script:wrote = $false

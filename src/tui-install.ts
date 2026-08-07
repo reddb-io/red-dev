@@ -111,6 +111,7 @@ export interface InstallModel {
   total: number;
   logScroll: ScrollAreaState;
   /** Start converging. Idempotent; the menu calls it when you pick Install. */
+  prelude: (label: string) => void;
   begin: () => void;
   /**
    * Add a line to the log from outside the converge.
@@ -177,6 +178,15 @@ export function useInstallModel(
 
   /** Log lines carry colour; the viewer takes plain strings. */
   const plain = (line: string): string => line.replace(/\x1b\[[0-9;]*m/g, "").trim();
+
+  // The clock is its own effect, unconditional. It used to start with
+  // the converge, which left Elapsed frozen at 0s through the whole
+  // setup phase — agents and runtimes can take minutes, and a frozen
+  // clock reads as a hang.
+  useEffect(() => {
+    const clock = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(clock);
+  });
 
   useEffect(() => {
     if (!started()) return;
@@ -253,9 +263,17 @@ export function useInstallModel(
     },
     total,
     logScroll,
+    // The phase before the converge: agents and runtimes, run from the
+    // wizard's answers. Starts the clock and names itself in the header
+    // so the screen is visibly alive while npm does its minutes.
+    prelude: (label: string) => {
+      if (startedAt() === 0) setStartedAt(Date.now());
+      setScope("setup");
+      setCurrent(label);
+    },
     begin: () => {
       if (started()) return;
-      setStartedAt(Date.now());
+      if (startedAt() === 0) setStartedAt(Date.now());
       setStarted(true);
     },
     note: (line) => push(line.replace(/\x1b\[[0-9;]*m/g, "").trimEnd()),

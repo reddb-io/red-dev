@@ -263,6 +263,10 @@ export async function runTui(
           // the renderer's; anything writing to it has to go through a
           // signal.
           const release = captureTo((line) => model?.note(line));
+          // Name the phase and start the clock: apply() installs agents
+          // and runtimes, which can take minutes, and a screen showing
+          // 0/46 and 0s through all of it reads as broken.
+          model?.prelude("agents & runtimes");
           void actions.setup
             .apply(answers)
             .catch((err: unknown) => model?.note(`failed: ${(err as Error).message}`))
