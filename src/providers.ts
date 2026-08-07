@@ -838,7 +838,6 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
         if (!spec) throw new RedError(`unknown font '${ctx.font}'`);
         await wsl.configureWindowsTerminal({
           fontFace: spec.family,
-          theme,
           opacity: ctx.opacity,
           distro: process.env["WSL_DISTRO_NAME"] ?? undefined,
           home: process.env["HOME"] ?? undefined,

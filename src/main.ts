@@ -316,7 +316,6 @@ async function cmdTheme(p: Platform, inv: Invocation, name?: string): Promise<nu
     try {
       await wsl.configureWindowsTerminal({
         fontFace: spec.family,
-        theme,
         opacity: ctx.opacity,
         distro: process.env["WSL_DISTRO_NAME"] ?? undefined,
         home: process.env["HOME"] ?? undefined,
