@@ -148,3 +148,32 @@ export async function toolchainParity(p: Platform): Promise<string | null> {
     ? `Git Bash cannot see: ${missing.join(", ")}`
     : null;
 }
+
+/**
+ * Resolve a tool the runtimes own, even when this process cannot.
+ *
+ * The bug this closes: `mise use -g node@lts` succeeds, and four lines
+ * later `Bun.which("npm")` still returns null — because PATH was read
+ * when this process started, and installing node does not reach back in
+ * time to change it. So the converge installed the runtime and then
+ * refused to use it, telling the user to install what it had just
+ * installed:
+ *
+ *   fail Gemini CLI: npm not on PATH — install a Node runtime first
+ *   ...
+ *   ok  node@lts
+ *
+ * `mise which npm` answers from mise's own state rather than from this
+ * process's environment, which is the difference between "was it ever
+ * installed" and "did my PATH happen to see it".
+ */
+export async function runtimeTool(name: string): Promise<string | null> {
+  const direct = Bun.which(name);
+  if (direct) return direct;
+
+  const mise = await miseBin();
+  if (!mise) return null;
+  const { code, out } = await run([mise, "which", name]);
+  const path = out.trim().split("\n")[0]?.trim() ?? "";
+  return code === 0 && path.length > 0 ? path : null;
+}

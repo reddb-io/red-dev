@@ -274,6 +274,34 @@ async function runWinget(argv: string[], label: string): Promise<void> {
   );
 }
 
+
+/**
+ * npm's argv, which on Windows is not just the path.
+ *
+ * mise resolves npm to npm.cmd there, and CreateProcess cannot exec a
+ * batch file directly — the same story as winget's reparse point, with
+ * the same answer: cmd.exe interprets it.
+ */
+function npmArgv(npm: string, args: string[]): string[] {
+  const lower = npm.toLowerCase();
+  return lower.endsWith(".cmd") || lower.endsWith(".bat")
+    ? ["cmd.exe", "/c", npm, ...args]
+    : [npm, ...args];
+}
+
+/**
+ * The npm this converge just made exist, found through mise.
+ *
+ * Bun.which alone re-created the bug the runtime ordering was meant to
+ * fix: PATH is read at process start, so node@lts lands and npm is
+ * still "not on PATH" in the very same run. runtimeTool asks mise,
+ * whose answer does not depend on when this process was born.
+ */
+async function resolveNpm(): Promise<string | null> {
+  const { runtimeTool } = await import("./runtimes.ts");
+  return await runtimeTool("npm");
+}
+
 export async function installAgent(a: AgentSpec, p: Platform): Promise<void> {
   if (p.os === "windows" && a.msstore) {
     // --source msstore is load-bearing, not a detail: without it winget
@@ -335,9 +363,9 @@ export async function installAgent(a: AgentSpec, p: Platform): Promise<void> {
   // Only on native Windows. Under WSL the installer is the better
   // choice — it is what the vendor tests, and npm is the fallback.
   if (p.os === "windows" && a.npm) {
-    const npm = Bun.which("npm");
-    if (!npm) throw new RedError("npm not on PATH — install a Node runtime first (red-dev lang)");
-    await run([npm, "install", "-g", a.npm]);
+    const npm = await resolveNpm();
+    if (!npm) throw new RedError("no npm anywhere — not on PATH, and mise has no node. Run `red-dev lang`");
+    await run(npmArgv(npm, ["install", "-g", a.npm]));
     return;
   }
 
@@ -348,9 +376,9 @@ export async function installAgent(a: AgentSpec, p: Platform): Promise<void> {
   }
 
   if (a.npm) {
-    const npm = Bun.which("npm");
-    if (!npm) throw new RedError("npm not on PATH — run `red-dev install core` first");
-    await run([npm, "install", "-g", a.npm]);
+    const npm = await resolveNpm();
+    if (!npm) throw new RedError("no npm anywhere — not on PATH, and mise has no node. Run `red-dev install core`");
+    await run(npmArgv(npm, ["install", "-g", a.npm]));
     return;
   }
 

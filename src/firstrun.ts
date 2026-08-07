@@ -148,16 +148,38 @@ export async function carryOutChoices(
   // Harmless on Linux and WSL, where the agents use vendor installers
   // and do not care. Ordering a dependency before its dependent is right
   // everywhere; it just only showed on the target that had one.
-  if (choices.runtimes.length > 0) {
+  const agents = choices.agents ?? [];
+
+  // An npm agent implies node, whether or not anyone ticked it.
+  //
+  // On Windows, Gemini, OpenClaw and Hermes install through npm. A user
+  // who picks Gemini and does not pick node@lts has not contradicted
+  // themselves — they have named an end and left the means to the tool
+  // whose job that is. Without this the converge failed those agents
+  // with "npm not on PATH", which is the tool reporting its own missing
+  // prerequisite as the user's mistake.
+  const runtimes = [...choices.runtimes];
+  if (agents.length > 0 && !runtimes.some((r) => r.startsWith("node"))) {
+    const { availableAgents } = await import("./agents.ts");
+    const chosen = availableAgents(p).filter((a) => agents.includes(a.key));
+    const needsNpm = chosen.some((a) =>
+      p.os === "windows" ? Boolean(a.npm) : Boolean(a.npm && !a.installer),
+    );
+    if (needsNpm) {
+      log.plain("       an npm-installed agent was chosen, so node@lts comes with it");
+      runtimes.unshift("node@lts");
+    }
+  }
+
+  if (runtimes.length > 0) {
     const { useRuntimes } = await import("./runtimes.ts");
     try {
-      await useRuntimes(choices.runtimes);
+      await useRuntimes(runtimes);
     } catch (err) {
       log.warn(`runtimes: ${(err as Error).message}`);
     }
   }
 
-  const agents = choices.agents ?? [];
   if (agents.length > 0) {
     const { availableAgents, installAgent, isAgentInstalled, installRedSkills } = await import(
       "./agents.ts"
