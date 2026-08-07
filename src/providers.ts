@@ -774,12 +774,12 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
         const { applyTerminalPalette } = await import("./terminal-surfaces.ts");
         await applyTerminalPalette(ctx.platform);
 
+        // ctx.theme, not a slug derived from theme.name. Deriving it is
+        // what made a converge miss every slug-indexed map while
+        // `red-dev theme <name>` looked fine.
         const { applyThemeEverywhere } = await import("./theme-apply.ts");
-        const { applied } = await applyThemeEverywhere(theme, ctx.platform);
+        const { applied } = await applyThemeEverywhere(ctx.theme, ctx.platform);
         if (applied.length > 0) log.ok(`themed: ${applied.join(", ")}`);
-
-        const { applyWallpaperLogged } = await import("./wallpaper.ts");
-        await applyWallpaperLogged(theme, ctx.theme, ctx.platform);
         return;
       }
       if (pr.name === "red-skills-vscode") {

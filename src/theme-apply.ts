@@ -17,20 +17,66 @@
  */
 
 import { log } from "./log.ts";
-import { applyWindowsDesktopTheme } from "./windows-theme.ts";
 import type { Platform } from "./platform.ts";
-import type { Theme } from "./themes.ts";
+import { THEMES, type Theme } from "./themes.ts";
 
-// --------------------------------------------------------- entrypoint
+export interface ThemeSurfaceSpec {
+  name: string;
+  /** False on a target that has no such surface at all. */
+  applies: (p: Platform) => boolean;
+  apply: (theme: Theme, slug: string, p: Platform) => Promise<boolean>;
+}
 
-const PORTABLE_SURFACE_NAMES = ["vscode"];
+/**
+ * One list, where there used to be two.
+ *
+ * The names and the functions lived in separate structures that had to
+ * agree, and the lookup was `surfaceFns[name]!`. A name present in one
+ * and missing from the other threw a TypeError *inside* the try/catch
+ * below, so the surface was reported as a benign "skipped" and the
+ * disagreement was invisible. One array cannot disagree with itself.
+ */
+export const THEME_SURFACES: ThemeSurfaceSpec[] = [
+  {
+    name: "vscode",
+    applies: () => true,
+    apply: async (theme, slug, p) => {
+      const { applyVsCodeTheme } = await import("./theme-editors.ts");
+      return applyVsCodeTheme(theme, p, slug);
+    },
+  },
+  {
+    // In the registry rather than called separately after it. The
+    // wallpaper is the surface a theme change is most visible on, and
+    // leaving it outside meant the two callers each remembered to invoke
+    // it — which is the shape of a thing one caller eventually forgets.
+    name: "wallpaper",
+    applies: (p) => p.env !== "server",
+    apply: async (theme, slug, p) => {
+      const { applyWallpaper } = await import("./wallpaper.ts");
+      return applyWallpaper(theme, slug, p);
+    },
+  },
+  {
+    name: "windows",
+    applies: (p) => p.env === "wsl" || p.env === "windows",
+    apply: async (theme, slug, p) => {
+      const { applyWindowsDesktopTheme } = await import("./windows-theme.ts");
+      return applyWindowsDesktopTheme(theme, p, slug);
+    },
+  },
+  {
+    name: "gnome",
+    applies: (p) => p.os !== "windows",
+    apply: async (theme, slug, p) => {
+      const { applyGnomeTheme } = await import("./theme-editors.ts");
+      return applyGnomeTheme(p, theme, slug);
+    },
+  },
+];
 
 export function themeSurfaceNames(p: Platform): string[] {
-  return [
-    ...PORTABLE_SURFACE_NAMES,
-    ...(p.env === "wsl" || p.env === "windows" ? ["windows"] : []),
-    ...(p.os !== "windows" ? ["gnome"] : []),
-  ];
+  return THEME_SURFACES.filter((s) => s.applies(p)).map((s) => s.name);
 }
 
 export interface ApplyThemeResult {
@@ -38,33 +84,48 @@ export interface ApplyThemeResult {
   skipped: string[];
 }
 
+/**
+ * Apply one theme, named by its slug.
+ *
+ * The slug is the input, not the theme, and that is the fix for a bug
+ * that only ever appeared on the converge path. This used to take a
+ * `Theme` with the slug as an optional third argument, and derive it
+ * from the display name when omitted:
+ *
+ *   const key = slug ?? theme.name.toLowerCase().replace(/\s+/g, "-");
+ *
+ * providers.ts omitted it. So a converge turned "Catppuccin Macchiato"
+ * into `catppuccin-macchiato`, which was a key in none of the six
+ * slug-indexed maps — no VS Code theme, no GNOME accent, a fallback bat
+ * theme, a blue Windows accent, and a wallpaper written under a name
+ * nothing else used. `red-dev theme catppuccin` was correct the whole
+ * time, which is why it survived: the bug was in the path nobody runs by
+ * hand.
+ *
+ * With one argument the two cannot disagree, and the call site that used
+ * to omit it does not compile.
+ *
+ * `surfaces` is injectable so a test can watch what each one receives.
+ * That test could not be written against the old shape at all.
+ */
 export async function applyThemeEverywhere(
-  theme: Theme,
+  slug: string,
   p: Platform,
-  slug?: string,
+  surfaces: ThemeSurfaceSpec[] = THEME_SURFACES,
 ): Promise<ApplyThemeResult> {
+  const theme = THEMES[slug];
+  if (!theme) throw new Error(`unknown theme '${slug}'`);
+
   const applied: string[] = [];
   const skipped: string[] = [];
 
-  const { applyVsCodeTheme, applyGnomeTheme } = await import("./theme-editors.ts");
-  // Derive the slug from the display name when the caller did not pass
-  // one, so `theme gruvbox` and the menu both reach the same mapping.
-  const key = slug ?? theme.name.toLowerCase().replace(/\s+/g, "-");
-
-  const surfaceFns: Record<string, () => Promise<boolean>> = {
-    vscode: () => applyVsCodeTheme(theme, p, key),
-    windows: () => applyWindowsDesktopTheme(theme, p, key),
-    gnome: () => applyGnomeTheme(p, theme, key),
-  };
-  const surfaces = themeSurfaceNames(p).map((name) => [name, surfaceFns[name]!] as const);
-
-  for (const [name, fn] of surfaces) {
+  for (const surface of surfaces.filter((s) => s.applies(p))) {
     try {
-      if (await fn()) applied.push(name);
-      else skipped.push(name);
+      if (await surface.apply(theme, slug, p)) applied.push(surface.name);
+      else skipped.push(surface.name);
     } catch (err) {
-      log.warn(`${name}: ${(err as Error).message}`);
-      skipped.push(name);
+      log.warn(`${surface.name}: ${(err as Error).message}`);
+      skipped.push(surface.name);
     }
   }
 

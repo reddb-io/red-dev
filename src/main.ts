@@ -311,15 +311,12 @@ async function cmdTheme(p: Platform, inv: Invocation, name?: string): Promise<nu
   // The desktop, which does.
   try {
     const { applyThemeEverywhere } = await import("./theme-apply.ts");
-    const { applied, skipped } = await applyThemeEverywhere(theme, p, chosen);
+    const { applied, skipped } = await applyThemeEverywhere(chosen, p);
     if (applied.length > 0) log.ok(`themed: ${applied.join(", ")}`);
     if (skipped.length > 0) log.skip(`not present: ${skipped.join(", ")}`);
   } catch (err) {
     log.warn(`theme surfaces: ${(err as Error).message}`);
   }
-
-  const { applyWallpaperLogged } = await import("./wallpaper.ts");
-  await applyWallpaperLogged(theme, chosen, p);
 
   if (p.env === "wsl" || p.os === "windows") {
     try {

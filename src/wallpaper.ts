@@ -13,7 +13,6 @@
  */
 
 import { existsSync, mkdirSync } from "node:fs";
-import { log } from "./log.ts";
 import type { Platform } from "./platform.ts";
 import { encodePng, hexToRgb, type Rgb } from "./png.ts";
 import type { Theme } from "./themes.ts";
@@ -234,18 +233,8 @@ export async function wallpaperPathInUse(p: Platform): Promise<string | null> {
   return null;
 }
 
-export async function applyWallpaperLogged(
-  theme: Theme,
-  key: string,
-  p: Platform,
-): Promise<void> {
-  try {
-    if (await applyWallpaper(theme, key, p)) {
-      log.ok("wallpaper set");
-    } else {
-      log.skip("wallpaper: no desktop to set it on");
-    }
-  } catch (err) {
-    log.warn(`wallpaper: ${(err as Error).message}`);
-  }
-}
+// applyWallpaperLogged lived here and is gone. It existed because the
+// wallpaper was applied outside the theme registry and therefore needed
+// its own try/catch and its own log line; the registry provides both,
+// and two callers each remembering to invoke a wrapper is the shape of a
+// thing one caller eventually forgets.
