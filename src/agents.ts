@@ -148,6 +148,26 @@ export const AGENTS: AgentSpec[] = [
     npm: "hermes-agent",
   },
   {
+    key: "muse",
+    label: "Muse",
+    about: "Meta's coding agent",
+    cmd: "muse",
+    recommended: false,
+    installer: "https://dev.meta.ai/install.sh",
+    // No winget id, and deliberately none guessed.
+    //
+    // The repository has Muse.MuseHub and Musescore.Musescore, and
+    // neither is Meta's. Putting one of those here would install a
+    // notation editor under the name of a coding agent — the same
+    // mistake the msstore field above exists to prevent, where searching
+    // for ChatGPT returns third-party wrappers.
+    //
+    // So on native Windows Muse is not offered at all: availableAgents
+    // requires winget, msstore or npm there, and none of the three is
+    // true. Under WSL the installer runs and the binary lands in the
+    // distro, which is where a CLI belongs anyway.
+  },
+  {
     key: "claude-desktop",
     label: "Claude Desktop",
     about: "the desktop app, not the CLI",

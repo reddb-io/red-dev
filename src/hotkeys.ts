@@ -103,7 +103,7 @@ export function hotkeyVerdict(shortcutExists: boolean, state: HotkeyState): Drif
  * most exists for. PowerShell is already the thing writing the
  * shortcuts; it can answer both questions itself.
  */
-function resolveScript(distro: string | null): string {
+export function resolveScript(distro: string | null): string {
   const d = distro ? `-d ${distro} ` : "";
   return `
 $ErrorActionPreference = 'Stop'
@@ -119,11 +119,33 @@ $alacritty = @(
 function New-Hot($name, $combo, $target, $argv, $admin) {
   $p = Join-Path $dir "$name.lnk"
   $s = $sh.CreateShortcut($p)
+
+  # Save() only when something actually differs.
+  #
+  # This used to write unconditionally, and the comment defended it as
+  # "the repair" — a machine carrying an old binding needs the property
+  # rewritten to clear it. True, and it cost the feature.
+  #
+  # Explorer registers a Start Menu shortcut's hotkey by scanning the
+  # folder, and rewriting the .lnk makes it drop the registration and
+  # re-scan. The re-registration is not reliable: often the key is simply
+  # gone until the next logon. So every converge had a good chance of
+  # silently unbinding CTRL+ALT+T, and on a day with a dozen converges
+  # the hotkey looked like it broke at random.
+  #
+  # Comparing first keeps the repair — a wrong value still gets written —
+  # and makes the steady state cost nothing, which is what a converge is
+  # supposed to be.
+  $same = ($s.TargetPath -eq $target) -and ($s.Arguments -eq $argv) -and ($s.HotKey -eq $combo)
+  if ($same -and (Test-Path $p)) {
+    if ($combo) { "= $combo -> $name" } else { "= (no hotkey) $name" }
+    return
+  }
+
   $s.TargetPath = $target
   $s.Arguments = $argv
-  # Assigned unconditionally, including the empty string. That is the
-  # repair: a machine that already has this shortcut carries the old
-  # binding inside the .lnk, and only rewriting the property clears it.
+  # Assigned including the empty string: only rewriting the property
+  # clears a binding a previous version left behind.
   $s.HotKey = $combo
   $s.Save()
   if ($admin) {

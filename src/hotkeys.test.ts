@@ -12,7 +12,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { WINDOWS_HOTKEYS } from "./hotkeys.ts";
+import { resolveScript, WINDOWS_HOTKEYS } from "./hotkeys.ts";
 
 const claimed = WINDOWS_HOTKEYS.filter((h) => h.combo !== null).map((h) => h.combo);
 
@@ -57,5 +57,37 @@ describe("the shortcuts written", () => {
     // The elevated one spent a version as a Start Menu entry with no
     // binding. It has Ctrl+Alt+Shift+T now.
     expect(WINDOWS_HOTKEYS.every((h) => h.combo !== null)).toBe(true);
+  });
+});
+
+describe("the shortcut is only rewritten when it is wrong", () => {
+  const script = resolveScript("Ubuntu-24.04");
+
+  test("compares before saving", () => {
+    // The regression this guards is the reason CTRL+ALT+T kept dying.
+    // Explorer registers a Start Menu shortcut's hotkey by scanning the
+    // folder; rewriting the .lnk makes it drop the registration and
+    // re-scan, and the re-registration often does not happen until the
+    // next logon. An unconditional Save() therefore had a good chance of
+    // unbinding the key on every single converge.
+    expect(script).toContain("$same =");
+    expect(script).toContain("$s.TargetPath -eq $target");
+    expect(script).toContain("$s.HotKey -eq $combo");
+  });
+
+  test("and returns before Save() when nothing differs", () => {
+    const guard = script.indexOf("if ($same -and (Test-Path $p))");
+    const save = script.indexOf("$s.Save()");
+    expect(guard).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(save);
+    expect(script.slice(guard, save)).toContain("return");
+  });
+
+  test("but still repairs a shortcut that carries the wrong binding", () => {
+    // The unconditional write existed for a reason — a machine with an
+    // old binding needs the property rewritten to clear it — and losing
+    // that would trade one silent breakage for another.
+    expect(script).toContain("$s.HotKey = $combo");
+    expect(script).toContain("$s.Save()");
   });
 });
