@@ -12,8 +12,8 @@
   "files": {
     "tokens/tokens.json": "a9505806e857bb9352875f8cdae2b1c11f27b2455a738e13d7d4ab802b284205"
   },
-  "wallpaperCommit": "b99aeaeadb6e6252debd0b1a8af7629e2e59baa8",
-  "wallpaperNote": "A different commit to the tokens above, and on an unmerged branch: reddb-io/brand#98 makes the wallpapers 8-bit. The bytes are final; what is pending is a look at 01, 14 and 25 on a real 4K panel, because RMSE cannot see banding and fourteen of those sheets are halo gradients. Move this pin to the merge commit when #98 lands. If the review rejects the 8-bit change, these six change with it \u2014 which is the dependency this line exists to record.",
+  "wallpaperCommit": "d96e5386c56794e411eefcafa23189ab0c7ad581",
+  "wallpaperNote": "reddb-io/brand#98, merged. The wallpapers here are byte-identical to that commit's assets/wallpaper/, vendored unaltered \u2014 the 8-bit encoding is the brand's own artefact, not something re-encoded on this side, which is what keeps LICENSE-assets.md out of it. Still a commit rather than a release: assets/wallpaper/ is excluded from the bundle CATEGORIES, filed as reddb-io/brand#102.",
   "wallpaper": {
     "assets/wallpapers/dark.png": {
       "from": "assets/wallpaper/reddb-wallpaper-01-signature-dark-3840x2160.png",
