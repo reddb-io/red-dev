@@ -190,13 +190,30 @@ export function isAgentInstalled(a: AgentSpec): boolean {
   return a.cmd.length > 0 && Bun.which(a.cmd) !== null;
 }
 
+/**
+ * Every agent install, routed through the log rather than the console.
+ *
+ * This used to spawn with stdout and stderr inherited, unconditionally.
+ * Under `red-dev install` that is correct — there is no frame to damage.
+ * Inside the fullscreen converge it is not: the renderer owns the screen
+ * and repaints it, so a child writing directly to the console lands in
+ * whatever cell the cursor happens to be in. The result was two streams
+ * in one row —
+ *
+ *     Fou ok  Codex CLI[OpenAI.Codex] Version 0.146.1
+ *     No fail T3 Code: cmd.exe exited non-zeroes it grant any licenses
+ *
+ * — winget's "Found"/"No" colliding with red-dev's own "ok"/"fail", and
+ * a progress bar drawn across the panel on the right.
+ *
+ * spawnLogged is the existing answer and every other provider already
+ * used it: inherit when the log is going straight to the terminal, pipe
+ * into the log when something is capturing it. The bug was that this
+ * file had its own two-line copy of the wrong half.
+ */
 async function run(cmd: string[]): Promise<void> {
-  const proc = Bun.spawn(cmd, {
-    stdout: "inherit",
-    stderr: "inherit",
-    stdin: process.stdin.isTTY === true ? "inherit" : "ignore",
-  });
-  if ((await proc.exited) !== 0) throw new RedError(`${cmd[0]} exited non-zero`);
+  const { spawnLogged } = await import("./providers.ts");
+  if ((await spawnLogged(cmd)) !== 0) throw new RedError(`${cmd[0]} exited non-zero`);
 }
 
 export async function installAgent(a: AgentSpec, p: Platform): Promise<void> {

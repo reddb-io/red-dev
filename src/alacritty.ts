@@ -313,6 +313,29 @@ action = 'Copy'
 [[keyboard.bindings]]
 key = 'F11'
 action = 'ToggleFullscreen'
+
+# Shift+Enter, and why it needs a binding at all.
+#
+# A terminal sends the same byte for Enter and Shift+Enter — carriage
+# return, 0x0D. The modifier is lost at the emulator, so every program
+# downstream is looking at identical input and cannot tell them apart no
+# matter what it binds. Claude Code's keybindings.json can say
+# shift+enter all it likes; nothing will ever deliver one.
+#
+# ESC[13;2u is the kitty keyboard protocol's encoding: 13 is Enter's
+# code point, 2 is "shift" (1 + the shift bit). Alacritty, kitty, foot,
+# WezTerm, Ghostty and iTerm2 all speak it, and so do the frameworks the
+# agents are built on — Ink 6.7+, crossterm, Bubble Tea 2.
+#
+# Deliberately not a literal newline, which is the other common answer.
+# 0x0A is Ctrl+J, and readline binds Ctrl+J to accept-line — so in bash
+# it would submit the line, which is the exact opposite of the point.
+# config/bash/inputrc.conf binds the sequence below instead, where it
+# collides with nothing.
+[[keyboard.bindings]]
+key = 'Return'
+mods = 'Shift'
+chars = "\\u001b[13;2u"
 `;
 }
 

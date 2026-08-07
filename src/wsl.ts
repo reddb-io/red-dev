@@ -798,7 +798,37 @@ interface WtSettings {
   defaultProfile?: string;
   profiles?: { defaults?: Record<string, unknown>; list?: WtProfile[] };
   schemes?: Record<string, unknown>[];
+  actions?: Record<string, unknown>[];
   [k: string]: unknown;
+}
+
+/**
+ * Shift+Enter, sent as something a program can actually see.
+ *
+ * Windows Terminal, like every terminal, sends 0x0D for Enter and 0x0D
+ * for Shift+Enter — the modifier never reaches the program. sendInput is
+ * how WT is told to send something else, and ESC[13;2u is the same
+ * kitty-protocol encoding src/alacritty.ts writes, so both emulators
+ * deliver one sequence and config/bash/inputrc.conf binds it once.
+ *
+ * Written as \u001b so the source carries no control character;
+ * JSON.stringify emits it as a real 0x1b byte in settings.json.
+ */
+const SHIFT_ENTER_ACTION = {
+  command: { action: "sendInput", input: "\u001b[13;2u" },
+  keys: "shift+enter",
+};
+
+/**
+ * Whether an entry is the Shift+Enter action, ours or the user's.
+ *
+ * Matched on the key rather than the whole object: a user who bound
+ * shift+enter to something else has made a choice, and replacing it
+ * because the command differs is how a converge takes a key away.
+ */
+function isShiftEnterBinding(a: Record<string, unknown>): boolean {
+  const keys = a["keys"];
+  return keys === "shift+enter" || (Array.isArray(keys) && keys.includes("shift+enter"));
 }
 
 export interface TerminalOptions {
@@ -890,6 +920,16 @@ export async function configureWindowsTerminal(opts: TerminalOptions): Promise<v
   if (LEGACY_WT_SCHEMES.has(named)) {
     delete settings.profiles.defaults["colorScheme"];
     log.plain(`       dropped the '${named}' scheme — Windows Terminal's own colours are back`);
+  }
+
+  // Shift+Enter, added only if the key is free.
+  settings.actions ??= [];
+  const existing = settings.actions.find(isShiftEnterBinding);
+  if (!existing) {
+    settings.actions.push(SHIFT_ENTER_ACTION);
+    log.plain(`       shift+enter sends ESC[13;2u — a newline, not a submit`);
+  } else if (JSON.stringify(existing) !== JSON.stringify(SHIFT_ENTER_ACTION)) {
+    log.skip("windows terminal: shift+enter is already bound to something else — left alone");
   }
 
   if (opts.distro) {

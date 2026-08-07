@@ -163,6 +163,16 @@ export async function syncWslDistro(p: Platform): Promise<void> {
     }
   }
 
+  // Said before the distro's own output arrives, and again after.
+  //
+  // What runs below is a whole second converge — its own steps, its own
+  // counts, its own `— summary —` with its own `failed` line — and
+  // spawnLogged pumps every line of it into this run's log. On the
+  // converge screen that lands beside the Windows panel's counts, so a
+  // machine with two Windows failures and a clean distro showed
+  // "Failed: red-skills, nerd-font" on the right and "failed 0" on the
+  // left, in one frame. Both were true and nothing said of what.
+  log.step(`${distro}: its own converge starts here`);
   const converged = await spawnLogged([
     "wsl.exe",
     "-d",
@@ -172,6 +182,7 @@ export async function syncWslDistro(p: Platform): Promise<void> {
     "-lc",
     "red-dev install core",
   ]);
+  log.plain(`       ── end of ${distro}; counts above are the distro's, not this run's`);
   if (converged !== 0) {
     // Not fatal to the Windows converge. The most likely cause is sudo
     // wanting a password that no unattended run can supply, and the
