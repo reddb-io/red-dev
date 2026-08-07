@@ -83,6 +83,20 @@ describe("the optional tools", () => {
   });
 });
 
+describe("language runtimes", () => {
+  test("Node and Python arrive marked together", () => {
+    const runtimes = [
+      { key: "node@lts", label: "Node", note: "" },
+      { key: "bun@latest", label: "Bun", note: "" },
+      { key: "python@3.13", label: "Python", note: "" },
+    ];
+    const q = questions(WSL, choices(2), choices(3), runtimes).find(
+      (candidate) => candidate.id === "runtimes",
+    );
+    expect(q?.preset).toEqual(["node@lts", "python@3.13"]);
+  });
+});
+
 describe("ble.sh", () => {
   test("is a plugin rather than a step of its own", () => {
     // It was one question at the same level as Theme and Runtimes,

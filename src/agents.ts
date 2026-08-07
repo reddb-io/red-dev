@@ -245,7 +245,7 @@ async function run(cmd: string[], env?: Record<string, string | undefined>): Pro
 }
 
 /**
- * The environment npm's own children need, when npm came from mise.
+ * The environment a child needs when its executable came from mise.
  *
  * Resolving npm.cmd by absolute path gets npm running — and then npm
  * spawns the package's lifecycle scripts through cmd.exe, which looks
@@ -254,16 +254,18 @@ async function run(cmd: string[], env?: Record<string, string | undefined>): Pro
  *
  *   npm error 'node' is not recognized as an internal or external command
  *
- * So the same directory that npm.cmd lives in — where node.exe also is —
- * is prepended for the child. Both spellings of the variable, because
- * the child is cmd.exe and inherits whichever casing exists.
+ * So the directory containing the executable is prepended for the child.
+ * That also lets shell installers see a runtime installed earlier in this
+ * process, before the parent shell has had a chance to refresh PATH. Both
+ * spellings of the variable are set because Windows inherits whichever
+ * casing already exists.
  */
-export function npmEnvironment(
-  npm: string,
+export function executableEnvironment(
+  executable: string,
   platform: string = process.platform,
   current: Record<string, string | undefined> = process.env,
 ): Record<string, string | undefined> {
-  const dir = npm.replace(/[\\/][^\\/]+$/, "");
+  const dir = executable.replace(/[\\/][^\\/]+$/, "");
   const sep = platform === "win32" ? ";" : ":";
   const inherited =
     platform === "win32"
@@ -271,6 +273,14 @@ export function npmEnvironment(
       : current["PATH"] ?? current["Path"] ?? "";
   const path = `${dir}${sep}${inherited}`;
   return { ...current, PATH: path, Path: path };
+}
+
+export function npmEnvironment(
+  npm: string,
+  platform: string = process.platform,
+  current: Record<string, string | undefined> = process.env,
+): Record<string, string | undefined> {
+  return executableEnvironment(npm, platform, current);
 }
 
 /**
@@ -496,10 +506,17 @@ export async function installAgent(a: AgentSpec, p: Platform): Promise<void> {
 export async function installRedSkills(): Promise<void> {
   const url = "https://raw.githubusercontent.com/reddb-io/red-skills/v2/scripts/install.sh";
   const { installerInstall } = await import("./providers.ts");
+  const { runtimeTool } = await import("./runtimes.ts");
+  const node = await runtimeTool("node");
   log.step("red-skills");
   log.plain("     Registers the RedSkills marketplace in Claude Code and Codex,");
   log.plain("     and generates plugin modules for OpenCode. User-level, global.");
-  await installerInstall(url, "reddb-io/red-skills");
+  await installerInstall(
+    url,
+    "reddb-io/red-skills",
+    [],
+    node ? executableEnvironment(node) : undefined,
+  );
 }
 
 /**

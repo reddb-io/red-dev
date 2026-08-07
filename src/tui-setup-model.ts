@@ -144,7 +144,9 @@ export function questions(
         "ends up working in one shell and not another.",
       multi: true,
       choices: runtimes,
-      preset: runtimes.slice(0, 1).map((r) => r.key),
+      preset: runtimes
+        .filter((runtime) => runtime.key === "node@lts" || runtime.key === "python@3.13")
+        .map((runtime) => runtime.key),
       applies: () => true,
     },
     {

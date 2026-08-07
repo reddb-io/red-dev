@@ -57,6 +57,14 @@ describe("resolving npm", () => {
     // exec a batch file directly.
     expect(agents).toContain('["cmd.exe", "/c", npm, ...args]');
   });
+
+  test("red-skills receives the Node directory mise resolved in this run", () => {
+    const start = agents.indexOf("export async function installRedSkills");
+    const end = agents.indexOf("export async function updateRedSkills", start);
+    const body = agents.slice(start, end);
+    expect(body).toContain('runtimeTool("node")');
+    expect(body).toContain("executableEnvironment(node)");
+  });
 });
 
 describe("ordering and implication", () => {

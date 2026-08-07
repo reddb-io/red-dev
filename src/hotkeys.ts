@@ -231,6 +231,7 @@ export async function installWindowsHotkeys(p: Platform): Promise<void> {
   const lines = out.split("\n").map((l) => l.trim()).filter(Boolean);
   for (const line of lines) log.plain(`       ${line}`);
   log.plain("       the elevated one prompts for consent when it opens");
+  log.plain("       Ctrl+Alt+T fires from normal windows, not while an Administrator window has focus");
   log.ok(`${lines.length} hotkey(s) in the Start Menu`);
 }
 

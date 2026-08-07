@@ -557,6 +557,7 @@ export async function installerInstall(
   url: string,
   note: string,
   args: string[] = [],
+  env?: Record<string, string | undefined>,
 ): Promise<void> {
   log.step(`installer: ${url}`);
   log.plain(`       ${note}`);
@@ -617,7 +618,7 @@ export async function installerInstall(
   // handles by preferring npm on Windows.
   if (process.platform !== "win32" && body.includes("sudo ")) await requireSudo();
 
-  const code = await spawnLogged([shell, tmp, ...args]);
+  const code = await spawnLogged([shell, tmp, ...args], env ? { env } : {});
   // node:fs, not `rm`. There is no rm on native Windows, so cleaning up
   // failed with `Executable not found in $PATH: "rm"` — reported as the
   // installer's own failure, which sent the reader looking at the vendor

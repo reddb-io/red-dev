@@ -50,6 +50,21 @@ describe("the setup work plan", () => {
     expect(plan.filter((step) => step.tool === "node@lts")).toHaveLength(1);
   });
 
+  test("Hermes brings both Node and Python before its npm postinstall", async () => {
+    const plan = await setupPlan(windows, {
+      agents: ["hermes"],
+      runtimes: [],
+      apps: [],
+    });
+
+    expect(plan.map((step) => step.tool)).toEqual([
+      "node@lts",
+      "python@3.13",
+      "Hermes Agent",
+      "red-skills",
+    ]);
+  });
+
   test("desktop-only choices do not pretend red-skills has work", async () => {
     const plan = await setupPlan(windows, {
       agents: ["t3code", "claude-desktop", "codex-desktop"],

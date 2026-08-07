@@ -71,6 +71,12 @@ export async function setupPlan(p: Platform, choices: SetupChoices): Promise<Set
     );
     if (needsNpm) runtimes.unshift("node@lts");
   }
+  if (
+    chosen.some((agent) => agent.key === "hermes") &&
+    !runtimes.some((runtime) => runtime.startsWith("python"))
+  ) {
+    runtimes.push("python@3.13");
+  }
 
   const plan: SetupPlanStep[] = [
     ...runtimes.map((key) => ({ key, tool: key, kind: "runtime" as const })),
@@ -216,6 +222,12 @@ export async function carryOutChoices(
   const runtimes = plan.filter((step) => step.kind === "runtime");
   if (runtimes.some((step) => step.key === "node@lts") && !choices.runtimes.includes("node@lts")) {
     log.plain("       an npm-installed agent was chosen, so node@lts comes with it");
+  }
+  if (
+    runtimes.some((step) => step.key === "python@3.13") &&
+    !choices.runtimes.includes("python@3.13")
+  ) {
+    log.plain("       Hermes was chosen, so python@3.13 comes with it");
   }
 
   if (runtimes.length > 0) {
@@ -399,7 +411,9 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
   const pickedRuntimes = await checkbox(
     "Language runtimes for mise to manage?",
     runtimeLabels as [string, ...string[]],
-    [runtimeLabels[0]!],
+    runtimeLabels.filter(
+      (label) => label.startsWith("node@lts ") || label.startsWith("python@3.13 "),
+    ),
   );
 
   // 4. Extra tools, all of them ticked.
