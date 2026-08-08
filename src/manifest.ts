@@ -111,7 +111,8 @@ export type Provider =
         | "red-skills-herdr"
         | "blender"
         | "wsl-sync"
-        | "claude-keybindings";
+        | "claude-keybindings"
+        | "ssh-server";
     }
   /** Not installed here, deliberately. The reason is required. */
   | { kind: "skip"; reason: string };
@@ -234,7 +235,8 @@ const builtin = (
     | "red-skills-vscode"
     | "red-skills-herdr"
     | "blender"
-    | "claude-keybindings",
+    | "claude-keybindings"
+    | "ssh-server",
 ): Provider => ({ kind: "builtin", name });
 const skip = (reason: string): Provider => ({ kind: "skip", reason });
 
@@ -273,6 +275,23 @@ export const TOOLS: Tool[] = [
     win: winget("sharkdp.bat"),
   },
   { name: "eza", scope: "core", u24: apt("eza"), win: winget("eza-community.eza") },
+  {
+    // A service, not a binary, which is why it is a builtin on both
+    // columns rather than apt on one and winget on the other: `apt
+    // install openssh-server` leaves nothing running on a WSL without
+    // systemd, and Windows has no package for it at all — OpenSSH
+    // Server is a capability, its service is created stopped and set to
+    // Manual, and the firewall blocks 22 until told otherwise.
+    //
+    // `core`, so every converge opens the port. That is a deliberate
+    // decision rather than an oversight; src/ssh-server.ts says what it
+    // costs, and the converge logs it instead of a silent ok.
+    name: "ssh-server",
+    scope: "core",
+    managed: true,
+    u24: builtin("ssh-server"),
+    win: builtin("ssh-server"),
+  },
   {
     // Sourced by config/bash/init.sh since before it was ever declared
     // here, which is the whole reason it is now. It arrives as somebody
