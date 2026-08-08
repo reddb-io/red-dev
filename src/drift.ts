@@ -672,7 +672,17 @@ const PRIVILEGED_PROBES: Record<string, () => Promise<(p: Platform) => Promise<P
     "ssh-server": async () => (await import("./ssh-server.ts")).probeSshServer,
   };
 
-async function probePrivileged(items: string[], p: Platform): Promise<PrivilegedStates> {
+/**
+ * Exported for the converge's privileged batch, which asks the same
+ * question for a different reason: the doctor reports what is
+ * outstanding, the batch decides what to ask consent for. Asking it
+ * twice would be two registries, and the one that only runs on Windows
+ * is the copy that would quietly stop matching.
+ */
+export async function probePrivileged(
+  items: string[],
+  p: Platform,
+): Promise<PrivilegedStates> {
   const states: PrivilegedStates = {};
   for (const item of items) {
     const load = PRIVILEGED_PROBES[item];

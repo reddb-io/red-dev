@@ -460,6 +460,26 @@ warn alacritty: ENOEXEC: unknown error, posix_spawn 'cmd.exe'
  ok  converged — restart your shell
 ```
 
+### Everything that needs administrator, asked once
+
+Items that need administrator are lifted out of the converge and run together at
+the end, behind one consent prompt — never one prompt per item, and never in the
+middle of a run. A converge started from an elevated session runs them straight
+away and asks nothing at all, and a machine with no such items produces no batch
+and no prompt, which is every Ubuntu target and most Windows ones after the first
+run.
+
+```console
+  :: 1 item needs administrator — asked for once, here at the end
+ ok  ssh-server        applied
+```
+
+Declining is a real choice. Everything that needed no rights has already
+converged by then, and the items behind the prompt are reported as deferred,
+named, with the one thing to do about them. The batch is safe to run again after
+a partial failure: each item is guarded so repeating it changes nothing, and one
+item failing does not abandon the ones after it.
+
 ### Work it was not allowed to do
 
 Some items need rights the run does not have: the Windows OpenSSH server needs
