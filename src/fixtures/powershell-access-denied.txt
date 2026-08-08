@@ -1,0 +1,6 @@
+Add-WindowsCapability : Access to the path is denied.
+At line:1 char:3
++   Add-WindowsCapability -Online -Name $cap.Name | Out-Null
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [Add-WindowsCapability], UnauthorizedAccessException
+    + FullyQualifiedErrorId : Microsoft.Dism.Commands.AddWindowsCapabilityCommand
