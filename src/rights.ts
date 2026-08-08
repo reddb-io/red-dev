@@ -73,7 +73,12 @@ const WORDING: Record<Gate, { cause: string; remedy: string }> = {
   },
   administrator: {
     cause: "this needs administrator and nothing here can raise it.",
-    remedy: "Start an elevated PowerShell first, then re-run red-dev — re-running is safe.",
+    // Names the command that finishes exactly this, because that is the
+    // cheaper of the two ways out and the one nobody would guess. The
+    // other stays: an operator already in an elevated PowerShell should
+    // not be sent to a different command to use the rights they hold.
+    remedy:
+      "Run `red-dev privileged` to finish just this, or re-run red-dev from an elevated PowerShell — either is safe.",
   },
 };
 

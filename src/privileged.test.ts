@@ -210,6 +210,18 @@ describe("consent declined", () => {
     expect(convergeExit({ failed: 0, deferred: outcomes.length })).toBe(2);
   });
 
+  test("and what the converge prints names the command that finishes it", async () => {
+    // The other end of the answer. Deferring tells the operator what was
+    // left; this is the line that tells them what to run, and asking it
+    // of the deferral itself is what stops the two from drifting apart.
+    const machine = host({ elevate: async (): Promise<Elevation> => ({ consent: "refused" }) });
+    const steps = await runPrivilegedBatch(ITEMS, machine);
+
+    for (const step of steps) {
+      expect(outcomeForError(step.error ?? "").remedy).toContain("red-dev privileged");
+    }
+  });
+
   test("a machine with nobody at it defers without raising a prompt", async () => {
     // CI, a pipe, a non-interactive SSH session. A consent dialog raised
     // where no one can answer it waits forever, and a converge that

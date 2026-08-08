@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { buildCli, parseArgs } from "./cli.ts";
+import { missingRights } from "./rights.ts";
 import { DEFAULT_THEME, themeNames } from "./themes.ts";
 
 const cli = buildCli();
@@ -22,6 +23,16 @@ describe("command parsing", () => {
     expect(inv.command).toBe("install");
     expect(inv.scope).toBe("core");
     expect(inv.errors).toEqual([]);
+  });
+
+  test("the command a deferred converge names is typeable exactly as printed", () => {
+    // `red-dev privileged` is printed to an operator as the way to
+    // finish work a converge deferred, so a rename here turns a remedy
+    // into an unknown-command error at the worst possible moment.
+    const inv = parse(["privileged"]);
+    expect(inv.command).toBe("privileged");
+    expect(inv.errors).toEqual([]);
+    expect(missingRights("administrator").remedy).toContain("red-dev privileged");
   });
 
   test("no arguments means no command, not an error", () => {

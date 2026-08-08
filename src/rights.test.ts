@@ -126,6 +126,17 @@ describe("both messages", () => {
     expect(missingRights("administrator").remedy).toContain("elevated PowerShell");
   });
 
+  test("and the administrator one names the command that finishes just that", () => {
+    // The deferral and the way out of it are the same sentence. An
+    // operator who reads "this needs administrator" on a machine where
+    // everything else converged should not have to guess that finishing
+    // it costs one command rather than the whole run again — and `sudo`
+    // deliberately does not say it, because the privileged batch is
+    // empty on every Linux target and would do nothing there.
+    expect(missingRights("administrator").remedy).toContain("red-dev privileged");
+    expect(missingRights("sudo").remedy).not.toContain("red-dev privileged");
+  });
+
   test("are the same shape, so the rule is learned once", () => {
     for (const gate of ["sudo", "administrator"] as const) {
       const outcome = missingRights(gate);

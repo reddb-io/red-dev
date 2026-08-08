@@ -499,7 +499,7 @@ needed no rights converged as usual.
   deferred
     ssh-server        this needs administrator and nothing here can raise it.
 
-    Start an elevated PowerShell first, then re-run red-dev — re-running is safe.
+    Run `red-dev privileged` to finish just this, or re-run red-dev from an elevated PowerShell — either is safe.
 
   Nothing here broke — this work is waiting, not lost.
 ```
@@ -516,6 +516,27 @@ out which one it was, and the exit status says the same thing to a script:
 So a wrapper can tell "done" from "done except the privileged part" without
 reading the summary, and without treating a healthy machine as a broken one.
 `red-dev doctor` reports the same outstanding work afterwards.
+
+### Finishing just the privileged part
+
+`red-dev privileged` runs the batch above and nothing else — one consent prompt,
+the same per-item rows and the same three exit codes as a converge, with none of
+the work that already converged repeated. It is what the deferral names, so
+finishing a run that was declined costs one command rather than the whole
+provision again.
+
+```console
+── administrator · 1 item ────────────────────────────────────────────
+  [ 1/1] ssh-server      builtin:ssh-server              ok
+```
+
+Run from an already-elevated session it asks nothing at all, and on a machine
+with nothing outstanding — every Ubuntu target, and every Windows one that has
+already consented once — it exits 0 having done nothing:
+
+```console
+ ok  nothing on this machine needs administrator
+```
 
 ### Reading the log while it is being written
 
