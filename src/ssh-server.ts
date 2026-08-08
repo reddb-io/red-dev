@@ -32,6 +32,7 @@
 
 import { log } from "./log.ts";
 import type { Platform } from "./platform.ts";
+import { classifyRights, missingRights } from "./rights.ts";
 
 /** Ran, and what it printed. */
 interface Ran {
@@ -75,9 +76,13 @@ async function linuxUnit(): Promise<string | null> {
 export async function installSshServerLinux(p: Platform): Promise<void> {
   const install = await run(["sudo", "-n", "apt-get", "install", "-y", "openssh-server"]);
   if (!install.ok) {
-    // Same wording as the rest of the converge: sudo that needs a
-    // password cannot be answered from here, and that is not a bug.
-    log.warn("openssh-server: apt needs sudo — run `sudo -v` first, then re-run red-dev");
+    // Same wording as the rest of the converge, and now literally the
+    // same wording: sudo that needs a password cannot be answered from
+    // here, and that is not a bug. `sudo -n` is the same non-blocking
+    // probe the shared gate uses, so a failure here means the gate.
+    const denied = missingRights("sudo");
+    log.warn(`openssh-server: ${denied.cause}`);
+    log.plain(`       ${denied.remedy}`);
     return;
   }
 
@@ -172,12 +177,22 @@ export async function installSshServerWindows(p: Platform): Promise<void> {
 
   if ((await proc.exited) !== 0) {
     const err = (await new Response(proc.stderr).text()).trim();
+
     // Adding a capability is an administrator operation, and a converge
     // started from an unelevated shell is the common case rather than a
-    // mistake. Named as the cause instead of surfacing an access-denied.
+    // mistake. Asked of the one classifier so this reads exactly like
+    // every other item that runs out of rights, instead of handing the
+    // operator the first line of a DISM stack trace to decode.
+    const denied = classifyRights(err, "administrator");
+    if (denied) {
+      log.warn(`the OpenSSH server: ${denied.cause}`);
+      log.plain(`       ${denied.remedy}`);
+      return;
+    }
+
+    // Anything else really is a failure, and keeps its own reporting.
     const first = err.split("\n")[0] ?? "unknown";
     log.warn(`could not configure the OpenSSH server: ${first}`);
-    log.plain("       Add-WindowsCapability needs an elevated PowerShell");
     return;
   }
 
