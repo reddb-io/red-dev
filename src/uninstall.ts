@@ -129,12 +129,34 @@ export function removableTools(p: Platform): { tool: Tool; removal: Removal }[] 
  * intentions. The shipped dotfiles go; the `.bashrc` line is removed;
  * the pre-red-dev backup is left exactly where it is, because that is
  * the only copy of what was there before.
+ *
+ * The generated Redwalls go too, and they need the platform to be found
+ * at all: on WSL the images live on the Windows disk, so none of the
+ * paths below covers them and a machine uninstalled from WSL would keep
+ * every 4K PNG it ever generated, under content-addressed names nothing
+ * left on the machine could explain.
  */
-export async function removeConfiguration(): Promise<string[]> {
+export async function removeConfiguration(p: Platform): Promise<string[]> {
   const home = process.env["HOME"] ?? process.env["USERPROFILE"];
   if (!home) throw new RedError("neither HOME nor USERPROFILE is set");
 
   const removed: string[] = [];
+
+  // Before the roots below, not after. Off WSL the Redwall directory
+  // sits inside `~/.local/share/red-dev`, and removing the root first
+  // would delete the images without ever being able to say it had.
+  //
+  // Isolated, because finding this directory on WSL asks Windows where
+  // LocalAppData is, and a machine where that question fails is still a
+  // machine whose dotfiles and shell hook must come out.
+  try {
+    const { removeRedwall } = await import("./redwall.ts");
+    const dir = await removeRedwall(p);
+    if (dir) removed.push(dir);
+  } catch (err) {
+    log.warn(`redwall: ${(err as Error).message}`);
+  }
+
   const targets = [
     `${home}/.local/share/red-dev`,
     `${home}/.config/red-dev`,
