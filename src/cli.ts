@@ -113,6 +113,14 @@ export function buildCli(): CLI {
           },
         ],
       },
+      redwall: {
+        // No positional, and no flag to force it on. What it draws comes
+        // from the machine and whether it draws at all comes from the
+        // preference, so there is nothing here for a caller to decide —
+        // which is what lets a hook invoke it with no arguments and no
+        // knowledge of how the feature is configured.
+        description: "regenerate the wallpaper that carries this machine's state",
+      },
       apps: {
         description: "choose optional tools to install",
       },

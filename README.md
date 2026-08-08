@@ -316,6 +316,7 @@ red-dev install [scope]      # converge toward the manifest
 red-dev install --dry-run    # print the plan, touch nothing
 red-dev update               # upgrade what the package managers own
 red-dev theme [name]         # dark | light | obsidian | marble | cobalt | flare
+red-dev redwall              # redraw the wallpaper carrying this machine's state
 red-dev apps                 # choose optional tools
 red-dev lang                 # choose runtimes for mise to manage
 red-dev lang node@lts,bun@latest # unattended runtime selection
