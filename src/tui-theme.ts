@@ -78,5 +78,8 @@ export const outcomeColor: Record<string, string> = {
   applied: ui.ok,
   present: ui.fg3,
   skipped: ui.fg3,
+  // Amber, and deliberately not the danger colour: an item waiting on
+  // rights is the one outcome that is neither done nor broken.
+  deferred: ui.warn,
   failed: ui.danger,
 };

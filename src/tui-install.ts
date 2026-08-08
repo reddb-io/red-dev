@@ -183,7 +183,7 @@ export function handleInstallScroll(
 export function useInstallModel(
   opts: InstallTuiOptions,
   logScroll: ScrollAreaState,
-  onFinish: (failed: number) => void,
+  onFinish: (outcome: { failed: number; deferred: number }) => void,
 ): InstallModel {
   const total = countSteps(opts.scopes);
 
@@ -271,11 +271,26 @@ export function useInstallModel(
           const held = captureStop();
           // LogViewer takes plain strings, so the glyph is chosen here
           // rather than by a component.
+          // A deferral gets its own glyph rather than the failure's: it
+          // is the row an operator scans for afterwards, and an ✗ beside
+          // it is the thing this outcome exists to stop saying.
           const glyph =
-            r.outcome === "failed" ? "✗" : r.outcome === "present" || r.outcome === "skipped" ? "·" : "✓";
+            r.outcome === "failed"
+              ? "✗"
+              : r.outcome === "deferred"
+                ? "!"
+                : r.outcome === "present" || r.outcome === "skipped"
+                  ? "·"
+                  : "✓";
           push(`${glyph} ${r.tool.padEnd(16)} ${r.outcome}${r.ms >= 1000 ? `  ${human(r.ms)}` : ""}`);
           for (const h of held) push(`    ${plain(h)}`);
-          if (r.detail && r.outcome === "failed") push(`    ${r.detail}`);
+          if (r.detail && (r.outcome === "failed" || r.outcome === "deferred")) {
+            push(`    ${r.detail}`);
+          }
+          // The remedy under the item, in the pane the eye is already
+          // on. The right-hand column has room to name what deferred,
+          // never room to say what to do about it.
+          if (r.remedy) push(`    ${r.remedy}`);
           setResults((prev) => [...prev, r]);
         },
       },
@@ -283,7 +298,7 @@ export function useInstallModel(
       setFinishedAt(Date.now());
       setFinished(true);
       const setupFailed = setupResults().filter((result) => result.outcome === "failed").length;
-      onFinish(summary.failed + setupFailed);
+      onFinish({ failed: summary.failed + setupFailed, deferred: summary.deferred });
     });
   });
 
@@ -371,8 +386,10 @@ export function InstallLayout(m: InstallModel, width: number, height: number) {
 
   const by = (o: string): number => results.filter((r) => r.outcome === o).length;
   const failures = results.filter((r) => r.outcome === "failed");
+  const deferrals = results.filter((r) => r.outcome === "deferred");
   const elapsedMs = m.elapsedMs();
-  const rightRows = 14 + Math.min(failures.length, 6) + (finished ? 4 : 0);
+  const rightRows =
+    14 + Math.min(failures.length, 6) + Math.min(deferrals.length, 6) + (finished ? 4 : 0);
 
   return Screen(
     width,
@@ -443,6 +460,7 @@ export function InstallLayout(m: InstallModel, width: number, height: number) {
             segments: [
               { value: by("installed") + by("applied"), color: ui.ok },
               { value: by("present"), color: subtle },
+              { value: by("deferred"), color: ui.warn },
               { value: by("failed"), color: ui.danger },
             ],
             total,
@@ -462,6 +480,19 @@ export function InstallLayout(m: InstallModel, width: number, height: number) {
           ),
           Section("Elapsed", { text: human(elapsedMs), color: text }),
 
+          // Named, not counted, and above the failures rather than
+          // among them: "1 deferred" sends the reader back through the
+          // log to find out which item it was, which is the whole cost
+          // this block exists to remove.
+          ...(deferrals.length > 0
+            ? [
+                Text({ color: ui.warn, bold: true }, "Deferred"),
+                ...deferrals
+                  .slice(0, 6)
+                  .map((d) => ListItem({ primary: d.tool, status: "warning" })),
+              ]
+            : []),
+
           ...(failures.length > 0
             ? [
                 Text({ color: ui.danger, bold: true }, "Failed"),
@@ -471,14 +502,25 @@ export function InstallLayout(m: InstallModel, width: number, height: number) {
 
           // Wrapped by hand to the column, not by hope: "Finished with
           // failures" rendered as "Finished with failu".
+          //
+          // Three endings, because there are three. A run whose only
+          // outstanding work needed rights it did not have is neither
+          // "Incomplete" — nothing broke — nor "Converged", since the
+          // items above are still waiting for an elevated session.
           ...(finished
             ? [
                 Text({}, ""),
                 Section(
-                  failures.length > 0 ? "Incomplete" : "Converged",
+                  failures.length > 0
+                    ? "Incomplete"
+                    : deferrals.length > 0
+                      ? "Deferred"
+                      : "Converged",
                   ...(failures.length > 0
                     ? ["Fix the cause and re-run;", "it resumes from here."]
-                    : ["Restart your shell to", "pick up the changes."]),
+                    : deferrals.length > 0
+                      ? ["Nothing broke. Re-run with", "the rights to finish these."]
+                      : ["Restart your shell to", "pick up the changes."]),
                 ),
               ]
             : []),
@@ -503,15 +545,17 @@ export function InstallLayout(m: InstallModel, width: number, height: number) {
  * still owns. Reaching the converge from the menu no longer comes
  * through here — see useInstallModel for why that mattered.
  */
-export async function runInstallTui(opts: InstallTuiOptions): Promise<{ failed: number }> {
-  let outcome = { failed: 0 };
+export async function runInstallTui(
+  opts: InstallTuiOptions,
+): Promise<{ failed: number; deferred: number }> {
+  let outcome = { failed: 0, deferred: 0 };
   const logScroll = createScrollArea({ height: 10, content: [], autoScroll: true });
 
   function App() {
     const { exit } = useApp();
     const size = useTerminalSize();
-    const model = useInstallModel(opts, logScroll, (failed) => {
-      outcome = { failed };
+    const model = useInstallModel(opts, logScroll, (finished) => {
+      outcome = finished;
     });
 
     useEffect(() => model.begin());

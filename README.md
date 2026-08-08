@@ -460,6 +460,43 @@ warn alacritty: ENOEXEC: unknown error, posix_spawn 'cmd.exe'
  ok  converged — restart your shell
 ```
 
+### Work it was not allowed to do
+
+Some items need rights the run does not have: the Windows OpenSSH server needs
+administrator, and sudo on a machine that will not grant it without a password
+cannot be answered from inside a converge. Those items are *deferred*, which is
+its own outcome — the work never started, nothing is broken, and every item that
+needed no rights converged as usual.
+
+```console
+── summary ──────────────────────────────────────────────────────────
+  installed        18
+  already present   9
+  deferred          1
+  failed            0
+  elapsed          2m 4s
+
+  deferred
+    ssh-server        this needs administrator and nothing here can raise it.
+
+    Start an elevated PowerShell first, then re-run red-dev — re-running is safe.
+
+  Nothing here broke — this work is waiting, not lost.
+```
+
+Each deferred item is named, so nobody has to go back through the log to find
+out which one it was, and the exit status says the same thing to a script:
+
+| | |
+| --- | --- |
+| `0` | converged |
+| `1` | something failed |
+| `2` | converged, except work waiting on rights |
+
+So a wrapper can tell "done" from "done except the privileged part" without
+reading the summary, and without treating a healthy machine as a broken one.
+`red-dev doctor` reports the same outstanding work afterwards.
+
 ### Reading the log while it is being written
 
 A converge inside the fullscreen interface follows the tail, which is right until

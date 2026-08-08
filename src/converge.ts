@@ -13,6 +13,7 @@
  */
 
 import { transcribeStep } from "./transcript.ts";
+import { refusedRights } from "./rights.ts";
 import { aptInstall, applyProvider, type ApplyContext } from "./providers.ts";
 import {
   describeProvider,
@@ -25,7 +26,22 @@ import {
 } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
 
-export type StepOutcome = "installed" | "applied" | "present" | "skipped" | "failed";
+/**
+ * `deferred` is the one that is not a verdict on the work.
+ *
+ * An item that needs rights this run does not have did not fail: it was
+ * never attempted, nothing is broken, and the machine around it
+ * converged. Reporting it as a failure makes a healthy, partly-converged
+ * machine read as a broken one, and after enough of those a red summary
+ * stops being read at all.
+ */
+export type StepOutcome =
+  | "installed"
+  | "applied"
+  | "present"
+  | "skipped"
+  | "deferred"
+  | "failed";
 
 export interface StepEvent {
   scope: Scope;
@@ -39,6 +55,16 @@ export interface StepResult extends StepEvent {
   outcome: StepOutcome;
   ms: number;
   detail?: string;
+  /**
+   * What the operator has to do to finish this item, when something is.
+   *
+   * Kept apart from `detail` rather than folded into it because they are
+   * printed at different rates: the cause belongs on the item's own row,
+   * the remedy belongs once per gate — three items behind the same
+   * locked door share one key, and printing it three times reads as
+   * three separate problems.
+   */
+  remedy?: string;
 }
 
 export interface ConvergeObserver {
@@ -75,6 +101,39 @@ export interface ConvergeOptions {
 export interface ConvergeSummary {
   results: StepResult[];
   failed: number;
+  /** Items that ran out of rights. Not a subset of `failed`. */
+  deferred: number;
+}
+
+/**
+ * What an error message means for the item that raised it. PURE.
+ *
+ * The whole classification, in one place and testable without a package
+ * manager: both callers below reach it holding nothing but a string,
+ * because that is all an exception and a failed batch leave behind.
+ */
+export function outcomeForError(message: string): {
+  outcome: StepOutcome;
+  detail: string;
+  remedy?: string;
+} {
+  const denied = refusedRights(message);
+  if (!denied) return { outcome: "failed", detail: message };
+  return { outcome: "deferred", detail: denied.cause, remedy: denied.remedy };
+}
+
+/**
+ * The three answers a script wrapping a converge has to tell apart.
+ *
+ * 0 converged, 1 something failed, 2 converged except work that needs
+ * rights this run did not have. The third exists so "done" and "done
+ * except the privileged part" are not the same byte — a wrapper can act
+ * on the difference without parsing a summary, and neither of them has
+ * to be reported as a failure to be noticed.
+ */
+export function convergeExit(summary: { failed: number; deferred: number }): 0 | 1 | 2 {
+  if (summary.failed > 0) return 1;
+  return summary.deferred > 0 ? 2 : 0;
 }
 
 /** Total steps across every scope, so a progress bar has a denominator. */
@@ -148,12 +207,13 @@ export async function converge(
       observer.stepStart?.(event);
       const started = Date.now();
 
-      const finish = (outcome: StepOutcome, detail?: string): void => {
+      const finish = (outcome: StepOutcome, detail?: string, remedy?: string): void => {
         const result: StepResult = {
           ...event,
           outcome,
           ms: Date.now() - started,
           ...(detail ? { detail } : {}),
+          ...(remedy ? { remedy } : {}),
         };
         results.push(result);
         observer.stepEnd?.(result);
@@ -168,6 +228,18 @@ export async function converge(
         // with it, still leaves the rows up to the point it stopped,
         // which is the run most likely to be worth reading.
         transcribeStep(result);
+      };
+
+      /**
+       * Close a step that raised, as whichever of the two things it was.
+       *
+       * Both paths below arrive holding a message and nothing else, and
+       * the difference between "this broke" and "this was not allowed to
+       * run" is entirely inside it.
+       */
+      const finishError = (message: string): void => {
+        const { outcome, detail, remedy } = outcomeForError(message);
+        finish(outcome, detail, remedy);
       };
 
       if (pr.kind === "skip") {
@@ -186,7 +258,11 @@ export async function converge(
       if (pr.kind === "apt") {
         // Attempted in the batch above; report what is actually true
         // rather than claiming a per-tool install that never ran.
-        if (aptError) finish("failed", aptError);
+        // A batch that never ran because sudo said no defers every
+        // package in it: one refusal at the transaction is not twenty
+        // broken packages, and reporting it as twenty is how a whole
+        // summary turns red over a single missing password.
+        if (aptError) finishError(aptError);
         else if (isInstalled(tool)) finish("installed");
         else if (installState(tool) === "outdated") {
           // Present and runnable, just too old — the archive has nothing
@@ -204,11 +280,15 @@ export async function converge(
         finish(tool.managed ? "applied" : "installed");
       } catch (err) {
         // One tool failing must not abort the run: re-running and
-        // picking up the rest is the point of a converge tool.
-        finish("failed", (err as Error).message);
+        // picking up the rest is the point of a converge tool. Nor does
+        // an item that ran out of rights — it is reported as deferred
+        // and the run carries on to everything that needs none.
+        finishError((err as Error).message);
       }
     }
   }
 
-  return { results, failed: results.filter((r) => r.outcome === "failed").length };
+  const count = (outcome: StepOutcome): number =>
+    results.filter((r) => r.outcome === outcome).length;
+  return { results, failed: count("failed"), deferred: count("deferred") };
 }

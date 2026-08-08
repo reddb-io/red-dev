@@ -10,7 +10,8 @@
  *
  * What this reports instead: where in the run you are, what is
  * happening right now, how long each step took, and a summary that
- * names the failures rather than counting them.
+ * names the failures rather than counting them — and, apart from them,
+ * names the work that was never allowed to run.
  *
  * Written to survive a pipe. No cursor movement, no redraw, no spinner
  * — the prefix is written when a step starts and the line is completed
@@ -31,22 +32,32 @@ const paint = (code: string, s: string): string =>
  * changes nothing, and reporting that as an install is the kind of
  * confident-and-wrong output this whole file is meant to remove.
  */
-export type Outcome = "installed" | "applied" | "present" | "skipped" | "failed";
+/**
+ * `deferred` is the outcome for work this run was not allowed to do.
+ *
+ * Amber rather than red, and lower-case rather than shouted, because
+ * that is what it is: an item waiting on rights, on a machine where
+ * everything else converged. See converge.ts, which decides it.
+ */
+export type Outcome = "installed" | "applied" | "present" | "skipped" | "deferred" | "failed";
 
 const MARK: Record<Outcome, string> = {
   installed: paint("1;32", "installed"),
   applied: paint("1;32", "applied"),
   present: paint("1;90", "present"),
   skipped: paint("1;90", "skipped"),
+  deferred: paint("1;33", "deferred"),
   failed: paint("1;31", "FAILED"),
 };
 
-interface Entry {
+export interface Entry {
   scope: string;
   name: string;
   outcome: Outcome;
   ms: number;
   detail?: string;
+  /** What to do about it, for the outcomes where there is something. */
+  remedy?: string;
 }
 
 function human(ms: number): string {
@@ -87,7 +98,10 @@ export class Reporter {
    * The prefix goes out immediately so a long install shows which tool
    * it is on rather than looking hung behind apt's own output.
    */
-  begin(name: string, provider: string): (outcome: Outcome, detail?: string) => void {
+  begin(
+    name: string,
+    provider: string,
+  ): (outcome: Outcome, detail?: string, remedy?: string) => void {
     this.closeLine();
     this.index++;
     const started = Date.now();
@@ -99,7 +113,7 @@ export class Reporter {
     this.openLine = true;
     captureStart();
 
-    return (outcome: Outcome, detail?: string) => {
+    return (outcome: Outcome, detail?: string, remedy?: string) => {
       const held = captureStop();
       const ms = Date.now() - started;
       // Timing only where it is information: a sub-second skip is
@@ -113,10 +127,16 @@ export class Reporter {
       for (const line of held) {
         console.log(`          ${paint("1;90", line.replace(/\x1b\[[0-9;]*m/g, "").trim())}`);
       }
+      // Said at the item as well as in the summary, for both outcomes
+      // that have something to say. A deferral whose cause appears only
+      // at the end leaves the row itself unexplained, which is where
+      // somebody watching the run is actually looking.
       if (detail && outcome === "failed") {
         console.log(`          ${paint("1;31", detail)}`);
+      } else if (detail && outcome === "deferred") {
+        console.log(`          ${paint("1;33", detail)}`);
       }
-      this.entries.push({ scope: this.scopeName, name, outcome, ms, detail });
+      this.entries.push({ scope: this.scopeName, name, outcome, ms, detail, remedy });
     };
   }
 
@@ -136,57 +156,95 @@ export class Reporter {
   /**
    * Close the run.
    *
-   * Failures are re-listed by name here. Counting them and leaving the
-   * detail sixty lines up is what makes people re-run instead of read.
+   * The lines themselves are built by summaryLines, which is where the
+   * decisions about what a summary says now live — this prints them.
    */
-  finish(): { failed: number } {
+  finish(): { failed: number; deferred: number } {
     this.closeLine();
-    const by = (o: Outcome) => this.entries.filter((e) => e.outcome === o);
-    const failed = by("failed");
 
     console.log("");
     console.log(rule("summary"));
-
-    const rows: [string, number][] = [
-      ["installed", by("installed").length],
-      ["applied", by("applied").length],
-      ["already present", by("present").length],
-      ["skipped", by("skipped").length],
-      ["failed", failed.length],
-    ];
-    for (const [label, n] of rows) {
-      if (n === 0 && label !== "failed") continue;
-      const painted = label === "failed" && n > 0 ? paint("1;31", String(n)) : String(n);
-      console.log(`  ${label.padEnd(16)} ${painted}`);
-    }
-    console.log(`  ${"elapsed".padEnd(16)} ${human(Date.now() - this.started)}`);
-
-    // The three slowest steps, when anything took real time. On a fresh
-    // machine this is the difference between "it was slow" and "docker
-    // took four minutes".
-    const slow = this.entries
-      .filter((e) => e.ms >= 3000)
-      .sort((a, b) => b.ms - a.ms)
-      .slice(0, 3);
-    if (slow.length > 0) {
-      console.log("");
-      console.log(`  ${paint("1;90", "slowest")}`);
-      for (const e of slow) {
-        console.log(`  ${" ".repeat(2)}${e.name.padEnd(17)} ${human(e.ms)}`);
-      }
-    }
-
-    if (failed.length > 0) {
-      console.log("");
-      console.log(`  ${paint("1;31", "failed")}`);
-      for (const e of failed) {
-        console.log(`    ${e.name.padEnd(17)} ${e.detail ?? ""}`);
-      }
-      console.log("");
-      console.log(`  ${paint("1;90", "Re-running is safe: every provider is idempotent.")}`);
+    for (const line of summaryLines(this.entries, Date.now() - this.started)) {
+      console.log(line);
     }
     console.log("");
 
-    return { failed: failed.length };
+    const count = (o: Outcome): number => this.entries.filter((e) => e.outcome === o).length;
+    return { failed: count("failed"), deferred: count("deferred") };
   }
+}
+
+/**
+ * The summary, as lines. PURE.
+ *
+ * A function rather than more of `finish` because what a summary claims
+ * is the whole point of the file, and a claim nothing can check is a
+ * preference: this is the only piece a test can hold without a terminal,
+ * a package manager and half an hour.
+ *
+ * Deferred work is listed apart from failures and named item by item.
+ * Both halves matter. Folded into the failures, a machine that converged
+ * everything it had the rights for reads as broken; reduced to a count,
+ * the reader goes back through a transcript to learn which of thirty-six
+ * items the number was about.
+ */
+export function summaryLines(entries: Entry[], elapsedMs: number): string[] {
+  const by = (o: Outcome): Entry[] => entries.filter((e) => e.outcome === o);
+  const deferred = by("deferred");
+  const failed = by("failed");
+  const out: string[] = [];
+
+  const rows: [string, number][] = [
+    ["installed", by("installed").length],
+    ["applied", by("applied").length],
+    ["already present", by("present").length],
+    ["skipped", by("skipped").length],
+    ["deferred", deferred.length],
+    ["failed", failed.length],
+  ];
+  for (const [label, n] of rows) {
+    // `failed` is printed at zero because a zero there is the news. The
+    // rest, deferred included, stay silent: a permanent "deferred 0" on
+    // every machine that needs no rights is noise, and noise is what
+    // teaches people to skip the block that matters.
+    if (n === 0 && label !== "failed") continue;
+    const colour = label === "failed" ? "1;31" : label === "deferred" ? "1;33" : "";
+    const painted = colour && n > 0 ? paint(colour, String(n)) : String(n);
+    out.push(`  ${label.padEnd(16)} ${painted}`);
+  }
+  out.push(`  ${"elapsed".padEnd(16)} ${human(elapsedMs)}`);
+
+  // The three slowest steps, when anything took real time. On a fresh
+  // machine this is the difference between "it was slow" and "docker
+  // took four minutes".
+  const slow = entries
+    .filter((e) => e.ms >= 3000)
+    .sort((a, b) => b.ms - a.ms)
+    .slice(0, 3);
+  if (slow.length > 0) {
+    out.push("", `  ${paint("1;90", "slowest")}`);
+    for (const e of slow) out.push(`    ${e.name.padEnd(17)} ${human(e.ms)}`);
+  }
+
+  if (deferred.length > 0) {
+    out.push("", `  ${paint("1;33", "deferred")}`);
+    for (const e of deferred) out.push(`    ${e.name.padEnd(17)} ${e.detail ?? ""}`);
+    // Once per remedy, not once per item: several items can be waiting
+    // on the same gate, and repeating one instruction beside each of
+    // them reads as several unrelated things to go and do.
+    const remedies = [...new Set(deferred.map((e) => e.remedy).filter(Boolean))];
+    if (remedies.length > 0) {
+      out.push("");
+      for (const remedy of remedies) out.push(`    ${remedy}`);
+    }
+    out.push("", `  ${paint("1;90", "Nothing here broke — this work is waiting, not lost.")}`);
+  }
+
+  if (failed.length > 0) {
+    out.push("", `  ${paint("1;31", "failed")}`);
+    for (const e of failed) out.push(`    ${e.name.padEnd(17)} ${e.detail ?? ""}`);
+    out.push("", `  ${paint("1;90", "Re-running is safe: every provider is idempotent.")}`);
+  }
+
+  return out;
 }

@@ -202,10 +202,9 @@ async function cmdInstall(
   // CI, in a pipe, over a dumb SSH session and on a narrow window.
   if (!inv.dryRun && interactive() && (process.stdout.columns ?? 0) >= 60) {
     const { runInstallTui } = await import("./tui-install.ts");
-    const { failed } = await runInstallTui({ platform: p, ctx, scopes });
-    if (failed > 0) return 1;
-    log.ok("converged — restart your shell");
-    return 0;
+    const { convergeExit } = await import("./converge.ts");
+    const outcome = await runInstallTui({ platform: p, ctx, scopes });
+    return endInstall(convergeExit(outcome), outcome.deferred);
   }
 
   log.step(summary(p).split("\n")[0] ?? "");
@@ -218,8 +217,10 @@ async function cmdInstall(
   // into a line. The fullscreen view subscribes to the same events and
   // draws them instead — one ordering, one apt batch, one failure
   // policy, two presentations.
-  let close: ((outcome: StepOutcome, detail?: string) => void) | null = null;
-  const { failed } = await converge(
+  let close:
+    | ((outcome: StepOutcome, detail?: string, remedy?: string) => void)
+    | null = null;
+  const summaryOf = await converge(
     { platform: p, ctx, scopes: scopes, dryRun: inv.dryRun },
     {
       scopeStart: (scope, total) => report.scope(scope, total),
@@ -228,7 +229,7 @@ async function cmdInstall(
         close = report.begin(e.tool, e.provider || "—");
       },
       stepEnd: (r) => {
-        close?.(r.outcome, r.detail);
+        close?.(r.outcome, r.detail, r.remedy);
         close = null;
       },
     },
@@ -240,9 +241,30 @@ async function cmdInstall(
     log.ok("dry run — nothing changed");
     return 0;
   }
-  if (failed > 0) return 1;
-  log.ok("converged — restart your shell");
-  return 0;
+  const { convergeExit } = await import("./converge.ts");
+  return endInstall(convergeExit(summaryOf), summaryOf.deferred);
+}
+
+/**
+ * The last line of a converge, and the status the shell gets.
+ *
+ * Shared by both presentations so they cannot disagree about what a run
+ * was, and separate from either so the third answer is stated once: 2
+ * means every item that could run did, and the ones that needed rights
+ * this run did not have are still waiting. Not 0, because something is
+ * outstanding and a wrapper script has to be able to see it; not 1,
+ * because nothing about this machine is broken.
+ */
+function endInstall(code: 0 | 1 | 2, deferred = 0): number {
+  if (code === 0) log.ok("converged — restart your shell");
+  else if (code === 2) {
+    log.warn(
+      deferred === 1
+        ? "converged, except one item that needs rights this run did not have"
+        : `converged, except ${deferred} items that need rights this run did not have`,
+    );
+  }
+  return code;
 }
 
 async function cmdUpdate(p: Platform, inv: Invocation): Promise<number> {
@@ -647,8 +669,14 @@ async function cmdUi(p: Platform, inv: Invocation): Promise<number> {
   switch (result.action) {
     case "theme":
       return result.theme ? await cmdTheme(p, inv, result.theme) : 0;
-    case "installed":
-      return (result.failed ?? 0) > 0 ? 1 : 0;
+    case "installed": {
+      // The same three answers as the line report. A converge watched
+      // from the menu is still a converge, and a script that started
+      // this way reads the status the same way.
+      const { convergeExit } = await import("./converge.ts");
+      const deferred = result.deferred ?? 0;
+      return endInstall(convergeExit({ failed: result.failed ?? 0, deferred }), deferred);
+    }
     case "doctor":
       return await cmdDoctor(p, inv);
     case "apps":
