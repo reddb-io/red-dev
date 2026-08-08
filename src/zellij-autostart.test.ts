@@ -22,6 +22,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 
+import { prunable } from "./transcript.ts";
+
 const SOURCE = `${import.meta.dir}/../config/bash/zellij.sh`;
 
 /**
@@ -99,11 +101,15 @@ function run(env: Record<string, string>, interactive: boolean): Run {
   };
 }
 
-/** The crash logs left behind by a run, newest name first. */
+/** Where the crash logs go — deliberately not the transcript directory. */
+function crashDir(r: Run): string {
+  return `${r.stateHome}/red-dev/zellij`;
+}
+
+/** The crash logs left behind by a run. */
 function crashLogs(r: Run): string[] {
-  const dir = `${r.stateHome}/red-dev`;
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir).filter((f) => f.startsWith("zellij-") && f.endsWith(".log"));
+  if (!existsSync(crashDir(r))) return [];
+  return readdirSync(crashDir(r)).filter((f) => f.endsWith(".log"));
 }
 
 describe("zellij autostart", () => {
@@ -168,7 +174,7 @@ describe("zellij autostart", () => {
       const r = run({ STUB_EXIT: "101", STUB_STDERR: "thread 'main' panicked at x" }, true);
       const logs = crashLogs(r);
       expect(logs).toHaveLength(1);
-      expect(readFileSync(`${r.stateHome}/red-dev/${logs[0]}`, "utf8")).toContain(
+      expect(readFileSync(`${crashDir(r)}/${logs[0]}`, "utf8")).toContain(
         "thread 'main' panicked at x",
       );
       expect(r.out).toContain("what zellij printed on its way out is in");
@@ -176,6 +182,31 @@ describe("zellij autostart", () => {
 
     test("is not left behind by a session that ended normally", () => {
       expect(crashLogs(run({ STUB_STDERR: "noise" }, true))).toHaveLength(0);
+    });
+
+    /**
+     * The state root is shared with the run transcripts, and they are
+     * not neighbours you can safely move in beside.
+     *
+     * transcript.ts globs *.log there and keeps only the newest few by
+     * filename order. `zellij-…` sorts after every timestamped name, so
+     * a crash log dropped in that directory reads as the newest file
+     * and evicts real transcripts — three of them are enough to leave
+     * `red-dev logs` with nothing but crash logs. Asserted against the
+     * real prunable rather than a restatement of its rule, so a change
+     * to either side breaks this.
+     */
+    test("stays out of the way of the run transcripts", () => {
+      const r = run({ STUB_EXIT: "101", STUB_STDERR: "panicked" }, true);
+      const transcriptDir = `${r.stateHome}/red-dev`;
+
+      expect(crashLogs(r)).toHaveLength(1);
+      const alongside = readdirSync(transcriptDir).filter((n) => n.endsWith(".log"));
+      expect(alongside).toEqual([]);
+
+      // And nothing this run wrote can be mistaken for a transcript.
+      const transcripts = ["2026-01-01T00-00-00-000-doctor.log"];
+      expect(prunable([...readdirSync(transcriptDir), ...transcripts], 1)).toEqual([]);
     });
 
     test("is not left behind by a failure that printed nothing", () => {

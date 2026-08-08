@@ -85,7 +85,15 @@ fi
 # start and takes the only other copy with it. The file is per-shell so
 # two windows crashing at once do not overwrite each other, and it is
 # deleted on the clean path, so what is on disk is only ever a failure.
-_red_zellij_log="${XDG_STATE_HOME:-$HOME/.local/state}/red-dev/zellij-$$.log"
+#
+# In a subdirectory, not beside the run transcripts src/transcript.ts
+# keeps in this same state root. That code globs *.log and prunes all
+# but the newest few by filename order — and `zellij-…` sorts after
+# every timestamped name, so crash logs would read as the newest files
+# there and evict real transcripts until `red-dev logs` showed nothing
+# else. A directory entry does not end in .log, so both the listing and
+# the prune skip this whole tree.
+_red_zellij_log="${XDG_STATE_HOME:-$HOME/.local/state}/red-dev/zellij/crash-$$.log"
 mkdir -p "${_red_zellij_log%/*}" 2>/dev/null
 RED_IN_ZELLIJ=1 zellij 2>"$_red_zellij_log"
 _red_zellij_status=$?
