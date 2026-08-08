@@ -803,6 +803,7 @@ A theme changes the things nothing else overrides:
 | Windows | dark mode, accent colour, and colour prevalence |
 | GNOME | light/dark preference and accent |
 | VS Code | `workbench.colorTheme`, in a settings file parsed as JSONC so comments and trailing commas survive |
+| Redwall | the new theme's art with this machine's state redrawn over it, then put on the desktop — only where the preference is on, and never on a machine with no screen |
 
 Both steps are written down: [ADR 0002](.red/adr/0002-the-terminal-palette-is-fixed.md)
 made the palette fixed, [ADR 0003](.red/adr/0003-red-dev-does-not-colour-the-terminal.md)

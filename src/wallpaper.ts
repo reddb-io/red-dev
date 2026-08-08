@@ -235,6 +235,22 @@ async function setWindows(path: string, p: Platform): Promise<boolean> {
   return await run([shell, "-NoProfile", "-NonInteractive", "-Command", windowsScript(winPath)]);
 }
 
+/**
+ * Point the desktop at an image, whoever wrote it.
+ *
+ * Split out of `applyWallpaper` because Redwall's last step is this one
+ * and nothing else: it composes its own image and then needs the desktop
+ * repainted exactly the way a theme's own art would be. A second copy of
+ * "how a background is set on GNOME and on Windows" would be a second
+ * place for the WSL path translation to be wrong, and only one of the
+ * two would be the one anybody tested.
+ */
+export async function setDesktopBackground(path: string, p: Platform): Promise<boolean> {
+  if (p.env === "desktop") return await setGnome(path);
+  if (p.os === "windows" || p.env === "wsl") return await setWindows(path, p);
+  return false;
+}
+
 export async function applyWallpaper(
   theme: Theme,
   key: string,
@@ -243,11 +259,7 @@ export async function applyWallpaper(
   // A headless server has no desktop to put an image on.
   if (p.env === "server") return false;
 
-  const path = await materialise(theme, key, p);
-
-  if (p.env === "desktop") return await setGnome(path);
-  if (p.os === "windows" || p.env === "wsl") return await setWindows(path, p);
-  return false;
+  return await setDesktopBackground(await materialise(theme, key, p), p);
 }
 
 /**
