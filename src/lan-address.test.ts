@@ -1,11 +1,17 @@
+import { mkdirSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { describe, expect, test } from "bun:test";
 import type { Platform } from "./platform.ts";
+import { writePreferences } from "./preferences.ts";
 import {
+  addressFor,
   addressFromRoutes,
   parseLinuxAddresses,
   parseLinuxDefaultRoutes,
   parseWindowsNetState,
   resolveLanAddress,
+  resolveRedwallAddress,
+  routableInterfaces,
 } from "./lan-address.ts";
 
 /**
@@ -171,6 +177,88 @@ describe("reading what Linux reports", () => {
   });
 });
 
+/**
+ * A pin is an override, so every test here is written as a comparison
+ * with what the default route would have said. A pin that happens to
+ * agree with the route proves nothing about either.
+ */
+describe("pinning an interface", () => {
+  const linuxState = {
+    routes: parseLinuxDefaultRoutes(LINUX_ROUTES),
+    addresses: parseLinuxAddresses(LINUX_ADDRESSES),
+  };
+  const roamed = parseWindowsNetState(WINDOWS_ROAMED);
+
+  test("nothing pinned leaves the default route in charge", () => {
+    expect(addressFor(linuxState, null)).toBe("192.168.1.42");
+    expect(addressFor(roamed, null)).toBe("192.168.4.77");
+  });
+
+  test("a pinned interface is reported even though the route points elsewhere", () => {
+    // The route leaves by enp3s0; this machine is reached on the Wi-Fi.
+    expect(addressFor(linuxState, "wlp2s0")).toBe("10.42.0.19");
+    // And the Windows shape of the same case: the LAN answers on Wi-Fi,
+    // the person wants the address the VM network can see.
+    expect(addressFor(roamed, "vEthernet (WSL)")).toBe("172.28.16.1");
+  });
+
+  test("a pin naming an interface that is gone falls back to the default route", () => {
+    // The VPN was up when the pin was made and is not up now.
+    expect(addressFor(linuxState, "tun0")).toBe("192.168.1.42");
+    expect(addressFor(roamed, "Ethernet 9")).toBe("192.168.4.77");
+  });
+
+  test("a pin naming an interface with no usable address falls back too", () => {
+    // Present, and holding nothing another machine could reach:
+    // loopback never leaves the host, and the unplugged adapter's APIPA
+    // address means DHCP found nobody.
+    expect(addressFor(linuxState, "lo")).toBe("192.168.1.42");
+    expect(addressFor(roamed, "Ethernet")).toBe("192.168.4.77");
+  });
+
+  test("the name is matched the way a person would have typed it", () => {
+    // "vEthernet (WSL)" is an adapter alias read off a screen, and the
+    // case it is read in is not the pin's meaning.
+    expect(addressFor(roamed, "  VETHERNET (WSL)  ")).toBe("172.28.16.1");
+  });
+
+  test("an empty pin is not a pin", () => {
+    expect(addressFor(linuxState, "")).toBe("192.168.1.42");
+    expect(addressFor(linuxState, "   ")).toBe("192.168.1.42");
+  });
+
+  test("a pin invents no answer on a machine that has none", () => {
+    // Falling back to the default route is falling back to nothing here,
+    // and nothing is the honest answer — an unreachable address looks
+    // exactly like one that works.
+    const offline = parseWindowsNetState(WINDOWS_OFFLINE);
+    expect(addressFor(offline, "Ethernet")).toBeNull();
+    expect(addressFor(offline, "Wi-Fi")).toBeNull();
+  });
+});
+
+describe("the interfaces worth offering as a pin", () => {
+  test("are the ones holding an address another machine could reach", () => {
+    // Loopback and the disconnected adapter are left out: pinning them
+    // is pinning the fallback, which is a menu entry that does nothing.
+    expect(routableInterfaces(parseWindowsNetState(WINDOWS_MEASURED))).toEqual([
+      { name: "vEthernet (WSL)", address: "172.28.16.1" },
+      { name: "Ethernet", address: "192.168.1.42" },
+    ]);
+  });
+
+  test("are listed once each, however many addresses they hold", () => {
+    const twice = {
+      routes: [],
+      addresses: [
+        { interfaceName: "eth0", interfaceIndex: 2, address: "192.168.1.42" },
+        { interfaceName: "eth0", interfaceIndex: 2, address: "10.0.0.5" },
+      ],
+    };
+    expect(routableInterfaces(twice)).toEqual([{ name: "eth0", address: "192.168.1.42" }]);
+  });
+});
+
 describe("resolving on a real machine", () => {
   test("a Linux desktop asks the local route table", async () => {
     const { capture, asked } = fakeCapture([
@@ -207,5 +295,54 @@ describe("resolving on a real machine", () => {
     const { capture, asked } = fakeCapture([[/./, { out: LINUX_ROUTES }]]);
     expect(await resolveLanAddress(platform({ os: "darwin" }), capture)).toBeNull();
     expect(asked).toEqual([]);
+  });
+});
+
+/**
+ * `addressFor` proves the rule; these prove the stored preference is the
+ * thing the rule is given. A pin nothing reads is a setting that lies,
+ * and it lies in the direction of "I already told you which interface".
+ */
+describe("the address Redwall reports", () => {
+  const desktop = platform({ env: "desktop" });
+
+  /** A machine with no preferences, torn down with the process. */
+  async function onFreshMachine<T>(run: () => Promise<T>): Promise<T> {
+    const previous = process.env["HOME"];
+    const home = mkdtempSync(`${tmpdir()}/red-dev-pin-`);
+    mkdirSync(`${home}/.config/alacritty`, { recursive: true });
+    process.env["HOME"] = home;
+    try {
+      return await run();
+    } finally {
+      if (previous === undefined) delete process.env["HOME"];
+      else process.env["HOME"] = previous;
+    }
+  }
+
+  const machine = () =>
+    fakeCapture([
+      [/^ip -4 route show default$/, { out: LINUX_ROUTES }],
+      [/^ip -o -4 addr show$/, { out: LINUX_ADDRESSES }],
+    ]).capture;
+
+  test("is the default route's when nothing is pinned", async () => {
+    await onFreshMachine(async () => {
+      expect(await resolveRedwallAddress(desktop, machine())).toBe("192.168.1.42");
+    });
+  });
+
+  test("is the pinned interface's when one is set", async () => {
+    await onFreshMachine(async () => {
+      await writePreferences(desktop, { redwallInterface: "wlp2s0" });
+      expect(await resolveRedwallAddress(desktop, machine())).toBe("10.42.0.19");
+    });
+  });
+
+  test("is the default route's again once the pinned interface is gone", async () => {
+    await onFreshMachine(async () => {
+      await writePreferences(desktop, { redwallInterface: "tun0" });
+      expect(await resolveRedwallAddress(desktop, machine())).toBe("192.168.1.42");
+    });
   });
 });

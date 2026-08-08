@@ -48,6 +48,14 @@ export interface Preferences {
    * agreed to have its desktop written over.
    */
   redwall?: boolean;
+  /**
+   * The interface whose address Redwall reports, for a machine that is
+   * not reached the way its default route leaves — see src/lan-address.ts.
+   *
+   * Absent is the ordinary state and means the default route decides,
+   * which is the answer that keeps working when adapters come and go.
+   */
+  redwallInterface?: string;
   /** Agent keys chosen for this workstation, mirrored into WSL when selected. */
   agents?: string[];
   /** mise runtime ids chosen for this workstation. */
@@ -115,6 +123,23 @@ export async function resolveTerminalShell(p: Platform): Promise<TerminalShell> 
 export async function resolveRedwall(p: Platform): Promise<boolean> {
   const prefs = await readPreferences(p);
   return prefs.redwall === true;
+}
+
+/**
+ * The interface pinned for Redwall's address, or null for "let the
+ * default route decide".
+ *
+ * Blank is not a pin. This is JSON a person opens, and emptying a value
+ * is how someone clears one — reading "" as an interface name would
+ * turn that into a pin that matches nothing, which looks identical to
+ * an interface that has gone away. Trimmed for the same reason a name
+ * copied off a screen deserves: the spaces around it are not the name.
+ */
+export async function resolveRedwallInterface(p: Platform): Promise<string | null> {
+  const pinned = (await readPreferences(p)).redwallInterface;
+  if (typeof pinned !== "string") return null;
+  const trimmed = pinned.trim();
+  return trimmed === "" ? null : trimmed;
 }
 
 export type ApplyContextEntryPath = "plan" | "install" | "update" | "theme";
