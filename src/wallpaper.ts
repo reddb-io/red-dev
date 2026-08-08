@@ -202,6 +202,52 @@ async function setGnome(path: string): Promise<boolean> {
 }
 
 /**
+ * GNOME's lock-screen background, which is a different schema from the
+ * desktop's and not the same promise.
+ *
+ * `org.gnome.desktop.screensaver` is the key GNOME exposes for this, and
+ * setting it is all red-dev does. GNOME Shell has ignored it since 3.36
+ * and blurs the desktop wallpaper instead — which is a Redwall either
+ * way, blurred, so the state is still on the screen the feature exists
+ * for. Making it exact would mean shipping a shell extension: a component
+ * with its own lifecycle, its own version compatibility, and its own
+ * failure mode on every GNOME release. That is a decision belonging to
+ * the program, and red-dev stops where such decisions do.
+ *
+ * So the key is written once and never read back. There is nothing to
+ * verify — a shell that honours it and a shell that ignores it are
+ * indistinguishable from here, and a check that could only ever be
+ * inconclusive would turn into a retry loop against a setting that is
+ * already correct.
+ *
+ * Failure is not fatal for the same reason `picture-uri-dark` is not next
+ * door: on a target where the schema is absent `gsettings` exits non-zero
+ * and that is a surface this machine does not have.
+ */
+async function setGnomeLockScreen(path: string): Promise<boolean> {
+  if (!Bun.which("gsettings")) return false;
+  const uri = `file://${path}`;
+  const ok = await run(["gsettings", "set", "org.gnome.desktop.screensaver", "picture-uri", uri]);
+  await run(["gsettings", "set", "org.gnome.desktop.screensaver", "picture-options", "zoom"]);
+  return ok;
+}
+
+/**
+ * Point the lock screen at an image, on the targets that have one red-dev
+ * can write.
+ *
+ * GNOME only, and deliberately. Windows has a lock screen but it is not
+ * reachable on Home editions, and the route that works everywhere —
+ * registering a screensaver — would greet a new machine with a SmartScreen
+ * warning for the sake of a cosmetic feature. False there is the honest
+ * answer rather than a best effort that half-works on half the machines.
+ */
+export async function setLockScreenBackground(path: string, p: Platform): Promise<boolean> {
+  if (p.env !== "desktop") return false;
+  return await setGnomeLockScreen(path);
+}
+
+/**
  * SystemParametersInfo is the only call that repaints the desktop
  * immediately; writing the registry value alone leaves the old image on
  * screen until the next sign-in.

@@ -20,7 +20,8 @@ import { describe, expect, test } from "bun:test";
 import type { Platform } from "./platform.ts";
 import { writePreferences } from "./preferences.ts";
 import type { RedwallState } from "./redwall-render.ts";
-import { applyRedwall, redwallDir } from "./redwall.ts";
+import { applyRedwall, redwallDir, showRedwall } from "./redwall.ts";
+import { setLockScreenBackground } from "./wallpaper.ts";
 
 const desktop: Platform = {
   os: "linux",
@@ -33,6 +34,8 @@ const desktop: Platform = {
 };
 
 const server: Platform = { ...desktop, env: "server", caps: { ...desktop.caps, gui: false } };
+
+const wsl: Platform = { ...desktop, env: "wsl" };
 
 const running: RedwallState = { workers: 3, address: "192.168.1.42" };
 
@@ -66,6 +69,43 @@ function screen() {
           shown.push(path);
           return true;
         },
+      }),
+  };
+}
+
+/**
+ * Both surfaces a Redwall reaches, watched one at a time.
+ *
+ * `screen()` above replaces the whole of `show`, which is right for
+ * questions about the file and wrong for this one: the lock screen only
+ * becomes assertable when the two writers underneath `show` are separate
+ * values. `showRedwall` is the real default, so what these tests exercise
+ * is the composition the machine runs and not a rehearsal of it.
+ *
+ * `lockTakes` is how a target that has no such key answers — `gsettings`
+ * exits non-zero for a schema it does not know, and the whole question is
+ * what red-dev does next.
+ */
+function screens(lockTakes = true) {
+  const wall: string[] = [];
+  const lock: string[] = [];
+  return {
+    wall,
+    lock,
+    apply: (p: Platform, slug: string) =>
+      applyRedwall(p, slug, {
+        state: async () => running,
+        inUse: async () => wall.at(-1) ?? null,
+        show: showRedwall(p, {
+          desktop: async (path: string) => {
+            wall.push(path);
+            return true;
+          },
+          lock: async (path: string) => {
+            lock.push(path);
+            return lockTakes;
+          },
+        }),
       }),
   };
 }
@@ -176,5 +216,102 @@ describe("applying a Redwall", () => {
       expect(existsSync(outcome.path!)).toBe(true);
       expect(outcome.shown).toBe(false);
     });
+  });
+});
+
+/**
+ * The surface that motivated the feature.
+ *
+ * A Redwall on the desktop is readable by whoever is already sitting at
+ * an unlocked machine, which is the person who least needs it. The lock
+ * screen is where a Worker count and an address are worth having, and it
+ * is the reason the image says anything at all rather than being art.
+ */
+describe("the lock screen", () => {
+  test("is pointed at the same image the desktop is", async () => {
+    await onFreshMachine(async () => {
+      await writePreferences(desktop, { redwall: true, theme: "dark" });
+
+      const s = screens();
+      const outcome = await s.apply(desktop, "marble");
+
+      expect(outcome.shown).toBe(true);
+      // The same path, not merely a path: two surfaces showing different
+      // generations of the same image is the bug that would otherwise
+      // read as working.
+      expect(s.wall).toEqual([outcome.path!]);
+      expect(s.lock).toEqual([outcome.path!]);
+    });
+  });
+
+  test("follows a theme switch rather than keeping the old art", async () => {
+    await onFreshMachine(async () => {
+      await writePreferences(desktop, { redwall: true, theme: "dark" });
+
+      const s = screens();
+      const first = await s.apply(desktop, "obsidian");
+      const second = await s.apply(desktop, "flare");
+
+      expect(s.lock).toEqual([first.path!, second.path!]);
+      // And never at a file the sweep has since removed: the lock screen
+      // is pointed at the survivor, so a machine locked an hour later
+      // still has an image to draw.
+      expect(existsSync(s.lock.at(-1)!)).toBe(true);
+      expect(existsSync(first.path!)).toBe(false);
+    });
+  });
+
+  test("is left alone when the preference is off", async () => {
+    // Not "set back to the plain art", which would be a second decision
+    // red-dev never made: a machine that did not ask for a Redwall has a
+    // lock screen belonging to whoever configured it.
+    await onFreshMachine(async () => {
+      const s = screens();
+      const outcome = await s.apply(desktop, "marble");
+
+      expect(outcome.skipped).toBe("off");
+      expect(s.lock).toEqual([]);
+      expect(s.wall).toEqual([]);
+    });
+  });
+
+  test("a target without the key still shows the desktop, and does not fail", async () => {
+    // GNOME's screensaver schema is not everywhere, and `gsettings set`
+    // exits non-zero for a schema it does not know. That is a surface
+    // this machine does not have, not a failed apply — the desktop is
+    // the claim `shown` makes, and it is still true.
+    await onFreshMachine(async () => {
+      await writePreferences(desktop, { redwall: true, theme: "dark" });
+
+      const s = screens(false);
+      const outcome = await s.apply(desktop, "cobalt");
+
+      expect(outcome.shown).toBe(true);
+      expect(s.wall).toEqual([outcome.path!]);
+    });
+  });
+
+  test("is written once, whatever the shell does with it", async () => {
+    // GNOME Shell has ignored this key since 3.36 and blurs the desktop
+    // wallpaper instead — which is a Redwall either way, and is why the
+    // project accepts the outcome rather than shipping an extension to
+    // override it. What must not happen is red-dev noticing and trying
+    // again: there is no reading back, and no second write.
+    await onFreshMachine(async () => {
+      await writePreferences(desktop, { redwall: true, theme: "dark" });
+
+      const s = screens(false);
+      await s.apply(desktop, "dark");
+
+      expect(s.lock).toHaveLength(1);
+    });
+  });
+
+  test("is a GNOME surface, and is not reached for anywhere else", async () => {
+    // Windows is the case that matters: the lock screen there is not
+    // reachable on Home editions, so the desktop is the whole of it and
+    // this must answer without spawning anything.
+    expect(await setLockScreenBackground("/tmp/red-dev-nowhere.png", wsl)).toBe(false);
+    expect(await setLockScreenBackground("/tmp/red-dev-nowhere.png", server)).toBe(false);
   });
 });
