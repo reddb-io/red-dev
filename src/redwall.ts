@@ -71,6 +71,7 @@ import { resolveThemeSlug, THEMES } from "./themes.ts";
 import {
   imageRoot,
   setDesktopBackground,
+  setLockScreenBackground,
   shortDigest,
   wallpaperBytes,
   wallpaperPathInUse,
@@ -115,7 +116,10 @@ export interface RedwallSeams {
   readonly state?: () => Promise<RedwallState>;
   /** Which image the desktop is pointed at, so the sweep can spare it. */
   readonly inUse?: () => Promise<string | null>;
-  /** Where the finished image goes. Defaults to this machine's desktop. */
+  /**
+   * Where the finished image goes. Defaults to `showRedwall`, which is
+   * every screen this machine has rather than only the desktop.
+   */
   readonly show?: (path: string) => Promise<boolean>;
 }
 
@@ -195,8 +199,51 @@ export interface RedwallApplied extends RedwallOutcome {
   readonly shown: boolean;
 }
 
+/** The screens a Redwall reaches, replaceable one at a time. */
+export interface ScreenWriters {
+  /** The desktop, which is what `shown` means. */
+  readonly desktop?: (path: string) => Promise<boolean>;
+  /** The lock screen, where a target has one red-dev can write. */
+  readonly lock?: (path: string) => Promise<boolean>;
+}
+
 /**
- * Compose this machine's Redwall for a theme and put it on the desktop.
+ * Put the image on every screen this machine has, and report the desktop.
+ *
+ * The lock screen is the surface that motivated the whole feature: a
+ * Worker count and an address are worth reading without unlocking, and a
+ * Redwall only the person already sitting at an unlocked machine can see
+ * is showing state to the one person who does not need it.
+ *
+ * It is written after the desktop and its answer is dropped, which is the
+ * whole of the tolerance this needs. The lock-screen key is not on every
+ * target — GNOME has it, Windows has nothing red-dev should write — and a
+ * machine that lacks it has still had its desktop repainted, so folding
+ * that absence into `shown` would report a successful apply as a failure
+ * and leave a caller retrying a surface that does not exist. `shown` is a
+ * claim about the desktop, and stays one.
+ *
+ * Both writers are injectable because the defaults repaint the screens of
+ * whoever runs the suite. Injected here rather than as two more seams on
+ * `applyRedwall`: a test that replaced only `show` would otherwise leave
+ * the lock-screen default live and reach for `gsettings` anyway, which is
+ * exactly the accident this seam exists to prevent.
+ */
+export function showRedwall(
+  p: Platform,
+  writers: ScreenWriters = {},
+): (path: string) => Promise<boolean> {
+  return async (path: string): Promise<boolean> => {
+    const shown = await (writers.desktop ?? ((image: string) => setDesktopBackground(image, p)))(
+      path,
+    );
+    await (writers.lock ?? ((image: string) => setLockScreenBackground(image, p)))(path);
+    return shown;
+  };
+}
+
+/**
+ * Compose this machine's Redwall for a theme and put it on the screens.
  *
  * The two halves are one call because they are useless apart. Generating
  * without showing leaves a 4K PNG nothing points at; showing without
@@ -222,7 +269,7 @@ export async function applyRedwall(
   const outcome = await generateRedwall(p, seams, theme);
   if (outcome.path === null) return { ...outcome, shown: false };
 
-  const show = seams.show ?? ((image: string) => setDesktopBackground(image, p));
+  const show = seams.show ?? showRedwall(p);
   const shown = await show(outcome.path);
   // Only when the repaint took. A desktop that refused is still pointed
   // at the previous Redwall, and that file is not this run's to remove.

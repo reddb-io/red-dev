@@ -112,10 +112,9 @@ export const THEME_SURFACES: ThemeSurfaceSpec[] = [
     // round would end with the plain art on screen and the overlay in a
     // directory nothing points at.
     //
-    // On Windows that background is the whole of it. The lock screen
-    // there is not reachable on Home editions, and the screensaver route
-    // would greet every new machine with a SmartScreen warning for the
-    // sake of a cosmetic feature.
+    // It has the final word on the lock screen too, where the target has
+    // one red-dev can write — see `setLockScreenBackground`, which is
+    // also where the reason Windows is not such a target is recorded.
     //
     // The slug is passed down rather than re-read: `red-dev theme` does
     // not record the new theme before applying it, so a Redwall that
