@@ -39,6 +39,15 @@ export interface Preferences {
   /** Terminal font size in points. omakub offers 7 to 14. */
   fontSize?: number;
   blesh?: boolean;
+  /**
+   * Whether the wallpaper carries live machine state — see Redwall in
+   * .red/contexts/visual/CONTEXT.md.
+   *
+   * Absent means off, and the absence is the setting rather than a gap
+   * waiting to be filled: a machine that has never been asked has not
+   * agreed to have its desktop written over.
+   */
+  redwall?: boolean;
   /** Agent keys chosen for this workstation, mirrored into WSL when selected. */
   agents?: string[];
   /** mise runtime ids chosen for this workstation. */
@@ -89,6 +98,23 @@ export async function resolveTerminalShell(p: Platform): Promise<TerminalShell> 
   const prefs = await readPreferences(p);
   if (prefs.terminalShell) return prefs.terminalShell;
   return p.env === "wsl" ? "wsl" : "gitbash";
+}
+
+/**
+ * Whether Redwall is on for this machine.
+ *
+ * Off unless someone said otherwise. ADR 0003 settled the same question
+ * one surface over — a terminal's colours are not red-dev's to choose —
+ * and a desktop someone looks at all day is no more red-dev's to write
+ * over because a converge happened to run.
+ *
+ * `=== true` rather than a truthy read, because this file is JSON a
+ * person can edit and "off" written as a string should not turn a
+ * desktop into a dashboard.
+ */
+export async function resolveRedwall(p: Platform): Promise<boolean> {
+  const prefs = await readPreferences(p);
+  return prefs.redwall === true;
 }
 
 export type ApplyContextEntryPath = "plan" | "install" | "update" | "theme";

@@ -37,6 +37,8 @@ export interface SetupAnswers {
   runtimes: string[];
   agents: string[];
   blesh: boolean;
+  /** Whether the wallpaper carries live machine state. Off unless asked for. */
+  redwall: boolean;
   terminalShell?: "wsl" | "gitbash";
   /** Whether to set up the one directory both environments read. */
   share: boolean;
@@ -220,6 +222,30 @@ export function questions(
       preset: [DEFAULT_THEME],
       applies: () => true,
     },
+    {
+      // After Theme, because it composes on the wallpaper that answer
+      // chooses rather than replacing it — and last, because it is the
+      // only question here whose honest default is "no".
+      id: "redwall",
+      title: "Redwall",
+      description:
+        "The theme's wallpaper with live machine state drawn over it: how many " +
+        "Workers are running and the address this machine answers on, readable " +
+        "from the lock screen without unlocking it. The art underneath is " +
+        "unchanged — Redwall composes on top, never in place of it.",
+      multi: false,
+      choices: [
+        // Declining first, and that ordering is load-bearing. A
+        // single-choice step commits whatever the cursor is on, and the
+        // cursor starts at zero — so the answer someone gets for
+        // pressing enter through the interview is the one at the top of
+        // this list, not the one named in `preset`.
+        { key: "no", label: "Leave the wallpaper alone", note: "the default" },
+        { key: "yes", label: "Draw machine state on it", note: "desktop and lock screen" },
+      ],
+      preset: ["no"],
+      applies: () => true,
+    },
   ].filter((q) => q.applies(p));
 }
 
@@ -281,6 +307,7 @@ export function useSetupModel(steps: Question[], wizard: ReturnType<typeof creat
       runtimes: get("runtimes"),
       agents: get("agents"),
       blesh: get("plugins").includes("blesh"),
+      redwall: get("redwall")[0] === "yes",
       share: get("share")[0] === "yes",
       ...(get("shell")[0] ? { terminalShell: get("shell")[0] as "wsl" | "gitbash" } : {}),
       completed: true,

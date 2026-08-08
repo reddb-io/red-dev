@@ -55,6 +55,31 @@ type SetupChoices = { agents?: string[]; runtimes: string[]; apps: string[] };
 
 const NON_SKILL_HOSTS = new Set(["claude-desktop", "codex-desktop", "t3code"]);
 
+/**
+ * What the interview's answers mean as recorded preferences.
+ *
+ * Built here rather than at each call site because there are two of
+ * them — the fullscreen menu hosts the same interview `install` runs —
+ * and they were the same object literal written twice. That is the shape
+ * a new answer gets dropped from: adding it to one leaves the other
+ * silently discarding what the person just said.
+ */
+export function preferencesFromAnswers(answers: SetupAnswers): Preferences {
+  return {
+    setupCompleted: true,
+    theme: answers.theme,
+    font: answers.font,
+    blesh: answers.blesh,
+    redwall: answers.redwall,
+    agents: answers.agents,
+    runtimes: answers.runtimes,
+    ...(answers.terminalShell ? { terminalShell: answers.terminalShell } : {}),
+    ...(answers.terminalShell === "wsl" && process.env["WSL_DISTRO_NAME"]
+      ? { distro: process.env["WSL_DISTRO_NAME"] }
+      : {}),
+  };
+}
+
 /** The exact units the pre-converge setup is about to perform. */
 export async function setupPlan(p: Platform, choices: SetupChoices): Promise<SetupPlanStep[]> {
   const { agentInstallMethod, availableAgents } = await import("./agents.ts");
@@ -152,18 +177,7 @@ export async function applySetupAnswers(
     }
   }
 
-  await writePreferences(p, {
-    setupCompleted: true,
-    theme: answers.theme,
-    font: answers.font,
-    blesh: answers.blesh,
-    agents: answers.agents,
-    runtimes: answers.runtimes,
-    ...(answers.terminalShell ? { terminalShell: answers.terminalShell } : {}),
-    ...(answers.terminalShell === "wsl" && process.env["WSL_DISTRO_NAME"]
-      ? { distro: process.env["WSL_DISTRO_NAME"] }
-      : {}),
-  });
+  await writePreferences(p, preferencesFromAnswers(answers));
   await writeShellEnv(p, answers.blesh);
   await carryOutChoices(p, {
     agents: answers.agents,
@@ -342,18 +356,7 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
       }
     }
 
-    await writePreferences(p, {
-      setupCompleted: true,
-      theme: answers.theme,
-      font: answers.font,
-      blesh: answers.blesh,
-      agents: answers.agents,
-      runtimes: answers.runtimes,
-      ...(answers.terminalShell ? { terminalShell: answers.terminalShell } : {}),
-      ...(answers.terminalShell === "wsl" && process.env["WSL_DISTRO_NAME"]
-        ? { distro: process.env["WSL_DISTRO_NAME"] }
-        : {}),
-    });
+    await writePreferences(p, preferencesFromAnswers(answers));
 
     return {
       theme: answers.theme,
@@ -457,6 +460,16 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
     DEFAULT_THEME,
   );
 
+  // 7. And whether that wallpaper reports on the machine it is sitting
+  //    on. Asked after the theme because it draws over whatever the
+  //    theme chose, and defaulted to no because a desktop is somebody's
+  //    own — the menu is where anyone who wants it turns it on.
+  log.plain("");
+  log.plain("     Redwall draws live machine state over the theme's wallpaper —");
+  log.plain("     Workers running, and the address this machine answers on —");
+  log.plain("     so the lock screen reports without being unlocked.");
+  const redwall = await confirm("Enable Redwall?", false);
+
   const choices: FirstRunChoices = {
     theme,
     font,
@@ -470,6 +483,7 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
     theme,
     font,
     blesh,
+    redwall,
     runtimes: choices.runtimes,
     ...(terminalShell ? { terminalShell } : {}),
     ...(terminalShell === "wsl" && process.env["WSL_DISTRO_NAME"]
