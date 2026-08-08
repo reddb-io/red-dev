@@ -91,6 +91,7 @@ export async function runSetupTui(
           runtimes: get("runtimes"),
           agents: get("agents"),
           blesh: get("plugins").includes("blesh"),
+          redwall: get("redwall")[0] === "yes",
           share: get("share")[0] === "yes",
           ...(get("shell")[0] ? { terminalShell: get("shell")[0] as "wsl" | "gitbash" } : {}),
           completed: true,

@@ -111,6 +111,36 @@ async function fontMenu(p: Platform, h: Handlers): Promise<void> {
   }
 }
 
+/**
+ * Redwall, on or off.
+ *
+ * A preference and nothing else for now: no image is generated or
+ * applied yet, so this submenu records an intent rather than repainting
+ * a desktop. It is still the surface that matters — Redwall is off on
+ * every machine until somebody comes here, which is the trade for not
+ * asking twice at first boot.
+ *
+ * Read fresh on entry rather than passed in, so the current state shown
+ * is the file's and not a snapshot the menu loop has been holding since
+ * it started.
+ */
+async function redwallMenu(p: Platform): Promise<void> {
+  const on = "On — draw machine state over the wallpaper";
+  const off = "Off — leave the wallpaper as the theme set it";
+  const current = (await readPreferences(p)).redwall === true;
+
+  const picked = await select(
+    `Redwall? (current: ${current ? "on" : "off"})`,
+    [on, off, BACK] as const,
+    current ? on : off,
+  );
+  if (picked === BACK) return;
+
+  const next = picked === on;
+  await writePreferences(p, { redwall: next });
+  log.ok(`redwall: ${next ? "on" : "off"}`);
+}
+
 export async function runMenu(
   p: Platform,
   inv: Invocation,
@@ -131,6 +161,7 @@ export async function runMenu(
       "Install — converge this machine",
       "Theme — colour scheme",
       "Font — family and size",
+      "Redwall — machine state on the wallpaper",
       "Apps — optional tools",
       "Languages — runtimes mise manages",
       ...(wslish ? ["Shell — where a terminal lands"] : []),
@@ -154,6 +185,9 @@ export async function runMenu(
         break;
       case "Font":
         await fontMenu(p, h);
+        break;
+      case "Redwall":
+        await redwallMenu(p);
         break;
       case "Apps":
         last = await h.apps();
