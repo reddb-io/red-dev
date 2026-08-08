@@ -904,6 +904,11 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
         await convergeClaudeKeybindings();
         return;
       }
+      if (pr.name === "ssh-server") {
+        const { installSshServer } = await import("./ssh-server.ts");
+        await installSshServer(ctx.platform);
+        return;
+      }
       if (pr.name === "hotkeys") {
         const { installWindowsHotkeys } = await import("./hotkeys.ts");
         await installWindowsHotkeys(ctx.platform);
