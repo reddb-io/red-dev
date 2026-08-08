@@ -1,0 +1,27 @@
+# Project-level RedSkills policy for red-dev.
+#
+# The AFK validation block is the only authority on what runs and when.
+# An undeclared moment is skipped loudly rather than guessed at, and the
+# engine never discovers a suite on its own — so before this file existed
+# a drain would have written code, run nothing, and left every failure
+# for the PR checks to find one red build at a time.
+#
+# The commands are the ones package.json already defines and CI already
+# runs, so a worker's local verdict and the merge queue's cannot drift.
+plugins:
+  dev:
+    afk:
+      validation:
+        # Handed to the inner agent while it writes, so it stays the fast
+        # half: the type checker runs at the two moments below, where a
+        # few extra seconds buy a verdict nobody has to re-derive.
+        iteration:
+          - bun test
+        # At the branch's fork point, once the agent reports done.
+        post_done:
+          - bun run typecheck
+          - bun test
+        # Before push, PR and queue — the last local word before CI's.
+        landing:
+          - bun run typecheck
+          - bun test
