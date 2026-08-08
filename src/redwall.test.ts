@@ -15,7 +15,12 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { describe, expect, test } from "bun:test";
-import { readPreferences, resolveRedwall, writePreferences } from "./preferences.ts";
+import {
+  readPreferences,
+  resolveRedwall,
+  resolveRedwallInterface,
+  writePreferences,
+} from "./preferences.ts";
 import { preferencesFromAnswers } from "./firstrun.ts";
 import type { SetupAnswers } from "./tui-setup-model.ts";
 import type { Platform } from "./platform.ts";
@@ -180,5 +185,79 @@ describe("the menu", () => {
     // The verb the menu switches on is the first word of the entry.
     expect(src).toContain('"Redwall — machine state on the wallpaper"');
     expect(src).toContain('case "Redwall":');
+  });
+
+  test("offers the interface beside the on/off switch", () => {
+    // The pin belongs with the answer it modifies. Somewhere else is a
+    // setting nobody looking at Redwall would find.
+    const src = readFileSync("src/menu.ts", "utf8");
+    const submenu = src.slice(src.indexOf("async function redwallMenu"));
+    expect(submenu.slice(0, submenu.indexOf("export "))).toContain("Interface");
+  });
+});
+
+/**
+ * The pin, which is an override and nothing more: absent is the normal
+ * state of this setting, and the default route is what absent means.
+ */
+describe("the pinned interface", () => {
+  test("is nothing on a machine nobody has pinned one on", async () => {
+    await onFreshMachine(async () => {
+      expect(await resolveRedwallInterface(linux)).toBeNull();
+      await writePreferences(linux, { redwall: true });
+      expect(await resolveRedwallInterface(linux)).toBeNull();
+    });
+  });
+
+  test("is the recorded name once one is set", async () => {
+    await onFreshMachine(async () => {
+      await writePreferences(linux, { redwallInterface: "vEthernet (WSL)" });
+      expect(await resolveRedwallInterface(linux)).toBe("vEthernet (WSL)");
+    });
+  });
+
+  test("survives beside the other answers, and they survive it", async () => {
+    await onFreshMachine(async () => {
+      await writePreferences(linux, preferencesFromAnswers(answers({ redwall: true })));
+      await writePreferences(linux, { redwallInterface: "tun0" });
+
+      const prefs = await readPreferences(linux);
+      expect(prefs).toMatchObject({ redwall: true, redwallInterface: "tun0", theme: "dark" });
+      expect(await resolveRedwall(linux)).toBe(true);
+    });
+  });
+
+  test("is cleared by writing it away, not left behind as an empty string", async () => {
+    // What the menu's "default route" entry does, on the same seam. A
+    // pin cleared to "" is still a pin as far as a JSON file is
+    // concerned, and this is the read that must not treat it as one.
+    await onFreshMachine(async (home) => {
+      await writePreferences(linux, { redwallInterface: "tun0" });
+      await writePreferences(linux, { redwallInterface: undefined });
+
+      expect(await resolveRedwallInterface(linux)).toBeNull();
+      expect(readFileSync(prefsPath(home), "utf8")).not.toContain("redwallInterface");
+    });
+  });
+
+  test("ignores what a person could type into the file by hand", async () => {
+    // Blank is how someone clears a value they can see; a non-string is
+    // what an editor leaves behind. Neither is an interface name.
+    await onFreshMachine(async () => {
+      await writePreferences(linux, { redwallInterface: "   " });
+      expect(await resolveRedwallInterface(linux)).toBeNull();
+    });
+    await onFreshMachine(async (home) => {
+      mkdirSync(`${home}/.config/alacritty`, { recursive: true });
+      await Bun.write(prefsPath(home), JSON.stringify({ redwallInterface: 3 }) + "\n");
+      expect(await resolveRedwallInterface(linux)).toBeNull();
+    });
+  });
+
+  test("is trimmed, because a name read off a screen carries spaces", async () => {
+    await onFreshMachine(async () => {
+      await writePreferences(linux, { redwallInterface: "  wlp2s0 " });
+      expect(await resolveRedwallInterface(linux)).toBe("wlp2s0");
+    });
   });
 });

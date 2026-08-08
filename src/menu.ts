@@ -12,11 +12,12 @@
  * over the commands, never the only way to reach something.
  */
 
+import { hostNetState, routableInterfaces } from "./lan-address.ts";
 import { log } from "./log.ts";
 import type { Platform } from "./platform.ts";
 import { readPreferences, writePreferences } from "./preferences.ts";
 import { resolveThemeSlug, themeFor, themeNames } from "./themes.ts";
-import { banner, number, select } from "./ui.ts";
+import { banner, number, select, text } from "./ui.ts";
 import type { Invocation } from "./cli.ts";
 import { summary } from "./platform.ts";
 
@@ -124,10 +125,9 @@ async function fontMenu(p: Platform, h: Handlers): Promise<void> {
  * is the file's and not a snapshot the menu loop has been holding since
  * it started.
  */
-async function redwallMenu(p: Platform): Promise<void> {
+async function redwallStateStep(p: Platform, current: boolean): Promise<void> {
   const on = "On — draw machine state over the wallpaper";
   const off = "Off — leave the wallpaper as the theme set it";
-  const current = (await readPreferences(p)).redwall === true;
 
   const picked = await select(
     `Redwall? (current: ${current ? "on" : "off"})`,
@@ -139,6 +139,66 @@ async function redwallMenu(p: Platform): Promise<void> {
   const next = picked === on;
   await writePreferences(p, { redwall: next });
   log.ok(`redwall: ${next ? "on" : "off"}`);
+}
+
+/**
+ * Which interface's address Redwall reports.
+ *
+ * Offered as the machine's own list rather than a typed name, because
+ * the name that has to match is the one the OS uses — "vEthernet (WSL)",
+ * "enp3s0" — and a name typed from memory is a pin that silently does
+ * nothing. The typed entry stays for the interface that is down right
+ * now, or a machine whose adapters could not be listed at all.
+ *
+ * Only interfaces holding a reachable address are listed; the rest
+ * resolve to the default route anyway, so offering them would be
+ * offering a choice that changes nothing.
+ */
+async function redwallInterfaceStep(p: Platform, pin: string | null): Promise<void> {
+  const route = "Default route — whichever interface leaves this machine";
+  const other = "Other — type an interface name";
+
+  const held = routableInterfaces(await hostNetState(p));
+  const labels = held.map((i) => `${i.name} — ${i.address}`);
+  const current = labels.find((l) => l.startsWith(`${pin ?? ""} — `)) ?? route;
+
+  const picked = await select(
+    `Report the address of? (current: ${pin ?? "default route"})`,
+    options(route, ...labels, other, BACK),
+    current,
+  );
+  if (picked === BACK) return;
+
+  if (picked === route) {
+    // Written as undefined so the key leaves the file: a pin recorded as
+    // "" is a pin nothing matches, which is not what "default route"
+    // means.
+    await writePreferences(p, { redwallInterface: undefined });
+    log.ok("redwall address: the default route");
+    return;
+  }
+
+  const chosen =
+    picked === other
+      ? (await text("Interface name?", pin ?? "")).trim()
+      : (held[labels.indexOf(picked)]?.name ?? "");
+  if (chosen === "") return;
+
+  await writePreferences(p, { redwallInterface: chosen });
+  log.ok(`redwall address: ${chosen}, falling back to the default route`);
+}
+
+async function redwallMenu(p: Platform): Promise<void> {
+  for (;;) {
+    const prefs = await readPreferences(p);
+    const state = `State — ${prefs.redwall === true ? "on" : "off"}`;
+    const iface = `Interface — ${prefs.redwallInterface ?? "default route"}`;
+
+    const picked = await select("Redwall", options(state, iface, BACK), state);
+    if (picked === BACK) return;
+    if (picked === state) await redwallStateStep(p, prefs.redwall === true);
+    else await redwallInterfaceStep(p, prefs.redwallInterface ?? null);
+  }
 }
 
 export async function runMenu(

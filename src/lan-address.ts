@@ -30,9 +30,25 @@
  *
  * Darwin is deliberately absent, failing closed as it does in
  * `providerFor` and per .red/adr/0001.
+ *
+ * ## When the route is not the answer
+ *
+ * The route is right about how packets leave and can still be wrong
+ * about how a person reaches this machine: a VPN carrying the default
+ * route while the laptop is wanted on the office LAN, a second NIC on
+ * the network everyone else is on. So an interface can be pinned, and a
+ * pin wins over the route.
+ *
+ * It wins only while it can. An interface that has gone away, or that
+ * holds nothing reachable, falls back to the default route rather than
+ * to nothing — a pin is a preference about which of several right
+ * answers to show, and it should not be able to turn into a wrong one
+ * because a VPN dropped. That is why the fallback is the rule above and
+ * not an error.
  */
 
 import type { Platform } from "./platform.ts";
+import { resolveRedwallInterface } from "./preferences.ts";
 import { readWindowsOutput } from "./windows-output.ts";
 
 /** A default route, as either platform describes one. */
@@ -122,6 +138,66 @@ export function addressFromRoutes(
     if (held) return held.address;
   }
   return null;
+}
+
+/**
+ * Interface names are compared the way they are read: off a screen,
+ * out of a menu, into a JSON file by hand. "vEthernet (WSL)" typed as
+ * "vethernet (wsl)" names the same adapter, and a pin that fails on
+ * capitalisation fails silently — it looks exactly like an interface
+ * that has gone away.
+ */
+function sameName(name: string | null, wanted: string): boolean {
+  return name !== null && name.trim().toLowerCase() === wanted;
+}
+
+/**
+ * The reachable address held on a named interface, or null when the
+ * machine has no such interface or it holds nothing worth showing.
+ *
+ * `isRoutable` applies here exactly as it does to the route's answer: an
+ * adapter sitting on its own 169.254 address has no address, whatever
+ * the pin says, and saying so is what lets the caller fall back.
+ */
+export function addressOnInterface(addresses: HostAddress[], name: string): string | null {
+  const wanted = name.trim().toLowerCase();
+  if (wanted === "") return null;
+  const held = addresses.find((a) => sameName(a.interfaceName, wanted) && isRoutable(a.address));
+  return held?.address ?? null;
+}
+
+/**
+ * The whole rule: the pinned interface when there is one and it can
+ * answer, the default route otherwise.
+ */
+export function addressFor(state: NetState, pin: string | null): string | null {
+  if (pin !== null) {
+    const pinned = addressOnInterface(state.addresses, pin);
+    if (pinned !== null) return pinned;
+  }
+  return addressFromRoutes(state.routes, state.addresses);
+}
+
+/**
+ * The interfaces worth offering as a pin: those holding an address
+ * another machine could reach, one entry each.
+ *
+ * Loopback and a disconnected adapter are left out because pinning them
+ * resolves to the default route anyway — a menu entry that does nothing
+ * is worse than an absent one, since choosing it looks like it worked.
+ */
+export function routableInterfaces(state: NetState): Array<{ name: string; address: string }> {
+  const found: Array<{ name: string; address: string }> = [];
+  const seen = new Set<string>();
+  for (const held of state.addresses) {
+    if (held.interfaceName === null || !isRoutable(held.address)) continue;
+    const name = held.interfaceName.trim();
+    const key = name.toLowerCase();
+    if (name === "" || seen.has(key)) continue;
+    seen.add(key);
+    found.push({ name, address: held.address });
+  }
+  return found;
 }
 
 // ----------------------------------------------------------------- linux
@@ -277,17 +353,49 @@ async function spawnCapture(cmd: string[]): Promise<Captured> {
 }
 
 /**
+ * What this machine says about its own addresses. WSL asks the Windows
+ * host; everything else asks itself.
+ *
+ * Exported because the menu offering a pin needs the same list this
+ * resolves against — offering an interface the resolver has never heard
+ * of is offering a pin that cannot work.
+ */
+export async function hostNetState(
+  p: Platform,
+  capture: Capture = spawnCapture,
+): Promise<NetState> {
+  if (p.os === "windows" || p.env === "wsl") return await windowsNetState(capture);
+  if (p.os === "linux") return await linuxNetState(capture);
+  return NOTHING;
+}
+
+/**
  * The address to show for this machine, or null when it has none worth
- * showing. WSL asks the Windows host; everything else asks itself.
+ * showing.
+ *
+ * The pin is a parameter rather than a read, so this stays the pure
+ * question "what does this machine answer on, given this preference" —
+ * `resolveRedwallAddress` is the one that knows where the preference is
+ * kept.
  */
 export async function resolveLanAddress(
   p: Platform,
   capture: Capture = spawnCapture,
+  pin: string | null = null,
 ): Promise<string | null> {
-  let state: NetState;
-  if (p.os === "windows" || p.env === "wsl") state = await windowsNetState(capture);
-  else if (p.os === "linux") state = await linuxNetState(capture);
-  else state = NOTHING;
+  return addressFor(await hostNetState(p, capture), pin);
+}
 
-  return addressFromRoutes(state.routes, state.addresses);
+/**
+ * The address Redwall reports: this machine's, through whatever the
+ * person configured.
+ *
+ * The entry point a caller wants. Reaching for `resolveLanAddress`
+ * without a pin is how a stored preference quietly stops being read.
+ */
+export async function resolveRedwallAddress(
+  p: Platform,
+  capture: Capture = spawnCapture,
+): Promise<string | null> {
+  return await resolveLanAddress(p, capture, await resolveRedwallInterface(p));
 }
