@@ -34,3 +34,13 @@ declare module "*.png" {
   const path: string;
   export default path;
 }
+
+/**
+ * Same mechanism, for the vendored font subset. A TTF put through the
+ * text form comes back as mangled UTF-8 with a plausible length, exactly
+ * as a PNG does.
+ */
+declare module "*.ttf" {
+  const path: string;
+  export default path;
+}
