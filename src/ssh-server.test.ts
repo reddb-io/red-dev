@@ -16,10 +16,14 @@
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { outcomeForError } from "./converge.ts";
 import { TOOLS, providerFor } from "./manifest.ts";
 import type { Capabilities, Platform } from "./platform.ts";
+import { batchScript, runPrivilegedBatch, type BatchHost } from "./privileged.ts";
 
 const source = readFileSync("src/ssh-server.ts", "utf8");
+
+const sshServer = TOOLS.find((t) => t.name === "ssh-server")!;
 
 function platform(over: Partial<Platform> = {}): Platform {
   return {
@@ -93,6 +97,66 @@ describe("the Windows half", () => {
     // which is not the same string on every Windows build.
     expect(source).toContain("'OpenSSH.Server*'");
     expect(source).not.toContain("OpenSSH.Server~~~~0.0.1.0");
+  });
+});
+
+describe("the administrator half is declared, not discovered", () => {
+  /** Nobody at the machine, no rights held: the unelevated case. */
+  const unelevated: BatchHost = {
+    states: async () => ({}),
+    elevated: async () => false,
+    consentPossible: () => false,
+    applyHere: async () => {
+      throw new Error("an unelevated run did the privileged work anyway");
+    },
+    elevate: async () => {
+      throw new Error("a consent prompt was raised with nobody to answer it");
+    },
+  };
+
+  test("the module classifies no administrator refusal of its own", () => {
+    // What this item used to do, and what named the gap: run PowerShell
+    // unelevated, read the refusal back out of stderr, and hand the
+    // operator its own instruction to open an elevated shell. A
+    // requirement discovered by failing, once per item.
+    //
+    // The manifest declares it now, so anything reaching the Windows
+    // half already holds the rights — a second classifier here would be
+    // answering a question that was settled before the run started.
+    expect(source).not.toMatch(/classifyRights\([^)]*"administrator"\)/);
+    // The sudo half is untouched: apt is not the gate that moved, and
+    // Ubuntu has no batch to join.
+    expect(source).toContain('classifyRights(install.out, "sudo")');
+  });
+
+  test("and the Windows column says so before anything runs", () => {
+    // Declared as data, which is what lets `plan` print the requirement
+    // and the batch collect the item without either of them running it.
+    expect(providerFor(sshServer, platform({ os: "windows", env: "windows" })).needsAdmin).toBe(
+      true,
+    );
+  });
+
+  test("its three steps are the ones the batch runs", async () => {
+    // The capability, the service and the firewall rule, composed into
+    // the shared script rather than spawned by this module. Borrowed
+    // from the provider, so there is no second copy to keep true.
+    const script = await batchScript([sshServer], "C:\\Temp\\red-dev-privileged.txt");
+    expect(script).toContain("Add-WindowsCapability");
+    expect(script).toContain("Set-Service -Name sshd -StartupType Automatic");
+    expect(script).toContain("New-NetFirewallRule");
+    expect(script).toContain("$report += 'ok ssh-server'");
+  });
+
+  test("an unelevated run defers it rather than failing it", async () => {
+    // The outcome the item is owed: a machine that could not elevate is
+    // one with work outstanding, not a broken one, and the operator gets
+    // the shared remedy instead of a DISM stack trace.
+    const [step] = await runPrivilegedBatch([sshServer], unelevated);
+    expect(step?.tool.name).toBe("ssh-server");
+    const outcome = outcomeForError(step?.error ?? "");
+    expect(outcome.outcome).toBe("deferred");
+    expect(outcome.remedy).toContain("elevated PowerShell");
   });
 });
 
