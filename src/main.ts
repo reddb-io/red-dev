@@ -347,6 +347,52 @@ async function cmdTheme(p: Platform, inv: Invocation, name?: string): Promise<nu
 }
 
 /**
+ * Regenerate this machine's Redwall.
+ *
+ * A command of its own rather than another thing `red-dev theme` does,
+ * because it is fired by something outside the program — a state change
+ * the RedSkills daemon reports — and a command that runs on its own
+ * schedule must not be reachable only through one a person types.
+ *
+ * Zero when the preference is off, and zero when there is no desktop
+ * here. The trigger should not have to know which machine it is on or
+ * what the user decided, and a non-zero exit for a feature nobody asked
+ * for is an error line in a log about nothing.
+ */
+async function cmdRedwall(p: Platform): Promise<number> {
+  const { generateRedwall } = await import("./redwall.ts");
+
+  let outcome: Awaited<ReturnType<typeof generateRedwall>>;
+  try {
+    outcome = await generateRedwall(p);
+  } catch (err) {
+    // Composing failed, which is a real fault rather than a state: the
+    // art, the face and the arithmetic all ship in this binary.
+    log.err(`redwall: ${(err as Error).message}`);
+    return 1;
+  }
+
+  if (outcome.skipped === "off") {
+    log.skip("redwall is off — `red-dev menu` turns it on");
+    return 0;
+  }
+  if (outcome.skipped === "headless") {
+    log.skip("redwall: no desktop on this machine");
+    return 0;
+  }
+
+  if (outcome.removed.length > 0) {
+    log.plain(`       removed ${outcome.removed.length} superseded redwall(s)`);
+  }
+  // The path is the useful half of this command's output: it is what the
+  // step that applies it reads, and what a person checks when a desktop
+  // shows something unexpected.
+  if (outcome.written) log.ok(`redwall: ${outcome.path}`);
+  else log.ok(`redwall: ${outcome.path} (unchanged)`);
+  return 0;
+}
+
+/**
  * Choose optional tools.
  *
  * `install` stays silent on purpose — it runs in CI and in scripts,
@@ -1007,6 +1053,8 @@ async function main(): Promise<number> {
       return await cmdUpdate(p, inv);
     case "theme":
       return await cmdTheme(p, inv, inv.scope);
+    case "redwall":
+      return await cmdRedwall(p);
     case "apps":
       return await cmdApps(p, inv);
     case "agents":
