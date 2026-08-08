@@ -552,13 +552,14 @@ async function cmdUninstall(p: Platform): Promise<number> {
   if (what === "Cancel") return 0;
 
   if (what.startsWith("red-dev")) {
-    log.warn("This removes the shipped dotfiles, the ~/.bashrc hook and recorded preferences.");
+    log.warn("This removes the shipped dotfiles, the ~/.bashrc hook, recorded preferences");
+    log.warn("and the generated Redwall images.");
     log.plain("     Installed tools stay. Your pre-red-dev shell backup stays.");
     if (!(await confirm("Remove red-dev's configuration?", false))) {
       log.skip("nothing removed");
       return 0;
     }
-    const removed = await removeConfiguration();
+    const removed = await removeConfiguration(p);
     for (const r of removed) log.ok(`removed ${r}`);
     return 0;
   }
