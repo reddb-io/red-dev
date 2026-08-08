@@ -18,6 +18,7 @@
 
 import { log } from "./log.ts";
 import type { Platform } from "./platform.ts";
+import { missingRights } from "./rights.ts";
 import { readWindowsOutput } from "./windows-output.ts";
 
 export interface WslState {
@@ -179,10 +180,15 @@ export async function isElevated(): Promise<boolean> {
  */
 export async function installWsl(distro = "Ubuntu-24.04"): Promise<boolean> {
   if (!(await isElevated())) {
-    log.err("installing WSL needs Administrator");
-    log.plain("     Open PowerShell as Administrator and run:");
-    log.plain(`       wsl --install -d ${distro}`);
-    log.plain("     Then re-run red-dev. It will pick up from there.");
+    // The same named outcome every other item reports when it runs out
+    // of rights; only the sentence naming what is left differs. Telling
+    // the operator to type `wsl --install` themselves was the old
+    // advice and it is one step too many — from an elevated shell this
+    // function runs it, which is the promise the shared remedy makes.
+    const denied = missingRights("administrator");
+    log.err(`installing WSL: ${denied.cause}`);
+    log.plain(`     ${denied.remedy}`);
+    log.plain(`     From there red-dev installs ${distro} itself.`);
     return false;
   }
 
