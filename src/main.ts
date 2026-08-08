@@ -18,6 +18,7 @@ import {
   type Scope,
 } from "./manifest.ts";
 import { detect, summary, type Platform } from "./platform.ts";
+import { administratorNotice } from "./plan.ts";
 import { applyProvider, systemUpdate, type ApplyContext } from "./providers.ts";
 import { applyContextForEntry, type ApplyContextEntryPath } from "./preferences.ts";
 import { themeFor, themeNames } from "./themes.ts";
@@ -42,7 +43,8 @@ function cmdPlatform(p: Platform): number {
 
 async function cmdPlan(p: Platform, inv: Invocation): Promise<number> {
   await contextFor(p, inv, "plan");
-  for (const scope of resolveScopes(p, inv.scope)) {
+  const scopes = resolveScopes(p, inv.scope);
+  for (const scope of scopes) {
     log.plain(`\n[${scope}]`);
     for (const tool of toolsInScope(scope)) {
       const pr = providerFor(tool, p);
@@ -62,6 +64,12 @@ async function cmdPlan(p: Platform, inv: Invocation): Promise<number> {
       log.plain(`  ${tool.name.padEnd(17)}${describeProvider(pr)}${state}`);
     }
   }
+  // Last, where a summary belongs: the rows it names have just been
+  // read, and it is the line the operator acts on — this plan is still
+  // free to abandon in favour of an elevated session, which is the whole
+  // reason for saying it here rather than at the item that needs the
+  // rights.
+  for (const line of administratorNotice(p, scopes)) log.plain(line);
   return 0;
 }
 
