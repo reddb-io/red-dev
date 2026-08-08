@@ -184,6 +184,24 @@ if (-not $cap) {
  * an inbound connection can land: WSL2 sits behind a NAT and a sshd
  * inside the distro is unreachable from the network without a port
  * proxy nobody asked for.
+ *
+ * ## The rights are settled before this runs
+ *
+ * This item is the one that exposed the gap: it used to find out it
+ * needed administrator by running the script unelevated, reading the
+ * refusal back out of stderr, and telling the operator to open an
+ * elevated PowerShell — a requirement discovered by failing, once per
+ * item, at whatever point in a converge it happened to be reached.
+ *
+ * The manifest declares it now (`win: admin(builtin("ssh-server"))`),
+ * which is what lets `plan` print the requirement up front and the
+ * batch collect the item without running it. So there are exactly two
+ * ways to arrive here, and neither is unelevated: a session that
+ * already holds administrator, or the elevated child, which runs the
+ * script text above rather than this function. Classifying a refusal
+ * here would be answering a question that was settled before the run
+ * started — and an unelevated run never gets this far, because the
+ * batch defers the item instead.
  */
 export async function installSshServerWindows(p: Platform): Promise<void> {
   if (p.os !== "windows" && p.env !== "wsl") {
@@ -199,20 +217,12 @@ export async function installSshServerWindows(p: Platform): Promise<void> {
   const out = (await new Response(proc.stdout).text()).trim();
 
   if ((await proc.exited) !== 0) {
+    // A failure with the rights in hand is a failure: a capability the
+    // build does not carry, a service that would not start, a firewall
+    // that refused the rule. Raised as one, and left to the converge to
+    // report — which is also where a message that does turn out to name
+    // a gate is classified, in the one place that does that.
     const err = (await new Response(proc.stderr).text()).trim();
-
-    // Adding a capability is an administrator operation, and a converge
-    // started from an unelevated shell is the common case rather than a
-    // mistake. Asked of the one classifier so this reads exactly like
-    // every other item that runs out of rights, instead of handing the
-    // operator the first line of a DISM stack trace to decode.
-    // Raised so the converge can report it as deferred rather than as
-    // done: an unelevated run has not configured this, and a warning
-    // under an `applied` row is a claim the machine cannot back up.
-    const denied = classifyRights(err, "administrator");
-    if (denied) throw new RedError(denied.message);
-
-    // Anything else really is a failure, and is raised as one.
     const first = err.split("\n")[0] ?? "unknown";
     throw new RedError(`could not configure the OpenSSH server: ${first}`);
   }
