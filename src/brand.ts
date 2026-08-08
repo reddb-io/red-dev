@@ -125,11 +125,26 @@ function channel(v: number): number {
   return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
 }
 
-export function luminance(hex: Hex): number {
+/**
+ * The three channels of a brand colour, 0–255.
+ *
+ * Exported because Redwall paints with these rather than measuring them,
+ * and a second hex parser written beside this one is a second place for
+ * `#f4f5f7` to become something else.
+ */
+export function rgb(hex: Hex): [number, number, number] {
   const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim());
   if (!m) throw new Error(`not a hex colour: ${hex}`);
-  const [r, g, b] = [m[1], m[2], m[3]].map((h) => channel(Number.parseInt(h as string, 16)));
-  return 0.2126 * (r as number) + 0.7152 * (g as number) + 0.0722 * (b as number);
+  return [
+    Number.parseInt(m[1] as string, 16),
+    Number.parseInt(m[2] as string, 16),
+    Number.parseInt(m[3] as string, 16),
+  ];
+}
+
+export function luminance(hex: Hex): number {
+  const [r, g, b] = rgb(hex).map(channel) as [number, number, number];
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
 /**

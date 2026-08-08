@@ -15,10 +15,17 @@
  * src/brand-guardrail.test.ts is the other half: it pins this checker
  * against the brand's published numbers, so a luminance function that
  * drifted would be caught before it started passing bad themes.
+ *
+ * The Redwall overlay joins the table at the bottom. It is the one pair
+ * here that is not a theme role against another theme role — the ink
+ * comes from the theme's declared appearance and the plate from its
+ * ground — and it is drawn on somebody's desktop rather than inside a
+ * window, so an unreadable one is the least recoverable of the lot.
  */
 
 import { describe, expect, test } from "bun:test";
-import { contrast, neutral, red } from "./brand.ts";
+import { brand, contrast, neutral, red } from "./brand.ts";
+import { redwallInk } from "./redwall-render.ts";
 import { THEME_SLUGS, THEMES } from "./themes.ts";
 
 /** WCAG AA for normal text, and what audit-contrast.mjs uses. */
@@ -70,6 +77,14 @@ describe.each([...THEME_SLUGS])("%s", (slug) => {
     expect(contrast(t.surface.edge, t.surface.bg)).toBeGreaterThanOrEqual(HAIRLINE);
   });
 
+  test("the Redwall overlay reads on the plate Redwall draws it on", () => {
+    // Held to the text bar and not the secondary one. This is a Worker
+    // count and an address — the two things the overlay exists so that
+    // somebody can read from across the room without unlocking.
+    const ink = redwallInk(t);
+    expect(contrast(ink.text, ink.plate)).toBeGreaterThanOrEqual(BODY);
+  });
+
   test("the accent is a fill that can be seen, carrying text that can be read", () => {
     if (t.accent.kind !== "colour") return;
     // As a fill: the non-text bar. The accent is never text — the type
@@ -91,6 +106,20 @@ describe("the rule the whole exercise exists for", () => {
       const accent = THEMES[slug].accent;
       if (accent.kind !== "colour") continue;
       expect(contrast(accent.on, accent.value), slug).toBeGreaterThanOrEqual(BODY);
+    }
+  });
+
+  test("and the Redwall ink is a choice this table would refuse to have wrong", () => {
+    // The check above passes for every theme, which on its own says
+    // nothing about whether the check has teeth. So: swap each theme's
+    // ink for the other appearance's — the single-character change
+    // somebody would make in `redwallInk` — and every one of the six
+    // fails. Paper on paper is 1.00 and ink on cobalt's grey is 1.74.
+    for (const slug of THEME_SLUGS) {
+      const theme = THEMES[slug];
+      const wrong = theme.appearance === "light" ? brand.paper : brand.ink;
+      expect(wrong, slug).not.toBe(redwallInk(theme).text);
+      expect(contrast(wrong, redwallInk(theme).plate), slug).toBeLessThan(BODY);
     }
   });
 
