@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import {
   TOOLS,
   applicableScopes,
   describeProvider,
   isInstalled,
+  itemsNeedingAdmin,
+  needsAdmin,
   providerFor,
   toolsInScope,
   type Tool,
@@ -229,6 +231,102 @@ describe("the manifest itself", () => {
         if (!provider) continue;
         expect(describeProvider(provider)).not.toContain("undefined");
       }
+    }
+  });
+});
+
+/**
+ * PowerShell an unelevated session cannot run at all.
+ *
+ * Every one of these returns access-denied without administrator, which
+ * is what makes the manifest's declaration checkable instead of a claim
+ * somebody typed. Self-elevation is deliberately not on the list:
+ * `Start-Process -Verb RunAs` runs perfectly well unelevated — raising a
+ * prompt is what it does — so finding it says nothing about whether the
+ * item's own work needs rights.
+ */
+const ADMIN_OPERATIONS = [
+  "Add-WindowsCapability",
+  "Enable-WindowsOptionalFeature",
+  "New-NetFirewallRule",
+  "Set-Service",
+  "Start-Service",
+  "Stop-Service",
+];
+
+/**
+ * Which manifest item each privileged module implements.
+ *
+ * Written down rather than derived from the filename, because only some
+ * builtins are named after their module. Both directions are asserted
+ * below, so this cannot quietly drift from the code it describes.
+ */
+const PRIVILEGED_MODULES: Record<string, string> = {
+  "ssh-server.ts": "ssh-server",
+};
+
+/**
+ * A module's code with its comments removed.
+ *
+ * ssh-server.ts explains Add-WindowsCapability at length before running
+ * it, and a prose mention is not a call — without this, documenting the
+ * problem somewhere would be enough to trip the check.
+ */
+function codeOf(file: string): string {
+  return readFileSync(`src/${file}`, "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+}
+
+function runsPrivilegedOperations(file: string): boolean {
+  const code = codeOf(file);
+  return ADMIN_OPERATIONS.some((op) => code.includes(op));
+}
+
+describe("items that need administrator", () => {
+  test("a Windows target names them", () => {
+    // The answer arrives from data, with nothing executed and no Windows
+    // host in sight — which is the whole point: `plan` has to be able to
+    // announce this before the first install rather than after item 36.
+    expect(itemsNeedingAdmin(WINDOWS).map((t) => t.name)).toEqual(["ssh-server"]);
+  });
+
+  test("a Linux target needs administrator for nothing", () => {
+    // Not symmetrical, and that asymmetry is the reason the declaration
+    // sits on the provider column rather than on the tool: Ubuntu
+    // installs openssh-server through the same sudo path as every other
+    // apt package, and must not be charged for a Windows requirement.
+    for (const p of [DESKTOP, WSL24, WSL26, platform({ env: "server" })]) {
+      expect(itemsNeedingAdmin(p)).toEqual([]);
+    }
+  });
+
+  test("the SSH server declares it on Windows and not on Ubuntu", () => {
+    const tool = TOOLS.find((t) => t.name === "ssh-server");
+    expect(needsAdmin(providerFor(tool!, WINDOWS))).toBe(true);
+    expect(needsAdmin(providerFor(tool!, WSL24))).toBe(false);
+    expect(needsAdmin(providerFor(tool!, WSL26))).toBe(false);
+  });
+
+  test("every module running privileged operations is accounted for", () => {
+    // The half that catches a provider which quietly starts needing
+    // administrator: a new module reaching for one of these cmdlets
+    // fails here until somebody says which item it belongs to, and a
+    // module that stops needing them fails here until it is removed.
+    const found = readdirSync("src")
+      .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
+      .filter(runsPrivilegedOperations)
+      .sort();
+    expect(found).toEqual(Object.keys(PRIVILEGED_MODULES).sort());
+  });
+
+  test("and each of them declares it in the manifest", () => {
+    // Delete `admin(...)` from the ssh-server row and this is what goes
+    // red, while the PowerShell that needs the rights sits untouched.
+    for (const [file, name] of Object.entries(PRIVILEGED_MODULES)) {
+      const tool = TOOLS.find((t) => t.name === name);
+      expect(tool).toBeDefined();
+      expect([file, needsAdmin(tool!.win)]).toEqual([file, true]);
     }
   });
 });
