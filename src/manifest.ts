@@ -273,6 +273,22 @@ export const TOOLS: Tool[] = [
     win: winget("sharkdp.bat"),
   },
   { name: "eza", scope: "core", u24: apt("eza"), win: winget("eza-community.eza") },
+  {
+    // Sourced by config/bash/init.sh since before it was ever declared
+    // here, which is the whole reason it is now. It arrives as somebody
+    // else's dependency on a desktop Ubuntu, so the guard around the
+    // source line never fired and the gap stayed invisible — until a
+    // trimmed WSL image or a container, where nothing pulls it in and
+    // bash loses tab-completion for git, apt, ssh and the rest without
+    // saying so.
+    //
+    // No `win`: Git Bash carries its own copy, and there is no winget
+    // package that would put one where MSYS bash reads from.
+    name: "bash-completion",
+    scope: "core",
+    u24: apt("bash-completion"),
+    win: skip("Git Bash ships its own bash-completion"),
+  },
   { name: "zoxide", scope: "core", u24: apt("zoxide"), win: winget("ajeetdsouza.zoxide") },
   { name: "fzf", scope: "core", u24: apt("fzf"), win: winget("junegunn.fzf") },
   { name: "btop", scope: "core", u24: apt("btop"), win: winget("aristocratos.btop4win") },

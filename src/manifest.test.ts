@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import {
   TOOLS,
   applicableScopes,
@@ -121,6 +122,25 @@ describe("the manifest itself", () => {
     const tool = TOOLS.find((t) => t.name === "wl-clipboard");
     expect(tool?.scope).toBe("desktop");
     expect(providerFor(tool!, DESKTOP)).toEqual({ kind: "apt", pkg: "wl-clipboard" });
+  });
+
+  test("what init.sh sources, the manifest installs", () => {
+    // The gap this closes: init.sh sourced bash_completion from the
+    // first version and nothing ever declared the package. On a desktop
+    // Ubuntu it arrives as somebody else's dependency, so the `[ -r ]`
+    // guard around the source line always passed and the omission was
+    // invisible — until a trimmed WSL image, where bash silently loses
+    // completion for git, apt and ssh.
+    //
+    // Asserted against init.sh rather than as a bare name, so deleting
+    // the source line and leaving the package, or the reverse, is what
+    // fails here.
+    const init = readFileSync("config/bash/init.sh", "utf8");
+    expect(init).toContain("/usr/share/bash-completion/bash_completion");
+
+    const tool = TOOLS.find((t) => t.name === "bash-completion");
+    expect(tool?.scope).toBe("core");
+    expect(providerFor(tool!, WSL24)).toEqual({ kind: "apt", pkg: "bash-completion" });
   });
 
   test("webm2mp4's ffmpeg dependency is declared", () => {
