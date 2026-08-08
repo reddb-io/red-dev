@@ -1,0 +1,419 @@
+{
+  "version": 1,
+  "protocol_version": 1,
+  "daemon_version": "3.12.6",
+  "machine_id_hash": "9f2c1a0b3d4e",
+  "session_key_hash": "7a6b5c4d3e2f",
+  "pid": 1417835,
+  "started_at": "2026-08-08T18:00:13.071Z",
+  "ceiling": {
+    "memory_bytes": 16417174323,
+    "worker_count": 6,
+    "interactive_reservation": 1,
+    "memory_source": "derived-default",
+    "worker_source": "home-config",
+    "source": "host-fraction",
+    "validation_count": 6,
+    "validation_source": "derived-default"
+  },
+  "scope": {
+    "kind": "machine",
+    "claim_path": "/tmp/redskilled-9f2c1a0b3d4e/redskilled.machine.claim.toon",
+    "owner_uid": 1000,
+    "machine_id_hash": "9f2c1a0b3d4e",
+    "session_key_hash": "7a6b5c4d3e2f",
+    "socket_path": "/run/user/1000/red-skills/0123456789abcdef0123/redskilled.sock"
+  },
+  "workers": [
+    {
+      "worker_id": "hO7UE",
+      "project_label": "reddb-io/design-system",
+      "pid": 1534418,
+      "started_at": "2026-08-08T18:30:45.795Z",
+      "workspace_path": "/home/dev/workspace/design-system",
+      "log_path": "/home/dev/workspace/design-system/.red/tmp/workers/hO7UE/worker.log.toonl",
+      "isolated": true,
+      "unit": "red-worker-reddb-io-design-system-ho7ue.service",
+      "applied_budget": {
+        "memory_max": "2736195720"
+      },
+      "memory_ceiling": "2736195720",
+      "memory_ceiling_reason": "derived from this host's memory ceiling of 16417174323 bytes shared across its 6 Worker slot(s) (ceiling source: host-fraction)",
+      "warnings": [],
+      "fork_sha": "2b8eff05331d7bee47b4abffe5ea448c88d9e1ef",
+      "cpu": {
+        "cpu_seconds": 658.67325,
+        "sampled_at": "2026-08-08T18:37:44.996Z"
+      },
+      "base_head_sha": "7df5d542ad991c7f9411c20ce7ba86e7cbf019b7",
+      "base_commits_ahead": 33
+    },
+    {
+      "worker_id": "hUK3Z",
+      "project_label": "reddb-io/design-system",
+      "pid": 1562395,
+      "started_at": "2026-08-08T18:33:23.082Z",
+      "workspace_path": "/home/dev/workspace/design-system",
+      "log_path": "/home/dev/workspace/design-system/.red/tmp/workers/hUK3Z/worker.log.toonl",
+      "isolated": true,
+      "unit": "red-worker-reddb-io-design-system-huk3z.service",
+      "applied_budget": {
+        "memory_max": "2736195720"
+      },
+      "memory_ceiling": "2736195720",
+      "memory_ceiling_reason": "derived from this host's memory ceiling of 16417174323 bytes shared across its 6 Worker slot(s) (ceiling source: host-fraction)",
+      "warnings": [],
+      "fork_sha": "7df5d542ad991c7f9411c20ce7ba86e7cbf019b7",
+      "base_head_sha": "7df5d542ad991c7f9411c20ce7ba86e7cbf019b7",
+      "base_commits_ahead": 0,
+      "cpu": {
+        "cpu_seconds": 332.376289,
+        "sampled_at": "2026-08-08T18:37:44.996Z"
+      }
+    },
+    {
+      "worker_id": "h9998",
+      "project_label": "reddb-io/red-dev",
+      "pid": 1563827,
+      "started_at": "2026-08-08T18:33:38.207Z",
+      "workspace_path": "/home/dev/workspace/red-dev",
+      "log_path": "/home/dev/workspace/red-dev/.red/tmp/workers/h9998/worker.log.toonl",
+      "isolated": true,
+      "unit": "red-worker-reddb-io-red-dev-h9998.service",
+      "applied_budget": {
+        "memory_max": "2736195720"
+      },
+      "memory_ceiling": "2736195720",
+      "memory_ceiling_reason": "derived from this host's memory ceiling of 16417174323 bytes shared across its 6 Worker slot(s) (ceiling source: host-fraction)",
+      "warnings": [],
+      "fork_sha": "52206606e76a605e8ead205eda83473938914293",
+      "base_head_sha": "52206606e76a605e8ead205eda83473938914293",
+      "base_commits_ahead": 0,
+      "cpu": {
+        "cpu_seconds": 131.748422,
+        "sampled_at": "2026-08-08T18:37:44.996Z"
+      }
+    },
+    {
+      "worker_id": "hDAL5",
+      "project_label": "reddb-io/red-dev",
+      "pid": 1563828,
+      "started_at": "2026-08-08T18:33:38.212Z",
+      "workspace_path": "/home/dev/workspace/red-dev",
+      "log_path": "/home/dev/workspace/red-dev/.red/tmp/workers/hDAL5/worker.log.toonl",
+      "isolated": true,
+      "unit": "red-worker-reddb-io-red-dev-hdal5.service",
+      "applied_budget": {
+        "memory_max": "2736195720"
+      },
+      "memory_ceiling": "2736195720",
+      "memory_ceiling_reason": "derived from this host's memory ceiling of 16417174323 bytes shared across its 6 Worker slot(s) (ceiling source: host-fraction)",
+      "warnings": [],
+      "fork_sha": "52206606e76a605e8ead205eda83473938914293",
+      "base_head_sha": "52206606e76a605e8ead205eda83473938914293",
+      "base_commits_ahead": 0,
+      "cpu": {
+        "cpu_seconds": 42.70361,
+        "sampled_at": "2026-08-08T18:37:44.996Z"
+      }
+    },
+    {
+      "worker_id": "hNH5J",
+      "project_label": "reddb-io/red-dev",
+      "pid": 1563830,
+      "started_at": "2026-08-08T18:33:38.217Z",
+      "workspace_path": "/home/dev/workspace/red-dev",
+      "log_path": "/home/dev/workspace/red-dev/.red/tmp/workers/hNH5J/worker.log.toonl",
+      "isolated": true,
+      "unit": "red-worker-reddb-io-red-dev-hnh5j.service",
+      "applied_budget": {
+        "memory_max": "2736195720"
+      },
+      "memory_ceiling": "2736195720",
+      "memory_ceiling_reason": "derived from this host's memory ceiling of 16417174323 bytes shared across its 6 Worker slot(s) (ceiling source: host-fraction)",
+      "warnings": [],
+      "fork_sha": "52206606e76a605e8ead205eda83473938914293",
+      "base_head_sha": "52206606e76a605e8ead205eda83473938914293",
+      "base_commits_ahead": 0,
+      "cpu": {
+        "cpu_seconds": 52.052544,
+        "sampled_at": "2026-08-08T18:37:44.996Z"
+      }
+    },
+    {
+      "worker_id": "hLFTB",
+      "project_label": "reddb-io/red-dev",
+      "pid": 1563831,
+      "started_at": "2026-08-08T18:33:38.222Z",
+      "workspace_path": "/home/dev/workspace/red-dev",
+      "log_path": "/home/dev/workspace/red-dev/.red/tmp/workers/hLFTB/worker.log.toonl",
+      "isolated": true,
+      "unit": "red-worker-reddb-io-red-dev-hlftb.service",
+      "applied_budget": {
+        "memory_max": "2736195720"
+      },
+      "memory_ceiling": "2736195720",
+      "memory_ceiling_reason": "derived from this host's memory ceiling of 16417174323 bytes shared across its 6 Worker slot(s) (ceiling source: host-fraction)",
+      "warnings": [],
+      "fork_sha": "52206606e76a605e8ead205eda83473938914293",
+      "base_head_sha": "52206606e76a605e8ead205eda83473938914293",
+      "base_commits_ahead": 0,
+      "cpu": {
+        "cpu_seconds": 37.468866,
+        "sampled_at": "2026-08-08T18:37:44.996Z"
+      }
+    }
+  ],
+  "projects": [
+    {
+      "project_label": "reddb-io/design-system",
+      "worker_count": 2
+    },
+    {
+      "project_label": "reddb-io/red-dev",
+      "worker_count": 4
+    }
+  ],
+  "registrations": [
+    {
+      "version": 1,
+      "project_label": "reddb-io/design-system",
+      "selector": "repo:reddb-io/design-system is:issue is:open label:\"ready-for-agent\"",
+      "queue_poll": {
+        "owner": "reddb-io",
+        "repo": "design-system",
+        "labels": [
+          "ready-for-agent"
+        ]
+      },
+      "argv": [
+        "npx",
+        "-y",
+        "-p",
+        "@reddb-io/red-skills@3.12.6",
+        "red-skills-dev",
+        "run",
+        "--once",
+        "--runner",
+        "codex"
+      ],
+      "workspace_path": "/home/dev/workspace/design-system",
+      "trunk": {
+        "remote": "origin",
+        "branch": "main"
+      },
+      "env": {
+        "REDSKILLED_WORKER_ID": "{{worker_id}}",
+        "RED_AFK_SLOT": "{{slot}}",
+        "RED_AFK_RUNNER_ORIGIN": "project_start",
+        "RED_AFK_RUNNER": "codex",
+        "RED_AFK_WORKER_ID": "{{worker_id}}"
+      },
+      "target": 2,
+      "registered_at": "2026-08-08T12:10:43.261Z",
+      "renew_within_ms": 300000,
+      "renew_by": "2026-08-08T18:42:52.738Z",
+      "renewed_at": "2026-08-08T18:36:58.141Z",
+      "renewals": 5194,
+      "session_renewals": 349,
+      "launch_revision": 1,
+      "sustained_at": "2026-08-08T18:37:52.738Z",
+      "sustains": 4845,
+      "sustained_by": "open-work",
+      "log_path": "/home/dev/workspace/design-system/.red/tmp/workers/{{worker_id}}/worker.log.toonl",
+      "renewal": "renewing",
+      "last_poll": {
+        "at": "2026-08-08T18:37:38.144Z",
+        "outcome": "counted",
+        "depth": 26,
+        "request_count": 3,
+        "detail": "project \"reddb-io/design-system\" has 26 item(s) matching its selector"
+      }
+    },
+    {
+      "version": 1,
+      "project_label": "reddb-io/red-dev",
+      "selector": "repo:reddb-io/red-dev is:issue is:open label:\"ready-for-agent\"",
+      "queue_poll": {
+        "owner": "reddb-io",
+        "repo": "red-dev",
+        "labels": [
+          "ready-for-agent"
+        ]
+      },
+      "argv": [
+        "/home/dev/.local/share/mise/installs/node/24.18.0/bin/node",
+        "/home/dev/.cache/red-skills/bundles/dev-3.12.6.bundle.min.mjs",
+        "run",
+        "--once",
+        "--runner",
+        "claude"
+      ],
+      "workspace_path": "/home/dev/workspace/red-dev",
+      "trunk": {
+        "remote": "origin",
+        "branch": "main"
+      },
+      "env": {
+        "REDSKILLED_WORKER_ID": "{{worker_id}}",
+        "RED_AFK_SLOT": "{{slot}}",
+        "RED_AFK_RUNNER_ORIGIN": "project_start",
+        "RED_AFK_RUNNER": "claude",
+        "RED_AFK_WORKER_ID": "{{worker_id}}"
+      },
+      "target": 4,
+      "registered_at": "2026-08-08T18:33:15.924Z",
+      "renew_within_ms": 300000,
+      "renew_by": "2026-08-08T18:42:52.738Z",
+      "renewed_at": "2026-08-08T18:37:05.582Z",
+      "renewals": 152,
+      "session_renewals": 6,
+      "launch_revision": 0,
+      "sustained_at": "2026-08-08T18:37:52.738Z",
+      "sustains": 146,
+      "sustained_by": "open-work",
+      "log_path": "/home/dev/workspace/red-dev/.red/tmp/workers/{{worker_id}}/worker.log.toonl",
+      "renewal": "renewing",
+      "last_poll": {
+        "at": "2026-08-08T18:37:38.144Z",
+        "outcome": "counted",
+        "depth": 2,
+        "request_count": 3,
+        "detail": "project \"reddb-io/red-dev\" has 2 item(s) matching its selector"
+      }
+    },
+    {
+      "version": 1,
+      "project_label": "reddb-io/red-skills",
+      "selector": "repo:reddb-io/red-skills is:issue is:open label:\"ready-for-agent\"",
+      "queue_poll": {
+        "owner": "reddb-io",
+        "repo": "red-skills",
+        "labels": [
+          "ready-for-agent"
+        ]
+      },
+      "argv": [
+        "/home/dev/.local/share/mise/installs/node/24.18.0/bin/node",
+        "/home/dev/.cache/red-skills/bundles/dev-3.12.6.bundle.min.mjs",
+        "run",
+        "--once",
+        "--runner",
+        "codex"
+      ],
+      "workspace_path": "/home/dev/workspace/red-skills",
+      "trunk": {
+        "remote": "origin",
+        "branch": "main"
+      },
+      "env": {
+        "REDSKILLED_WORKER_ID": "{{worker_id}}",
+        "RED_AFK_SLOT": "{{slot}}",
+        "RED_AFK_RUNNER_ORIGIN": "project_start",
+        "RED_AFK_RUNNER": "codex",
+        "RED_AFK_WORKER_ID": "{{worker_id}}"
+      },
+      "target": 3,
+      "registered_at": "2026-08-08T18:32:10.790Z",
+      "renew_within_ms": 300000,
+      "renew_by": "2026-08-08T18:42:52.738Z",
+      "renewed_at": "2026-08-08T18:35:58.908Z",
+      "renewals": 196,
+      "session_renewals": 2,
+      "launch_revision": 0,
+      "sustained_at": "2026-08-08T18:37:52.738Z",
+      "sustains": 194,
+      "sustained_by": "open-work",
+      "log_path": "/home/dev/workspace/red-skills/.red/tmp/workers/{{worker_id}}/worker.log.toonl",
+      "renewal": "renewing",
+      "last_poll": {
+        "at": "2026-08-08T18:37:38.144Z",
+        "outcome": "counted",
+        "depth": 6,
+        "request_count": 3,
+        "detail": "project \"reddb-io/red-skills\" has 6 item(s) matching its selector"
+      }
+    }
+  ],
+  "demand": {
+    "version": 1,
+    "at": "2026-08-08T18:37:44.999Z",
+    "requested": 0,
+    "granted": [],
+    "shortfall": 0,
+    "refusal": null,
+    "retry_after": null,
+    "projects": [
+      {
+        "project_label": "reddb-io/design-system",
+        "queue_depth": 26,
+        "target": 2,
+        "live": 2,
+        "outcome": "at-target",
+        "wanted": 0,
+        "detail": "project \"reddb-io/design-system\" holds 2 Worker(s) against a target of 2 and a queue of 26, so it asks for none"
+      },
+      {
+        "project_label": "reddb-io/red-dev",
+        "queue_depth": 2,
+        "target": 4,
+        "live": 4,
+        "outcome": "at-target",
+        "wanted": 0,
+        "detail": "project \"reddb-io/red-dev\" holds 4 Worker(s) against a target of 4 and a queue of 2, so it asks for none"
+      },
+      {
+        "project_label": "reddb-io/red-skills",
+        "queue_depth": 6,
+        "target": 3,
+        "live": 0,
+        "outcome": "birth-halted",
+        "wanted": 0,
+        "detail": "project \"reddb-io/red-skills\" lost 3 Workers in a row inside 60000ms of birth, so it is not asked for another before 2026-08-08T18:42:38.290Z \u2014 a Worker that cannot survive boot will not survive the next one either, and every birth spends host quota shared with every project"
+      }
+    ]
+  },
+  "birth_latches": [
+    {
+      "name": "project-birth-breaker",
+      "project_label": "reddb-io/red-skills",
+      "state": "open",
+      "opened_at": "2026-08-08T18:32:38.290Z",
+      "reason": "3 Workers from this project died before surviving 60000ms",
+      "closes": "the cooldown ends at 2026-08-08T18:42:38.290Z, then one probe Worker is admitted; surviving the short-life window closes the latch",
+      "probe_worker_id": null,
+      "repair": {
+        "tool": "project_reset",
+        "args": {
+          "latch": "project-birth-breaker"
+        },
+        "why": "clear the project's birth-breaker history and allow the next demand tick to birth normally"
+      }
+    }
+  ],
+  "budget_accounting": {
+    "version": 1,
+    "worker_count": 6,
+    "memory_high_bytes": 0,
+    "memory_max_bytes": 16417174320,
+    "cpu_weight_total": 0,
+    "unaccounted_workers": [],
+    "unisolated_workers": [],
+    "memory_ceiling_bytes": 16417174323,
+    "over_committed_bytes": 0,
+    "over_commitment_reason": null
+  },
+  "upgrade": {
+    "running_version": "3.12.6",
+    "published_version": "3.12.6",
+    "published_unknown": 0,
+    "newer_published": 0,
+    "replacement": "none",
+    "checked_at": "2026-08-08T18:31:01.037Z",
+    "checks": 3,
+    "hold_reason": "no-newer-version",
+    "newest_published_version": "3.12.6",
+    "major_held": 0,
+    "major_hold": null
+  }
+}
