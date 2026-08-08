@@ -12,18 +12,32 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync, chmodSync } from "node:fs";
+import {
+  mkdtempSync,
+  writeFileSync,
+  chmodSync,
+  existsSync,
+  readdirSync,
+  readFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 
 const SOURCE = `${import.meta.dir}/../config/bash/zellij.sh`;
 
-/** A fake zellij that announces itself and exits with STUB_EXIT. */
+/**
+ * A fake zellij that announces itself and exits with STUB_EXIT.
+ *
+ * STUB_STDERR stands in for a panic message, which is the only thing the
+ * real one writes to stderr on the failure this suite cares about.
+ */
 function stubDir(): string {
   const dir = mkdtempSync(`${tmpdir()}/red-zellij-stub-`);
   const stub = `${dir}/zellij`;
   writeFileSync(
     stub,
-    '#!/bin/sh\necho "STUB RED_IN_ZELLIJ=$RED_IN_ZELLIJ"\nexit ${STUB_EXIT:-0}\n',
+    '#!/bin/sh\necho "STUB RED_IN_ZELLIJ=$RED_IN_ZELLIJ"\n' +
+      '[ -n "$STUB_STDERR" ] && echo "$STUB_STDERR" >&2\n' +
+      "exit ${STUB_EXIT:-0}\n",
   );
   chmodSync(stub, 0o755);
   return dir;
@@ -35,6 +49,8 @@ interface Run {
   fellThrough: boolean;
   /** True when the stub was started at all. */
   started: boolean;
+  /** XDG_STATE_HOME for this run, where the crash log would be. */
+  stateHome: string;
 }
 
 /**
@@ -47,6 +63,8 @@ interface Run {
  */
 function run(env: Record<string, string>, interactive: boolean): Run {
   const dir = stubDir();
+  // Somewhere to leave a crash log that is not the real one under $HOME.
+  const stateHome = mkdtempSync(`${tmpdir()}/red-zellij-state-`);
   const body = `source ${SOURCE}; echo FELLTHROUGH`;
   const argv = interactive
     ? ["script", "-qec", `bash --norc -i -c '${body}'`, "/dev/null"]
@@ -62,6 +80,7 @@ function run(env: Record<string, string>, interactive: boolean): Run {
       ZELLIJ_SESSION_NAME: "",
       RED_IN_ZELLIJ: "",
       TERM: "xterm-256color",
+      XDG_STATE_HOME: stateHome,
       ...env,
     },
     stdout: "pipe",
@@ -72,7 +91,19 @@ function run(env: Record<string, string>, interactive: boolean): Run {
     new TextDecoder().decode(proc.stdout) + new TextDecoder().decode(proc.stderr)
   ).replace(/\r/g, "");
 
-  return { out, fellThrough: out.includes("FELLTHROUGH"), started: out.includes("STUB") };
+  return {
+    out,
+    fellThrough: out.includes("FELLTHROUGH"),
+    started: out.includes("STUB"),
+    stateHome,
+  };
+}
+
+/** The crash logs left behind by a run, newest name first. */
+function crashLogs(r: Run): string[] {
+  const dir = `${r.stateHome}/red-dev`;
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).filter((f) => f.startsWith("zellij-") && f.endsWith(".log"));
 }
 
 describe("zellij autostart", () => {
@@ -96,6 +127,64 @@ describe("zellij autostart", () => {
     expect(r.started).toBe(true);
     expect(r.fellThrough).toBe(true);
     expect(r.out).toContain("zellij exited 3");
+  });
+
+  /**
+   * The fallback shell must not inherit a half-configured terminal.
+   *
+   * zellij turns these on at startup and off again on its way out. Exit
+   * 101 is a Rust panic, which skips the way out entirely, and then the
+   * shell below is left with the kitty keyboard protocol still pushed —
+   * so Esc arrives as ESC[27u, readline eats the ESC[ and types `27u` on
+   * the command line — mouse motion still reported as input, and the
+   * alternate buffer still showing the background zellij painted.
+   */
+  describe("restores the terminal zellij abandoned", () => {
+    const undone: [string, string][] = [
+      ["kitty keyboard protocol", "[<u"],
+      ["alternate screen buffer", "[?1049l"],
+      ["mouse motion reporting", "[?1003l"],
+      ["SGR mouse encoding", "[?1006l"],
+      ["colour scheme notifications", "[?2031l"],
+    ];
+
+    for (const [name, seq] of undone) {
+      test(name, () => {
+        expect(run({ STUB_EXIT: "101" }, true).out).toContain(seq);
+      });
+    }
+
+    test("and does not touch a terminal it never took", () => {
+      // The clean path exits the shell, so nothing is printed after
+      // zellij's own cleanup — sending these there would fight it.
+      expect(run({}, true).out).not.toContain("[<u");
+    });
+  });
+
+  describe("the crash log", () => {
+    test("keeps what zellij printed on its way out", () => {
+      // zellij truncates its own log on the next start, so a panic that
+      // is only there is gone by the time anyone looks.
+      const r = run({ STUB_EXIT: "101", STUB_STDERR: "thread 'main' panicked at x" }, true);
+      const logs = crashLogs(r);
+      expect(logs).toHaveLength(1);
+      expect(readFileSync(`${r.stateHome}/red-dev/${logs[0]}`, "utf8")).toContain(
+        "thread 'main' panicked at x",
+      );
+      expect(r.out).toContain("what zellij printed on its way out is in");
+    });
+
+    test("is not left behind by a session that ended normally", () => {
+      expect(crashLogs(run({ STUB_STDERR: "noise" }, true))).toHaveLength(0);
+    });
+
+    test("is not left behind by a failure that printed nothing", () => {
+      // An empty file is worse than no file: it reads as a crash with no
+      // cause rather than as a crash whose cause went somewhere else.
+      const r = run({ STUB_EXIT: "1" }, true);
+      expect(crashLogs(r)).toHaveLength(0);
+      expect(r.out).not.toContain("what zellij printed");
+    });
   });
 
   test("leaves non-interactive shells alone", () => {

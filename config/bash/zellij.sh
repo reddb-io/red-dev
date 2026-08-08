@@ -79,16 +79,49 @@ fi
 #
 # RED_IN_ZELLIJ is set on the command rather than exported, so the
 # fallback shell below is not left claiming to be inside a session.
-RED_IN_ZELLIJ=1 zellij
+#
+# stderr goes to a file because a panic prints there and then the
+# terminal scrolls it away, or zellij's own log truncates on the next
+# start and takes the only other copy with it. The file is per-shell so
+# two windows crashing at once do not overwrite each other, and it is
+# deleted on the clean path, so what is on disk is only ever a failure.
+_red_zellij_log="${XDG_STATE_HOME:-$HOME/.local/state}/red-dev/zellij-$$.log"
+mkdir -p "${_red_zellij_log%/*}" 2>/dev/null
+RED_IN_ZELLIJ=1 zellij 2>"$_red_zellij_log"
 _red_zellij_status=$?
 
 if [ "$_red_zellij_status" -eq 0 ]; then
-  unset _red_zellij_status
+  rm -f "$_red_zellij_log"
+  unset _red_zellij_status _red_zellij_log
   # The session ended normally, so the terminal is done — same as if
   # zellij had replaced this shell to begin with.
   exit 0
 fi
 
+# Undo what zellij turned on and did not turn off.
+#
+# zellij starts by sending ESC[>1u, ESC[?1049h, ESC[?2031h and the five
+# mouse-tracking modes, and unsets every one of them on its way out. A
+# panic — exit 101, the common failure here — skips that, and the shell
+# below inherits a terminal still in all of those states: the kitty
+# keyboard protocol encodes Esc as ESC[27u and Ctrl+Backspace as
+# ESC[8;5u, which readline does not parse, so it eats the ESC[ and
+# leaves `27u` and `8;5u` on the command line; ESC[?1003h means moving
+# the mouse over the window types too; and ESC[?1049h keeps the shell in
+# the alternate buffer, still wearing the background zellij painted.
+#
+# Every sequence below turns something off, so sending them to a
+# terminal that was never in those states costs nothing — including the
+# kitty pop, which is defined as a no-op on an empty stack. That matters
+# because this branch is also reached by a zellij that died before it
+# sent anything at all.
+printf '\033[<u\033[?1000l\033[?1002l\033[?1003l\033[?1006l\033[?1015l\033[?2031l\033[?1049l\033[?25h\033[0m'
+
 printf 'red-dev: zellij exited %s — continuing as a plain shell\n' "$_red_zellij_status" >&2
+if [ -s "$_red_zellij_log" ]; then
+  printf 'red-dev: what zellij printed on its way out is in %s\n' "$_red_zellij_log" >&2
+else
+  rm -f "$_red_zellij_log"
+fi
 printf 'red-dev: set RED_ZELLIJ=0 in ~/.config/red-dev/env.sh to stop trying\n' >&2
-unset _red_zellij_status
+unset _red_zellij_status _red_zellij_log
