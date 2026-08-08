@@ -28,7 +28,13 @@ export type Scope =
    */
   | "optional";
 
-export type Provider =
+/**
+ * The provider shapes, before the flags that apply to all of them.
+ *
+ * Split from `Provider` so a cross-cutting flag is declared once instead
+ * of being repeated on nine members and forgotten on the tenth.
+ */
+type ProviderSpec =
   | { kind: "apt"; pkg: string }
   | { kind: "winget"; id: string }
   /**
@@ -116,6 +122,29 @@ export type Provider =
     }
   /** Not installed here, deliberately. The reason is required. */
   | { kind: "skip"; reason: string };
+
+/** One column of the manifest: how this platform gets this tool. */
+export type Provider = ProviderSpec & {
+  /**
+   * This column cannot complete without administrator rights.
+   *
+   * Declared per column, never per tool, because the need is not
+   * symmetrical. The Windows OpenSSH server is a capability to add, a
+   * service to set Automatic and a firewall rule to open — three
+   * administrator operations — while the same item on Ubuntu is an apt
+   * package taking the ordinary sudo path. A Linux target must not be
+   * asked to elevate for a Windows requirement.
+   *
+   * Data, so `plan` can answer "will this ask for administrator" without
+   * executing anything, and so a test can name the set on each target
+   * with no Windows host in sight.
+   *
+   * `true` only. Absence is the answer for everything else, and a
+   * `needsAdmin: false` sprinkled through the manifest would read as a
+   * checked claim where it is only the default.
+   */
+  needsAdmin?: true;
+};
 
 export interface Tool {
   /** Stable logical name — what the user thinks they have. */
@@ -239,6 +268,14 @@ const builtin = (
     | "ssh-server",
 ): Provider => ({ kind: "builtin", name });
 const skip = (reason: string): Provider => ({ kind: "skip", reason });
+/**
+ * Wraps a column that cannot complete without administrator rights.
+ *
+ * A wrapper rather than a field on every helper, so the declaration
+ * reads as what it is at the call site — `admin(builtin("ssh-server"))`
+ * says the Windows column needs rights and the row above it does not.
+ */
+const admin = (pr: ProviderSpec): Provider => ({ ...pr, needsAdmin: true });
 
 const NO_GUI = "no GUI layer on this target";
 const HOST_PROVIDES = "the Windows host provides this instead";
@@ -286,11 +323,19 @@ export const TOOLS: Tool[] = [
     // `core`, so every converge opens the port. That is a deliberate
     // decision rather than an oversight; src/ssh-server.ts says what it
     // costs, and the converge logs it instead of a silent ok.
+    //
+    // The Windows column is the manifest's first `admin`, and adding the
+    // item is what made the declaration necessary: until it arrived, no
+    // red-dev converge had ever needed administrator, and the run that
+    // discovered otherwise did so at the item itself — a warning buried
+    // in a summary that still reported success. Ubuntu keeps the plain
+    // column: apt-get through sudo is the path every other package here
+    // already takes.
     name: "ssh-server",
     scope: "core",
     managed: true,
     u24: builtin("ssh-server"),
-    win: builtin("ssh-server"),
+    win: admin(builtin("ssh-server")),
   },
   {
     // Sourced by config/bash/init.sh since before it was ever declared
@@ -925,6 +970,29 @@ export function applicableScopes(p: Platform): Scope[] {
   if (p.caps.gui) scopes.push("desktop");
   if (p.env === "wsl") scopes.push("wsl");
   return scopes;
+}
+
+/** Does this column need administrator rights to complete? */
+export function needsAdmin(pr: Provider): boolean {
+  return pr.needsAdmin === true;
+}
+
+/**
+ * The items this target will ask administrator for, in manifest order.
+ *
+ * Answered from the declarations alone: nothing is executed, no
+ * PowerShell is parsed and no Windows host is required, which is what
+ * lets the question be settled before the converge starts rather than at
+ * the item that needs the rights.
+ *
+ * Scoped to what a plain converge touches, so the answer describes what
+ * is about to happen rather than everything the manifest could install.
+ * On every Linux target the set is empty — sudo is a separate path that
+ * already works, and this must not disturb it.
+ */
+export function itemsNeedingAdmin(p: Platform): Tool[] {
+  const scopes = applicableScopes(p);
+  return TOOLS.filter((t) => scopes.includes(t.scope) && needsAdmin(providerFor(t, p)));
 }
 
 /**

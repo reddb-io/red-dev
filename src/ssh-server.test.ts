@@ -43,9 +43,13 @@ describe("the manifest entry", () => {
     const tool = TOOLS.find((t) => t.name === "ssh-server");
     expect(tool?.scope).toBe("core");
     expect(providerFor(tool!, platform())).toEqual({ kind: "builtin", name: "ssh-server" });
+    // Same builtin on both, and one extra word on the Windows column:
+    // the capability, the service and the firewall rule all need
+    // administrator, while Ubuntu's apt-get takes the usual sudo path.
     expect(providerFor(tool!, platform({ os: "windows", env: "windows" }))).toEqual({
       kind: "builtin",
       name: "ssh-server",
+      needsAdmin: true,
     });
   });
 
