@@ -11,7 +11,8 @@
  * the things you can see at a glance and nothing else overrides.
  *
  * What is left is the desktop: the wallpaper, the system accent and
- * light-dark, and the editor that is a window rather than a pane.
+ * light-dark, the editor that is a window rather than a pane, and — for
+ * the machines that asked for it — the Redwall drawn over the new art.
  *
  * Each writer is independent and failure-tolerant: a missing application
  * is not an error, it is just a surface that does not exist here.
@@ -21,10 +22,32 @@ import { log } from "./log.ts";
 import type { Platform } from "./platform.ts";
 import { themeFor, type Theme } from "./themes.ts";
 
+/**
+ * What a surface needs to know that the platform does not say.
+ *
+ * Redwall is the first surface whose existence is a decision rather than
+ * a property of the machine, and the decision lives in a file. Resolved
+ * once, up front, and handed to every `applies` — rather than read from
+ * disk inside the predicate — for two reasons. A predicate that touches
+ * the filesystem is a predicate whose answer depends on which machine
+ * the test suite is running on, and reading it per surface would spawn
+ * `cmd.exe` once per surface under WSL to find %APPDATA%.
+ */
+export interface ThemeSurfaceContext {
+  /** Whether Redwall is on for this machine. Off unless someone said so. */
+  readonly redwall: boolean;
+}
+
+/** What this machine has decided, for the surfaces that ask. */
+export async function themeSurfaceContext(p: Platform): Promise<ThemeSurfaceContext> {
+  const { resolveRedwall } = await import("./preferences.ts");
+  return { redwall: await resolveRedwall(p) };
+}
+
 export interface ThemeSurfaceSpec {
   name: string;
   /** False on a target that has no such surface at all. */
-  applies: (p: Platform) => boolean;
+  applies: (p: Platform, ctx: ThemeSurfaceContext) => boolean;
   apply: (theme: Theme, slug: string, p: Platform) => Promise<boolean>;
 }
 
@@ -82,10 +105,35 @@ export const THEME_SURFACES: ThemeSurfaceSpec[] = [
       return applyGnomeTheme(p, theme, slug);
     },
   },
+  {
+    // After the wallpaper, and last, because it has the final word on
+    // the background: Redwall composes over the art the surface above
+    // just installed, so a theme change that ran them the other way
+    // round would end with the plain art on screen and the overlay in a
+    // directory nothing points at.
+    //
+    // On Windows that background is the whole of it. The lock screen
+    // there is not reachable on Home editions, and the screensaver route
+    // would greet every new machine with a SmartScreen warning for the
+    // sake of a cosmetic feature.
+    //
+    // The slug is passed down rather than re-read: `red-dev theme` does
+    // not record the new theme before applying it, so a Redwall that
+    // consulted the preference would draw over the art being switched
+    // away from.
+    name: "redwall",
+    applies: (p, ctx) => ctx.redwall && p.env !== "server",
+    apply: async (_theme, slug, p) => {
+      const { applyRedwall } = await import("./redwall.ts");
+      const { shown, removed } = await applyRedwall(p, slug);
+      if (removed.length > 0) log.plain(`       removed ${removed.length} superseded redwall(s)`);
+      return shown;
+    },
+  },
 ];
 
-export function themeSurfaceNames(p: Platform): string[] {
-  return THEME_SURFACES.filter((s) => s.applies(p)).map((s) => s.name);
+export function themeSurfaceNames(p: Platform, ctx: ThemeSurfaceContext): string[] {
+  return THEME_SURFACES.filter((s) => s.applies(p, ctx)).map((s) => s.name);
 }
 
 export interface ApplyThemeResult {
@@ -115,20 +163,28 @@ export interface ApplyThemeResult {
  * to omit it does not compile.
  *
  * `surfaces` is injectable so a test can watch what each one receives.
- * That test could not be written against the old shape at all.
+ * That test could not be written against the old shape at all. `ctx` is
+ * injectable for the same reason one step further out: it is what
+ * decides whether a surface is in the run, so absence is observable
+ * through the same seam as presence.
  */
 export async function applyThemeEverywhere(
   slug: string,
   p: Platform,
   surfaces: ThemeSurfaceSpec[] = THEME_SURFACES,
+  ctx?: ThemeSurfaceContext,
 ): Promise<ApplyThemeResult> {
   const theme = themeFor(slug);
   if (!theme) throw new Error(`unknown theme '${slug}'`);
 
+  // After the slug check, so an unknown theme still fails without having
+  // gone to disk for a preference it will not use.
+  const context = ctx ?? (await themeSurfaceContext(p));
+
   const applied: string[] = [];
   const skipped: string[] = [];
 
-  for (const surface of surfaces.filter((s) => s.applies(p))) {
+  for (const surface of surfaces.filter((s) => s.applies(p, context))) {
     try {
       if (await surface.apply(theme, slug, p)) applied.push(surface.name);
       else skipped.push(surface.name);

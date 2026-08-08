@@ -68,7 +68,13 @@ import { readPreferences, resolveRedwall } from "./preferences.ts";
 import { REDWALL_SUBSET } from "./redwall-font.ts";
 import { renderRedwall, type RedwallState } from "./redwall-render.ts";
 import { resolveThemeSlug, THEMES } from "./themes.ts";
-import { imageRoot, shortDigest, wallpaperBytes, wallpaperPathInUse } from "./wallpaper.ts";
+import {
+  imageRoot,
+  setDesktopBackground,
+  shortDigest,
+  wallpaperBytes,
+  wallpaperPathInUse,
+} from "./wallpaper.ts";
 
 /** Where the generated images live. A sibling of `wallpapers/`, never inside it. */
 export async function redwallDir(p: Platform): Promise<string> {
@@ -109,6 +115,8 @@ export interface RedwallSeams {
   readonly state?: () => Promise<RedwallState>;
   /** Which image the desktop is pointed at, so the sweep can spare it. */
   readonly inUse?: () => Promise<string | null>;
+  /** Where the finished image goes. Defaults to this machine's desktop. */
+  readonly show?: (path: string) => Promise<boolean>;
 }
 
 /**
@@ -136,6 +144,17 @@ export async function redwallState(p: Platform): Promise<RedwallState> {
 export async function generateRedwall(
   p: Platform,
   seams: RedwallSeams = {},
+  /**
+   * The theme to draw on, for a caller that already knows which one.
+   *
+   * A theme switch is exactly that caller, and it needs this: `red-dev
+   * theme` does not record the new slug before it applies it, so a
+   * Redwall that only ever read the preference would draw the machine's
+   * state over the art the user just switched away from. Omitted, the
+   * recorded preference is the answer — which is what the hook, firing
+   * on a state change rather than a theme change, has to fall back on.
+   */
+  theme?: string,
 ): Promise<RedwallOutcome> {
   if (!(await resolveRedwall(p))) return skipped("off");
   // Not a failure, and not a thing to warn about either: a server is a
@@ -146,7 +165,7 @@ export async function generateRedwall(
   // retired slugs draws its Redwall on the art it is actually themed
   // with rather than failing to find a wallpaper for a name nothing
   // holds any more.
-  const slug = resolveThemeSlug((await readPreferences(p)).theme);
+  const slug = resolveThemeSlug(theme ?? (await readPreferences(p)).theme);
   const state = await (seams.state ?? (() => redwallState(p)))();
 
   const bytes = renderRedwall({
@@ -169,6 +188,48 @@ export async function generateRedwall(
 
   const removed = await sweepSupersededRedwalls(p, path, seams.inUse);
   return { path, skipped: null, written, removed };
+}
+
+export interface RedwallApplied extends RedwallOutcome {
+  /** Whether the desktop is now pointed at the image. */
+  readonly shown: boolean;
+}
+
+/**
+ * Compose this machine's Redwall for a theme and put it on the desktop.
+ *
+ * The two halves are one call because they are useless apart. Generating
+ * without showing leaves a 4K PNG nothing points at; showing without
+ * generating first would point the desktop at the previous theme's
+ * overlay. `generateRedwall` stays separate underneath it because the
+ * hook that fires on a state change wants the first half testable
+ * without a desktop, and because `red-dev redwall` reports the path.
+ *
+ * It sweeps a second time, and that is the point of doing both halves in
+ * one place. The sweep inside `generateRedwall` necessarily runs before
+ * the desktop is repointed, so it has to spare the image on screen — and
+ * on a theme switch the image on screen is precisely the one being
+ * replaced. Left there, a user trying the six themes in turn keeps a 4K
+ * PNG for every theme but the first. Once the desktop has moved, the
+ * same sweep spares the new image instead and the old one goes, which is
+ * the ordering `sweepRetiredWallpapers` has always kept next door.
+ */
+export async function applyRedwall(
+  p: Platform,
+  theme: string,
+  seams: RedwallSeams = {},
+): Promise<RedwallApplied> {
+  const outcome = await generateRedwall(p, seams, theme);
+  if (outcome.path === null) return { ...outcome, shown: false };
+
+  const show = seams.show ?? ((image: string) => setDesktopBackground(image, p));
+  const shown = await show(outcome.path);
+  // Only when the repaint took. A desktop that refused is still pointed
+  // at the previous Redwall, and that file is not this run's to remove.
+  if (!shown) return { ...outcome, shown };
+
+  const removed = await sweepSupersededRedwalls(p, outcome.path, seams.inUse);
+  return { ...outcome, removed: [...outcome.removed, ...removed], shown };
 }
 
 /**
