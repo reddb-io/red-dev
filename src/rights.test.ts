@@ -171,7 +171,11 @@ describe("it lives in one place", () => {
     // The other direction. Without this, deleting a call site and its
     // message together would pass the check above by saying nothing at
     // all — which is the second failure mode the spec names.
-    for (const file of ["providers.ts", "ssh-server.ts", "wsl-provision.ts"]) {
+    // drift.ts is here for the same reason as the three that converge:
+    // it hands the operator a remedy after the run rather than during
+    // it, which is precisely where a second wording would be hardest to
+    // notice and easiest to justify.
+    for (const file of ["providers.ts", "ssh-server.ts", "wsl-provision.ts", "drift.ts"]) {
       expect([file, codeOf(file).includes('from "./rights.ts"')]).toEqual([file, true]);
     }
   });

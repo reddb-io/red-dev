@@ -14,6 +14,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import type { Platform } from "./platform.ts";
+import { missingRights } from "./rights.ts";
 
 export type DriftStatus = "ok" | "drift" | "n/a";
 
@@ -514,6 +515,7 @@ export async function collectDrift(p: Platform): Promise<DriftCheck[]> {
   checks.push(await checkBlesh());
   checks.push(await checkSharedRoot(p));
   checks.push(await checkHotkeys(p));
+  checks.push(await checkPrivilegedWork(p));
   return checks;
 }
 
@@ -579,6 +581,134 @@ async function checkHotkeys(p: Platform): Promise<DriftCheck> {
       `${claimed.length} claimed and held (Windows does not say by whom) — ` +
       `note: they do not fire while an elevated window has focus`,
   };
+}
+
+/**
+ * Whether a privileged item's work is actually on the machine.
+ *
+ * Three values because two would have to lie. "unknown" is the answer
+ * whenever the question could not be put — no host to ask, a probe that
+ * failed, an item this build has no way to verify — and collapsing it
+ * into either of the others turns a doctor into a guess: fold it into
+ * "unfinished" and every machine that cannot be asked grows a permanent
+ * warning, fold it into "finished" and the one failure this exists to
+ * catch is the one it reports as fine.
+ */
+export type PrivilegedState = "finished" | "unfinished" | "unknown";
+
+/** What each privileged item reports, by tool name. */
+export type PrivilegedStates = Record<string, PrivilegedState>;
+
+const PRIVILEGED = "administrator work";
+
+/**
+ * The verdict on privileged work, from names and states alone. PURE.
+ *
+ * Separated from the asking so the reporting can be pinned without a
+ * Windows host, and because the two halves fail differently: a probe
+ * breaks when a machine changes, this breaks when the wording does.
+ *
+ * Every outstanding item is named. The converge already reported a
+ * count — "1 warning" — and the whole cost of that is the reader going
+ * back through a transcript to learn which of thirty-six items it was.
+ */
+export function privilegedDrift(items: string[], states: PrivilegedStates): DriftCheck {
+  if (items.length === 0) {
+    // Every Ubuntu target lands here, and it is not an absence of
+    // information: apt goes through sudo, which is its own path with its
+    // own outcome, so there is genuinely nothing on this machine waiting
+    // on administrator.
+    return { name: PRIVILEGED, status: "n/a", detail: "nothing here needs administrator" };
+  }
+
+  const inState = (state: PrivilegedState): string[] =>
+    items.filter((item) => (states[item] ?? "unknown") === state);
+  const unfinished = inState("unfinished");
+  const finished = inState("finished");
+  const unknown = inState("unknown");
+
+  if (unfinished.length > 0) {
+    return {
+      name: PRIVILEGED,
+      status: "drift",
+      detail: `${unfinished.join(", ")} — administrator work a converge left unfinished`,
+      // Asked for, not written. The operator read this sentence once
+      // already, in the converge that stopped at the item; wording it
+      // differently here would read as a second, unrelated problem.
+      fix: missingRights("administrator").remedy,
+    };
+  }
+
+  if (finished.length === 0) {
+    return {
+      name: PRIVILEGED,
+      status: "n/a",
+      detail: `could not ask this machine about ${unknown.join(", ")}`,
+    };
+  }
+
+  return {
+    name: PRIVILEGED,
+    status: "ok",
+    detail:
+      unknown.length === 0
+        ? `${finished.join(", ")} — done`
+        : `${finished.join(", ")} done; could not ask about ${unknown.join(", ")}`,
+  };
+}
+
+/**
+ * How each privileged item answers for itself, by tool name.
+ *
+ * A registry rather than a branch, and loaded per item rather than up
+ * front, because the module behind each entry is a platform adapter that
+ * a machine without that platform must never import to find out it has
+ * nothing to do. An item with no entry answers "unknown" — the honest
+ * result for a build that cannot verify it, and one that shows up in the
+ * report as unasked rather than as either verdict.
+ */
+const PRIVILEGED_PROBES: Record<string, () => Promise<(p: Platform) => Promise<PrivilegedState>>> =
+  {
+    "ssh-server": async () => (await import("./ssh-server.ts")).probeSshServer,
+  };
+
+async function probePrivileged(items: string[], p: Platform): Promise<PrivilegedStates> {
+  const states: PrivilegedStates = {};
+  for (const item of items) {
+    const load = PRIVILEGED_PROBES[item];
+    if (!load) {
+      states[item] = "unknown";
+      continue;
+    }
+    try {
+      states[item] = await (await load())(p);
+    } catch {
+      // A probe that threw answered nothing, which is a state we have.
+      states[item] = "unknown";
+    }
+  }
+  return states;
+}
+
+/**
+ * What this target needs administrator for, and how much of it is done.
+ *
+ * The item list comes from the manifest's declarations, so it is the
+ * same set `plan` announces before a converge starts — a machine cannot
+ * be told one thing beforehand and reported against another afterwards.
+ *
+ * `states` is injectable for tests only; nothing in the product passes
+ * it. An empty plan short-circuits before any probe runs, which is what
+ * keeps this free on the majority of machines.
+ */
+export async function checkPrivilegedWork(
+  p: Platform,
+  states?: PrivilegedStates,
+): Promise<DriftCheck> {
+  const { itemsNeedingAdmin } = await import("./manifest.ts");
+  const items = itemsNeedingAdmin(p).map((t) => t.name);
+  if (items.length === 0) return privilegedDrift([], {});
+  return privilegedDrift(items, states ?? (await probePrivileged(items, p)));
 }
 
 /**

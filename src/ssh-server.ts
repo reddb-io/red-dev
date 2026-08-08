@@ -30,6 +30,7 @@
  * the log says what happened rather than reporting a silent `ok`.
  */
 
+import type { PrivilegedState } from "./drift.ts";
 import { log } from "./log.ts";
 import type { Platform } from "./platform.ts";
 import { classifyRights, missingRights } from "./rights.ts";
@@ -200,6 +201,59 @@ export async function installSshServerWindows(p: Platform): Promise<void> {
     log.plain(`       ${line}`);
   }
   log.ok("OpenSSH server configured on the Windows host");
+}
+
+/**
+ * The same three steps, asked rather than performed.
+ *
+ * Read-only by construction, and that is the constraint the script is
+ * written around: an unelevated doctor is exactly the machine worth
+ * asking, since it is the one whose converge could not finish this. So
+ * the capability is not queried at all — `Get-WindowsCapability -Online`
+ * needs the rights we are trying to find out are missing — and the
+ * service it creates is asked instead. No sshd service means the
+ * capability was never added, which is the same answer arrived at from
+ * outside.
+ *
+ * Every condition mirrors one the install performs, in the same order,
+ * because a check that verifies less than the work did will call a
+ * half-configured machine done: the capability alone leaves the service
+ * Manual and stopped, and Manual survives exactly until the next reboot.
+ */
+const WINDOWS_PROBE = `
+$svc = Get-Service sshd -ErrorAction SilentlyContinue
+if (-not $svc) { 'unfinished'; exit 0 }
+if ($svc.StartType -ne 'Automatic') { 'unfinished'; exit 0 }
+if ($svc.Status -ne 'Running') { 'unfinished'; exit 0 }
+if (-not (Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue)) {
+  'unfinished'; exit 0
+}
+'finished'
+`.trim();
+
+/**
+ * Whether the privileged half of this item is actually in place.
+ *
+ * "unknown" is a real answer here and is returned generously: a machine
+ * with no Windows host to ask, a PowerShell that is not reachable, a
+ * word this build did not print itself. Guessing in either direction is
+ * worse than saying the question went unanswered — doctor reports it as
+ * unasked, and nobody is sent to elevate a shell over a probe that
+ * simply could not run.
+ */
+export async function probeSshServer(p: Platform): Promise<PrivilegedState> {
+  if (p.os !== "windows" && p.env !== "wsl") return "unknown";
+
+  const exe =
+    p.os === "windows" ? "powershell.exe" : (Bun.which("powershell.exe") ?? "powershell.exe");
+  try {
+    const { ok, out } = await run([exe, "-NoProfile", "-Command", WINDOWS_PROBE]);
+    if (!ok) return "unknown";
+    const answer = out.replace(/\r/g, "").trim();
+    return answer === "finished" || answer === "unfinished" ? answer : "unknown";
+  } catch {
+    return "unknown";
+  }
 }
 
 /** The manifest entry point; picks the half this platform has. */
