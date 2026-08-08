@@ -989,9 +989,12 @@ export function needsAdmin(pr: Provider): boolean {
  * is about to happen rather than everything the manifest could install.
  * On every Linux target the set is empty — sudo is a separate path that
  * already works, and this must not disturb it.
+ *
+ * `scopes` is what `plan core` and `install wsl` need: the caller has
+ * already narrowed the run, and an answer taken from the full matrix
+ * would name an item that run is never going to reach.
  */
-export function itemsNeedingAdmin(p: Platform): Tool[] {
-  const scopes = applicableScopes(p);
+export function itemsNeedingAdmin(p: Platform, scopes: Scope[] = applicableScopes(p)): Tool[] {
   return TOOLS.filter((t) => scopes.includes(t.scope) && needsAdmin(providerFor(t, p)));
 }
 
