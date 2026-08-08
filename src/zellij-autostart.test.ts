@@ -76,11 +76,20 @@ function run(env: Record<string, string>, interactive: boolean): Run {
     env: {
       ...process.env,
       PATH: `${dir}:${process.env["PATH"]}`,
-      // Inherited from whatever ran the test suite, and both would
-      // otherwise make every case look like "already inside one".
+      // Inherited from whatever ran the test suite. The first three
+      // would make every case look like "already inside one"; RED_ZELLIJ
+      // is the opt-out, and a maintainer who set it in env.sh — the
+      // documented way to stop the autostart — turned ten of these red
+      // on their own machine and nowhere else.
+      //
+      // Empty rather than deleted, because `${RED_ZELLIJ:-1}` reads an
+      // empty value as unset and lands on the default. The cases that
+      // exercise the opt-out set it through `env`, which is spread after
+      // this and still wins.
       ZELLIJ: "",
       ZELLIJ_SESSION_NAME: "",
       RED_IN_ZELLIJ: "",
+      RED_ZELLIJ: "",
       TERM: "xterm-256color",
       XDG_STATE_HOME: stateHome,
       ...env,
