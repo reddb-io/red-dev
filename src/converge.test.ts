@@ -7,9 +7,9 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { converge, countSteps, type StepResult } from "./converge.ts";
+import { converge, convergeExit, countSteps, type StepResult } from "./converge.ts";
 import { applicableScopes, toolsInScope } from "./manifest.ts";
-import { privilegedItems } from "./privileged.ts";
+import { privilegedItems, type BatchHost } from "./privileged.ts";
 import type { Platform } from "./platform.ts";
 
 const wsl: Platform = {
@@ -172,5 +172,142 @@ describe("the privileged batch", () => {
     const { events } = await run(["core"]);
     const order = events.filter((e) => e.startsWith("end:")).map((e) => e.split(":")[1]);
     expect(order).toEqual(toolsInScope("core").map((t) => t.name));
+  });
+});
+
+/**
+ * The remainder on its own — the same batch, reached without the run in
+ * front of it.
+ *
+ * A converge that deferred its privileged half leaves a machine where
+ * everything else has converged, and re-running all of it to reach the
+ * one thing outstanding is half an hour of work already done. So this
+ * asks the same questions the batch answers inside a converge, of the
+ * path an operator takes when that is all that is left: which items are
+ * touched, how many times a person is interrupted, and what a machine
+ * with nothing outstanding does.
+ */
+describe("only the privileged remainder", () => {
+  const names = privilegedItems(windows, applicableScopes(windows)).map((t) => t.name);
+
+  /** Everything the batch asked the machine for, in the order it asked. */
+  function host(over: Partial<BatchHost> = {}, finished = false): BatchHost & { calls: string[] } {
+    const calls: string[] = [];
+    return {
+      calls,
+      states: async (items) => {
+        calls.push(`states:${items.map((t) => t.name).join(",")}`);
+        return finished
+          ? Object.fromEntries(items.map((t) => [t.name, "finished" as const]))
+          : {};
+      },
+      elevated: async () => false,
+      consentPossible: () => true,
+      applyHere: async (tool) => {
+        calls.push(`apply:${tool.name}`);
+      },
+      elevate: async (items) => {
+        calls.push(`elevate:${items.map((t) => t.name).join(",")}`);
+        return { consent: "given", report: items.map((t) => `ok ${t.name}`) };
+      },
+      ...over,
+    };
+  }
+
+  async function remainder(
+    p: Platform,
+    machine: BatchHost,
+  ): Promise<{ steps: StepResult[]; summary: Awaited<ReturnType<typeof converge>> }> {
+    const steps: StepResult[] = [];
+    const summary = await converge(
+      {
+        platform: p,
+        ctx: { ...ctx, platform: p },
+        scopes: applicableScopes(p),
+        dryRun: false,
+        only: "privileged",
+        host: machine,
+      },
+      { stepEnd: (r) => steps.push(r) },
+    );
+    return { steps, summary };
+  }
+
+  test("runs the privileged batch and nothing else", async () => {
+    // Not a converge with a filter in front of it: the unprivileged
+    // items are never opened, never reported and never installed, which
+    // is the whole reason to have this command rather than re-running
+    // the converge that deferred.
+    const machine = host();
+    const { steps, summary } = await remainder(windows, machine);
+
+    expect(names.length).toBeGreaterThan(0);
+    expect(steps.map((s) => s.tool)).toEqual(names);
+    expect(steps.length).toBeLessThan(countSteps(applicableScopes(windows)));
+    expect(convergeExit(summary)).toBe(0);
+  });
+
+  test("requests consent once, for the whole batch", async () => {
+    // One prompt, carrying every outstanding item. Two prompts for one
+    // decision is the failure the batch exists to remove, and reaching
+    // the batch by a different door must not reintroduce it.
+    const machine = host();
+    await remainder(windows, machine);
+    expect(machine.calls.filter((c) => c.startsWith("elevate:"))).toEqual([
+      `elevate:${names.join(",")}`,
+    ]);
+  });
+
+  test("and not at all from an already-elevated session", async () => {
+    // Consent already given is not requested twice. The two overrides
+    // are the assertion that nothing asked; the calls are the assertion
+    // that the work still happened.
+    const machine = host({
+      elevated: async () => true,
+      consentPossible: () => {
+        throw new Error("an elevated session was asked to consent");
+      },
+      elevate: async () => {
+        throw new Error("an elevated session tried to elevate again");
+      },
+    });
+    const { steps } = await remainder(windows, machine);
+
+    expect(machine.calls).toEqual([
+      `states:${names.join(",")}`,
+      ...names.map((n) => `apply:${n}`),
+    ]);
+    expect(steps.map((s) => s.outcome)).toEqual(names.map(() => "applied"));
+  });
+
+  test("a machine with nothing outstanding succeeds having done nothing", async () => {
+    // The answer to "did this finish" is the same whether it took a
+    // consent prompt to get there or nothing at all. Running this on a
+    // converged machine must not raise a dialog, and must not report a
+    // problem it does not have.
+    const machine = host(
+      {
+        elevated: async () => {
+          throw new Error("a finished remainder went looking for rights");
+        },
+      },
+      true,
+    );
+    const { steps, summary } = await remainder(windows, machine);
+
+    expect(steps.map((s) => s.outcome)).toEqual(names.map(() => "present"));
+    expect(machine.calls).toEqual([`states:${names.join(",")}`]);
+    expect(convergeExit(summary)).toBe(0);
+  });
+
+  test("and a target with no privileged items touches nothing at all", async () => {
+    // Every Ubuntu target. No probe, no elevation check and no prompt —
+    // sudo is its own path and nothing here may disturb it.
+    const machine = host();
+    const { steps, summary } = await remainder(wsl, machine);
+
+    expect(steps).toEqual([]);
+    expect(machine.calls).toEqual([]);
+    expect(convergeExit(summary)).toBe(0);
   });
 });

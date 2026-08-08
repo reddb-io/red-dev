@@ -118,6 +118,22 @@ export interface ConvergeOptions {
   scopes: Scope[];
   dryRun: boolean;
   /**
+   * Run the privileged batch and skip everything else.
+   *
+   * The companion to deferring it. A converge that was declined, or that
+   * ran where nobody could answer a prompt, leaves a machine on which
+   * everything unprivileged has already converged — and re-running all
+   * of it to reach the one thing outstanding is half an hour spent
+   * repeating work that is done.
+   *
+   * An option on the loop rather than a second runner beside it, because
+   * the batch is only half of what this has to get right: the outcomes,
+   * the per-item reporting, the transcript and the exit status are the
+   * other half, and a copy of those is a second place for them to
+   * disagree with the converge they are meant to finish.
+   */
+  only?: "privileged";
+  /**
    * Where the privileged batch gets its rights. Injected in tests only;
    * nothing in the product passes it.
    */
@@ -198,7 +214,22 @@ export async function converge(
 ): Promise<ConvergeSummary> {
   const { platform: p, ctx, scopes, dryRun } = opts;
   const results: StepResult[] = [];
-  const total = countSteps(scopes);
+
+  // The privileged half of the plan, lifted out of the loop below and
+  // run after all of it.
+  //
+  // Declared per platform in the manifest, so this is a partition
+  // settled before anything executes rather than a discovery made at the
+  // item that needs the rights. Empty on every Linux target, where it
+  // costs a filter over a list and nothing else.
+  const batch = privilegedItems(p, scopes);
+  const batched = new Set(batch.map((t) => t.name));
+
+  // Resolved here because it decides the denominator as well as the
+  // work: a remainder that counts every step of a converge it is not
+  // going to run reports `[ 1/38]` for the only item it touches.
+  const onlyPrivileged = opts.only === "privileged";
+  const total = onlyPrivileged ? batch.length : countSteps(scopes);
   let index = 0;
 
   /**
@@ -259,17 +290,12 @@ export async function converge(
     return { finish, finishError };
   };
 
-  // The privileged half of the plan, lifted out of the loop below and
-  // run after all of it.
-  //
-  // Declared per platform in the manifest, so this is a partition
-  // settled before anything executes rather than a discovery made at the
-  // item that needs the rights. Empty on every Linux target, where it
-  // costs a filter over a list and nothing else.
-  const batch = privilegedItems(p, scopes);
-  const batched = new Set(batch.map((t) => t.name));
-
-  for (const scope of scopes) {
+  // Skipped entirely for a remainder, which leaves the batch below to
+  // run alone. Not filtered down to nothing item by item: an item that
+  // is skipped is still opened, reported and counted, and a remainder
+  // that prints thirty-seven rows of work it did not do buries the one
+  // row it did.
+  for (const scope of onlyPrivileged ? [] : scopes) {
     const tools = toolsInScope(scope).filter((t) => !batched.has(t.name));
     observer.scopeStart?.(scope, tools.length);
 
@@ -361,11 +387,16 @@ export async function converge(
         else finish("skipped", "dry run");
       }
     } else {
-      observer.note?.(
-        batch.length === 1
-          ? "1 item needs administrator — asked for once, here at the end"
-          : `${batch.length} items need administrator — asked for once, here at the end`,
-      );
+      // Where it sits in the run is the news, and a remainder has no run
+      // for it to sit at the end of — the caller has already announced
+      // that administrator is the whole subject.
+      if (!onlyPrivileged) {
+        observer.note?.(
+          batch.length === 1
+            ? "1 item needs administrator — asked for once, here at the end"
+            : `${batch.length} items need administrator — asked for once, here at the end`,
+        );
+      }
 
       observer.privilegedStart?.(batch.map((t) => t.name));
       let steps;

@@ -90,6 +90,15 @@ export function buildCli(): CLI {
       update: {
         description: "upgrade what the package managers own, then converge",
       },
+      privileged: {
+        // No positional and no flags, for the same reason `redwall` has
+        // none: what it does is settled by the manifest and by what this
+        // machine is still missing, so there is nothing here for the
+        // caller to decide. It is the command a deferred converge points
+        // at, and a command named in a remedy has to be typeable exactly
+        // as it was printed.
+        description: "finish only the work that needs administrator",
+      },
       doctor: {
         description: "report drift against the manifest",
       },

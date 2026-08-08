@@ -267,6 +267,83 @@ function endInstall(code: 0 | 1 | 2, deferred = 0): number {
   return code;
 }
 
+/**
+ * The privileged remainder, and nothing else.
+ *
+ * The command a deferred converge points at. Declining the consent
+ * prompt, or converging where nobody was there to answer one, leaves a
+ * machine whose unprivileged half is entirely done — and re-running the
+ * whole converge to reach the one item still outstanding is half an hour
+ * spent repeating work that finished the first time.
+ *
+ * The loop does the work, under `only: "privileged"`, so this shares the
+ * outcomes, the per-item rows, the transcript and the three exit codes
+ * with the converge it is finishing. A second runner beside it would be
+ * a second place for those to disagree, and they disagree about exactly
+ * the thing an operator came here to settle.
+ *
+ * Nothing outstanding is a success. The question a script asks is
+ * whether this machine is finished, and the answer does not depend on
+ * whether it took a consent prompt to get there.
+ */
+async function cmdPrivileged(p: Platform, inv: Invocation): Promise<number> {
+  const { privilegedItems } = await import("./privileged.ts");
+  const scopes = resolveScopes(p, inv.scope);
+  const items = privilegedItems(p, scopes);
+
+  // Answered before a context is built or the machine is probed. Every
+  // Ubuntu target lands here — privileged work there goes through sudo,
+  // which is its own path — and so does a Windows machine that already
+  // consented once. A summary of nothing reads as a failure to do
+  // something, so there is no summary.
+  if (items.length === 0) {
+    log.ok("nothing on this machine needs administrator");
+    return 0;
+  }
+
+  const ctx = await contextFor(p, inv, "install");
+  const { Reporter } = await import("./report.ts");
+  const { converge, convergeExit } = await import("./converge.ts");
+  const report = new Reporter();
+  // Announced as its own scope rather than left to the converge's note:
+  // this run has one subject, and the row counter needs a denominator
+  // before the first item opens.
+  report.scope("administrator", items.length);
+
+  let close:
+    | ((outcome: StepOutcome, detail?: string, remedy?: string) => void)
+    | null = null;
+  const summaryOf = await converge(
+    { platform: p, ctx, scopes, dryRun: false, only: "privileged" },
+    {
+      note: (message) => report.note(message),
+      stepStart: (e) => {
+        close = report.begin(e.tool, e.provider || "—");
+      },
+      stepEnd: (r) => {
+        close?.(r.outcome, r.detail, r.remedy);
+        close = null;
+      },
+    },
+  );
+  report.finish();
+
+  // The same three answers as a converge, and deliberately not the same
+  // three sentences: "converged" would claim a whole machine on the
+  // strength of one batch. A failure says nothing extra — the summary
+  // has just named it, item by item.
+  const code = convergeExit(summaryOf);
+  if (code === 0) log.ok("the privileged work is done");
+  else if (code === 2) {
+    log.warn(
+      summaryOf.deferred === 1
+        ? "one item is still waiting on rights this run did not have"
+        : `${summaryOf.deferred} items are still waiting on rights this run did not have`,
+    );
+  }
+  return code;
+}
+
 async function cmdUpdate(p: Platform, inv: Invocation): Promise<number> {
   try {
     await systemUpdate(p);
@@ -1080,6 +1157,8 @@ async function main(): Promise<number> {
       return await cmdInstall(p, inv);
     case "update":
       return await cmdUpdate(p, inv);
+    case "privileged":
+      return await cmdPrivileged(p, inv);
     case "theme":
       return await cmdTheme(p, inv, inv.scope);
     case "redwall":
