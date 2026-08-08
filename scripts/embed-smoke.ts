@@ -19,6 +19,7 @@ import { basename } from "node:path";
 import rc from "../config/bash/rc.sh" with { type: "text" };
 import aliases from "../config/bash/aliases.sh" with { type: "text" };
 import wallpaper from "../assets/wallpapers/obsidian.png" with { type: "file" };
+import font from "../assets/fonts/redwall-firacode-subset.ttf" with { type: "file" };
 
 console.log("rc.sh bytes:", rc.length);
 console.log("aliases.sh bytes:", aliases.length);
@@ -45,6 +46,42 @@ if (!signatureOk) {
 if (bytes.length < 1024) {
   console.error(`embed-smoke: the PNG is ${bytes.length} bytes, which is not a wallpaper`);
   process.exit(1);
+}
+
+// The Redwall font subset, which travels the same way and fails the same
+// way. A TTF has no signature as memorable as PNG's: the first four
+// bytes are the sfnt version, 0x00010000 for TrueType outlines, and a
+// UTF-8 round trip mangles them into something that is still four bytes
+// long. Reading a table out of the directory is the cheap way to say the
+// file arrived whole rather than merely arrived — cmap is the one the
+// subset exists to carry.
+const fontBytes = await Bun.file(font).bytes();
+const fontView = new DataView(fontBytes.buffer, fontBytes.byteOffset, fontBytes.byteLength);
+const sfntOk = fontBytes.length > 12 && fontView.getUint32(0) === 0x00010000;
+
+let tags: string[] = [];
+if (sfntOk) {
+  const count = fontView.getUint16(4);
+  for (let i = 0; i < count; i++) {
+    const at = 12 + 16 * i;
+    tags.push(String.fromCharCode(...fontBytes.subarray(at, at + 4)));
+  }
+}
+
+console.log("font path:", basename(font));
+console.log("font bytes:", fontBytes.length);
+console.log("font sfnt:", sfntOk ? "truetype" : "NOT A TTF");
+console.log("font tables:", tags.join(" ") || "none");
+
+if (!sfntOk) {
+  console.error("embed-smoke: the font did not survive compilation");
+  process.exit(1);
+}
+for (const required of ["cmap", "glyf", "head", "hmtx", "loca", "maxp"]) {
+  if (!tags.includes(required)) {
+    console.error(`embed-smoke: the embedded font has no '${required}' table`);
+    process.exit(1);
+  }
 }
 
 console.log("EMBED OK");

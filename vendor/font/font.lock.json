@@ -1,0 +1,48 @@
+{
+  "source": "ryanoasis/nerd-fonts",
+  "ref": "v3.5.0",
+  "commit": "bbb2db23a131139161d66a9b526a6fdc79875c92",
+  "nearestTag": "v3.5.0",
+  "why": [
+    "A release and its commit, which is the thing vendor/brand could not have. ryanoasis/nerd-fonts tags every release and publishes the patched faces as assets on it, so `ref`, `nearestTag` and `commit` all name the same point in history rather than papering over a gap.",
+    "The face is the Mono variant because that is the family red-dev already installs — src/wsl.ts names 'FiraCode Nerd Font Mono' — and because a fixed advance is what lets an overlay lay out a dotted quad without measuring anything.",
+    "Nerd Fonts patches icons into upstream tonsky/FiraCode and changes nothing about the Latin outlines Redwall draws. Subsetting from the patched face rather than from tonsky's keeps one provenance chain instead of two, and leaves the door open for a later slice that wants a glyph from the patched ranges.",
+    "The upstream OFL declares no Reserved Font Name — the copyright line is 'The Fira Code Project Authors' with no reservation — so the subset keeps the original name table and its attribution travels with it. If a future re-vendor takes a face that does reserve its name, the name table has to be rewritten and this line is the one that should stop it."
+  ],
+  "license": {
+    "id": "OFL-1.1",
+    "file": "vendor/font/LICENSE-OFL.txt",
+    "from": "LICENSE",
+    "sha256": "1d41e10031ab125302780a05ec4c91d218e47db0c7e37cf315cce5e608cdc25c",
+    "why": "A subset is a Modified Version under OFL 1.1 clause 2, so the licence travels with it. The wallpapers next door are vendored unaltered and need no such file."
+  },
+  "upstream": {
+    "asset": "FiraCode.tar.xz",
+    "url": "https://github.com/ryanoasis/nerd-fonts/releases/download/v3.5.0/FiraCode.tar.xz",
+    "sha256": "32226dc81bb30ea421cdc49ba2134b93c2b43096992c829504a3004d2537420d",
+    "face": "FiraCodeNerdFontMono-Regular.ttf",
+    "faceSha256": "26541bcfc75cd030aeeae9d7e24211be32f1fe7c6c9ceaa05c94759d1bb9ba0c",
+    "faceBytes": 2713228,
+    "faceGlyphs": 12780
+  },
+  "subset": {
+    "path": "assets/fonts/redwall-firacode-subset.ttf",
+    "sha256": "13b1d404e058f6fae8ffd1657279c6c0e25d60b36a90d7b5faa573a09281a7c2",
+    "bytes": 4932,
+    "glyphCount": 23,
+    "characters": " .0123456789:AEKLNORSW",
+    "unaltered": false,
+    "generatedBy": "scripts/vendor-font.ts",
+    "dropped": [
+      "GSUB",
+      "GPOS",
+      "GDEF",
+      "gasp",
+      "cvt ",
+      "fpgm",
+      "prep",
+      "glyph instructions",
+      "post glyph names"
+    ]
+  }
+}
