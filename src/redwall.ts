@@ -207,6 +207,35 @@ export async function sweepSupersededRedwalls(
   return removed;
 }
 
+/**
+ * Delete the whole Redwall directory, and report whether there was one.
+ *
+ * Uninstall's half of the sweep above. The sweep spares the image on
+ * screen because something is about to replace it; here nothing is, and
+ * a desktop pointed at a file red-dev is removing is the state the user
+ * asked for — the alternative is leaving a 4K PNG behind to keep an
+ * unowned wallpaper setting company.
+ *
+ * The directory rather than its `.png` files, because an empty
+ * `redwall/` under a removed tool's root is still a trace of the
+ * feature, and unlike the sweep there is no next generation that needs
+ * somewhere to land. Nothing outside it is touched: the sibling
+ * `wallpapers/` is a different directory with a different owner, and a
+ * wallpaper somebody chose by hand is a decision that outlives the tool
+ * uninstalled around it.
+ *
+ * Null, not an empty list, when there was nothing here. Redwall is off
+ * by default, so "this machine never generated one" is the common
+ * answer and has to read as success rather than as a thing that failed
+ * to happen.
+ */
+export async function removeRedwall(p: Platform): Promise<string | null> {
+  const dir = await redwallDir(p);
+  if (!existsSync(dir)) return null;
+  rmSync(dir, { recursive: true, force: true });
+  return dir;
+}
+
 async function currentlyDisplayed(
   p: Platform,
   inUse: (() => Promise<string | null>) | undefined,
