@@ -66,6 +66,29 @@ async function rm(path: string): Promise<boolean> {
 // ----------------------------------------------------------- zellij
 
 /**
+ * Every directory a zellij on this machine might read.
+ *
+ * `configHome` answers where red-dev *writes* zellij's configuration,
+ * and on a machine with a share that is the share — zellij is in
+ * ADOPTABLE, and rc.sh exports ZELLIJ_CONFIG_DIR to match. Which made
+ * the cleanup below sweep exactly one of the two places the colours can
+ * be, and the wrong one: the share was provisioned after ADR 0003 and
+ * was already clean, while `~/.config/zellij` still held the theme file
+ * and the `theme "red-dev"` line from before the share existed.
+ *
+ * That leftover is invisible for as long as ZELLIJ_CONFIG_DIR is set,
+ * and comes back the moment a zellij starts without it — from a desktop
+ * launcher, a fresh login shell, the Windows side. So both are swept,
+ * and a machine with no share simply has the two collapse into one.
+ */
+function zellijDirs(p: Platform): string[] {
+  const home = process.env["HOME"] ?? process.env["USERPROFILE"];
+  const dirs = [`${configHome(p, "zellij")}/zellij`];
+  if (home) dirs.push(`${home}/.config/zellij`);
+  return [...new Set(dirs)];
+}
+
+/**
  * zellij, released.
  *
  * The theme file goes and the `theme "red-dev"` line with it, which
@@ -78,7 +101,15 @@ async function rm(path: string): Promise<boolean> {
  * broken multiplexer.
  */
 export async function clearZellij(p: Platform): Promise<boolean> {
-  const dir = `${configHome(p, "zellij")}/zellij`;
+  let touched = false;
+  for (const dir of zellijDirs(p)) {
+    if (await clearZellijDir(dir)) touched = true;
+  }
+  return touched;
+}
+
+/** One config directory, swept. Absent is not an error. */
+async function clearZellijDir(dir: string): Promise<boolean> {
   let touched = await rm(`${dir}/themes/red-dev.kdl`);
 
   const configPath = `${dir}/config.kdl`;

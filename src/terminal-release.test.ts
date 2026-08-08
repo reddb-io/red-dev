@@ -22,6 +22,7 @@ import type { Platform } from "./platform.ts";
 
 let dir: string;
 let prevHome: string | undefined;
+let prevShare: string | undefined;
 
 /**
  * A platform with no share, so configHome resolves to HOME and the temp
@@ -40,11 +41,18 @@ beforeEach(() => {
   dir = mkdtempSync(`${tmpdir()}/red-dev-release-`);
   prevHome = process.env["HOME"];
   process.env["HOME"] = dir;
+  // Cleared, not just remembered: a developer running these inside a
+  // red-dev shell has a real share exported, and configHome would then
+  // resolve out of the temp directory the whole suite assumes.
+  prevShare = process.env["RED_SHARE_WIN"];
+  delete process.env["RED_SHARE_WIN"];
 });
 
 afterEach(() => {
   if (prevHome === undefined) delete process.env["HOME"];
   else process.env["HOME"] = prevHome;
+  if (prevShare === undefined) delete process.env["RED_SHARE_WIN"];
+  else process.env["RED_SHARE_WIN"] = prevShare;
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -94,6 +102,34 @@ describe("zellij", () => {
     const once = await Bun.file(conf).text();
     expect(await clearZellij(platform())).toBe(false);
     expect(await Bun.file(conf).text()).toBe(once);
+  });
+
+  /**
+   * The bug this guards: `configHome` points at the share on a machine
+   * that has one, so sweeping only there left the pre-share colours in
+   * `~/.config/zellij` — dormant while ZELLIJ_CONFIG_DIR is exported,
+   * back the moment a zellij starts without it.
+   *
+   * The share is faked by pointing configHome's own inputs at the temp
+   * directory rather than by stubbing it, so the test exercises the
+   * resolution that was wrong rather than asserting around it.
+   */
+  test("the local copy goes too, on a machine whose share is elsewhere", async () => {
+    const share = `${dir}/share`;
+    mkdirSync(`${share}/config/zellij`, { recursive: true });
+    // A desktop platform leaves localPath's Windows spelling alone, so
+    // the recorded root can be the temp path itself.
+    process.env["RED_SHARE_WIN"] = share;
+
+    const localTheme = await write(".config/zellij/themes/red-dev.kdl", "themes {\n red-dev {}\n}\n");
+    const localConf = await write(".config/zellij/config.kdl", `${KEYS}\ntheme "red-dev"\n`);
+
+    expect(await clearZellij(platform())).toBe(true);
+    expect(existsSync(localTheme)).toBe(false);
+
+    const after = await Bun.file(localConf).text();
+    expect(after).not.toContain("red-dev");
+    expect(after).toContain('bind "Ctrl g"');
   });
 });
 
