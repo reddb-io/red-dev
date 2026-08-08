@@ -13,6 +13,7 @@ import { copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { log, logIsCaptured, RedError } from "./log.ts";
 import type { Provider } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
+import { missingRights } from "./rights.ts";
 
 /**
  * Inheriting stdin is only safe when there is a real terminal behind it.
@@ -150,11 +151,11 @@ export async function requireSudo(): Promise<void> {
     stderr: "ignore",
     stdin: "ignore",
   });
+  // The wording lives in rights.ts, where the Windows sibling of this
+  // refusal lives too. Same bytes as before — this branch is where the
+  // shared classification came from, not somewhere it was applied.
   if ((await probe.exited) !== 0) {
-    throw new RedError(
-      "sudo needs a password and nothing here can supply one.\n" +
-        "      Run `sudo -v` first, then re-run red-dev — or run it as root.",
-    );
+    throw new RedError(missingRights("sudo").message);
   }
   sudoChecked = true;
 }
