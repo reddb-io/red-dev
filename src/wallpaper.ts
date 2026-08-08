@@ -60,20 +60,56 @@ function home(): string {
 }
 
 /**
- * Where the image has to live for the machine that will display it.
+ * Where images have to live for the machine that will display them.
  *
  * Under WSL this must be the Windows filesystem, not the distro's. A
  * wallpaper at \\wsl.localhost\... only renders while the distro is
  * running: shut WSL down and the desktop goes black, and every login
  * reads it across the 9p bridge. The host's own disk has neither
  * problem.
+ *
+ * The root rather than the wallpaper directory, because Redwall writes
+ * beside it under the same rule and a second copy of this reasoning is a
+ * second chance for one of them to be wrong about WSL.
  */
-export async function wallpaperDir(p: Platform): Promise<string> {
+export async function imageRoot(p: Platform): Promise<string> {
   if (p.env === "wsl") {
     const { windowsLocalAppData } = await import("./wsl.ts");
-    return `${await windowsLocalAppData()}/red-dev/wallpapers`;
+    return `${await windowsLocalAppData()}/red-dev`;
   }
-  return `${home()}/.local/share/red-dev/wallpapers`;
+  return `${home()}/.local/share/red-dev`;
+}
+
+/** Where the theme's own art is copied to, and nothing else. */
+export async function wallpaperDir(p: Platform): Promise<string> {
+  return `${await imageRoot(p)}/wallpapers`;
+}
+
+/**
+ * Eight hex of a sha256, which is how red-dev names an image after its
+ * contents.
+ *
+ * Shared with Redwall rather than spelled twice, because the two
+ * directories name files for the same reason — new bytes must be a new
+ * path, or a desktop that caches by path goes on showing the old image —
+ * and a convention that is written down once cannot drift.
+ */
+export function shortDigest(bytes: Uint8Array): string {
+  return new Bun.CryptoHasher("sha256").update(bytes).digest("hex").slice(0, 8);
+}
+
+/**
+ * The theme's sheet, as bytes, from the binary.
+ *
+ * Exported for Redwall, which composes over the same art the desktop
+ * would otherwise carry. Reading it back out of the wallpapers directory
+ * would make the overlay depend on a converge having run first; the
+ * embedded bytes are the source and the file on disk is a copy of them.
+ */
+export async function wallpaperBytes(key: string): Promise<Uint8Array> {
+  const source = EMBEDDED[key as ThemeSlug];
+  if (!source) throw new Error(`no wallpaper for theme '${key}'`);
+  return await Bun.file(source).bytes();
 }
 
 /**
@@ -90,11 +126,8 @@ export async function wallpaperDir(p: Platform): Promise<string> {
  */
 export async function materialise(theme: Theme, key: string, p: Platform): Promise<string> {
   void theme;
-  const source = EMBEDDED[key as ThemeSlug];
-  if (!source) throw new Error(`no wallpaper for theme '${key}'`);
-
-  const bytes = await Bun.file(source).bytes();
-  const digest = new Bun.CryptoHasher("sha256").update(bytes).digest("hex").slice(0, 8);
+  const bytes = await wallpaperBytes(key);
+  const digest = shortDigest(bytes);
 
   const dir = await wallpaperDir(p);
   mkdirSync(dir, { recursive: true });
@@ -109,13 +142,17 @@ export async function materialise(theme: Theme, key: string, p: Platform): Promi
  * Used to tell a retired image from one somebody chose by hand: the
  * sweep below deletes the first and doctor reports it, while a wallpaper
  * outside red-dev's own directory is a decision and is left alone.
+ *
+ * The set is finite — six themes, six names — and that is the property
+ * the whole scheme rests on. It is also why a Redwall is written
+ * somewhere else: a generated image changes whenever the state it shows
+ * changes, so admitting one here would make this set unbounded and
+ * leave the sweep unable to tell either kind of image apart.
  */
 export async function expectedWallpaperNames(): Promise<Set<string>> {
   const names = new Set<string>();
   for (const slug of THEME_SLUGS) {
-    const bytes = await Bun.file(EMBEDDED[slug]).bytes();
-    const digest = new Bun.CryptoHasher("sha256").update(bytes).digest("hex").slice(0, 8);
-    names.add(`${slug}-${digest}.png`);
+    names.add(`${slug}-${shortDigest(await wallpaperBytes(slug))}.png`);
   }
   return names;
 }
