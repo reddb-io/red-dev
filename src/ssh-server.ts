@@ -129,38 +129,51 @@ export async function installSshServerLinux(p: Platform): Promise<void> {
  * matched by port: Windows ships `OpenSSH-Server-In-TCP` with some
  * builds and not others, and adding a second rule for 22 each converge
  * is how a rule list becomes unreadable.
+ *
+ * Every step here is guarded, which is what lets the same text run
+ * again after a converge that got halfway: a capability already
+ * installed, a service already running and a rule already present are
+ * three no-ops, not three errors.
+ *
+ * Exported because the privileged batch composes it with every other
+ * item that needs administrator, so one consent covers all of them. That
+ * is also why the missing-capability branch nests the rest instead of
+ * calling `exit 0`: composed, an exit would abandon the sections after
+ * this one and the report they all write at the end.
  */
-const WINDOWS_SCRIPT = `
+export const windowsSshServerScript = `
 $ErrorActionPreference = 'Stop'
 
 $cap = Get-WindowsCapability -Online -Name 'OpenSSH.Server*' |
   Select-Object -First 1
-if (-not $cap) { 'openssh-capability-missing'; exit 0 }
-
-if ($cap.State -ne 'Installed') {
-  Add-WindowsCapability -Online -Name $cap.Name | Out-Null
-  "installed $($cap.Name)"
+if (-not $cap) {
+  'openssh-capability-missing'
 } else {
-  'capability already installed'
-}
+  if ($cap.State -ne 'Installed') {
+    Add-WindowsCapability -Online -Name $cap.Name | Out-Null
+    "installed $($cap.Name)"
+  } else {
+    'capability already installed'
+  }
 
-# Automatic, not Manual: the capability leaves it Manual, which survives
-# exactly until the next reboot.
-Set-Service -Name sshd -StartupType Automatic
-if ((Get-Service sshd).Status -ne 'Running') {
-  Start-Service sshd
-  'sshd started'
-} else {
-  'sshd already running'
-}
+  # Automatic, not Manual: the capability leaves it Manual, which
+  # survives exactly until the next reboot.
+  Set-Service -Name sshd -StartupType Automatic
+  if ((Get-Service sshd).Status -ne 'Running') {
+    Start-Service sshd
+    'sshd started'
+  } else {
+    'sshd already running'
+  }
 
-if (-not (Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue)) {
-  New-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' \`
-    -DisplayName 'OpenSSH Server (sshd)' \`
-    -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 | Out-Null
-  'firewall rule added for TCP 22'
-} else {
-  'firewall rule already present'
+  if (-not (Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue)) {
+    New-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' \`
+      -DisplayName 'OpenSSH Server (sshd)' \`
+      -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 | Out-Null
+    'firewall rule added for TCP 22'
+  } else {
+    'firewall rule already present'
+  }
 }
 `.trim();
 
@@ -178,7 +191,7 @@ export async function installSshServerWindows(p: Platform): Promise<void> {
     return;
   }
 
-  const proc = Bun.spawn(["powershell.exe", "-NoProfile", "-Command", WINDOWS_SCRIPT], {
+  const proc = Bun.spawn(["powershell.exe", "-NoProfile", "-Command", windowsSshServerScript], {
     stdout: "pipe",
     stderr: "pipe",
     stdin: "ignore",

@@ -261,6 +261,18 @@ export function useInstallModel(
           releaseBatch = null;
           if (error) push(`    ${error}`);
         },
+        // The same redirect as apt, for the same reason and never at the
+        // same time: apt runs at the head of a scope, this runs after
+        // the last step of the run has closed.
+        privilegedStart: (items) => {
+          setCurrent("administrator");
+          releaseBatch = captureTo((line) => push(`    ${plain(line)}`));
+          push(`   administrator: ${items.length} item(s) behind one consent`);
+        },
+        privilegedEnd: () => {
+          releaseBatch?.();
+          releaseBatch = null;
+        },
         stepStart: (e) => {
           setCurrent(e.tool);
           // Hold provider chatter so it lands under its own step rather

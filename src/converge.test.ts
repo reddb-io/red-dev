@@ -8,7 +8,8 @@
 
 import { describe, expect, test } from "bun:test";
 import { converge, countSteps, type StepResult } from "./converge.ts";
-import { toolsInScope } from "./manifest.ts";
+import { applicableScopes, toolsInScope } from "./manifest.ts";
+import { privilegedItems } from "./privileged.ts";
 import type { Platform } from "./platform.ts";
 
 const wsl: Platform = {
@@ -19,6 +20,23 @@ const wsl: Platform = {
   env: "wsl",
   arch: "x64",
   caps: { apt: true, gui: false, systemd: true, winget: true, flatpak: true },
+};
+
+/**
+ * The one target with privileged items in it.
+ *
+ * A dry run is the only way to watch a Windows converge from here, and
+ * it is enough for the question this asks: where the privileged items
+ * appear in the run, not what they do when they get there.
+ */
+const windows: Platform = {
+  os: "windows",
+  distro: null,
+  version: null,
+  codename: null,
+  env: "windows",
+  arch: "x64",
+  caps: { apt: false, gui: true, systemd: false, winget: true, flatpak: false },
 };
 
 const ctx = { platform: wsl, theme: "dark", font: "firacode", opacity: 90 };
@@ -114,5 +132,45 @@ describe("converge", () => {
     const { events } = await run(["core", "optional"]);
     const scopes = events.filter((e) => e.startsWith("scope:")).map((e) => e.split(":")[1]);
     expect(scopes).toEqual(["core", "optional"]);
+  });
+});
+
+describe("the privileged batch", () => {
+  const scopes = applicableScopes(windows);
+
+  async function runWindows(): Promise<string[]> {
+    const events: string[] = [];
+    await converge(
+      { platform: windows, ctx: { ...ctx, platform: windows }, scopes, dryRun: true },
+      { stepEnd: (r) => events.push(r.tool) },
+    );
+    return events;
+  }
+
+  test("runs after every unprivileged item, never between them", async () => {
+    // The whole point of batching. An item that needs administrator
+    // interrupts whatever is on the screen, so it interrupts at the end
+    // or it interrupts a run someone is still watching.
+    const order = await runWindows();
+    const batch = privilegedItems(windows, scopes).map((t) => t.name);
+    expect(batch.length).toBeGreaterThan(0);
+    expect(order.slice(-batch.length)).toEqual(batch);
+  });
+
+  test("and each of its items is stepped exactly once", async () => {
+    // Moved to the end, not duplicated there: an item reported twice
+    // makes a converge look like it did the work twice, and the counts
+    // the summary is built from stop adding up.
+    const order = await runWindows();
+    expect(order).toHaveLength(countSteps(scopes));
+    expect(new Set(order).size).toBe(order.length);
+  });
+
+  test("a target with no privileged items is untouched by any of it", async () => {
+    // The common case, and it must stay exactly as it was: same items,
+    // same order, nothing lifted out and nothing appended.
+    const { events } = await run(["core"]);
+    const order = events.filter((e) => e.startsWith("end:")).map((e) => e.split(":")[1]);
+    expect(order).toEqual(toolsInScope("core").map((t) => t.name));
   });
 });
