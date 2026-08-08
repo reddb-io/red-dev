@@ -31,9 +31,9 @@
  */
 
 import type { PrivilegedState } from "./drift.ts";
-import { log } from "./log.ts";
+import { log, RedError } from "./log.ts";
 import type { Platform } from "./platform.ts";
-import { classifyRights, missingRights } from "./rights.ts";
+import { classifyRights } from "./rights.ts";
 
 /** Ran, and what it printed. */
 interface Ran {
@@ -77,14 +77,23 @@ async function linuxUnit(): Promise<string | null> {
 export async function installSshServerLinux(p: Platform): Promise<void> {
   const install = await run(["sudo", "-n", "apt-get", "install", "-y", "openssh-server"]);
   if (!install.ok) {
-    // Same wording as the rest of the converge, and now literally the
-    // same wording: sudo that needs a password cannot be answered from
-    // here, and that is not a bug. `sudo -n` is the same non-blocking
-    // probe the shared gate uses, so a failure here means the gate.
-    const denied = missingRights("sudo");
-    log.warn(`openssh-server: ${denied.cause}`);
-    log.plain(`       ${denied.remedy}`);
-    return;
+    // Raised rather than warned past, and this is the item that made
+    // the distinction necessary. Warning and returning left the converge
+    // recording an `applied` it had not applied: the one item that
+    // regularly runs out of rights reported success, and the sentence
+    // explaining why it had not scrolled away with everything else.
+    // Thrown, it reaches the loop, which reads the wording back and
+    // reports the item as deferred — beside the failures, not among
+    // them.
+    const denied = classifyRights(install.out, "sudo");
+    if (denied) throw new RedError(denied.message);
+
+    // sudo refusing and apt refusing are different answers. `sudo -n`
+    // says so in its own words, so anything else here is apt's — a
+    // package that does not exist on this release, an archive that is
+    // unreachable — and it has no remedy involving elevation. Calling it
+    // one sends an operator to raise a shell that changes nothing.
+    throw new RedError(`openssh-server: ${install.out.split("\n")[0] ?? "apt-get failed"}`);
   }
 
   if (!p.caps.systemd) {
@@ -184,17 +193,15 @@ export async function installSshServerWindows(p: Platform): Promise<void> {
     // mistake. Asked of the one classifier so this reads exactly like
     // every other item that runs out of rights, instead of handing the
     // operator the first line of a DISM stack trace to decode.
+    // Raised so the converge can report it as deferred rather than as
+    // done: an unelevated run has not configured this, and a warning
+    // under an `applied` row is a claim the machine cannot back up.
     const denied = classifyRights(err, "administrator");
-    if (denied) {
-      log.warn(`the OpenSSH server: ${denied.cause}`);
-      log.plain(`       ${denied.remedy}`);
-      return;
-    }
+    if (denied) throw new RedError(denied.message);
 
-    // Anything else really is a failure, and keeps its own reporting.
+    // Anything else really is a failure, and is raised as one.
     const first = err.split("\n")[0] ?? "unknown";
-    log.warn(`could not configure the OpenSSH server: ${first}`);
-    return;
+    throw new RedError(`could not configure the OpenSSH server: ${first}`);
   }
 
   for (const line of out.split("\n").map((l) => l.trim()).filter(Boolean)) {

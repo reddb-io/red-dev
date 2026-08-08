@@ -84,6 +84,30 @@ export function missingRights(gate: Gate): MissingRights {
 }
 
 /**
+ * The refusal behind one of our own error messages, if that is what it is.
+ *
+ * The inverse of missingRights, and the reason it can be an inverse at
+ * all: every gate refusal in this program is worded above, so a message
+ * carrying one of those causes came from here rather than from a
+ * provider inventing its own wording for a failure.
+ *
+ * The converge needs it because an exception flattens both into the same
+ * string. Work that was deferred for lack of rights and work that broke
+ * arrive at the same catch, and telling them apart there is what lets a
+ * healthy, partly-converged machine stop reporting as a broken one.
+ *
+ * classifyRights asks the same question of a *command's* output, where
+ * the tells are whatever Windows felt like printing that day. This one
+ * asks it of a message whose bytes are known exactly, which is why it
+ * matches on the cause rather than on a list of guesses.
+ */
+export function refusedRights(message: string): MissingRights | null {
+  const gates = Object.keys(WORDING) as Gate[];
+  const gate = gates.find((g) => message.includes(WORDING[g].cause));
+  return gate ? missingRights(gate) : null;
+}
+
+/**
  * How each gate spells a refusal, lower-cased for comparison.
  *
  * Windows has no single spelling. One product, several components, and

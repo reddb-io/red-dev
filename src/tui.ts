@@ -126,6 +126,14 @@ export interface TuiResult {
   theme?: string;
   /** Failures, when the converge ran inside the interface. */
   failed?: number;
+  /**
+   * Items that ran out of rights, counted apart from the failures.
+   *
+   * Carried separately all the way out because the caller turns it into
+   * an exit status, and the whole point of the outcome is that these two
+   * numbers are not the same news.
+   */
+  deferred?: number;
 }
 
 
@@ -225,8 +233,8 @@ export async function runTui(
     // between frames; the converge does not begin until begin() is
     // called, which is what the Enter key does.
     const model = install
-      ? useInstallModel(install, logScroll, (failed) => {
-          result = { action: "installed", failed };
+      ? useInstallModel(install, logScroll, ({ failed, deferred }) => {
+          result = { action: "installed", failed, deferred };
         })
       : null;
 
