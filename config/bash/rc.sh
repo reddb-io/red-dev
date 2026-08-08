@@ -44,6 +44,31 @@ if [ -r "$HOME/.config/red-dev/env.sh" ]; then
   . "$HOME/.config/red-dev/env.sh"
 fi
 
+# COLORTERM, on the two targets whose terminal cannot hand it over.
+#
+# Alacritty, Windows Terminal and the VS Code terminal all export
+# COLORTERM=truecolor, and none of it survives the boundary: wsl.exe
+# passes only what WSLENV names, and Git Bash starts from its own
+# environment rather than the launching one. So a shell objectively
+# attached to a 24-bit terminal reports no capability at all, and a
+# program that asks before it paints degrades to the sixteen ANSI slots.
+#
+# The visible casualty was the statusline. It asks for neutral.900
+# #12141b as 24-bit; answered from the palette instead, that lands in
+# the blue slot, which is why a line built entirely from a red-and-grey
+# brand rendered with a blue background.
+#
+# Sourced after env.sh so a recorded answer wins, and set only when the
+# variable is empty so a terminal that did manage to say something keeps
+# the last word. Never for the two TERMs that mean "no colour at all":
+# claiming truecolor on a Linux console is the same lie pointing the
+# other way.
+if [ -z "${COLORTERM:-}" ] &&
+  { [ "$RED_ENV" = "wsl" ] || [ "$RED_ENV" = "windows" ]; } &&
+  [ "${TERM:-dumb}" != "dumb" ] && [ "${TERM:-}" != "linux" ]; then
+  export COLORTERM=truecolor
+fi
+
 # ble.sh, when opted in.
 #
 # It has to load before everything else and attach after everything
