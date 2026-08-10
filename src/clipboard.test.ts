@@ -332,3 +332,35 @@ describe("imports when there is a shared root", () => {
     expect(repairedImports(settled, req)).toBeNull();
   });
 });
+
+/**
+ * The keys file, and the promise it used to break.
+ *
+ * `keys.toml` is rewritten on every converge, so a binding a person adds
+ * to it is gone at the next run. The source comment beside the write
+ * claimed the opposite — that someone tuning bindings "does not lose it
+ * on every run" — and the file's own header said nothing at all. Someone
+ * edited it and lost the edit, which is the only way that kind of
+ * disagreement gets found.
+ *
+ * Asserted against the generated text rather than a constant, so the
+ * warning cannot be deleted while the behaviour it describes stays.
+ */
+describe("the generated keys file", () => {
+  const keys = readFileSync("src/alacritty.ts", "utf8");
+  const generated = keys.slice(keys.indexOf("function keysToml"), keys.indexOf("const SHARED_PARTS"));
+
+  test("warns that it is rewritten, and says where user bindings go", () => {
+    expect(generated).toContain("REWRITTEN ON EVERY CONVERGE");
+    expect(generated).toContain("alacritty.toml");
+  });
+
+  test("declares the new-window binding instead of inheriting a default", () => {
+    // Alacritty binds Ctrl+Shift+N itself on Linux and BSD. Relying on
+    // that made the key a property of the platform rather than of this
+    // project, and it is the four targets behaving alike that red-dev
+    // exists for.
+    expect(generated).toContain("CreateNewWindow");
+    expect(generated).toMatch(/key = 'N'\nmods = 'Control\|Shift'/);
+  });
+});
