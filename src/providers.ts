@@ -289,11 +289,31 @@ interface GhAsset {
 }
 
 /**
+ * Which release to ask for: the newest, or one named tag.
+ *
+ * Exported and separate from the fetch so the choice can be asserted
+ * without a network — the pin is worth nothing if this silently keeps
+ * resolving /latest, and that is a failure no unit test would see if the
+ * URL were built inline.
+ */
+export function releaseApiUrl(repo: string, version?: string): string {
+  const which = version ? `tags/${version}` : "latest";
+  return `https://api.github.com/repos/${repo}/releases/${which}`;
+}
+
+/**
  * Resolve a release asset by matching a glob against the names the
  * release actually publishes. Never construct the filename from a
  * pinned version — see the note on the `gh` provider in manifest.ts.
+ *
+ * `version` names a tag to hold to; without it this is /releases/latest,
+ * which is what every unpinned tool still gets.
  */
-export async function resolveGhAsset(repo: string, glob: string): Promise<string> {
+export async function resolveGhAsset(
+  repo: string,
+  glob: string,
+  version?: string,
+): Promise<string> {
   const headers: Record<string, string> = { Accept: "application/vnd.github+json" };
   const token = process.env["GITHUB_TOKEN"];
   if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -303,7 +323,7 @@ export async function resolveGhAsset(repo: string, glob: string): Promise<string
   // and nothing else — never even the "github: …" line, which is logged
   // after this call returns — so the API request was where it sat, with
   // no child process to notice and no error to report.
-  const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+  const res = await fetch(releaseApiUrl(repo, version), {
     headers,
     signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
   }).catch((err: unknown) => {
@@ -314,6 +334,11 @@ export async function resolveGhAsset(repo: string, glob: string): Promise<string
   if (!res.ok) {
     throw new RedError(
       `GitHub API ${res.status} for ${repo}` +
+        // A pinned tag has a failure of its own: 404 here means the tag
+        // does not exist, usually because it was written as a version
+        // when the publisher prefixes with `v`. Saying which tag was
+        // asked for is the difference between a one-line fix and a hunt.
+        (version && res.status === 404 ? ` — no release tagged '${version}'` : "") +
         (res.status === 403 ? " — rate limited, set GITHUB_TOKEN" : ""),
     );
   }
@@ -326,7 +351,7 @@ export async function resolveGhAsset(repo: string, glob: string): Promise<string
   if (!hit) {
     const available = assets.map((a) => `  ${a.name}`).join("\n");
     throw new RedError(
-      `no asset matching '${glob}' in latest ${repo} release.\nAvailable:\n${available}`,
+      `no asset matching '${glob}' in ${version ?? "latest"} ${repo} release.\nAvailable:\n${available}`,
     );
   }
   return hit.browser_download_url;
@@ -336,8 +361,9 @@ export async function ghInstall(
   repo: string,
   glob: string,
   bin?: string,
+  version?: string,
 ): Promise<void> {
-  const url = await resolveGhAsset(repo, glob);
+  const url = await resolveGhAsset(repo, glob, version);
   const file = url.split("/").pop() ?? "asset";
   log.step(`github: ${repo} -> ${file}`);
 
@@ -417,8 +443,9 @@ export async function ghInstallWindows(
   glob: string,
   bin?: string,
   silentArgs?: string[],
+  version?: string,
 ): Promise<void> {
-  const url = await resolveGhAsset(repo, glob);
+  const url = await resolveGhAsset(repo, glob, version);
   const file = url.split("/").pop() ?? "asset";
   log.step(`github: ${repo} -> ${file}`);
 
@@ -817,9 +844,9 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
       // into two provider kinds would put the same repo in two places
       // and let them drift.
       if (ctx.platform.os === "windows") {
-        await ghInstallWindows(pr.repo, pr.asset, pr.bin, pr.silentArgs);
+        await ghInstallWindows(pr.repo, pr.asset, pr.bin, pr.silentArgs, pr.version);
       } else {
-        await ghInstall(pr.repo, pr.asset, pr.bin);
+        await ghInstall(pr.repo, pr.asset, pr.bin, pr.version);
       }
       return;
     case "ppa":
