@@ -171,6 +171,23 @@ export interface Tool {
    */
   cmd?: string[];
   /**
+   * A file whose existence is the proof, for packages that ship no
+   * binary at all.
+   *
+   * Every probe above answers "is there a command on PATH", which is the
+   * right question for all but one shape of package. bash-completion
+   * installs a shell library and nothing executable, so probing by name
+   * asked for `bash-completion` on PATH, never found it, and reported
+   * the package absent on a machine where dpkg said `install ok
+   * installed`. The converge then tried to install it on every run,
+   * forever, and each run named it as a problem.
+   *
+   * The path is the same one the code that consumes the package already
+   * reads, which is what keeps this honest: a declaration pointing
+   * somewhere nothing uses would pass its own test and prove nothing.
+   */
+  file?: string;
+  /**
    * Proof that the command on PATH is the tool we mean.
    *
    * A name is not an identity. Ubuntu ships /usr/bin/red — GNU ed's
@@ -350,6 +367,11 @@ export const TOOLS: Tool[] = [
     // package that would put one where MSYS bash reads from.
     name: "bash-completion",
     scope: "core",
+    // The file config/bash/init.sh sources, which is the only observable
+    // this package leaves behind — it installs no binary, so the default
+    // name-on-PATH probe reported it absent forever and every converge
+    // tried to install it again.
+    file: "/usr/share/bash-completion/bash_completion",
     u24: apt("bash-completion"),
     win: skip("Git Bash ships its own bash-completion"),
   },
@@ -1010,6 +1032,12 @@ export type InstallState = "ok" | "absent" | "outdated";
 
 export function installState(tool: Tool): InstallState {
   if (tool.managed) return "absent"; // the provider decides; see Tool.managed
+
+  // Checked before the PATH probe rather than beside it: a tool that
+  // declares a file has no command to find, so falling through would ask
+  // the wrong question and answer "absent" on a machine that has it.
+  if (tool.file) return existsSync(tool.file) ? "ok" : "absent";
+
   const candidates = tool.cmd ?? [tool.name];
   if (!candidates.some(present)) return "absent";
   // A name on PATH is not proof it is the right program — see Tool.signature.
