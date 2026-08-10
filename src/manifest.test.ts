@@ -4,6 +4,7 @@ import {
   TOOLS,
   applicableScopes,
   describeProvider,
+  installState,
   isInstalled,
   itemsNeedingAdmin,
   needsAdmin,
@@ -124,6 +125,27 @@ describe("the manifest itself", () => {
     const tool = TOOLS.find((t) => t.name === "wl-clipboard");
     expect(tool?.scope).toBe("desktop");
     expect(providerFor(tool!, DESKTOP)).toEqual({ kind: "apt", pkg: "wl-clipboard" });
+  });
+
+  test("a package that ships no binary is still findable", () => {
+    // The regression this pins: bash-completion installs a shell library
+    // and nothing executable, so the default probe looked for a command
+    // called `bash-completion` on PATH, never found one, and reported
+    // the package absent on a machine where dpkg said `install ok
+    // installed`. Every converge then tried to install it again and
+    // named it as a problem — the same failure, once per run, forever.
+    //
+    // Asserted through installState rather than by reading the field, so
+    // deleting the declaration fails here even if the field survives.
+    const tool = TOOLS.find((t) => t.name === "bash-completion");
+    expect(tool?.file).toBe("/usr/share/bash-completion/bash_completion");
+    expect(tool?.cmd).toBeUndefined();
+
+    const seen = { ...tool!, file: import.meta.path } as typeof tool;
+    expect(installState(seen!)).toBe("ok");
+
+    const missing = { ...tool!, file: "/nonexistent/bash_completion" } as typeof tool;
+    expect(installState(missing!)).toBe("absent");
   });
 
   test("what init.sh sources, the manifest installs", () => {
