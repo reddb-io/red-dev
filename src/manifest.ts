@@ -65,6 +65,26 @@ type ProviderSpec =
       repo: string;
       asset: string;
       /**
+       * Hold this repo at one release instead of following /latest.
+       *
+       * For the case a glob cannot express: not "which file in the
+       * newest release", but "not the newest release at all", because a
+       * later one is the defect. zellij 0.44.2 shipped the OSC-reply
+       * leak and there is no filename that says so.
+       *
+       * The *tag*, as the publisher writes it — `v0.44.1`, not `0.44.1`,
+       * for a repo that tags with a prefix. It is used verbatim, since
+       * decorating it is a guess and a guess here is a 404 on the next
+       * repo that tags the other way. Absent, resolution is exactly what
+       * it always was: /releases/latest, glob matched against the names
+       * that release publishes.
+       *
+       * Half a pin on its own. The tool it belongs to also needs
+       * `pinVersion`, or a machine that already carries a later build
+       * is never told — see Tool.pinVersion.
+       */
+      version?: string;
+      /**
        * Install name, when the release publishes a bare binary whose
        * asset name is not the command. tealdeer ships
        * `tealdeer-linux-x86_64-musl` and the command is `tldr`.
@@ -216,6 +236,27 @@ export interface Tool {
    * prerelease ordering, because no tool here needs it.
    */
   minVersion?: string;
+  /**
+   * This version, exactly. Newer is also wrong.
+   *
+   * The floor above answers "is this new enough", which is the wrong
+   * question whenever a *later* release is the defect — and a floor is
+   * then silent on precisely the machine that has the bad build. zellij
+   * 0.44.2 introduced the OSC-reply leak; a floor of 0.44.1 calls a host
+   * running 0.44.3 `ok` and the terminal keeps filling with replies.
+   *
+   * So a pin is a point, not a range: any other version is reported as
+   * `mismatched` and the report names both numbers. Downgrading is left
+   * to the provider — on a `gh` column that follows, because the tag is
+   * declared there too; on a column whose package manager only moves
+   * forward it does not, and saying so out loud beats a doctor that
+   * reports `ok` about the version we know is broken.
+   *
+   * Declared with the reason and the condition for lifting it written
+   * beside the tool. A pin whose justification is lost is a pin nobody
+   * dares remove, and it outlives the bug by years.
+   */
+  pinVersion?: string;
   scope: Scope;
   /**
    * True when presence cannot be answered by probing for a command —
@@ -237,6 +278,21 @@ const gh = (repo: string, asset: string, bin?: string): Provider => ({
   kind: "gh",
   repo,
   asset,
+  ...(bin ? { bin } : {}),
+});
+/**
+ * The same release asset, held at one tag.
+ *
+ * A separate helper rather than a fourth positional argument to `gh`,
+ * because the tag is the unusual thing on the line and burying it behind
+ * an optional `bin` would let it read as noise. The reason for the pin
+ * belongs in a comment above the tool; this only carries the tag.
+ */
+const ghPinned = (repo: string, version: string, asset: string, bin?: string): Provider => ({
+  kind: "gh",
+  repo,
+  asset,
+  version,
   ...(bin ? { bin } : {}),
 });
 /** A release asset that is an installer rather than a binary. */
@@ -516,9 +572,29 @@ export const TOOLS: Tool[] = [
     // Upstream ships an official windows-msvc build (0.44.3 has both a
     // .zip and an .msi), which an earlier revision of this manifest
     // wrongly claimed did not exist.
+    //
+    // Held at 0.44.1, which is the last release that does not leak OSC
+    // replies. 0.44.2 began answering the terminal's OSC queries without
+    // consuming the replies, so they land in the pane as literal text —
+    // `11;rgb:...` sprayed across whatever is running — and the newer
+    // the release, the more of it. That is zellij-org/zellij#5174.
+    //
+    // Lift the pin when #5174 closes, or when a later release is shown
+    // not to leak; either way move both numbers below, since the tag and
+    // the version the binary prints have to keep agreeing.
     name: "zellij",
     scope: "core",
-    u24: gh("zellij-org/zellij", "zellij-x86_64-unknown-linux-musl.tar.gz"),
+    pinVersion: "0.44.1",
+    u24: ghPinned(
+      "zellij-org/zellij",
+      "v0.44.1",
+      "zellij-x86_64-unknown-linux-musl.tar.gz",
+    ),
+    // winget installs what its manifest has, which is the newest — so on
+    // Windows the pin is a report rather than a repair: the doctor names
+    // the machine as off the pinned version and the downgrade is manual.
+    // Silence would be the alternative, and silence is how 0.44.3 got
+    // onto a machine in the first place.
     win: winget("Zellij.Zellij"),
   },
   {
@@ -1021,14 +1097,18 @@ export function itemsNeedingAdmin(p: Platform, scopes: Scope[] = applicableScope
 }
 
 /**
- * The three answers, kept apart so a report can tell them apart.
+ * The four answers, kept apart so a report can tell them apart.
  *
- * "absent" and "outdated" both mean there is work to do, but they fail
- * differently and a converge that says "the binary is absent" about a
- * binary sitting on PATH sends whoever reads it looking in the wrong
- * place.
+ * "absent", "outdated" and "mismatched" all mean there is work to do,
+ * but they fail differently and a converge that says "the binary is
+ * absent" about a binary sitting on PATH sends whoever reads it looking
+ * in the wrong place. "mismatched" is the one that can mean *too new* —
+ * see Tool.pinVersion — and it is separate from "outdated" for that
+ * reason alone: telling someone on 0.44.3 that they are behind 0.44.1
+ * would be a lie, and the fix it implies is the opposite of the one
+ * that works.
  */
-export type InstallState = "ok" | "absent" | "outdated";
+export type InstallState = "ok" | "absent" | "outdated" | "mismatched";
 
 export function installState(tool: Tool): InstallState {
   if (tool.managed) return "absent"; // the provider decides; see Tool.managed
@@ -1042,6 +1122,10 @@ export function installState(tool: Tool): InstallState {
   if (!candidates.some(present)) return "absent";
   // A name on PATH is not proof it is the right program — see Tool.signature.
   if (tool.signature && !identify(candidates, tool.signature)) return "absent";
+  // Before the floor, and above it in the file for the same reason: a
+  // pin is an exact answer, so a floor declared alongside one could only
+  // ever agree with it or contradict it.
+  if (tool.pinVersion && versionOtherThan(candidates, tool.pinVersion)) return "mismatched";
   if (tool.minVersion && versionBelow(candidates, tool.minVersion)) return "outdated";
   return "ok";
 }
@@ -1071,7 +1155,18 @@ export function isPresent(tool: Tool): boolean {
  * reader to run --version themselves.
  */
 export function installedVersion(tool: Tool): string | null {
-  for (const c of tool.cmd ?? [tool.name]) {
+  return probeVersion(tool.cmd ?? [tool.name]);
+}
+
+/**
+ * What the first candidate on PATH says its version is, or null.
+ *
+ * Null covers two different disappointments — nothing on PATH, and
+ * something on PATH whose output carries no version — and every caller
+ * treats them the same way, by not claiming anything.
+ */
+function probeVersion(candidates: string[]): string | null {
+  for (const c of candidates) {
     if (!commandExists(c)) continue;
     return parseVersion(versionOutput(c) ?? "");
   }
@@ -1096,15 +1191,17 @@ export function compareVersions(a: string, b: string): number {
 }
 
 function versionBelow(candidates: string[], min: string): boolean {
-  for (const c of candidates) {
-    if (!commandExists(c)) continue;
-    const found = parseVersion(versionOutput(c) ?? "");
-    // Unreadable output is not evidence of an old version, and treating
-    // it as one would reinstall the tool on every single converge with
-    // no run ever reaching a fixed point. Fail open and say nothing.
-    return found === null ? false : compareVersions(found, min) < 0;
-  }
-  return false;
+  const found = probeVersion(candidates);
+  // Unreadable output is not evidence of an old version, and treating
+  // it as one would reinstall the tool on every single converge with
+  // no run ever reaching a fixed point. Fail open and say nothing.
+  return found === null ? false : compareVersions(found, min) < 0;
+}
+
+/** Anything but the pinned version, newer included. Fails open, as above. */
+function versionOtherThan(candidates: string[], pin: string): boolean {
+  const found = probeVersion(candidates);
+  return found === null ? false : compareVersions(found, pin) !== 0;
 }
 
 /**
@@ -1181,7 +1278,10 @@ export function describeProvider(pr: Provider): string {
     case "installer":
       return `installer:${pr.url}`;
     case "gh":
-      return `gh:${pr.repo}:${pr.asset}`;
+      // The tag, when there is one, sits where the reader is already
+      // looking for "which release": a plan that says only the repo
+      // hides the whole point of a pinned column.
+      return `gh:${pr.repo}${pr.version ? `@${pr.version}` : ""}:${pr.asset}`;
     case "ppa":
       return `ppa:${pr.ppa}`;
     case "aptrepo":
