@@ -60,7 +60,12 @@ async function cmdPlan(p: Platform, inv: Invocation): Promise<number> {
               ? " (present)"
               : installState(tool) === "outdated"
                 ? ` (outdated, wants ${tool.minVersion})`
-                : "";
+                : installState(tool) === "mismatched"
+                  ? // Both numbers, because the found one may be the
+                    // higher: "wants 0.44.1" alone reads as an upgrade
+                    // on a machine that has to go the other way.
+                    ` (${installedVersion(tool) ?? "unknown"}, pinned to ${tool.pinVersion})`
+                  : "";
       log.plain(`  ${tool.name.padEnd(17)}${describeProvider(pr)}${state}`);
     }
   }
@@ -76,6 +81,7 @@ async function cmdPlan(p: Platform, inv: Invocation): Promise<number> {
 async function cmdDoctor(p: Platform, inv: Invocation): Promise<number> {
   let missing = 0;
   let outdated = 0;
+  let mismatched = 0;
 
   // Which of the two this machine currently is.
   //
@@ -115,6 +121,13 @@ async function cmdDoctor(p: Platform, inv: Invocation): Promise<number> {
         const found = installedVersion(tool) ?? "unknown";
         log.err(`${tool.name} ${found} — older than ${tool.minVersion} (${describeProvider(pr)})`);
         outdated++;
+      } else if (installState(tool) === "mismatched") {
+        // Deliberately not phrased as old or new: this is the one case
+        // where the machine may be ahead of where it must be, and the
+        // remedy is the pinned release either way.
+        const found = installedVersion(tool) ?? "unknown";
+        log.err(`${tool.name} ${found} — pinned to ${tool.pinVersion} (${describeProvider(pr)})`);
+        mismatched++;
       } else {
         log.err(`${tool.name} missing (${describeProvider(pr)})`);
         missing++;
@@ -142,9 +155,10 @@ async function cmdDoctor(p: Platform, inv: Invocation): Promise<number> {
   }
 
   log.plain("");
-  if (missing > 0 || outdated > 0 || drifted > 0) {
+  if (missing > 0 || outdated > 0 || mismatched > 0 || drifted > 0) {
     const parts = [`${missing} tool(s) missing`];
     if (outdated > 0) parts.push(`${outdated} outdated`);
+    if (mismatched > 0) parts.push(`${mismatched} off the pinned version`);
     parts.push(`${drifted} config drift(s)`);
     log.warn(parts.join(", "));
     return 1;

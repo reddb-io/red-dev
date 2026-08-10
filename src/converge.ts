@@ -23,6 +23,7 @@ import {
 import { aptInstall, applyProvider, type ApplyContext } from "./providers.ts";
 import {
   describeProvider,
+  installedVersion,
   installState,
   isInstalled,
   providerFor,
@@ -349,6 +350,12 @@ export async function converge(
           // newer. Saying "absent" here sends the reader hunting for a
           // missing binary that is sitting right there on PATH.
           finish("failed", `apt has nothing newer than ${tool.minVersion} for ${tool.name}`);
+        } else if (installState(tool) === "mismatched") {
+          // apt installs what the archive has and will not be argued
+          // down to an exact version, so a pinned tool on an apt column
+          // reports the gap rather than pretending to have closed it.
+          const found = installedVersion(tool) ?? "unknown";
+          finish("failed", `${tool.name} ${found}, pinned to ${tool.pinVersion}`);
         } else finish("failed", "apt reported success but the binary is absent");
         continue;
       }
