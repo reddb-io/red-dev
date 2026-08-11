@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { buildCli, parseArgs } from "./cli.ts";
 import { missingRights } from "./rights.ts";
 import { DEFAULT_THEME, themeNames } from "./themes.ts";
@@ -33,6 +34,14 @@ describe("command parsing", () => {
     expect(inv.command).toBe("privileged");
     expect(inv.errors).toEqual([]);
     expect(missingRights("administrator").remedy).toContain("red-dev privileged");
+  });
+
+  test("the repository statusline is one stable red-dev command", () => {
+    const settings = JSON.parse(readFileSync(".claude/settings.json", "utf8")) as {
+      statusLine: { command: string };
+    };
+    expect(settings.statusLine.command).toBe("bun run src/main.ts statusline");
+    expect(parse(["statusline"]).errors).toEqual([]);
   });
 
   test("no arguments means no command, not an error", () => {
@@ -111,5 +120,19 @@ describe("flags", () => {
     const inv = parse(["install"]);
     expect(inv.font).toBe("firacode");
     expect(inv.themeName).toBe(DEFAULT_THEME);
+  });
+
+  test("Rescue and Reclaim are previews until apply is explicitly requested", () => {
+    expect(parse(["rescue"])).toMatchObject({ command: "rescue", apply: false, yes: false });
+    expect(parse(["rescue", "--apply", "--yes"])).toMatchObject({
+      command: "rescue",
+      apply: true,
+      yes: true,
+    });
+    expect(parse(["reclaim", "--apply", "--crash-dumps"])).toMatchObject({
+      command: "reclaim",
+      apply: true,
+      crashDumps: true,
+    });
   });
 });

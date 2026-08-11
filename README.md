@@ -328,11 +328,48 @@ red-dev share adopt <tool>   # move that tool's configuration into it
 red-dev uninstall            # remove tools, or red-dev's own config
 red-dev wsl                  # Windows: set up or verify WSL 2
 red-dev ui                   # fullscreen, with live theme preview
-red-dev doctor               # report tool and configuration drift
+red-dev doctor               # report drift plus process/memory/disk health
+red-dev rescue               # preview process groups proven orphaned
+red-dev rescue --apply       # snapshot, revalidate and end those groups
+red-dev reclaim              # preview generated logs outside retention
+red-dev reclaim --apply      # prune red-dev-owned generated artifacts
+red-dev reclaim --crash-dumps # include Windows dumps in the preview
 ```
 
 Global options: `--theme`, `--font`, `--opacity`. Scopes: `core`, `desktop`,
 `wsl`, `optional`.
+
+### Host recovery and retention
+
+`doctor` is always read-only. On Linux and WSL it reports processes and tasks,
+cgroup capacity, OOMs, stop timeouts, deleted working directories, Worker
+isolation, statusline lifecycle, memory and disk. On Windows and WSL it also
+reports free space on C: and `%LOCALAPPDATA%\CrashDumps` usage.
+
+Claude's repository statusline is one bounded command:
+`bun run src/main.ts statusline`.
+The subcommand consumes one complete JSON value without waiting for stdin EOF,
+enforces its own portable deadline and never creates a run transcript. On
+Linux/WSL it cleans and verifies the whole process group; native Windows uses
+a childless fallback because Bun cannot prove descendant teardown there.
+
+`rescue` is online recovery, not a name-based process killer. Its preview names
+only groups supported by multiple orphan signals; registered Workers, active
+systemd units, terminals, redskilled descendants and the command running
+Rescue are protected. `--apply` writes sanitized before/after snapshots under
+`~/.local/state/red-dev/incidents`, revalidates PID start times, then uses
+TERM → five seconds → KILL and verifies the group disappeared. A script must
+say both `--apply --yes`; there is no force mode.
+
+`reclaim` handles derived files and follows ADR 0004: it refuses while Workers
+are alive or their state is unknown, never runs from converge or a timer, and
+never touches source, branches, worktrees or user-authored configuration.
+Transcripts retain 20 runs/30 days/250 MiB; Zellij crashes retain 10/14 days/
+50 MiB. red-dev crash evidence retains one file for at most 30 days and
+10 MiB. These policies are applied only by `reclaim`; normal startup,
+statusline and converge never prune them. Windows dumps are considered only
+with `--crash-dumps`; reclaim reduces their total toward 2 GiB while preserving
+the newest three per executable and everything from the last 72 hours.
 
 ---
 
@@ -369,6 +406,8 @@ deliberately:
 | `red-dev agents` | which coding agents — pre-ticked, then offers red-skills |
 | `red-dev uninstall` | what to remove — and confirms before removing it |
 | `red-dev wsl` | whether to set WSL up on a fresh Windows machine |
+| `red-dev rescue --apply` | whether to end the exact proven-orphan groups in the preview |
+| `red-dev reclaim --apply` | whether to remove the exact derived files in the preview |
 
 Omakub asks these at first run; here they are re-runnable, because the answers
 change when a project does.
@@ -563,7 +602,7 @@ fail invalid scope 'nonsense' (expected: core, desktop, wsl)
 
 $ red-dev frobnicate
 fail Unknown command: frobnicate
-Available commands: platform, plan, install, update, doctor, theme, menu
+Available commands: platform, plan, install, update, doctor, rescue, reclaim, theme, menu
 ```
 
 ## One directory both sides read
@@ -894,8 +933,9 @@ and a README that blurs them costs someone an afternoon.
 ### When something goes wrong
 
 Uncaught exceptions and rejections are written to
-`%LOCALAPPDATA%\red-dev\crash.log` before the process exits, and on Linux to
-`~/.local/state/red-dev/crash.log`. A fullscreen application that dies takes the
+the same local state directory as transcripts (`%LOCALAPPDATA%\red-dev\logs` in
+PowerShell, or `~/.local/state/red-dev`) before the process exits. A fullscreen
+application that dies takes the
 console with it, so the stack scrolls past inside a window that is already
 closing — the file is the copy that survives.
 
@@ -1037,8 +1077,8 @@ this project actually hit, not from chasing coverage.
 
 Early, but the loop runs end to end.
 
-- Working: `platform`, `plan`, `doctor`, `menu`, `install`, `update`, `theme`,
-  `apps`, `agents`, `lang`, `shell`, `uninstall`, `ui`
+- Working: `platform`, `plan`, `doctor`, `rescue`, `reclaim`, `menu`, `install`,
+  `update`, `theme`, `apps`, `agents`, `lang`, `shell`, `uninstall`, `ui`
 - Providers: apt, ppa, apt repositories, winget, vendor install scripts, GitHub
   releases on **both** Linux and Windows, and builtins for dotfiles, fonts,
   Alacritty, Windows Terminal and WSL interop
@@ -1077,7 +1117,7 @@ Then, in order:
    to windows opened *after* the switch.
 5. `red-dev doctor` — it should report no drift.
 
-If anything dies, `%LOCALAPPDATA%\red-dev\crash.log` is the file to send.
+If anything dies, send `crash.log` from the local state directory described above.
 
 ## License
 

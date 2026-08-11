@@ -102,6 +102,44 @@ export function buildCli(): CLI {
       doctor: {
         description: "report drift against the manifest",
       },
+      statusline: {
+        description: "render the bounded Claude status line",
+      },
+      rescue: {
+        description: "inspect or end process groups proven to be orphaned",
+        options: {
+          apply: {
+            type: "boolean",
+            description: "write a forensic snapshot and apply the displayed rescue plan",
+            default: false,
+          },
+          yes: {
+            type: "boolean",
+            description: "confirm an apply in a non-interactive session",
+            default: false,
+          },
+        },
+      },
+      reclaim: {
+        description: "inspect or prune derived logs and crash artifacts",
+        options: {
+          apply: {
+            type: "boolean",
+            description: "apply the displayed retention plan",
+            default: false,
+          },
+          yes: {
+            type: "boolean",
+            description: "confirm an apply in a non-interactive session",
+            default: false,
+          },
+          "crash-dumps": {
+            type: "boolean",
+            description: "include Windows CrashDumps in the explicit reclaim",
+            default: false,
+          },
+        },
+      },
       logs: {
         description: "show the last run's transcript",
         positional: [
@@ -199,6 +237,10 @@ export interface Invocation {
   font: string;
   opacity: number;
   dryRun: boolean;
+  /** Rescue/Reclaim remain previews until this is explicitly true. */
+  apply: boolean;
+  /** Reclaim only touches Windows CrashDumps when explicitly selected. */
+  crashDumps: boolean;
   /** --yes: take defaults instead of asking on a first run. */
   yes: boolean;
   /** `share <target> [tool]` — its own positionals, see the note in buildCli. */
@@ -275,6 +317,8 @@ export function parseArgs(cli: CLI, argv: string[]): Invocation {
     font: typeof opts["font"] === "string" ? opts["font"] : "firacode",
     opacity: clampOpacity(opts["opacity"], errors),
     dryRun: opts["dry-run"] === true,
+    apply: opts["apply"] === true,
+    crashDumps: opts["crash-dumps"] === true,
     yes: opts["yes"] === true,
     shareTarget: typeof pos["target"] === "string" ? pos["target"] : undefined,
     shareTool: typeof pos["tool"] === "string" ? pos["tool"] : undefined,

@@ -35,7 +35,11 @@
  * someone's desktop.
  */
 
-import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readdirSync } from "node:fs";
+import { createConnection } from "node:net";
+import { homedir, tmpdir } from "node:os";
+import { join } from "node:path";
 
 /** The document shape this build reads. Not a floor: an exact match. */
 export const HOST_STATE_VERSION = 1;
@@ -47,6 +51,40 @@ export const HOST_STATE_PROTOCOL_VERSION = 1;
 export interface HostState {
   /** Workers running on this machine right now; zero is a real answer. */
   readonly workers: number;
+}
+
+export interface HostWorkerIdentity {
+  readonly pid: number;
+  readonly unit: string | null;
+}
+
+/** Full identity subset used to protect live Workers during Host Rescue. */
+export interface HostInventory {
+  readonly daemonPid: number;
+  readonly workers: HostWorkerIdentity[];
+}
+
+export function hostInventoryFrom(value: unknown): HostInventory | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const state = value as Record<string, unknown>;
+  if (state["version"] !== HOST_STATE_VERSION) return null;
+  if (state["protocol_version"] !== HOST_STATE_PROTOCOL_VERSION) return null;
+  const daemonPid = state["pid"];
+  if (!Number.isSafeInteger(daemonPid) || (daemonPid as number) <= 0) return null;
+  const workers = state["workers"];
+  if (!Array.isArray(workers)) return null;
+
+  const identities: HostWorkerIdentity[] = [];
+  for (const worker of workers) {
+    if (worker === null || typeof worker !== "object" || Array.isArray(worker)) return null;
+    const record = worker as Record<string, unknown>;
+    const pid = record["pid"];
+    const unit = record["unit"];
+    if (!Number.isSafeInteger(pid) || (pid as number) <= 0) return null;
+    if (unit !== undefined && unit !== null && typeof unit !== "string") return null;
+    identities.push({ pid: pid as number, unit: typeof unit === "string" ? unit : null });
+  }
+  return { daemonPid: daemonPid as number, workers: identities };
 }
 
 /**
@@ -89,6 +127,89 @@ export function parseHostState(text: string | null | undefined): HostState | nul
 /** Produces the host-state document as text, or null when there is none. */
 export type HostStateSource = () => Promise<string | null>;
 
+function latestResidentBundle(dir: string): string | null {
+  try {
+    const name = readdirSync(dir)
+      .filter((entry) => /^redskilled-.*\.bundle\.min\.mjs$/.test(entry))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+      .at(-1);
+    return name ? `${dir}/${name}` : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Resolve the daemon-compatible client, preferring its resident bundle. */
+export function resolveRedskilledBin(home = homedir()): string | null {
+  const root = home.replace(/\\/g, "/");
+  const resident = latestResidentBundle(`${root}/.red/redskilled/bundles`);
+  if (resident) return resident;
+  const cached = latestResidentBundle(`${root}/.cache/red-skills/bundles`);
+  if (cached) return cached;
+  const packaged = `${root}/.red-skills/current/packaging/npm/bin/red-skills-redskilled.mjs`;
+  return existsSync(packaged) ? packaged : null;
+}
+
+/** Derive the resident socket without creating its directory or starting a daemon. */
+export function resolveRedskilledSocket(
+  env: NodeJS.ProcessEnv = process.env,
+  uid: number | string = process.getuid?.() ?? "nouid",
+): string | null {
+  if (process.platform === "win32") return null;
+  const sessionKey = env["REDSKILLED_SESSION"]?.trim() ||
+    env["XDG_RUNTIME_DIR"]?.trim() || `uid:${uid}`;
+  const hash = createHash("sha256").update(`redskilled:${sessionKey}`).digest("hex").slice(0, 20);
+  const socketName = "redskilled.sock";
+  const xdg = env["XDG_RUNTIME_DIR"]?.trim();
+  if (xdg) {
+    const path = join(xdg, "red-skills", hash, socketName);
+    if (path.length < 108) return path;
+  }
+  const candidate = join(tmpdir(), `red-skills-${uid}`, hash, socketName);
+  return candidate.length < 108 ? candidate : join("/tmp", `red-skills-${uid}`, hash, socketName);
+}
+
+/** Read host-state over the existing socket. This function has no birth path. */
+export async function readHostInventoryNoStart(
+  socketPath = resolveRedskilledSocket(),
+  timeoutMs = 500,
+): Promise<HostInventory | null> {
+  if (!socketPath || !existsSync(socketPath)) return null;
+  return await new Promise((resolve) => {
+    const socket = createConnection(socketPath);
+    let settled = false;
+    let buffer = "";
+    const finish = (value: HostInventory | null): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.destroy();
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish(null), timeoutMs);
+    socket.on("connect", () => {
+      socket.write(`${JSON.stringify({ id: `red-dev-${process.pid}`, op: "host-state" })}\n`);
+    });
+    socket.on("data", (chunk) => {
+      buffer += chunk.toString("utf8");
+      if (buffer.length > 10 * 1024 * 1024) return finish(null);
+      const newline = buffer.indexOf("\n");
+      if (newline < 0) return;
+      try {
+        const response = JSON.parse(buffer.slice(0, newline)) as {
+          ok?: unknown;
+          value?: unknown;
+        };
+        finish(response.ok === true ? hostInventoryFrom(response.value) : null);
+      } catch {
+        finish(null);
+      }
+    });
+    socket.on("error", () => finish(null));
+    socket.on("close", () => finish(null));
+  });
+}
+
 /**
  * Ask for host-state and reduce it, or answer null.
  *
@@ -101,19 +222,27 @@ export type HostStateSource = () => Promise<string | null>;
  */
 export async function readHostState(
   source: HostStateSource = askRedskilled,
+  timeoutMs = 2_000,
 ): Promise<HostState | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    return parseHostState(await source());
+    const timed = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), timeoutMs);
+    });
+    const text = await Promise.race([source(), timed]);
+    return parseHostState(text);
   } catch {
     return null;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
 /**
- * The default source: the `redskilled` entry point in the red-skills checkout.
+ * The default source: the already-running redskilled socket.
  *
- * A read and only a read. `host-state` reaches for the daemon's socket and
- * never starts it, which is the property that lets a wallpaper regenerate
+ * A read and only a read. It never invokes the auto-spawning RedSkills client,
+ * which is the property that lets a wallpaper regenerate
  * without a cosmetic feature becoming what births a machine-wide singleton.
  *
  * A checkout that is absent, or present without its built bundle, exits
@@ -122,15 +251,13 @@ export async function readHostState(
  * repair to offer for either, and the Redwall it draws is identical.
  */
 async function askRedskilled(): Promise<string | null> {
-  const home = (process.env["HOME"] ?? process.env["USERPROFILE"] ?? "").replace(/\\/g, "/");
-  if (home === "") return null;
-  const bin = `${home}/.red-skills/current/packaging/npm/bin/red-skills-redskilled.mjs`;
-  if (!existsSync(bin)) return null;
-  const proc = Bun.spawn(["node", bin, "host-state"], {
-    stdout: "pipe",
-    stderr: "ignore",
-    stdin: "ignore",
-  });
-  const out = await new Response(proc.stdout).text();
-  return (await proc.exited) === 0 ? out : null;
+  const inventory = await readHostInventoryNoStart();
+  return inventory
+    ? JSON.stringify({
+      version: HOST_STATE_VERSION,
+      protocol_version: HOST_STATE_PROTOCOL_VERSION,
+      pid: inventory.daemonPid,
+      workers: inventory.workers,
+    })
+    : null;
 }
