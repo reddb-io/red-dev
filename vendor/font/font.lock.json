@@ -27,10 +27,10 @@
   },
   "subset": {
     "path": "assets/fonts/redwall-firacode-subset.ttf",
-    "sha256": "49bb5b9114b52adfd876522fa0f3b01d0760ebb927232379afe363e625a4d560",
-    "bytes": 6660,
-    "glyphCount": 39,
-    "characters": " ./0123456789:abcdefghiklmnopqrstuvwy·",
+    "sha256": "38a7991ab543f48520284a3e8f69678830873dcfa5e4c303a1912ae66c4e6ee6",
+    "bytes": 6860,
+    "glyphCount": 40,
+    "characters": " %./0123456789:abcdefghiklmnopqrstuvwy·",
     "unaltered": false,
     "generatedBy": "scripts/vendor-font.ts",
     "dropped": [
