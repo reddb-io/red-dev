@@ -19,12 +19,16 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createServer } from "node:net";
+import { tmpdir } from "node:os";
 import {
   HOST_STATE_PROTOCOL_VERSION,
   HOST_STATE_VERSION,
+  hostInventoryFrom,
   hostStateFrom,
   parseHostState,
+  readHostInventoryNoStart,
   readHostState,
 } from "./host-state.ts";
 
@@ -58,6 +62,14 @@ describe("a payload the daemon really emitted", () => {
   test("is read the same way from its JSON text", () => {
     expect(parseHostState(fixture)).toEqual(hostStateFrom(captured));
   });
+
+  test("also yields the exact Worker identities Rescue must protect", () => {
+    expect(hostInventoryFrom(captured)?.daemonPid).toBe(captured["pid"] as number);
+    expect(hostInventoryFrom(captured)?.workers[0]).toEqual({
+      pid: 1_534_418,
+      unit: "red-worker-reddb-io-design-system-ho7ue.service",
+    });
+  });
 });
 
 describe("a version this build does not understand", () => {
@@ -86,6 +98,37 @@ describe("a version this build does not understand", () => {
 });
 
 describe("a daemon that is not running", () => {
+  test("reads an already-running socket without invoking a client", async () => {
+    const root = mkdtempSync(`${tmpdir()}/red-dev-host-state-`);
+    const socketPath = `${root}/redskilled.sock`;
+    const server = createServer((socket) => {
+      socket.once("data", () => {
+        socket.end(`${JSON.stringify({ ok: true, value: captured })}\n`);
+      });
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(socketPath, resolve);
+    });
+    try {
+      expect(await readHostInventoryNoStart(socketPath)).toEqual(hostInventoryFrom(captured));
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("does not create or start anything when the socket is absent", async () => {
+    const root = mkdtempSync(`${tmpdir()}/red-dev-no-daemon-`);
+    const socketPath = `${root}/missing.sock`;
+    try {
+      expect(await readHostInventoryNoStart(socketPath)).toBeNull();
+      expect(existsSync(socketPath)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test("yields no Worker count and no error", async () => {
     expect(await readHostState(async () => null)).toBeNull();
   });
@@ -109,5 +152,13 @@ describe("a daemon that is not running", () => {
     const idle = JSON.stringify(payload({ workers: [], projects: [] }));
     expect(await readHostState(async () => idle)).toEqual({ workers: 0 });
     expect(await readHostState(async () => null)).toBeNull();
+  });
+
+  test("cannot hold a cosmetic caller open forever", async () => {
+    const started = performance.now();
+    const state = await readHostState(() => new Promise(() => undefined), 25);
+
+    expect(state).toBeNull();
+    expect(performance.now() - started).toBeLessThan(500);
   });
 });

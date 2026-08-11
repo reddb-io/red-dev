@@ -1,5 +1,5 @@
 /**
- * Every run, written down, so a converge can be read after it ends.
+ * Every mutating run, written down, so a converge can be read after it ends.
  *
  * The screen is the wrong medium for this and always was. A converge is
  * forty steps of scrollback inside a fullscreen frame; the interesting
@@ -22,7 +22,7 @@
  *
  * ## What is in it, and what is not
  *
- * Every `log` call, always. Child process output whenever something is
+ * Every `log` call in a transcribed run. Child process output whenever something is
  * capturing — which is exactly the fullscreen case this exists for,
  * since `spawnLogged` pipes into the log there.
  *
@@ -43,7 +43,7 @@
  * stories.
  */
 
-import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { appendFileSync } from "node:fs";
 
 /** How many runs to keep. Past this the oldest go. */
@@ -115,10 +115,6 @@ export async function startTranscript(command: string, version: string, at: Date
   try {
     const dir = transcriptDir();
     mkdirSync(dir, { recursive: true });
-
-    for (const old of prunable(readdirSync(dir))) {
-      rmSync(`${dir}/${old}`, { force: true });
-    }
 
     const path = `${dir}/${transcriptName(at, command)}`;
     const header = [

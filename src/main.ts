@@ -22,6 +22,7 @@ import { administratorNotice } from "./plan.ts";
 import { applyProvider, systemUpdate, type ApplyContext } from "./providers.ts";
 import { applyContextForEntry, type ApplyContextEntryPath } from "./preferences.ts";
 import { themeFor, themeNames } from "./themes.ts";
+import { transcriptDir } from "./transcript.ts";
 import { interactive, select } from "./ui.ts";
 
 function resolveScopes(p: Platform, arg?: string): Scope[] {
@@ -82,6 +83,8 @@ async function cmdDoctor(p: Platform, inv: Invocation): Promise<number> {
   let missing = 0;
   let outdated = 0;
   let mismatched = 0;
+  let hostProblems = 0;
+  const livePids = new Set<number>();
 
   // Which of the two this machine currently is.
   //
@@ -99,6 +102,109 @@ async function cmdDoctor(p: Platform, inv: Invocation): Promise<number> {
     const how = prefs.terminalShell ? "recorded" : "defaulted, never chosen";
     log.ok(`a new terminal opens into ${where} — ${how}`);
     log.plain("       change it with: red-dev shell");
+  }
+
+  log.plain("\n[host]");
+  if (p.os === "linux") {
+    const [{ collectLinuxHostSnapshot }, { inspectStatuslineHealth }, { buildHostReport }, { assessHost }] =
+      await Promise.all([
+        import("./linux-host.ts"),
+        import("./statusline-health.ts"),
+        import("./host-report.ts"),
+        import("./host-health.ts"),
+      ]);
+    // Probe first and collect second: the bounded probe must not appear in
+    // the very process census it is validating.
+    const statusline = await inspectStatuslineHealth();
+    const snapshot = await collectLinuxHostSnapshot();
+    for (const process of snapshot.processes) livePids.add(process.pid);
+    log.ok(
+      `${snapshot.metrics.processCount.toLocaleString("en-US")} processes, ` +
+        `${snapshot.metrics.taskCount.toLocaleString("en-US")} tasks`,
+    );
+    if (snapshot.workerStateKnown) {
+      log.ok(`${snapshot.workers.length} Worker(s) registered by redskilled`);
+    } else {
+      log.skip("Worker state unknown — daemon absent or protocol not understood");
+    }
+    if (snapshot.metrics.workerMemoryMax.length > 0) {
+      const current = snapshot.metrics.workerMemoryCurrent.reduce((sum, bytes) => sum + bytes, 0);
+      const limits = snapshot.metrics.workerMemoryMax.map((limit) =>
+        limit === "infinity" ? limit : `${(limit / 1024 ** 3).toFixed(1)} GiB`
+      );
+      log.ok(
+        `Worker memory isolation: ${(current / 1024 ** 3).toFixed(1)} GiB current; ` +
+          `MemoryMax ${limits.join(", ")}`,
+      );
+    }
+
+    const report = buildHostReport(snapshot, statusline);
+    hostProblems = report.problems;
+    for (const row of report.rows) {
+      const detail = `${row.name} — ${row.detail}`;
+      if (row.kind === "ok") log.ok(detail);
+      else if (row.kind === "skip") log.skip(detail);
+      else if (row.kind === "warning") log.warn(detail);
+      else log.err(detail);
+      if (row.fix) log.plain(`       fix: ${row.fix}`);
+    }
+
+    for (const group of assessHost(snapshot).groups.filter((item) => item.disposition === "suspect")) {
+      log.skip(`suspect group ${group.pgid} (${group.pids.join(",")}) — ${group.reasons.join(", ")}`);
+    }
+  } else {
+    log.skip("online process health is available on Linux and WSL");
+  }
+
+  const reclaim = await import("./reclaim.ts");
+  const crashDumpDir = p.os === "windows" || p.env === "wsl"
+    ? await reclaim.windowsCrashDumpDir()
+    : null;
+  const artifacts = reclaim.collectArtifactUsage(reclaim.redDevStateRoot(), crashDumpDir);
+  const reclaimPlan = reclaim.collectReclaimPlan({
+    stateRoot: reclaim.redDevStateRoot(),
+    includeCrashDumps: crashDumpDir !== null,
+    crashDumpDir,
+    livePids,
+  });
+  const selectedKinds = new Set(reclaimPlan.items.map((item) => item.kind));
+  const artifactRows = [
+    ["transcripts", artifacts.transcripts, "transcript"],
+    ["zellij crashes", artifacts.zellijCrashes, "zellij-crash"],
+    ["red-dev crashes", artifacts.redDevCrashes, "red-dev-crash"],
+    ["Windows CrashDumps", artifacts.windowsDumps, "windows-dump"],
+  ] as const;
+  for (const [name, usage, kind] of artifactRows) {
+    const detail = `${usage.count} file(s), ${reclaim.formatBytes(usage.bytes)}`;
+    if (selectedKinds.has(kind)) {
+      log.warn(`${name} — ${detail}`);
+      log.plain(
+        `       fix: red-dev reclaim${name === "Windows CrashDumps" ? " --crash-dumps" : ""}`,
+      );
+      hostProblems++;
+    } else {
+      log.ok(`${name} — ${detail}`);
+    }
+  }
+
+  if (p.os === "windows" || p.env === "wsl") {
+    const disk = await reclaim.windowsDiskUsage();
+    if (disk) {
+      const ratio = disk.freeBytes / disk.totalBytes;
+      const freeGiB = disk.freeBytes / 1024 ** 3;
+      const detail = `C: ${reclaim.formatBytes(disk.freeBytes)} free`;
+      if (ratio < 0.05 || freeGiB < 10) {
+        log.err(detail);
+        hostProblems++;
+      } else if (ratio < 0.15 || freeGiB < 20) {
+        log.warn(detail);
+        hostProblems++;
+      } else {
+        log.ok(detail);
+      }
+    } else {
+      log.skip("Windows C: capacity unavailable");
+    }
   }
 
   log.plain("\n[tools]");
@@ -155,16 +261,182 @@ async function cmdDoctor(p: Platform, inv: Invocation): Promise<number> {
   }
 
   log.plain("");
-  if (missing > 0 || outdated > 0 || mismatched > 0 || drifted > 0) {
+  if (missing > 0 || outdated > 0 || mismatched > 0 || drifted > 0 || hostProblems > 0) {
     const parts = [`${missing} tool(s) missing`];
     if (outdated > 0) parts.push(`${outdated} outdated`);
     if (mismatched > 0) parts.push(`${mismatched} off the pinned version`);
     parts.push(`${drifted} config drift(s)`);
+    if (hostProblems > 0) parts.push(`${hostProblems} host health problem(s)`);
     log.warn(parts.join(", "));
     return 1;
   }
   log.ok("no drift");
   return 0;
+}
+
+async function cmdRescue(p: Platform, inv: Invocation): Promise<number> {
+  if (p.os !== "linux") {
+    log.err("online Host Rescue is available on Linux and WSL");
+    return 1;
+  }
+
+  const [{ collectLinuxHostSnapshot }, { assessHost }, rescue] = await Promise.all([
+    import("./linux-host.ts"),
+    import("./host-health.ts"),
+    import("./rescue.ts"),
+  ]);
+  const snapshot = await collectLinuxHostSnapshot();
+  const assessment = assessHost(snapshot);
+  const plan = rescue.planRescue(snapshot);
+  const processCount = plan.targets.reduce((sum, target) => sum + target.processes.length, 0);
+
+  log.plain("\n[rescue]");
+  if (plan.targets.length === 0) {
+    log.ok("no process group is proven orphaned");
+    const suspects = assessment.groups.filter((group) => group.disposition === "suspect");
+    for (const group of suspects) {
+      log.skip(`group ${group.pgid} is only suspect — ${group.reasons.join(", ")}`);
+    }
+    return 0;
+  }
+
+  log.warn(`${plan.targets.length} proven orphan group(s), ${processCount} process(es)`);
+  for (const target of plan.targets) {
+    const classified = assessment.groups.find((group) => group.pgid === target.pgid);
+    log.plain(
+      `  pgid ${target.pgid}  pids ${target.processes.map((item) => item.pid).join(",")}  ` +
+        `${classified?.reasons.join(", ") ?? "proven orphan"}`,
+    );
+  }
+
+  if (!inv.apply) {
+    log.plain("\nPreview only. Apply exactly this policy with: red-dev rescue --apply");
+    return 0;
+  }
+
+  if (!interactive() && !inv.yes) {
+    log.err("non-interactive Rescue requires both --apply and --yes");
+    return 1;
+  }
+  if (interactive() && !inv.yes) {
+    const { confirm } = await import("./ui.ts");
+    if (!(await confirm(`End ${plan.targets.length} proven orphan group(s)?`, false))) {
+      log.skip("nothing changed");
+      return 0;
+    }
+  }
+
+  const result = await rescue.applyRescue(snapshot, plan, rescue.linuxRescueOptions());
+  log.ok(`forensic snapshot: ${result.beforePath}`);
+  for (const pgid of result.ended) log.ok(`ended process group ${pgid}`);
+  for (const item of result.skipped) log.warn(`skipped ${item.pgid} — ${item.reason}`);
+  for (const item of result.failed) log.err(`failed ${item.pgid} — ${item.reason}`);
+  log.ok(`verification snapshot: ${result.afterPath}`);
+  return result.skipped.length > 0 || result.failed.length > 0 ? 1 : 0;
+}
+
+async function cmdReclaim(p: Platform, inv: Invocation): Promise<number> {
+  const reclaim = await import("./reclaim.ts");
+  const { transcriptPath } = await import("./transcript.ts");
+  let workerStateKnown = false;
+  let workers = 0;
+  const livePids = new Set<number>();
+  if (p.os === "linux") {
+    const { collectLinuxHostSnapshot } = await import("./linux-host.ts");
+    const snapshot = await collectLinuxHostSnapshot();
+    workerStateKnown = snapshot.workerStateKnown;
+    workers = snapshot.workers.length;
+    for (const process of snapshot.processes) livePids.add(process.pid);
+  } else if (p.os === "windows") {
+    const { readPreferences } = await import("./preferences.ts");
+    const gate = await reclaim.windowsWslWorkerState((await readPreferences(p)).distro);
+    workerStateKnown = gate.known;
+    workers = gate.workers;
+  }
+
+  const current = transcriptPath();
+  const crashDumpDir = inv.crashDumps ? await reclaim.windowsCrashDumpDir() : null;
+  const plan = reclaim.collectReclaimPlan({
+    stateRoot: reclaim.redDevStateRoot(),
+    includeCrashDumps: inv.crashDumps,
+    crashDumpDir,
+    livePids,
+    protectedPaths: new Set(current ? [current] : []),
+  });
+
+  log.plain("\n[reclaim]");
+  if (inv.crashDumps && crashDumpDir === null) {
+    log.warn("Windows CrashDumps could not be reached; none are in this plan");
+  }
+  if (plan.items.length === 0) {
+    log.ok("all derived artifacts are within their retention budgets");
+    return 0;
+  }
+  log.warn(`${plan.items.length} derived file(s), ${reclaim.formatBytes(plan.bytes)} reclaimable`);
+  for (const item of plan.items) {
+    log.plain(
+      `  ${item.kind.padEnd(15)} ${reclaim.formatBytes(item.file.size).padStart(10)}  ` +
+        `${item.file.path} — ${item.reasons.join(", ")}`,
+    );
+  }
+
+  if (!inv.apply) {
+    const crash = inv.crashDumps ? " --crash-dumps" : "";
+    log.plain(`\nPreview only. Apply exactly this plan with: red-dev reclaim --apply${crash}`);
+    return 0;
+  }
+  if (!workerStateKnown) {
+    log.err("Reclaim refuses: Worker state is unknown; run it inside a healthy WSL/Linux environment");
+    return 1;
+  }
+  if (workers > 0) {
+    log.err(`Reclaim refuses while ${workers} Worker(s) are active`);
+    return 1;
+  }
+  if (!interactive() && !inv.yes) {
+    log.err("non-interactive Reclaim requires both --apply and --yes");
+    return 1;
+  }
+  if (interactive() && !inv.yes) {
+    const { confirm } = await import("./ui.ts");
+    if (!(await confirm(`Remove ${plan.items.length} derived file(s)?`, false))) {
+      log.skip("nothing changed");
+      return 0;
+    }
+  }
+
+  // A Worker may start while the preview is on screen. Re-check at the
+  // destructive boundary; the earlier answer is evidence, not a lease.
+  if (p.os === "linux") {
+    const { collectLinuxHostSnapshot } = await import("./linux-host.ts");
+    const latest = await collectLinuxHostSnapshot();
+    if (!latest.workerStateKnown) {
+      log.err("Reclaim refuses: Worker state became unknown before apply");
+      return 1;
+    }
+    if (latest.workers.length > 0) {
+      log.err(`Reclaim refuses: ${latest.workers.length} Worker(s) became active before apply`);
+      return 1;
+    }
+  } else if (p.os === "windows") {
+    const { readPreferences } = await import("./preferences.ts");
+    const latest = await reclaim.windowsWslWorkerState((await readPreferences(p)).distro);
+    if (!latest.known) {
+      log.err("Reclaim refuses: WSL Worker state became unknown before apply");
+      return 1;
+    }
+    if (latest.workers > 0) {
+      log.err(`Reclaim refuses: ${latest.workers} Worker(s) became active before apply`);
+      return 1;
+    }
+  }
+
+  const result = reclaim.applyReclaim(plan);
+  for (const path of result.removed) log.ok(`removed ${path}`);
+  for (const item of result.skipped) log.warn(`skipped ${item.path} — ${item.reason}`);
+  for (const item of result.failed) log.err(`failed ${item.path} — ${item.reason}`);
+  log.ok(`reclaimed ${reclaim.formatBytes(result.removedBytes)}`);
+  return result.skipped.length > 0 || result.failed.length > 0 ? 1 : 0;
 }
 
 async function cmdInstall(
@@ -1101,11 +1373,8 @@ process.env.NODE_ENV = "production";
  */
 function recordCrash(kind: string, err: unknown): void {
   const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
-  const dir =
-    process.platform === "win32"
-      ? `${process.env["LOCALAPPDATA"] ?? "."}\\red-dev`
-      : `${process.env["HOME"] ?? "."}/.local/state/red-dev`;
-  const path = `${dir}${process.platform === "win32" ? "\\" : "/"}crash.log`;
+  const dir = transcriptDir();
+  const path = `${dir}/crash.log`;
   const entry = `\n=== ${new Date().toISOString()} ${kind} red-dev ${VERSION} ${process.platform} ===\n${detail}\n`;
   try {
     mkdirSync(dir, { recursive: true });
@@ -1119,14 +1388,16 @@ function recordCrash(kind: string, err: unknown): void {
   process.stderr.write(`\x1b[?1049l${entry}\nrecorded to ${path}\n`);
 }
 
-process.on("uncaughtException", (err) => {
-  recordCrash("uncaughtException", err);
-  process.exit(70);
-});
-process.on("unhandledRejection", (err) => {
-  recordCrash("unhandledRejection", err);
-  process.exit(70);
-});
+if (process.argv[2] !== "statusline") {
+  process.on("uncaughtException", (err) => {
+    recordCrash("uncaughtException", err);
+    process.exit(70);
+  });
+  process.on("unhandledRejection", (err) => {
+    recordCrash("unhandledRejection", err);
+    process.exit(70);
+  });
+}
 
 async function main(): Promise<number> {
   const cli = buildCli();
@@ -1165,6 +1436,14 @@ async function main(): Promise<number> {
       return await cmdPlan(p, inv);
     case "doctor":
       return await cmdDoctor(p, inv);
+    case "statusline": {
+      const { statuslineCommand } = await import("./statusline-command.ts");
+      return await statuslineCommand();
+    }
+    case "rescue":
+      return await cmdRescue(p, inv);
+    case "reclaim":
+      return await cmdReclaim(p, inv);
     case "logs":
       return await cmdLogs(inv.logsWhich);
     case "install":
@@ -1266,13 +1545,34 @@ async function cmdLogs(which?: string): Promise<number> {
  * a log of, and a try/finally is the only way to be sure the exit line
  * is written on every path out.
  *
- * `--version` and `--help` are excluded by the time this runs only in
- * the sense that they are cheap; they get a transcript like everything
- * else, and the rotation keeps that from mattering.
+ * Read-only commands bypass this wrapper so observability cannot create log
+ * pressure. Mutating commands retain the durable trace needed for diagnosis.
  */
 async function run(): Promise<number> {
+  const argv = process.argv.slice(2);
+  // Claude invokes this frequently. A statusline must never create a transcript.
+  if (argv[0] === "statusline") {
+    try {
+      return await main();
+    } catch {
+      // A cosmetic producer must not write crash evidence or disturb Claude.
+      return 0;
+    }
+  }
+  // Inspection really is read-only: repeated health checks and previews must
+  // not manufacture the very log pressure they are intended to diagnose.
+  const verb = argv[0];
+  if (
+    verb === "doctor" ||
+    ((verb === "rescue" || verb === "reclaim") && !argv.includes("--apply")) ||
+    argv.includes("--help") ||
+    argv.includes("-h") ||
+    argv.includes("--version") ||
+    argv.includes("-V")
+  ) return await main();
+
   const { startTranscript, finishTranscript } = await import("./transcript.ts");
-  const command = process.argv.slice(2).join(" ") || "menu";
+  const command = argv.join(" ") || "menu";
   await startTranscript(command, VERSION, new Date());
 
   let code = 70;
