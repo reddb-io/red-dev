@@ -35,10 +35,10 @@
  *
  * ## Where it sits
  *
- * Bottom right. The top left is where both GNOME and Windows put desktop
- * icons, the left edge is where GNOME's dock lives, and both lock
- * screens set their clock along the top. What is left is the corner
- * nothing else claims.
+ * Top right. The left edge is where GNOME and Windows put desktop icons,
+ * while the bottom belongs to the taskbar, activation notices and transient
+ * system UI. Keeping a small instrument against the top-right edge leaves
+ * the brand mark and the working edges of the desktop alone.
  */
 
 import { brand, rgb } from "./brand.ts";
@@ -132,12 +132,12 @@ export function redwallLines(state: RedwallState): string[] {
 
 /** Text height in pixels, and the space around it, for art this tall. */
 function scaleFor(height: number): { size: number; pad: number; margin: number } {
-  // A fortieth of the height puts about forty lines of text on any
+  // A sixtieth of the height puts about sixty lines of text on any
   // screen, so a 4K sheet and a 1080p one carry the same overlay at
   // different resolutions rather than the same overlay at different
   // apparent sizes. The floor is what keeps a thumbnail legible.
-  const size = Math.max(12, Math.round(height / 40));
-  return { size, pad: Math.round(size * 0.75), margin: Math.round(size * 2) };
+  const size = Math.max(12, Math.round(height / 60));
+  return { size, pad: Math.round(size * 0.5), margin: Math.round(size * 1.25) };
 }
 
 /**
@@ -163,7 +163,7 @@ export function redwallBox(
   // the overlay is a thumbnail, and a thumbnail should show what it can.
   return {
     x: Math.max(0, art.width - margin - width),
-    y: Math.max(0, art.height - margin - height),
+    y: Math.max(0, margin),
     width,
     height,
   };
