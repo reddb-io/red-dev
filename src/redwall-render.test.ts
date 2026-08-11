@@ -155,6 +155,24 @@ describe("the brand art underneath", () => {
     }
     expect(moved).toBe(0);
   });
+
+  test("keeps the machine state quiet and out of the way at the top right", async () => {
+    const real = await Bun.file(`${root}/assets/wallpapers/flare.png`).bytes();
+    const before = decodePng(real);
+    const box = redwallBox(before, font, redwallLines(running))!;
+
+    // Desktop icons own the left edge. The top-right keeps the state visible
+    // without competing with the taskbar and Windows activation watermark.
+    expect(box.x).toBeGreaterThan(before.width * 0.75);
+    expect(box.y).toBeGreaterThan(0);
+    expect(box.y + box.height).toBeLessThan(before.height * 0.15);
+
+    // It is a small instrument, not a second brand mark. These bounds are
+    // deliberately relative so the same apparent weight survives on 1080p
+    // and 4K sheets.
+    expect(box.width).toBeLessThan(before.width / 8);
+    expect(box.height).toBeLessThan(before.height / 14);
+  });
 });
 
 describe("what actually landed inside the region", () => {

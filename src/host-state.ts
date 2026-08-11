@@ -40,6 +40,11 @@ import { existsSync, readdirSync } from "node:fs";
 import { createConnection } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  runBounded,
+  type BoundedCommandOptions,
+  type BoundedCommandResult,
+} from "./bounded-command.ts";
 
 /** The document shape this build reads. Not a floor: an exact match. */
 export const HOST_STATE_VERSION = 1;
@@ -126,6 +131,11 @@ export function parseHostState(text: string | null | undefined): HostState | nul
 
 /** Produces the host-state document as text, or null when there is none. */
 export type HostStateSource = () => Promise<string | null>;
+
+export type HostStateCommand = (
+  argv: string[],
+  options?: BoundedCommandOptions,
+) => Promise<BoundedCommandResult>;
 
 function latestResidentBundle(dir: string): string | null {
   try {
@@ -236,6 +246,64 @@ export async function readHostState(
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+const WSL_HOST_STATE_PROGRAM = [
+  'b=$(ls -1 "$HOME"/.red/redskilled/bundles/redskilled-*.bundle.min.mjs "$HOME"/.cache/red-skills/bundles/redskilled-*.bundle.min.mjs 2>/dev/null | sort -V | tail -1)',
+  '[ -n "$b" ] || b="$HOME/.red-skills/current/packaging/npm/bin/red-skills-redskilled.mjs"',
+  '[ -f "$b" ] || exit 3',
+  'n=$(command -v node 2>/dev/null || ls -1 /usr/local/bin/node /usr/bin/node "$HOME"/.local/share/mise/installs/node/*/bin/node "$HOME"/.volta/bin/node "$HOME"/.asdf/shims/node "$HOME"/.nodenv/shims/node "$HOME"/.nvm/versions/node/*/bin/node "$HOME"/.local/share/fnm/node-versions/*/installation/bin/node 2>/dev/null | sort -V | tail -1)',
+  '[ -n "$n" ] || exit 3',
+  'exec "$n" "$b" host-state',
+].join("; ");
+
+// wsl.exe reconstructs a command line while crossing the Windows/Linux
+// boundary. A literal shell program containing `$()` and globs can therefore
+// be expanded once too early when red-dev itself runs under WSL. Base64 keeps
+// the program inert until the shell inside the selected distro decodes it.
+const WSL_HOST_STATE_SCRIPT =
+  `printf %s ${Buffer.from(WSL_HOST_STATE_PROGRAM).toString("base64")} | base64 -d | sh`;
+
+/**
+ * Read every already-running WSL RedSkills host from native Windows.
+ *
+ * The inventory call comes first so a cosmetic refresh never knowingly
+ * starts a stopped distro. Inside each running distro the resident
+ * `redskilled host-state` client contacts the existing socket only; it has no
+ * daemon birth path. Non-RedSkills distros (Docker's internal distro is the
+ * common one) contribute nothing rather than withholding a real count from a
+ * participating Ubuntu or Debian host.
+ */
+export async function readWindowsWslHostState(
+  run: HostStateCommand = runBounded,
+): Promise<HostState | null> {
+  const wsl = Bun.which("wsl.exe");
+  if (!wsl && run === runBounded) return null;
+
+  const running = await run([wsl ?? "wsl.exe", "--list", "--running", "--quiet"], {
+    timeoutMs: 2_000,
+  });
+  if (running.timedOut || running.exitCode !== 0) return null;
+  const distros = running.stdout
+    .replace(/\0/g, "")
+    .split(/\r?\n/)
+    .map((name) => name.trim().replace(/^\*\s*/, ""))
+    .filter(Boolean);
+  if (distros.length === 0) return null;
+
+  const states = await Promise.all(
+    distros.map(async (distro): Promise<HostState | null> => {
+      const result = await run(
+        [wsl ?? "wsl.exe", "-d", distro, "--", "sh", "-lc", WSL_HOST_STATE_SCRIPT],
+        { timeoutMs: 2_000 },
+      );
+      return result.timedOut || result.exitCode !== 0 ? null : parseHostState(result.stdout);
+    }),
+  );
+  const known = states.filter((state): state is HostState => state !== null);
+  return known.length === 0
+    ? null
+    : { workers: known.reduce((total, state) => total + state.workers, 0) };
 }
 
 /**

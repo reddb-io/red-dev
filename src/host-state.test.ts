@@ -30,7 +30,9 @@ import {
   parseHostState,
   readHostInventoryNoStart,
   readHostState,
+  readWindowsWslHostState,
 } from "./host-state.ts";
+import type { BoundedCommandResult } from "./bounded-command.ts";
 
 // Read as text rather than imported as a module, so what the parser is given
 // is the bytes the daemon printed — an import would hand it a document
@@ -160,5 +162,58 @@ describe("a daemon that is not running", () => {
 
     expect(state).toBeNull();
     expect(performance.now() - started).toBeLessThan(500);
+  });
+});
+
+function result(over: Partial<BoundedCommandResult> = {}): BoundedCommandResult {
+  return {
+    stdout: "",
+    stderr: "",
+    exitCode: 0,
+    timedOut: false,
+    groupGone: true,
+    ...over,
+  };
+}
+
+describe("native Windows looking into running WSL hosts", () => {
+  test("sums Workers from participating distros without entering a stopped one", async () => {
+    const commands: string[][] = [];
+    const three = JSON.stringify(payload({ workers: [{ pid: 101 }, { pid: 102 }, { pid: 103 }] }));
+    const two = JSON.stringify(payload({ workers: [{ pid: 201 }, { pid: 202 }] }));
+
+    const state = await readWindowsWslHostState(async (argv) => {
+      commands.push(argv);
+      if (argv.includes("--list")) {
+        // wsl.exe commonly writes redirected inventory as UTF-16LE. The NULs
+        // are intentional: the production parser has to survive those bytes.
+        return result({ stdout: "Ubuntu-24.04\0\r\nDebian\0\r\n" });
+      }
+      if (argv.includes("Ubuntu-24.04")) return result({ stdout: three });
+      if (argv.includes("Debian")) return result({ stdout: two });
+      throw new Error(`unexpected distro command: ${argv.join(" ")}`);
+    });
+
+    expect(state).toEqual({ workers: 5 });
+    expect(commands[0]?.slice(-3)).toEqual(["--list", "--running", "--quiet"]);
+    expect(commands.filter((argv) => argv.includes("-d"))).toHaveLength(2);
+    // A non-interactive WSL shell does not source mise activation. The probe
+    // must therefore find the runtime red-dev installed even when `node` is
+    // absent from that shell's sparse PATH.
+    const wrapper = commands[1]?.at(-1) ?? "";
+    const encoded = /^printf %s ([A-Za-z0-9+/=]+) \| base64 -d \| sh$/.exec(wrapper)?.[1];
+    expect(encoded).toBeDefined();
+    expect(Buffer.from(encoded!, "base64").toString("utf8"))
+      .toContain(".local/share/mise/installs/node/*/bin/node");
+  });
+
+  test("returns unknown when no running distro exposes a live daemon", async () => {
+    const state = await readWindowsWslHostState(async (argv) =>
+      argv.includes("--list")
+        ? result({ stdout: "docker-desktop\0\r\n" })
+        : result({ exitCode: 3, stderr: "no resident daemon" })
+    );
+
+    expect(state).toBeNull();
   });
 });

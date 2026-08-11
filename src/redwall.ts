@@ -61,7 +61,7 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
-import { readHostState } from "./host-state.ts";
+import { readHostState, readWindowsWslHostState } from "./host-state.ts";
 import { resolveRedwallAddress } from "./lan-address.ts";
 import type { Platform } from "./platform.ts";
 import { readPreferences, resolveRedwall } from "./preferences.ts";
@@ -133,7 +133,10 @@ export interface RedwallSeams {
  * survives.
  */
 export async function redwallState(p: Platform): Promise<RedwallState> {
-  const [host, address] = await Promise.all([readHostState(), resolveRedwallAddress(p)]);
+  const [host, address] = await Promise.all([
+    p.os === "windows" ? readWindowsWslHostState() : readHostState(),
+    resolveRedwallAddress(p),
+  ]);
   return { workers: host?.workers ?? null, address };
 }
 
