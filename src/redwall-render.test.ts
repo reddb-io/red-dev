@@ -69,10 +69,9 @@ describe("the same inputs", () => {
     expect([...render(running)]).toEqual([...render(running)]);
   });
 
-  test("and a state that says nothing hands back the art it was given", () => {
-    // A machine with no daemon and no route is a machine Redwall has
-    // nothing to add to, and the honest picture of it is the wallpaper.
-    expect(render({ workers: null, address: null })).toBe(art);
+  test("and unavailable is still a state when the route is unknown", () => {
+    expect(redwallLines({ workers: null, address: null })).toEqual(["redskilled unavailable"]);
+    expect([...render({ workers: null, address: null })]).not.toEqual([...art]);
   });
 });
 
@@ -173,6 +172,23 @@ describe("the brand art underneath", () => {
     expect(box.width).toBeLessThan(before.width / 8);
     expect(box.height).toBeLessThan(before.height / 14);
   });
+
+  test("is a rounded instrument with the brand signal at its edge", () => {
+    const before = sheet();
+    const after = decodePng(render(running));
+    const box = redwallBox(before, font, redwallLines(running))!;
+    const corner = (box.y * before.width + box.x) * 4;
+    const middle = ((box.y + Math.floor(box.height / 2)) * before.width + box.x) * 4;
+
+    // A rounded corner leaves the art below it untouched; halfway down, the
+    // narrow first column is the theme signal rather than the old square plate.
+    expect([...after.data.slice(corner, corner + 4)])
+      .toEqual([...before.data.slice(corner, corner + 4)]);
+    expect([...after.data.slice(middle, middle + 3)])
+      .not.toEqual([...before.data.slice(middle, middle + 3)]);
+    expect([...after.data.slice(middle, middle + 3)])
+      .not.toEqual(hexChannels(redwallInk(THEMES.dark).plate));
+  });
 });
 
 describe("what actually landed inside the region", () => {
@@ -190,46 +206,79 @@ describe("what actually landed inside the region", () => {
       }
     }
 
-    // Both colours present as themselves, not merely as something near
-    // them: the plate is flat and the strokes are wide enough to have
-    // solid interiors, so antialiasing accounts for edges and nothing
-    // else. This is the pixel-level half of the contrast claim that
-    // theme-contrast.test.ts measures as a ratio.
     expect(tally.get(ink.plate) ?? 0).toBeGreaterThan(0);
-    expect(tally.get(ink.text) ?? 0).toBeGreaterThan(0);
+    const [pr, pg, pb] = hexChannels(ink.plate);
+    const [tr, tg, tb] = hexChannels(ink.text);
+    let titleBlend = 0;
+    for (const [hex, count] of tally) {
+      const [r, g, b] = hexChannels(hex);
+      const between = (value: number, a: number, z: number): boolean =>
+        value >= Math.min(a, z) && value <= Math.max(a, z);
+      if (hex !== ink.plate && between(r, pr, tr) && between(g, pg, tg) && between(b, pb, tb)) {
+        titleBlend += count;
+      }
+    }
+    expect(titleBlend).toBeGreaterThan(0);
     expect(contrast(ink.text, ink.plate)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(ink.secondary, ink.plate)).toBeGreaterThanOrEqual(4.5);
   });
 
-  test("and the ink follows the appearance rather than the palette", () => {
-    // obsidian and marble are the pair that makes this checkable: they
-    // are the same design in opposite appearances and share no accent to
-    // confuse the question.
-    expect(redwallInk(THEMES.obsidian).text).not.toBe(redwallInk(THEMES.marble).text);
+  test("and the two text levels come from the theme's declared hierarchy", () => {
     for (const slug of THEME_SLUGS) {
       const theme = THEMES[slug];
-      expect(redwallInk(theme).text, slug).toBe(
-        redwallInk(THEMES[theme.appearance === "light" ? "light" : "dark"]).text,
-      );
+      expect(redwallInk(theme).text, slug).toBe(theme.text.strong);
+      expect(redwallInk(theme).secondary, slug).toBe(theme.text.normal);
     }
   });
 });
 
+function hexChannels(hex: string): [number, number, number] {
+  return [1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16)) as [number, number, number];
+}
+
 describe("the lines", () => {
-  test("carry both facts when both are known, in a fixed order", () => {
-    expect(redwallLines(running)).toEqual(["WORKERS 3", "LAN 192.168.1.42"]);
+  test("turn ordinary activity into a human status with operational context", () => {
+    expect(redwallLines({ ...running, capacity: 6, queued: 18, attention: null })).toEqual([
+      "redskilled at work",
+      "3/6 workers · 18 queued",
+      "192.168.1.42",
+    ]);
   });
 
-  test("keep the half that is known when the other is not", () => {
-    expect(redwallLines({ workers: 2, address: null })).toEqual(["WORKERS 2"]);
-    expect(redwallLines({ workers: null, address: "10.1.2.3" })).toEqual(["LAN 10.1.2.3"]);
-    expect(redwallLines({ workers: null, address: null })).toEqual([]);
+  test("distinguishes standing by, capacity, attention and unavailable", () => {
+    expect(redwallLines({ workers: 0, capacity: 6, queued: 0, attention: null, address: "10.1.2.3" }))
+      .toEqual(["redskilled standing by", "nothing queued", "10.1.2.3"]);
+    expect(redwallLines({ workers: 6, capacity: 6, queued: 3, attention: null, address: null }))
+      .toEqual(["redskilled at capacity", "6/6 workers · 3 queued"]);
+    expect(redwallLines({
+      workers: 2,
+      capacity: 6,
+      queued: 18,
+      attention: { kind: "births-paused", count: null },
+      address: "10.1.2.3",
+    })).toEqual(["redskilled needs attention", "worker births paused · 18 queued", "10.1.2.3"]);
+    expect(redwallLines({ workers: null, address: "10.1.2.3" }))
+      .toEqual(["redskilled unavailable", "10.1.2.3"]);
+    expect(redwallLines({ workers: null, address: null }))
+      .toEqual(["redskilled unavailable"]);
+  });
+
+  test("keeps the half that is known when the other is not", () => {
+    expect(redwallLines({ workers: 2, address: null })).toEqual([
+      "redskilled at work",
+      "2 workers",
+    ]);
+    expect(redwallLines({ workers: null, address: null })).toEqual(["redskilled unavailable"]);
   });
 
   test("drop an address the embedded face was never cut for", () => {
     // Nothing produces an IPv6 address today. When something does, the
     // failure has to be one missing line rather than a wallpaper that
     // stops regenerating — and the charset test is what will say so.
-    expect(redwallLines({ workers: 1, address: "fe80::1" })).toEqual(["WORKERS 1"]);
+    expect(redwallLines({ workers: 1, address: "fe80::1" })).toEqual([
+      "redskilled at work",
+      "1 worker",
+    ]);
   });
 
   test("drop a count that has no digits-only decimal form", () => {

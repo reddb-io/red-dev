@@ -16,11 +16,10 @@
  * against the brand's published numbers, so a luminance function that
  * drifted would be caught before it started passing bad themes.
  *
- * The Redwall overlay joins the table at the bottom. It is the one pair
- * here that is not a theme role against another theme role — the ink
- * comes from the theme's declared appearance and the plate from its
- * ground — and it is drawn on somebody's desktop rather than inside a
- * window, so an unreadable one is the least recoverable of the lot.
+ * The Redwall overlay joins the table at the bottom. Its strong and normal
+ * text roles are measured against its ground exactly as they are drawn, and
+ * it is drawn on somebody's desktop rather than inside a window, so an
+ * unreadable combination is the least recoverable of the lot.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -83,6 +82,7 @@ describe.each([...THEME_SLUGS])("%s", (slug) => {
     // somebody can read from across the room without unlocking.
     const ink = redwallInk(t);
     expect(contrast(ink.text, ink.plate)).toBeGreaterThanOrEqual(BODY);
+    expect(contrast(ink.secondary, ink.plate)).toBeGreaterThanOrEqual(BODY);
   });
 
   test("the accent is a fill that can be seen, carrying text that can be read", () => {

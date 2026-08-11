@@ -3,19 +3,20 @@
  *
  * `redskilled host-state` answers with everything the RedSkills daemon knows
  * about this machine — ceilings, budgets, registrations, birth latches, the
- * version it is holding at. Redwall wants one number out of that document:
- * how many Workers are running right now. Everything else is read past.
+ * version it is holding at. Redwall reduces that document to the few facts
+ * worth leaving on a desktop: active Workers, capacity, queued work, and the
+ * highest-severity actionable condition.
  *
  * ## Absent is a value, not a failure
  *
  * The whole of this module is one rule: **never withhold half the
  * information because the other half is unavailable.** Redwall composes a
- * Worker count and a LAN address over the theme's art, and the address is
+ * daemon state and a LAN address over the theme's art, and the address is
  * resolved without the daemon's help. So a daemon that is not running, a
  * document this build cannot parse, and a document whose version it does not
- * recognise all produce the same thing — `null`, meaning "no Worker count" —
- * and none of them throws. The Redwall that results carries the address
- * alone, which is the picture the Spec settled on twice.
+ * recognise all produce the same thing — `null`, meaning "no daemon state" —
+ * and none of them throws. The Redwall that results says the daemon is
+ * unavailable while preserving an independently known address.
  *
  * `null` is therefore load-bearing, and it is not the same value as
  * `{ workers: 0 }`. A host whose queue has drained reports zero; a host
@@ -56,6 +57,25 @@ export const HOST_STATE_PROTOCOL_VERSION = 1;
 export interface HostState {
   /** Workers running on this machine right now; zero is a real answer. */
   readonly workers: number;
+  /** Scheduler slots, only meaningful while one daemon owns the answer. */
+  readonly capacity: number | null;
+  /** Work waiting across registered projects; null when telemetry is absent. */
+  readonly queued: number | null;
+  /** The most actionable condition the compact Redwall can honestly name. */
+  readonly attention: HostStateAttention | null;
+}
+
+export type HostStateAttentionKind =
+  | "births-paused"
+  | "admission-refused"
+  | "worker-shortfall"
+  | "memory-overcommitted"
+  | "workers-unisolated"
+  | "update-available";
+
+export interface HostStateAttention {
+  readonly kind: HostStateAttentionKind;
+  readonly count: number | null;
 }
 
 export interface HostWorkerIdentity {
@@ -93,7 +113,7 @@ export function hostInventoryFrom(value: unknown): HostInventory | null {
 }
 
 /**
- * The Worker count in a parsed host-state document, or null. PURE.
+ * The compact Redwall state in a parsed host-state document, or null. PURE.
  *
  * Fail-closed by construction: every path that is not a document of the
  * exact version this build understands, carrying a Worker array, returns
@@ -109,7 +129,90 @@ export function hostStateFrom(value: unknown): HostState | null {
   if (state["protocol_version"] !== HOST_STATE_PROTOCOL_VERSION) return null;
   const workers = state["workers"];
   if (!Array.isArray(workers)) return null;
-  return { workers: workers.length };
+
+  const ceiling = object(state["ceiling"]);
+  const workerCount = nonNegativeInteger(ceiling?.["worker_count"]);
+  const demand = object(state["demand"]);
+  const demandProjects = demand?.["projects"];
+  let queued: number | null = null;
+  if (Array.isArray(demandProjects)) {
+    const depths = demandProjects.map((project) =>
+      nonNegativeInteger(object(project)?.["queue_depth"])
+    );
+    if (depths.every((depth): depth is number => depth !== null)) {
+      const total = depths.reduce((sum, depth) => sum + depth, 0);
+      if (Number.isSafeInteger(total)) queued = total;
+    }
+  }
+
+  return {
+    workers: workers.length,
+    capacity: workerCount,
+    queued,
+    attention: attentionFrom(state, demand),
+  };
+}
+
+function object(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function nonNegativeInteger(value: unknown): number | null {
+  return Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : null;
+}
+
+function attentionFrom(
+  state: Record<string, unknown>,
+  demand: Record<string, unknown> | null,
+): HostStateAttention | null {
+  const accounting = object(state["budget_accounting"]);
+  const overcommitted = nonNegativeInteger(accounting?.["over_committed_bytes"]);
+  if (overcommitted !== null && overcommitted > 0) {
+    return { kind: "memory-overcommitted", count: null };
+  }
+  const unisolated = accounting?.["unisolated_workers"];
+  if (Array.isArray(unisolated) && unisolated.length > 0) {
+    return { kind: "workers-unisolated", count: unisolated.length };
+  }
+  const latches = state["birth_latches"];
+  if (Array.isArray(latches) && latches.some((latch) => object(latch)?.["state"] === "open")) {
+    return { kind: "births-paused", count: null };
+  }
+  if (demand?.["refusal"] != null) return { kind: "admission-refused", count: null };
+  const shortfall = nonNegativeInteger(demand?.["shortfall"]);
+  if (shortfall !== null && shortfall > 0) {
+    return { kind: "worker-shortfall", count: shortfall };
+  }
+  const upgrade = object(state["upgrade"]);
+  const newer = nonNegativeInteger(upgrade?.["newer_published"]);
+  return newer !== null && newer > 0 ? { kind: "update-available", count: null } : null;
+}
+
+const ATTENTION_RANK: Record<HostStateAttentionKind, number> = {
+  "memory-overcommitted": 0,
+  "workers-unisolated": 1,
+  "births-paused": 2,
+  "admission-refused": 3,
+  "worker-shortfall": 4,
+  "update-available": 5,
+};
+
+/** Merge execution domains without inventing one shared scheduler ceiling. */
+export function mergeHostStates(states: readonly (HostState | null)[]): HostState | null {
+  const known = states.filter((state): state is HostState => state !== null);
+  if (known.length === 0) return null;
+  const queueKnown = known.every((state) => state.queued !== null);
+  const attention = known
+    .flatMap((state) => state.attention ? [state.attention] : [])
+    .sort((a, b) => ATTENTION_RANK[a.kind] - ATTENTION_RANK[b.kind])[0] ?? null;
+  return {
+    workers: known.reduce((sum, state) => sum + state.workers, 0),
+    capacity: known.length === 1 ? known[0]!.capacity : null,
+    queued: queueKnown ? known.reduce((sum, state) => sum + state.queued!, 0) : null,
+    attention,
+  };
 }
 
 /**
@@ -164,8 +267,8 @@ export function resolveRedskilledBin(home = homedir()): string | null {
 export function resolveRedskilledSocket(
   env: NodeJS.ProcessEnv = process.env,
   uid: number | string = process.getuid?.() ?? "nouid",
+  platform: NodeJS.Platform = process.platform,
 ): string | null {
-  if (process.platform === "win32") return null;
   const sessionKey = env["REDSKILLED_SESSION"]?.trim() ||
     env["XDG_RUNTIME_DIR"]?.trim() || `uid:${uid}`;
   const hash = createHash("sha256").update(`redskilled:${sessionKey}`).digest("hex").slice(0, 20);
@@ -176,7 +279,8 @@ export function resolveRedskilledSocket(
     if (path.length < 108) return path;
   }
   const candidate = join(tmpdir(), `red-skills-${uid}`, hash, socketName);
-  return candidate.length < 108 ? candidate : join("/tmp", `red-skills-${uid}`, hash, socketName);
+  if (candidate.length < 108 || platform === "win32") return candidate;
+  return join("/tmp", `red-skills-${uid}`, hash, socketName);
 }
 
 /** Read host-state over the existing socket. This function has no birth path. */
@@ -184,12 +288,23 @@ export async function readHostInventoryNoStart(
   socketPath = resolveRedskilledSocket(),
   timeoutMs = 500,
 ): Promise<HostInventory | null> {
-  if (!socketPath || !existsSync(socketPath)) return null;
+  const value = await readHostDocumentNoStart(socketPath, timeoutMs);
+  return value === null ? null : hostInventoryFrom(value);
+}
+
+/** Read the daemon's complete document over an existing socket, without birth. */
+async function readHostDocumentNoStart(
+  socketPath = resolveRedskilledSocket(),
+  timeoutMs = 500,
+): Promise<unknown | null> {
+  // Windows' local-domain endpoint may be connectable without presenting as
+  // a stat-able file. A failed connection is already bounded and harmless.
+  if (!socketPath || (process.platform !== "win32" && !existsSync(socketPath))) return null;
   return await new Promise((resolve) => {
     const socket = createConnection(socketPath);
     let settled = false;
     let buffer = "";
-    const finish = (value: HostInventory | null): void => {
+    const finish = (value: unknown | null): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -210,7 +325,7 @@ export async function readHostInventoryNoStart(
           ok?: unknown;
           value?: unknown;
         };
-        finish(response.ok === true ? hostInventoryFrom(response.value) : null);
+        finish(response.ok === true ? response.value : null);
       } catch {
         finish(null);
       }
@@ -301,9 +416,7 @@ export async function readWindowsWslHostState(
     }),
   );
   const known = states.filter((state): state is HostState => state !== null);
-  return known.length === 0
-    ? null
-    : { workers: known.reduce((total, state) => total + state.workers, 0) };
+  return mergeHostStates(known);
 }
 
 /**
@@ -319,13 +432,6 @@ export async function readWindowsWslHostState(
  * repair to offer for either, and the Redwall it draws is identical.
  */
 async function askRedskilled(): Promise<string | null> {
-  const inventory = await readHostInventoryNoStart();
-  return inventory
-    ? JSON.stringify({
-      version: HOST_STATE_VERSION,
-      protocol_version: HOST_STATE_PROTOCOL_VERSION,
-      pid: inventory.daemonPid,
-      workers: inventory.workers,
-    })
-    : null;
+  const state = await readHostDocumentNoStart();
+  return state === null ? null : JSON.stringify(state);
 }
