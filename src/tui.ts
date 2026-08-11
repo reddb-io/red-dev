@@ -44,6 +44,7 @@ import {
   type SetupModel,
 } from "./tui-setup-model.ts";
 import { muted, text, wordmarkGradient } from "./tui-theme.ts";
+import { withConsoleSelectionSuspended } from "./windows-console-mode.ts";
 
 /**
  * A row of blocks in the palette's own colours.
@@ -481,7 +482,9 @@ export async function runTui(
     );
   }
 
-  const { waitUntilExit } = render(App, { fullHeight: true });
-  await waitUntilExit();
+  await withConsoleSelectionSuspended(async () => {
+    const { waitUntilExit } = render(App, { fullHeight: true });
+    await waitUntilExit();
+  });
   return result;
 }
