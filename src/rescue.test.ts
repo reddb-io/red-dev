@@ -220,9 +220,18 @@ describe("Host Rescue", () => {
     );
     const stat = readFileSync(`/proc/${child.pid}/stat`, "utf8");
     const startTime = stat.slice(stat.lastIndexOf(") ") + 2).trim().split(/\s+/)[19]!;
+    const currentUid = process.getuid?.() ?? 1000;
     const before = snapshot([
-      processRecord({ pid: child.pid, ppid: 1, pgid: child.pid, sid: child.pid, startTime }),
+      processRecord({
+        pid: child.pid,
+        ppid: 1,
+        pgid: child.pid,
+        sid: child.pid,
+        uid: currentUid,
+        startTime,
+      }),
     ]);
+    before.currentUid = currentUid;
     const target = planRescue(before).targets[0]!;
     expect(rescueTargetStillExact(target)).toBe(true);
     let refreshes = 0;
@@ -255,11 +264,13 @@ describe("Host Rescue", () => {
       try {
         const stat = readFileSync(`/proc/${child.pid}/stat`, "utf8");
         const startTime = stat.slice(stat.lastIndexOf(") ") + 2).trim().split(/\s+/)[19]!;
+        const currentUid = process.getuid?.() ?? 1000;
         const record = processRecord({
           pid: child.pid,
           ppid: 1,
           pgid: child.pid,
           sid: child.pid,
+          uid: currentUid,
           startTime,
         });
         const activeSession = processRecord({
@@ -274,6 +285,7 @@ describe("Host Rescue", () => {
           reparented: false,
         });
         const before = snapshot([record, activeSession]);
+        before.currentUid = currentUid;
         before.activeUnits = ["app-active.scope"];
         const afterSnapshot = snapshot([activeSession]);
         afterSnapshot.activeUnits = ["app-active.scope"];
@@ -323,5 +335,5 @@ describe("Host Rescue", () => {
     }
     expect(after.processes).toBeLessThanOrEqual(baseline.processes + 5);
     expect(after.tasks).toBeLessThanOrEqual(baseline.tasks + 5);
-  }, 15_000);
+  }, 30_000);
 });

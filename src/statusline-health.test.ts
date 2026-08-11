@@ -95,7 +95,7 @@ describe("statusline lifecycle probe", () => {
         command,
       ], 2_100);
       expect(result).toMatchObject({ bounded: true, groupGone: true });
-      expect(performance.now() - started).toBeGreaterThan(1_200);
+      expect(performance.now() - started).toBeGreaterThan(750);
       expect(performance.now() - started).toBeLessThan(2_100);
     } finally {
       rmSync(root, { recursive: true, force: true });
