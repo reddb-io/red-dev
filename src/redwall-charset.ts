@@ -23,14 +23,30 @@
  * committed subset, and the failure says re-vendor — rather than the
  * overlay quietly drawing `.notdef` boxes on somebody's desktop.
  */
-export const REDWALL_LABELS = ["WORKERS", "LAN"] as const;
+export const REDWALL_LABELS = [
+  "redskilled at work",
+  "redskilled standing by",
+  "redskilled at capacity",
+  "redskilled needs attention",
+  "redskilled unavailable",
+  "worker",
+  "workers",
+  "queued",
+  "nothing queued",
+  "worker births paused",
+  "worker admission refused",
+  "workers short",
+  "memory overcommitted",
+  "workers not isolated",
+  "update available",
+] as const;
 
 /**
  * Everything the overlay writes that is not a label: the Worker count,
  * the dotted quad, and the colon a port would need. The space is here
  * because a subset without one has nothing to set between two words.
  */
-const REDWALL_VALUES = "0123456789.: ";
+const REDWALL_VALUES = "0123456789.:/ ·";
 
 /**
  * Sorted by codepoint and deduplicated — the order `subsetFont` requires

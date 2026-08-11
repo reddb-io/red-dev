@@ -76,12 +76,9 @@ describe("every glyph the overlay can draw", () => {
     }
   });
 
-  test("'0' and 'O' are different shapes, which is the whole point of a face", () => {
-    // Not in the charset together — 'O' is only there because WORKERS
-    // has one — but this is the pair a subsetter renumbering glyphs gets
-    // wrong, and the pair a reader would be most embarrassed to confuse.
+  test("'0' and 'o' are different shapes, which is the whole point of a face", () => {
     const zero = font.contoursOf(glyph("0"));
-    const oh = font.contoursOf(glyph("O"));
+    const oh = font.contoursOf(glyph("o"));
     expect(JSON.stringify(zero)).not.toBe(JSON.stringify(oh));
   });
 });

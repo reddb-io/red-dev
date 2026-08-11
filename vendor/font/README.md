@@ -6,8 +6,9 @@ Redwall draws with. Pinned in `font.lock.json`; the OFL it ships under is
 
 ## Why a subset and not the face
 
-FiraCode Nerd Font Mono is 2.7 MB and 12,780 glyphs. Redwall writes
-twenty-two characters. Embedding the whole face to reach them would put
+FiraCode Nerd Font Mono is 2.7 MB and 12,780 glyphs. Redwall writes a small,
+derived alphabet of human status phrases, digits and separators. Embedding
+the whole face to reach them would put
 more unused outline data into the binary than the six wallpapers weigh
 together.
 

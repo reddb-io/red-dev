@@ -61,7 +61,7 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
-import { readHostState, readWindowsWslHostState } from "./host-state.ts";
+import { mergeHostStates, readHostState, readWindowsWslHostState } from "./host-state.ts";
 import { resolveRedwallAddress } from "./lan-address.ts";
 import type { Platform } from "./platform.ts";
 import { readPreferences, resolveRedwall } from "./preferences.ts";
@@ -126,18 +126,25 @@ export interface RedwallSeams {
 /**
  * What this machine currently says about itself.
  *
- * Both halves are asked at once and neither can withhold the other: a
- * daemon that is not running costs the Worker count, and `host-state.ts`
- * turns every way that can happen into `null` rather than a throw. The
- * address is resolved without the daemon's help precisely so that it
- * survives.
+ * Daemon state and address are asked at once and neither can withhold the
+ * other: a daemon that is not running costs its operational facts, and
+ * `host-state.ts` turns every way that can happen into `null` rather than a
+ * throw. The address is resolved without the daemon's help so it survives.
  */
 export async function redwallState(p: Platform): Promise<RedwallState> {
   const [host, address] = await Promise.all([
-    p.os === "windows" ? readWindowsWslHostState() : readHostState(),
+    p.os === "windows"
+      ? Promise.all([readHostState(), readWindowsWslHostState()]).then(mergeHostStates)
+      : readHostState(),
     resolveRedwallAddress(p),
   ]);
-  return { workers: host?.workers ?? null, address };
+  return {
+    workers: host?.workers ?? null,
+    capacity: host?.capacity ?? null,
+    queued: host?.queued ?? null,
+    attention: host?.attention ?? null,
+    address,
+  };
 }
 
 /**

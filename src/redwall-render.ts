@@ -14,12 +14,12 @@
  * sheet, never in place of it, which is what keeps Redwall compatible
  * with the decision `wallpaper.ts` records: the desktop carries the
  * mark, and a generator that could not draw one is why the old gradient
- * was retired. Outside the overlay's rectangle the output is the input,
+ * was retired. Outside the overlay's rounded card the output is the input,
  * pixel for pixel.
  *
  * ## Why there is a plate at all
  *
- * The overlay puts an opaque rectangle down and writes on that, rather
+ * The overlay puts an opaque, rounded card down and writes on that, rather
  * than writing straight onto the art. The reason is `flare`: its sheet
  * is a field of red.500, and paper text on red.500 measures 3.75 — a
  * failure by the brand's own guardrail. Text laid directly on art is
@@ -28,8 +28,8 @@
  * a sampled colour is a colour nobody declared, so nothing can assert
  * about it before the image exists.
  *
- * With a plate, the ground is a colour the *theme* declares, the ink is
- * a colour the theme's *appearance* declares, and the pair can be
+ * With a plate, the ground and both text roles are colours the *theme*
+ * declares, and each pair can be
  * measured in `theme-contrast.test.ts` alongside every other pair this
  * project draws. Legibility becomes arithmetic instead of a look.
  *
@@ -41,7 +41,8 @@
  * the brand mark and the working edges of the desktop alone.
  */
 
-import { brand, rgb } from "./brand.ts";
+import { rgb } from "./brand.ts";
+import type { HostStateAttention } from "./host-state.ts";
 import { decodePng, encodePng, type Raster } from "./png.ts";
 import { REDWALL_CHARSET } from "./redwall-charset.ts";
 import type { Hex, Theme } from "./themes.ts";
@@ -51,13 +52,19 @@ import { typeset, type Mask } from "./typeset.ts";
 /**
  * What the overlay reports, with `null` meaning "not known".
  *
- * Both halves are independently absent, and that is load-bearing: see
- * `host-state.ts`, which exists to make sure a daemon that is not
- * running costs the Worker count and not the address as well.
+ * Daemon state and address are independently absent, and that is
+ * load-bearing: see `host-state.ts`, which makes sure a daemon that is not
+ * running costs its operational facts and not the address as well.
  */
 export interface RedwallState {
   /** Workers running here. Zero is a real answer; null is no answer. */
   readonly workers: number | null;
+  /** Scheduler capacity, absent when multiple execution domains were merged. */
+  readonly capacity?: number | null;
+  /** Work waiting across registered projects. */
+  readonly queued?: number | null;
+  /** The highest-severity condition the daemon can state compactly. */
+  readonly attention?: HostStateAttention | null;
   /** The address this machine answers on, as a dotted quad. */
   readonly address: string | null;
 }
@@ -71,7 +78,7 @@ export interface RedwallInput {
   readonly state: RedwallState;
 }
 
-/** The rectangle the overlay occupies. Everything outside it is art. */
+/** The card's bounding box. Everything outside its rounded shape is art. */
 export interface RedwallBox {
   readonly x: number;
   readonly y: number;
@@ -79,12 +86,16 @@ export interface RedwallBox {
   readonly height: number;
 }
 
-/** The two colours the overlay is painted in. */
+/** The declared colours the overlay is painted in. */
 export interface RedwallInk {
   /** The plate the text is set on. */
   readonly plate: Hex;
   /** The text itself. */
   readonly text: Hex;
+  /** Operational facts below the headline. */
+  readonly secondary: Hex;
+  /** The daemon's signal rail and state mark. */
+  readonly signal: Hex;
 }
 
 /**
@@ -92,15 +103,17 @@ export interface RedwallInk {
  *
  * The plate is the theme's own deepest ground — the colour `themes.ts`
  * describes as the wallpaper's base — so the block reads as part of the
- * desktop rather than as a sticker on it. The ink is chosen from
- * `appearance` and nothing else: a dark theme takes paper, a light one
- * takes ink. No pixel is consulted, which is what makes the pair
- * knowable, and therefore assertable, before anything is drawn.
+ * desktop rather than as a sticker on it. Headline and operational facts
+ * use the theme's declared strong and normal text roles; the narrow signal
+ * rail uses its declared accent when it has one. No pixel is consulted,
+ * which makes every pair knowable, and therefore assertable, before drawing.
  */
 export function redwallInk(theme: Theme): RedwallInk {
   return {
     plate: theme.surface.bg,
-    text: theme.appearance === "light" ? brand.ink : brand.paper,
+    text: theme.text.strong,
+    secondary: theme.text.normal,
+    signal: theme.accent.kind === "colour" ? theme.accent.value : theme.text.normal,
   };
 }
 
@@ -116,28 +129,139 @@ export function redwallInk(theme: Theme): RedwallInk {
  * `host-state.ts` states for a missing daemon.
  */
 export function redwallLines(state: RedwallState): string[] {
-  const lines: string[] = [];
-  // A count that is not a plain non-negative integer has no decimal form
-  // made only of digits — 1e21 and NaN both stringify into characters
-  // this face has never been cut for.
-  if (state.workers !== null && Number.isSafeInteger(state.workers) && state.workers >= 0) {
-    lines.push(`WORKERS ${state.workers}`);
+  const address = state.address !== null && validAddress(state.address) && drawable(state.address)
+    ? state.address
+    : null;
+  if (state.workers === null) {
+    return address === null ? ["redskilled unavailable"] : ["redskilled unavailable", address];
   }
-  if (state.address !== null && state.address !== "") {
-    const line = `LAN ${state.address}`;
-    if ([...line].every((ch) => REDWALL_CHARSET.includes(ch))) lines.push(line);
+  if (!Number.isSafeInteger(state.workers) || state.workers < 0) return [];
+
+  const workers = state.workers;
+  const capacity = validCount(state.capacity) ? state.capacity : null;
+  const queued = validCount(state.queued) ? state.queued : null;
+  let headline: string;
+  let detail: string;
+  if (state.attention) {
+    headline = "redskilled needs attention";
+    detail = attentionLine(state.attention);
+    if (queued !== null && queued > 0) detail += ` · ${queued} queued`;
+  } else if (capacity !== null && capacity > 0 && workers >= capacity && (queued ?? 0) > 0) {
+    headline = "redskilled at capacity";
+    detail = workerLine(workers, capacity);
+    if (queued !== null) detail += ` · ${queued} queued`;
+  } else if (workers > 0) {
+    headline = "redskilled at work";
+    detail = workerLine(workers, capacity);
+    if (queued !== null) detail += queued === 0 ? " · nothing queued" : ` · ${queued} queued`;
+  } else {
+    headline = "redskilled standing by";
+    detail = queued === 0 ? "nothing queued" : queued === null ? "0 workers" : `${queued} queued`;
   }
-  return lines;
+
+  const lines = [headline, detail];
+  if (address !== null) lines.push(address);
+  return lines.every(drawable) ? lines : [];
 }
 
-/** Text height in pixels, and the space around it, for art this tall. */
-function scaleFor(height: number): { size: number; pad: number; margin: number } {
-  // A sixtieth of the height puts about sixty lines of text on any
-  // screen, so a 4K sheet and a 1080p one carry the same overlay at
-  // different resolutions rather than the same overlay at different
-  // apparent sizes. The floor is what keeps a thumbnail legible.
-  const size = Math.max(12, Math.round(height / 60));
-  return { size, pad: Math.round(size * 0.5), margin: Math.round(size * 1.25) };
+function validCount(value: number | null | undefined): value is number {
+  return value !== null && value !== undefined && Number.isSafeInteger(value) && value >= 0;
+}
+
+function drawable(line: string): boolean {
+  return [...line].every((ch) => REDWALL_CHARSET.includes(ch));
+}
+
+function validAddress(value: string): boolean {
+  const octets = value.split(".");
+  return octets.length === 4 && octets.every((octet) => {
+    if (!/^\d{1,3}$/.test(octet)) return false;
+    const number = Number.parseInt(octet, 10);
+    return number >= 0 && number <= 255;
+  });
+}
+
+function workerLine(workers: number, capacity: number | null): string {
+  if (capacity !== null) return `${workers}/${capacity} workers`;
+  return `${workers} ${workers === 1 ? "worker" : "workers"}`;
+}
+
+function attentionLine(attention: HostStateAttention): string {
+  switch (attention.kind) {
+    case "births-paused": return "worker births paused";
+    case "admission-refused": return "worker admission refused";
+    case "worker-shortfall": return attention.count === null
+      ? "workers short"
+      : `${attention.count} workers short`;
+    case "memory-overcommitted": return "memory overcommitted";
+    case "workers-unisolated": return "workers not isolated";
+    case "update-available": return "update available";
+  }
+}
+
+interface RedwallScale {
+  title: number;
+  detail: number;
+  padX: number;
+  padY: number;
+  gap: number;
+  margin: number;
+  radius: number;
+  rail: number;
+}
+
+interface RedwallLayout {
+  box: RedwallBox;
+  scale: RedwallScale;
+  title: Mask;
+  details: Mask[];
+}
+
+/** Two levels of type and the quiet space around them, scaled with the art. */
+function scaleFor(height: number): RedwallScale {
+  const title = Math.max(12, Math.round(height / 66));
+  const detail = Math.max(10, Math.round(title * 0.58));
+  return {
+    title,
+    detail,
+    padX: Math.round(title * 0.62),
+    padY: Math.round(title * 0.52),
+    gap: Math.max(4, Math.round(detail * 0.38)),
+    margin: Math.round(title * 1.35),
+    radius: Math.round(title * 0.5),
+    rail: Math.max(2, Math.round(title * 0.1)),
+  };
+}
+
+function layoutFor(
+  art: { readonly width: number; readonly height: number },
+  font: Font,
+  lines: readonly string[],
+): RedwallLayout | null {
+  if (lines.length === 0) return null;
+  const scale = scaleFor(art.height);
+  const title = typeset(font, [lines[0]!], scale.title);
+  const details = lines.slice(1).map((line) => typeset(font, [line], scale.detail));
+  const signalReserve = Math.round(scale.title * 1.5);
+  const contentWidth = Math.max(
+    title.width + signalReserve,
+    ...details.map((mask) => mask.width),
+  );
+  const contentHeight = title.height +
+    details.reduce((sum, mask) => sum + scale.gap + mask.height, 0);
+  const width = contentWidth + scale.padX * 2;
+  const height = contentHeight + scale.padY * 2;
+  return {
+    box: {
+      x: Math.max(0, art.width - scale.margin - width),
+      y: Math.max(0, scale.margin),
+      width,
+      height,
+    },
+    scale,
+    title,
+    details,
+  };
 }
 
 /**
@@ -153,29 +277,15 @@ export function redwallBox(
   font: Font,
   lines: readonly string[],
 ): RedwallBox | null {
-  if (lines.length === 0) return null;
-  const { size, pad, margin } = scaleFor(art.height);
-  const mask = typeset(font, lines, size);
-
-  const width = mask.width + pad * 2;
-  const height = mask.height + pad * 2;
-  // Clamped rather than allowed to run off the edge: art smaller than
-  // the overlay is a thumbnail, and a thumbnail should show what it can.
-  return {
-    x: Math.max(0, art.width - margin - width),
-    y: Math.max(0, margin),
-    width,
-    height,
-  };
+  return layoutFor(art, font, lines)?.box ?? null;
 }
 
 /**
  * The art with the state drawn on it, as PNG bytes.
  *
- * State with nothing sayable in it returns the art it was given, byte
- * for byte and without a re-encode. A Redwall of an unknown machine is
- * the wallpaper, and saying so by returning the input is both cheaper
- * and more obviously true than encoding an image nothing was drawn on.
+ * State with no drawable lines returns the art it was given, byte for byte
+ * and without a re-encode. An unreachable daemon is itself drawable state:
+ * it deliberately produces the quiet unavailable card even without a route.
  */
 export function renderRedwall(input: RedwallInput): Uint8Array {
   const lines = redwallLines(input.state);
@@ -183,10 +293,9 @@ export function renderRedwall(input: RedwallInput): Uint8Array {
 
   const raster = decodePng(input.art);
   const font = readFont(input.font);
-  const box = redwallBox(raster, font, lines)!;
-  const { size, pad } = scaleFor(raster.height);
+  const layout = layoutFor(raster, font, lines)!;
 
-  paint(raster, box, pad, typeset(font, lines, size), redwallInk(input.theme));
+  paint(raster, layout, lines[0]!, redwallInk(input.theme));
   return encodePng(raster);
 }
 
@@ -199,30 +308,116 @@ export function renderRedwall(input: RedwallInput): Uint8Array {
  * between the two declared colours and never a third one taken from
  * whatever the sheet happened to have there.
  */
-function paint(raster: Raster, box: RedwallBox, pad: number, mask: Mask, ink: RedwallInk): void {
+function paint(
+  raster: Raster,
+  layout: RedwallLayout,
+  headline: string,
+  ink: RedwallInk,
+): void {
+  const { box, scale, title, details } = layout;
   const [pr, pg, pb] = rgb(ink.plate);
-  const [tr, tg, tb] = rgb(ink.text);
+  const [sr, sg, sb] = rgb(ink.signal);
   const { data, width } = raster;
 
   for (let y = 0; y < box.height; y++) {
     const row = box.y + y;
     if (row < 0 || row >= raster.height) continue;
-    const my = y - pad;
 
     for (let x = 0; x < box.width; x++) {
       const column = box.x + x;
       if (column < 0 || column >= width) continue;
-      const mx = x - pad;
-      const covered =
-        mx >= 0 && mx < mask.width && my >= 0 && my < mask.height
-          ? mask.alpha[my * mask.width + mx]!
-          : 0;
+      if (!insideRounded(x, y, box.width, box.height, scale.radius)) continue;
 
       const at = (row * width + column) * 4;
-      data[at] = mix(pr, tr, covered);
-      data[at + 1] = mix(pg, tg, covered);
-      data[at + 2] = mix(pb, tb, covered);
+      const signal = x < scale.rail;
+      data[at] = signal ? sr : pr;
+      data[at + 1] = signal ? sg : pg;
+      data[at + 2] = signal ? sb : pb;
       data[at + 3] = 255;
+    }
+  }
+
+  let top = box.y + scale.padY;
+  pour(raster, title, box.x + scale.padX, top, ink.plate, ink.text);
+  top += title.height;
+  for (const detail of details) {
+    top += scale.gap;
+    pour(raster, detail, box.x + scale.padX, top, ink.plate, ink.secondary);
+    top += detail.height;
+  }
+  paintSignal(raster, layout, headline, ink);
+}
+
+function insideRounded(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+): boolean {
+  const cx = Math.max(radius, Math.min(width - radius - 1, x));
+  const cy = Math.max(radius, Math.min(height - radius - 1, y));
+  return (x - cx) ** 2 + (y - cy) ** 2 <= radius ** 2;
+}
+
+function pour(
+  raster: Raster,
+  mask: Mask,
+  left: number,
+  top: number,
+  under: Hex,
+  over: Hex,
+): void {
+  const [ur, ug, ub] = rgb(under);
+  const [or, og, ob] = rgb(over);
+  for (let y = 0; y < mask.height; y++) {
+    const row = top + y;
+    if (row < 0 || row >= raster.height) continue;
+    for (let x = 0; x < mask.width; x++) {
+      const column = left + x;
+      if (column < 0 || column >= raster.width) continue;
+      const covered = mask.alpha[y * mask.width + x]!;
+      if (covered === 0) continue;
+      const at = (row * raster.width + column) * 4;
+      raster.data[at] = mix(ur, or, covered);
+      raster.data[at + 1] = mix(ug, og, covered);
+      raster.data[at + 2] = mix(ub, ob, covered);
+      raster.data[at + 3] = 255;
+    }
+  }
+}
+
+function paintSignal(
+  raster: Raster,
+  layout: RedwallLayout,
+  headline: string,
+  ink: RedwallInk,
+): void {
+  const { box, scale, title } = layout;
+  const radius = Math.max(3, Math.round(scale.title * 0.15));
+  const centerX = box.x + box.width - scale.padX - radius;
+  const centerY = box.y + scale.padY + Math.round(title.height / 2);
+  const colour = headline.endsWith("unavailable") ? ink.secondary : ink.signal;
+  const [r, g, b] = rgb(colour);
+  const standby = headline.endsWith("standing by");
+  const attention = headline.endsWith("needs attention");
+  for (let dy = -radius; dy <= radius; dy++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      const distance = Math.hypot(dx, dy);
+      const covered = attention
+        ? Math.abs(dx) + Math.abs(dy) <= radius
+        : standby
+        ? distance <= radius && distance >= radius - Math.max(2, scale.rail)
+        : distance <= radius;
+      if (!covered) continue;
+      const x = centerX + dx;
+      const y = centerY + dy;
+      if (x < 0 || x >= raster.width || y < 0 || y >= raster.height) continue;
+      const at = (y * raster.width + x) * 4;
+      raster.data[at] = r;
+      raster.data[at + 1] = g;
+      raster.data[at + 2] = b;
+      raster.data[at + 3] = 255;
     }
   }
 }

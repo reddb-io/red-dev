@@ -1,5 +1,5 @@
 /**
- * The daemon's host-state, read for the one number Redwall draws from it.
+ * The daemon's host-state, reduced to the compact facts Redwall draws from it.
  *
  * Three of these tests are the same rule stated three ways: a Worker count
  * that cannot be trusted is dropped, and nothing else is. A daemon that is
@@ -15,7 +15,7 @@
  * The payload is a real capture from `redskilled host-state`, with the
  * machine's own identifiers and paths replaced. What it pins is the shape
  * the daemon actually emits — a shape with sixteen top-level keys, of which
- * this module reads three.
+ * this module reads only the operational subset the card can act on.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -27,10 +27,12 @@ import {
   HOST_STATE_VERSION,
   hostInventoryFrom,
   hostStateFrom,
+  mergeHostStates,
   parseHostState,
   readHostInventoryNoStart,
   readHostState,
   readWindowsWslHostState,
+  resolveRedskilledSocket,
 } from "./host-state.ts";
 import type { BoundedCommandResult } from "./bounded-command.ts";
 
@@ -50,7 +52,12 @@ describe("a payload the daemon really emitted", () => {
     // Both numbers come from the capture rather than from a literal, so the
     // assertion cannot drift from the fixture it is reading.
     expect(workers.length).toBeGreaterThan(0);
-    expect(hostStateFrom(captured)).toEqual({ workers: workers.length });
+    expect(hostStateFrom(captured)).toEqual({
+      workers: workers.length,
+      capacity: 6,
+      queued: 34,
+      attention: { kind: "births-paused", count: null },
+    });
   });
 
   test("counts Workers, not the slots the host would allow", () => {
@@ -58,7 +65,7 @@ describe("a payload the daemon really emitted", () => {
     // daemon wants; neither is what is running. A reader that took either
     // would draw a full machine on an idle one.
     const state = hostStateFrom(payload({ workers: [], projects: [] }));
-    expect(state).toEqual({ workers: 0 });
+    expect(state).toMatchObject({ workers: 0, capacity: 6, queued: 34 });
   });
 
   test("is read the same way from its JSON text", () => {
@@ -152,7 +159,7 @@ describe("a daemon that is not running", () => {
 
   test("is distinguishable from a host with no Workers", async () => {
     const idle = JSON.stringify(payload({ workers: [], projects: [] }));
-    expect(await readHostState(async () => idle)).toEqual({ workers: 0 });
+    expect(await readHostState(async () => idle)).toMatchObject({ workers: 0 });
     expect(await readHostState(async () => null)).toBeNull();
   });
 
@@ -194,7 +201,12 @@ describe("native Windows looking into running WSL hosts", () => {
       throw new Error(`unexpected distro command: ${argv.join(" ")}`);
     });
 
-    expect(state).toEqual({ workers: 5 });
+    expect(state).toEqual({
+      workers: 5,
+      capacity: null,
+      queued: 68,
+      attention: { kind: "births-paused", count: null },
+    });
     expect(commands[0]?.slice(-3)).toEqual(["--list", "--running", "--quiet"]);
     expect(commands.filter((argv) => argv.includes("-d"))).toHaveLength(2);
     // A non-interactive WSL shell does not source mise activation. The probe
@@ -215,5 +227,44 @@ describe("native Windows looking into running WSL hosts", () => {
     );
 
     expect(state).toBeNull();
+  });
+
+  test("keeps the native Windows socket reachable instead of assuming only Unix can host one", () => {
+    const socket = resolveRedskilledSocket({ XDG_RUNTIME_DIR: "/run/red-dev-test" }, "nouid", "win32");
+    expect(socket).not.toBeNull();
+    expect(socket).toStartWith("/run/red-dev-test/red-skills/");
+    expect(socket).toEndWith("redskilled.sock");
+  });
+});
+
+describe("the wallpaper-sized host summary", () => {
+  test("chooses the first actionable concern by operational severity", () => {
+    const state = hostStateFrom(payload({
+      birth_latches: [],
+      demand: {
+        ...(captured["demand"] as Record<string, unknown>),
+        shortfall: 2,
+        projects: [],
+      },
+      budget_accounting: {
+        ...(captured["budget_accounting"] as Record<string, unknown>),
+        over_committed_bytes: 1024,
+      },
+    }));
+
+    expect(state?.attention).toEqual({ kind: "memory-overcommitted", count: null });
+  });
+
+  test("keeps a capacity only when one scheduler owns the answer", () => {
+    const one = hostStateFrom(payload({ birth_latches: [] }))!;
+    const merged = mergeHostStates([one, { ...one, workers: 2 }]);
+
+    expect(mergeHostStates([one])?.capacity).toBe(6);
+    expect(merged).toMatchObject({ workers: 8, capacity: null, queued: 68 });
+  });
+
+  test("does not turn absent queue telemetry into a confident zero", () => {
+    const withoutDemand = hostStateFrom(payload({ demand: undefined }));
+    expect(withoutDemand?.queued).toBeNull();
   });
 });
