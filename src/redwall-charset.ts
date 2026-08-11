@@ -46,7 +46,7 @@ export const REDWALL_LABELS = [
  * the dotted quad, and the colon a port would need. The space is here
  * because a subset without one has nothing to set between two words.
  */
-const REDWALL_VALUES = "0123456789.:/ ·";
+const REDWALL_VALUES = "0123456789%.:/ ·";
 
 /**
  * Sorted by codepoint and deduplicated — the order `subsetFont` requires

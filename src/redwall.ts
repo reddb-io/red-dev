@@ -61,6 +61,7 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { githubRatePercent, readGithubRateLimit } from "./github-rate.ts";
 import { mergeHostStates, readHostState, readWindowsWslHostState } from "./host-state.ts";
 import { resolveRedwallAddress } from "./lan-address.ts";
 import type { Platform } from "./platform.ts";
@@ -132,17 +133,24 @@ export interface RedwallSeams {
  * throw. The address is resolved without the daemon's help so it survives.
  */
 export async function redwallState(p: Platform): Promise<RedwallState> {
-  const [host, address] = await Promise.all([
+  const [host, address, githubRate] = await Promise.all([
     p.os === "windows"
       ? Promise.all([readHostState(), readWindowsWslHostState()]).then(mergeHostStates)
       : readHostState(),
     resolveRedwallAddress(p),
+    readGithubRateLimit(),
   ]);
   return {
     workers: host?.workers ?? null,
     capacity: host?.capacity ?? null,
     queued: host?.queued ?? null,
     attention: host?.attention ?? null,
+    github: githubRate === null
+      ? null
+      : {
+        api: githubRatePercent(githubRate.core),
+        graphql: githubRatePercent(githubRate.graphql),
+      },
     address,
   };
 }

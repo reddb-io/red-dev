@@ -104,6 +104,6 @@ describe("a character the face was not cut for", () => {
     // that have drifted apart is a re-vendor, and the failure has to say
     // so rather than shipping tofu to somebody's desktop.
     expect(() => typeset(font, ["Z"], 32)).toThrow(/U\+005A/);
-    expect(() => measure(font, ["%"], 32)).toThrow(/no glyph/);
+    expect(() => measure(font, ["x"], 32)).toThrow(/no glyph/);
   });
 });

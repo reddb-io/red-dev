@@ -238,11 +238,25 @@ function hexChannels(hex: string): [number, number, number] {
 
 describe("the lines", () => {
   test("turn ordinary activity into a human status with operational context", () => {
-    expect(redwallLines({ ...running, capacity: 6, queued: 18, attention: null })).toEqual([
+    expect(redwallLines({
+      ...running,
+      capacity: 6,
+      queued: 18,
+      attention: null,
+      github: { api: 95, graphql: 0 },
+    })).toEqual([
       "redskilled at work",
       "3/6 workers · 18 queued",
+      "github api 95% · gql 0%",
       "192.168.1.42",
     ]);
+  });
+
+  test("drops invalid GitHub percentages without dropping machine state", () => {
+    expect(redwallLines({
+      ...running,
+      github: { api: 101, graphql: -1 },
+    })).toEqual(["redskilled at work", "3 workers", "192.168.1.42"]);
   });
 
   test("distinguishes standing by, capacity, attention and unavailable", () => {

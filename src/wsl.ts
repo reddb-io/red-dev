@@ -825,15 +825,43 @@ const SHIFT_ENTER_ACTION = {
 };
 
 /**
- * Whether an entry is the Shift+Enter action, ours or the user's.
- *
- * Matched on the key rather than the whole object: a user who bound
- * shift+enter to something else has made a choice, and replacing it
- * because the command differs is how a converge takes a key away.
+ * The image gesture shared with Alacritty and Claude Code on Windows/WSL.
+ * Ctrl+Shift+V remains terminal text paste; this sends the raw Ctrl+V byte
+ * through to whichever agent owns clipboard-image input.
  */
-function isShiftEnterBinding(a: Record<string, unknown>): boolean {
+const ALT_V_ACTION = {
+  command: { action: "sendInput", input: "\u0016" },
+  keys: "alt+v",
+};
+
+function hasKey(a: Record<string, unknown>, wanted: string): boolean {
   const keys = a["keys"];
-  return keys === "shift+enter" || (Array.isArray(keys) && keys.includes("shift+enter"));
+  return keys === wanted || (Array.isArray(keys) && keys.includes(wanted));
+}
+
+export interface WindowsTerminalAgentActions {
+  readonly actions: Record<string, unknown>[];
+  readonly added: string[];
+  readonly conflicts: string[];
+}
+
+/** Merge the two cross-agent gestures while treating any occupied key as user-owned. */
+export function mergeWindowsTerminalAgentActions(
+  current: Record<string, unknown>[] = [],
+): WindowsTerminalAgentActions {
+  const actions = [...current];
+  const added: string[] = [];
+  const conflicts: string[] = [];
+  for (const wanted of [SHIFT_ENTER_ACTION, ALT_V_ACTION] as const) {
+    const existing = actions.find((action) => hasKey(action, wanted.keys));
+    if (!existing) {
+      actions.push(wanted);
+      added.push(wanted.keys);
+    } else if (JSON.stringify(existing) !== JSON.stringify(wanted)) {
+      conflicts.push(wanted.keys);
+    }
+  }
+  return { actions, added, conflicts };
 }
 
 export interface TerminalOptions {
@@ -927,14 +955,17 @@ export async function configureWindowsTerminal(opts: TerminalOptions): Promise<v
     log.plain(`       dropped the '${named}' scheme — Windows Terminal's own colours are back`);
   }
 
-  // Shift+Enter, added only if the key is free.
-  settings.actions ??= [];
-  const existing = settings.actions.find(isShiftEnterBinding);
-  if (!existing) {
-    settings.actions.push(SHIFT_ENTER_ACTION);
+  // Agent input gestures, each added only when its key is free.
+  const input = mergeWindowsTerminalAgentActions(settings.actions);
+  settings.actions = input.actions;
+  if (input.added.includes("shift+enter")) {
     log.plain(`       shift+enter sends ESC[13;2u — a newline, not a submit`);
-  } else if (JSON.stringify(existing) !== JSON.stringify(SHIFT_ENTER_ACTION)) {
-    log.skip("windows terminal: shift+enter is already bound to something else — left alone");
+  }
+  if (input.added.includes("alt+v")) {
+    log.plain(`       alt+v reaches agent image paste; ctrl+shift+v remains text paste`);
+  }
+  for (const key of input.conflicts) {
+    log.skip(`windows terminal: ${key} is already bound to something else — left alone`);
   }
 
   if (opts.distro) {
@@ -956,4 +987,3 @@ export async function configureWindowsTerminal(opts: TerminalOptions): Promise<v
   await Bun.write(path, JSON.stringify(settings, null, 4) + "\n");
   log.ok(`Windows Terminal configured (backup at ${path}.red-dev-backup)`);
 }
-

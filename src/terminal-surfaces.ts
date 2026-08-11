@@ -265,6 +265,69 @@ export async function applyDelta(): Promise<boolean> {
 
 // -------------------------------------------------- opencode, herdr
 
+const OPENCODE_INPUT = {
+  input_newline: "shift+return,ctrl+return,alt+return,ctrl+j",
+  input_paste: { key: "ctrl+v", preventDefault: false },
+} as const;
+
+export type OpenCodeInputOutcome = "wrote" | "already-set" | "conflict" | "malformed";
+export type OpenCodeInputResult = Record<keyof typeof OPENCODE_INPUT, OpenCodeInputOutcome>;
+
+function sameJson(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+/**
+ * State the workstation's input contract in OpenCode's own keymap.
+ *
+ * These happen to be OpenCode's defaults today. Writing them is still useful:
+ * the behavior becomes a red-dev invariant that can be diagnosed, and an
+ * upstream default change cannot silently make one agent feel different. A
+ * user's explicit choice wins, just as it does in Claude's keybindings file.
+ */
+export async function convergeOpenCodeInput(path: string): Promise<OpenCodeInputResult> {
+  let cfg: Record<string, unknown> = {};
+  if (existsSync(path)) {
+    try {
+      const parsed = JSON.parse(await Bun.file(path).text()) as unknown;
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error();
+      cfg = parsed as Record<string, unknown>;
+    } catch {
+      log.skip("opencode tui.json is not valid JSON — left alone");
+      return { input_newline: "malformed", input_paste: "malformed" };
+    }
+  }
+
+  const existing = cfg["keybinds"];
+  if (existing !== undefined && (typeof existing !== "object" || existing === null || Array.isArray(existing))) {
+    log.skip("opencode tui.json keybinds is not an object — left alone");
+    return { input_newline: "malformed", input_paste: "malformed" };
+  }
+  const keybinds = { ...((existing ?? {}) as Record<string, unknown>) };
+  const result = {} as OpenCodeInputResult;
+  let changed = false;
+
+  for (const key of Object.keys(OPENCODE_INPUT) as Array<keyof typeof OPENCODE_INPUT>) {
+    const wanted = OPENCODE_INPUT[key];
+    if (!Object.prototype.hasOwnProperty.call(keybinds, key)) {
+      keybinds[key] = wanted;
+      result[key] = "wrote";
+      changed = true;
+    } else if (sameJson(keybinds[key], wanted)) {
+      result[key] = "already-set";
+    } else {
+      result[key] = "conflict";
+      log.skip(`opencode ${key} is already bound — left alone`);
+    }
+  }
+
+  if (changed) {
+    mkdirSync(path.slice(0, path.lastIndexOf("/")), { recursive: true });
+    await Bun.write(path, `${JSON.stringify({ ...cfg, $schema: "https://opencode.ai/tui.json", keybinds }, null, 2)}\n`);
+  }
+  return result;
+}
+
 /**
  * opencode, following omarchy's lead.
  *
@@ -291,6 +354,7 @@ export async function applyOpencode(p: Platform): Promise<boolean> {
   cfg["$schema"] = "https://opencode.ai/config.json";
   cfg["theme"] = "system";
   await Bun.write(path, `${JSON.stringify(cfg, null, 2)}\n`);
+  await convergeOpenCodeInput(`${dir}/tui.json`);
   return true;
 }
 

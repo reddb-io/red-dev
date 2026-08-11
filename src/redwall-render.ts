@@ -65,6 +65,8 @@ export interface RedwallState {
   readonly queued?: number | null;
   /** The highest-severity condition the daemon can state compactly. */
   readonly attention?: HostStateAttention | null;
+  /** Remaining GitHub budgets, kept separate because API and GraphQL reset independently. */
+  readonly github?: { readonly api: number; readonly graphql: number } | null;
   /** The address this machine answers on, as a dotted quad. */
   readonly address: string | null;
 }
@@ -132,8 +134,9 @@ export function redwallLines(state: RedwallState): string[] {
   const address = state.address !== null && validAddress(state.address) && drawable(state.address)
     ? state.address
     : null;
+  const github = githubLine(state.github);
   if (state.workers === null) {
-    return address === null ? ["redskilled unavailable"] : ["redskilled unavailable", address];
+    return ["redskilled unavailable", github, address].filter((line): line is string => line !== null);
   }
   if (!Number.isSafeInteger(state.workers) || state.workers < 0) return [];
 
@@ -160,8 +163,18 @@ export function redwallLines(state: RedwallState): string[] {
   }
 
   const lines = [headline, detail];
+  if (github !== null) lines.push(github);
   if (address !== null) lines.push(address);
   return lines.every(drawable) ? lines : [];
+}
+
+function githubLine(value: RedwallState["github"]): string | null {
+  if (!value || !validPercent(value.api) || !validPercent(value.graphql)) return null;
+  return `github api ${value.api}% · gql ${value.graphql}%`;
+}
+
+function validPercent(value: number): boolean {
+  return Number.isSafeInteger(value) && value >= 0 && value <= 100;
 }
 
 function validCount(value: number | null | undefined): value is number {

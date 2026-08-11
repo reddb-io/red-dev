@@ -259,9 +259,14 @@ choice: compatible CLI agents and runtimes are installed on Windows **and** in
 the selected WSL 2 distro. Desktop applications remain on Windows. Choosing Git
 Bash keeps the selection native-Windows only. The unattended forms are
 `red-dev agents claude-code,codex` and `red-dev lang node@lts,bun@latest`.
-Convergence also writes `~/.claude/keybindings.json` to map Shift+Enter to a
-newline in Chat — non-destructively: malformed JSON and explicit conflicting
-bindings are never overwritten silently, and re-running is a no-op.
+Convergence makes the input gestures a workstation contract rather than an
+agent-specific surprise. Shift+Enter is emitted as CSI-u by Alacritty and
+Windows Terminal, mapped to a newline in Claude Code, and stated explicitly in
+OpenCode's `tui.json`; Codex receives the same terminal sequence. Alt+V sends
+the raw image-paste gesture on Alacritty and Windows Terminal, while
+Ctrl+Shift+V remains text paste. Plain Shift+V cannot be used because it is the
+ordinary uppercase `V`. Every config merge is non-destructive: malformed JSON
+and explicit conflicting bindings are left alone, and re-running is a no-op.
 
 **Web apps** — a page in its own window, its own icon and its own alt-tab entry, the way omakub's `web2app` does it. Desktop sessions only: a `.desktop` file needs a menu to appear in.
 
@@ -883,7 +888,7 @@ A theme changes the things nothing else overrides:
 | Windows | dark mode, accent colour, and colour prevalence |
 | GNOME | light/dark preference and accent |
 | VS Code | `workbench.colorTheme`, in a settings file parsed as JSONC so comments and trailing commas survive |
-| Redwall | the new theme's art with this machine's state redrawn over it, then put on the desktop and — on GNOME — the lock screen, so the state reads without unlocking; only where the preference is on, and never on a machine with no screen |
+| Redwall | the new theme's art with this machine's state redrawn over it — workers, queue, actionable health, LAN address, and separate GitHub REST/GraphQL percentages — then put on the desktop and, on GNOME, the lock screen; GitHub is read from a locked 15-minute snapshot, never queried by every repaint |
 
 Both steps are written down: [ADR 0002](.red/adr/0002-the-terminal-palette-is-fixed.md)
 made the palette fixed, [ADR 0003](.red/adr/0003-red-dev-does-not-colour-the-terminal.md)
