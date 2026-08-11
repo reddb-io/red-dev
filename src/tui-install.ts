@@ -39,6 +39,7 @@ import type { Scope } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
 import type { ApplyContext } from "./providers.ts";
 import type { SetupPlanStep, SetupStepResult } from "./firstrun.ts";
+import { withConsoleSelectionSuspended } from "./windows-console-mode.ts";
 
 function human(ms: number): string {
   const s = Math.floor(ms / 1000);
@@ -586,7 +587,9 @@ export async function runInstallTui(
   // fullHeight: the panels are drawn to the terminal's height rather
   // than to their content, so the log fills the window instead of ending
   // partway down with the previous screen showing underneath.
-  const { waitUntilExit } = render(App, { fullHeight: true });
-  await waitUntilExit();
+  await withConsoleSelectionSuspended(async () => {
+    const { waitUntilExit } = render(App, { fullHeight: true });
+    await waitUntilExit();
+  });
   return outcome;
 }
