@@ -391,10 +391,11 @@ export function InstallLayout(m: InstallModel, width: number, height: number) {
   const logRows = Math.max(5, height - (twoColumn ? 8 : 16));
 
   // What a log line actually gets: Accented spends one column on its
-  // bar and one on the margin, and LogViewer spends one more on the
-  // scrollbar as soon as there is anything to scroll — which, during a
-  // converge, is immediately.
-  const logTextWidth = Math.max(8, leftWidth - 3);
+  // bar and one on the margin. Once there is anything to scroll,
+  // LogViewer spends two more: its scrollbar glyph and its left margin.
+  // Reserve all four up front so the scrollbar appearing cannot make
+  // already-visible lines wrap and change the viewport height.
+  const logTextWidth = Math.max(8, leftWidth - 4);
 
   const by = (o: string): number => results.filter((r) => r.outcome === o).length;
   const failures = results.filter((r) => r.outcome === "failed");

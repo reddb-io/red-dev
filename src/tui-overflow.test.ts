@@ -112,6 +112,24 @@ describe("a log line wider than its column", () => {
   });
 });
 
+describe("the transition from a full viewport to a scrollbar", () => {
+  test("does not turn one logical line into two physical rows", () => {
+    // At WIDTH=96 the log text receives 50 columns before overflow. The
+    // scrollbar adds both a margin and a glyph when line 23 arrives; if
+    // only one of those columns is reserved, every 50-column line wraps.
+    const edge = Array.from(
+      { length: 23 },
+      (_, index) => `L${String(index).padStart(2, "0")} ${"x".repeat(46)}`,
+    );
+    const visibleLabels = frame(edge).flatMap((row) => row.match(/L\d\d/g) ?? []);
+
+    // logRows is 22, so following the tail must show L01 through L22.
+    expect(visibleLabels).toEqual(
+      Array.from({ length: 22 }, (_, index) => `L${String(index + 1).padStart(2, "0")}`),
+    );
+  });
+});
+
 describe("fitToWidth", () => {
   test("leaves a line that fits", () => {
     expect(fitToWidth("short", 20)).toBe("short");
