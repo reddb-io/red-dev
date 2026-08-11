@@ -31,8 +31,8 @@ function inked(text: string, size = 32): number {
 
 describe("the same call twice", () => {
   test("produces the same coverage, byte for byte", () => {
-    const first = typeset(font, ["WORKERS 12", "LAN 10.0.0.1"], 24);
-    const second = typeset(font, ["WORKERS 12", "LAN 10.0.0.1"], 24);
+    const first = typeset(font, ["workers 12", "lan 10.0.0.1"], 24);
+    const second = typeset(font, ["workers 12", "lan 10.0.0.1"], 24);
     expect(first.width).toBe(second.width);
     expect(first.height).toBe(second.height);
     expect([...first.alpha]).toEqual([...second.alpha]);
@@ -56,10 +56,10 @@ describe("what lands in the mask", () => {
   });
 
   test("with the counters of the letters left open", () => {
-    // 'O' is a contour inside a contour wound the other way. Non-zero
+    // 'o' is a contour inside a contour wound the other way. Non-zero
     // winding leaves the middle empty; a rasteriser that ignored
-    // direction fills it, and 'O' then carries more ink than '0'.
-    const mask = typeset(font, ["O"], 64);
+    // direction fills it, and 'o' then carries more ink than '0'.
+    const mask = typeset(font, ["o"], 64);
     const centre = mask.alpha[Math.floor(mask.height / 2) * mask.width + Math.floor(mask.width / 2)]!;
     expect(centre).toBe(0);
   });
@@ -76,16 +76,16 @@ describe("the geometry", () => {
   });
 
   test("scales linearly with the size asked for", () => {
-    expect(measure(font, ["WORKERS"], 60).width).toBeCloseTo(measure(font, ["WORKERS"], 30).width * 2, 6);
+    expect(measure(font, ["workers"], 60).width).toBeCloseTo(measure(font, ["workers"], 30).width * 2, 6);
   });
 
   test("stacks lines rather than overprinting them", () => {
-    const one = measure(font, ["LAN"], 32);
-    const three = measure(font, ["LAN", "LAN", "LAN"], 32);
+    const one = measure(font, ["lan"], 32);
+    const three = measure(font, ["lan", "lan", "lan"], 32);
     expect(three.height).toBeCloseTo(one.height + one.lineHeight * 2, 6);
     // And the mask is as tall as the measurement says, so a caller can
     // position the block without knowing where a baseline is.
-    expect(typeset(font, ["LAN", "LAN", "LAN"], 32).height).toBe(Math.ceil(three.height));
+    expect(typeset(font, ["lan", "lan", "lan"], 32).height).toBe(Math.ceil(three.height));
   });
 
   test("is a widest-line measurement, not a last-line one", () => {
