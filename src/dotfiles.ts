@@ -301,6 +301,13 @@ const SHIPPED_ZELLIJ_CONFIGS = new Set([
   // already on disk, which is the branch that reaches everyone whose
   // file hashes to one of the four above.
   "d1a2cbf38939ff698a9a3cd48376ff69ad0ac8eda2b25bbc05833fb9d4d48117",
+  // 0.23.x: the Shift+Enter keybind. zellij downgrades Shift+Enter to a
+  // plain Enter for panes that never enabled the kitty keyboard
+  // protocol — Claude Code among them — and a user keybind is the one
+  // thing that wins before that downgrade, so the config writes the
+  // ESC[13;2u bytes through in the two modes where typing reaches the
+  // pane at all.
+  "2aaca2fbc44c5653ac8503274cc88cdd8923b93813a6b988e7ee24a21800f32c",
 ]);
 
 /**

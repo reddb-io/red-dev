@@ -54,6 +54,19 @@ on_force_close "quit"
 default_mode "locked"
 
 keybinds clear-defaults=true {
+    // Shift+Enter, delivered to the pane as the CSI-u sequence the
+    // terminals red-dev configures already send (ESC[13;2u — see the
+    // inputrc and the Windows Terminal / Alacritty bindings). Without
+    // this, zellij parses the key and then downgrades it to a plain
+    // Enter for any pane app that never enabled the kitty keyboard
+    // protocol — which is how Claude Code lost Shift+Enter the day
+    // zellij autostart came back. A user keybind wins before that
+    // downgrade, so the bytes arrive intact; bash panes are covered
+    // too, because the inputrc maps the same sequence to a newline.
+    // Only in the two modes where typing reaches the pane at all.
+    shared_among "locked" "normal" {
+        bind "Shift Enter" { Write 27 91 49 51 59 50 117; }
+    }
     locked {
         bind "Ctrl g" { SwitchToMode "normal"; }
     }
