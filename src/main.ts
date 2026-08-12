@@ -745,11 +745,20 @@ async function cmdTheme(p: Platform, inv: Invocation, name?: string): Promise<nu
  * for is an error line in a log about nothing.
  */
 async function cmdRedwall(p: Platform): Promise<number> {
-  const { generateRedwall } = await import("./redwall.ts");
+  const { applyRedwall } = await import("./redwall.ts");
+  const { readPreferences } = await import("./preferences.ts");
+  const { resolveThemeSlug } = await import("./themes.ts");
 
-  let outcome: Awaited<ReturnType<typeof generateRedwall>>;
+  // Generate AND repaint. This command exists so a schedule or a hook
+  // can keep the desktop current with no arguments and no knowledge of
+  // the configuration — and a schedule that only manufactures PNGs
+  // while the desktop stays pointed at last week's is the bug this
+  // command shipped with. The recorded theme is the right canvas here:
+  // unlike `red-dev theme`, nothing is being switched away from.
+  let outcome: Awaited<ReturnType<typeof applyRedwall>>;
   try {
-    outcome = await generateRedwall(p);
+    const slug = resolveThemeSlug((await readPreferences(p)).theme);
+    outcome = await applyRedwall(p, slug);
   } catch (err) {
     // Composing failed, which is a real fault rather than a state: the
     // art, the face and the arithmetic all ship in this binary.
@@ -769,11 +778,14 @@ async function cmdRedwall(p: Platform): Promise<number> {
   if (outcome.removed.length > 0) {
     log.plain(`       removed ${outcome.removed.length} superseded redwall(s)`);
   }
-  // The path is the useful half of this command's output: it is what the
-  // step that applies it reads, and what a person checks when a desktop
-  // shows something unexpected.
+  // The path is what a person checks when a desktop shows something
+  // unexpected; `shown` is whether they should need to. A desktop that
+  // refused the repaint is worth a line, not an exit code — the next
+  // tick retries, and a schedule must not accumulate red in a log over
+  // a screen that was locked at the wrong moment.
   if (outcome.written) log.ok(`redwall: ${outcome.path}`);
   else log.ok(`redwall: ${outcome.path} (unchanged)`);
+  if (!outcome.shown) log.warn("redwall: generated, but the desktop refused the repaint");
   return 0;
 }
 
