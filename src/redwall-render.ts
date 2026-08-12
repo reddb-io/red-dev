@@ -37,10 +37,11 @@
  *
  * Top right. The left edge is where GNOME and Windows put desktop icons,
  * while the bottom belongs to the taskbar, activation notices and transient
- * system UI. Keeping a small instrument against the top-right edge leaves
- * the brand mark and the working edges of the desktop alone. Its lower
- * half is a year-at-a-glance: week columns, weekday rows, and a continuous
- * progress bar, all derived from the local civil day.
+ * system UI. The top inset also clears desktop chrome after a high-resolution
+ * sheet is scaled down to the display. Keeping a small instrument near the
+ * top-right edge leaves the brand mark and the working edges of the desktop
+ * alone. Its lower half is a year-at-a-glance: week columns, weekday rows,
+ * and a continuous progress bar, all derived from the local civil day.
  */
 
 import { rgb } from "./brand.ts";
@@ -275,6 +276,7 @@ interface RedwallScale {
   padY: number;
   gap: number;
   margin: number;
+  topInset: number;
   radius: number;
   rail: number;
   calendarCell: number;
@@ -306,6 +308,10 @@ function scaleFor(height: number): RedwallScale {
     padY: Math.round(title * 0.52),
     gap: Math.max(4, Math.round(detail * 0.38)),
     margin: Math.round(title * 1.35),
+    // A 4K sheet is commonly reduced to less than half size on the desktop.
+    // Keep enough vertical room for GNOME's top bar after that projection;
+    // the right edge does not need the same system-chrome reserve.
+    topInset: Math.round(title * 2.5),
     radius: Math.round(title * 0.5),
     rail: Math.max(2, Math.round(title * 0.1)),
     calendarCell: Math.max(2, Math.round(title * 0.15)),
@@ -347,7 +353,7 @@ function layoutFor(
   return {
     box: {
       x: Math.max(0, art.width - scale.margin - width),
-      y: Math.max(0, scale.margin),
+      y: Math.max(0, scale.topInset),
       width,
       height,
     },

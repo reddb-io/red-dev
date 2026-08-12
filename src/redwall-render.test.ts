@@ -218,6 +218,19 @@ describe("the brand art underneath", () => {
     expect(box.height).toBeLessThan(before.height / 8);
   });
 
+  test("clears the GNOME top bar after a 4K sheet is fitted to the desktop", async () => {
+    const real = await Bun.file(`${root}/assets/wallpapers/flare.png`).bytes();
+    const before = decodePng(real);
+    const box = redwallBox(before, font, redwallLines(running), YEAR)!;
+
+    // Captured failure: a 3840px sheet displayed on a 1600px-wide GNOME
+    // desktop. Its 22px top bar covered the beginning of the instrument.
+    // Keep a little breathing room below system chrome as well as clearing it.
+    const displayScale = 1600 / before.width;
+    const displayedTop = box.y * displayScale;
+    expect(displayedTop).toBeGreaterThanOrEqual(22 + 8);
+  });
+
   test("is a rounded instrument with the brand signal at its edge", () => {
     const before = sheet();
     const after = decodePng(render(running));
