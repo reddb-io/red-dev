@@ -1,47 +1,63 @@
 /**
  * The log has to be readable while it is being written to.
  *
- * There was never a scroll bug to fix: LogViewer registers no key
- * handling of its own — ScrollArea does, LogViewer does not — so nothing
- * could move the view, and autoScroll pinned it to the tail on every one
- * of thirty frames a second regardless. These check the two halves that
- * make it work: that an external state can hold a position, and that
- * autoScroll is what overrides it.
+ * LogViewer can display an externally moved position, but it registers
+ * neither keyboard nor wheel handling. The live pane uses ScrollArea so
+ * the component that draws the viewport also owns its input. These tests
+ * cross the real renderer boundary: raw terminal sequences must move the
+ * same external state the frame reads.
  */
 
 import { describe, expect, test } from "bun:test";
-import { LogViewer, createScrollArea, renderToString } from "tuiuiu.js";
-import { handleInstallScroll } from "./tui-install.ts";
+import { PassThrough } from "node:stream";
+import { LogViewer, createScrollArea, render, renderToString } from "tuiuiu.js";
+import { InstallLayout, type InstallModel } from "./tui-install.ts";
 
 const LINES = Array.from({ length: 40 }, (_, i) => `linha ${i}`);
 const strip = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "");
 
+function interactiveLog() {
+  const stdin = new PassThrough() as PassThrough & NodeJS.ReadStream;
+  const stdout = new PassThrough() as PassThrough & NodeJS.WriteStream;
+  Object.assign(stdin, {
+    isTTY: true,
+    isRaw: false,
+    setRawMode: () => stdin,
+  });
+  Object.assign(stdout, { isTTY: true, columns: 96, rows: 30 });
+
+  const state = createScrollArea({ height: 5, content: LINES, autoScroll: true });
+  state.scrollToBottom();
+  const model = {
+    lines: () => LINES,
+    results: () => [],
+    setupResults: () => [],
+    setupTotal: () => 0,
+    current: () => "git",
+    scope: () => "desktop",
+    finished: () => false,
+    following: () => false,
+    followScroll: () => {},
+    elapsedMs: () => 1000,
+    total: 40,
+    logScroll: state,
+    prelude: () => {},
+    setupBegin: () => {},
+    setupStepStart: () => {},
+    setupStepEnd: () => {},
+    begin: () => {},
+    note: () => {},
+  } as unknown as InstallModel;
+
+  const app = render(() => InstallLayout(model, 96, 30), {
+    stdin,
+    stdout,
+    fullHeight: true,
+  });
+  return { app, stdin, state };
+}
+
 describe("the converge log", () => {
-  test("the install key handler moves up and pauses tail-following", () => {
-    const state = createScrollArea({ height: 5, content: LINES, autoScroll: false });
-    state.scrollToBottom();
-    const before = state.scrollTop();
-    let following = true;
-
-    const handled = handleInstallScroll(state, (value) => (following = value), "", {
-      upArrow: true,
-    });
-
-    expect(handled).toBe(true);
-    expect(state.scrollTop()).toBeLessThan(before);
-    expect(following).toBe(false);
-  });
-
-  test("G returns to the tail and resumes following", () => {
-    const state = createScrollArea({ height: 5, content: LINES, autoScroll: false });
-    state.scrollToTop();
-    let following = false;
-
-    expect(handleInstallScroll(state, (value) => (following = value), "G", {})).toBe(true);
-    expect(state.scrollTop()).toBe(state.maxScroll());
-    expect(following).toBe(true);
-  });
-
   test("an external scroll state decides what is shown", () => {
     const state = createScrollArea({ height: 5, content: LINES, autoScroll: false });
     state.scrollToTop();
@@ -78,5 +94,35 @@ describe("the converge log", () => {
     state.pageDown();
     // Back at the bottom is what re-arms following in tui-install.
     expect(state.scrollTop()).toBe(state.maxScroll());
+  });
+
+  test("the rendered log receives arrow and page keys", async () => {
+    const { app, stdin, state } = interactiveLog();
+    try {
+      const bottom = state.scrollTop();
+      stdin.write("\x1b[A");
+      await Bun.sleep(40);
+      expect(state.scrollTop()).toBeLessThan(bottom);
+
+      const afterArrow = state.scrollTop();
+      stdin.write("\x1b[5~");
+      await Bun.sleep(40);
+      expect(state.scrollTop()).toBeLessThan(afterArrow);
+    } finally {
+      app.unmount();
+    }
+  });
+
+  test("the rendered log receives the mouse wheel inside its bounds", async () => {
+    const { app, stdin, state } = interactiveLog();
+    try {
+      const bottom = state.scrollTop();
+      // SGR mouse: wheel-up at column 5, row 6 (one-based).
+      stdin.write("\x1b[<64;5;6M");
+      await Bun.sleep(40);
+      expect(state.scrollTop()).toBeLessThan(bottom);
+    } finally {
+      app.unmount();
+    }
   });
 });

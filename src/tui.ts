@@ -349,7 +349,6 @@ export async function runTui(
           else if (input === "q" || key.escape) exit();
           return;
         }
-        if (model.handleKey(input, key)) return;
         // Refused until it finishes: leaving halfway abandons the machine
         // mid-converge with no report of where it stopped. Afterwards the
         // same key goes back to the verdict, never straight out.
@@ -411,6 +410,11 @@ export async function runTui(
 
     const width = Math.max(size.columns ?? 80, 60);
     const height = Math.max(size.rows ?? 24, 16);
+    // Built on every frame so ScrollArea's input hook never changes
+    // position as the menu swaps views. A hidden viewport is inactive.
+    const installView = model
+      ? InstallLayout(model, width, height, mode() === "install" && (!done() || reviewing()))
+      : null;
 
     if (mode() === "setup" && setup) return SetupLayout(setup, p, width, height);
 
@@ -421,7 +425,7 @@ export async function runTui(
       if (finished && !reviewing()) {
         return CompletionLayout(finished, width, height, transcriptPath());
       }
-      return InstallLayout(model, width, height);
+      return installView!;
     }
 
     if (mode() === "task") {
