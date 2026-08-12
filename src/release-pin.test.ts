@@ -139,7 +139,9 @@ describe("the zellij pin", () => {
     // (`0.44.3+red.1`), and the pin. parseVersion is the translator
     // between them, so agreement is asserted through it; the fields
     // drift silently otherwise.
-    expect(parseVersion(zellij!.u24!.version!)).toBe(zellij?.pinVersion);
+    const u24 = zellij!.u24!;
+    if (u24.kind !== "gh") throw new Error("zellij u24 must stay the pinned gh provider");
+    expect(parseVersion(u24.version!)).toBe(zellij!.pinVersion ?? null);
   });
 
   test("plan names the tag it will fetch", () => {
