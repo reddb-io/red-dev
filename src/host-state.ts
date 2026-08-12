@@ -408,9 +408,15 @@ export async function readWindowsWslHostState(
 
   const states = await Promise.all(
     distros.map(async (distro): Promise<HostState | null> => {
+      // Five seconds, not the two the surrounding probes get. This hop
+      // pays for wsl.exe interop, a cold node start and parsing a
+      // ~750 KB bundle before the socket is even asked — measured
+      // around two seconds on a warm machine, which made the old
+      // budget a coin flip and the Windows Redwall show zero WSL
+      // workers while the fleet was running.
       const result = await run(
         [wsl ?? "wsl.exe", "-d", distro, "--", "sh", "-lc", WSL_HOST_STATE_SCRIPT],
-        { timeoutMs: 2_000 },
+        { timeoutMs: 5_000 },
       );
       return result.timedOut || result.exitCode !== 0 ? null : parseHostState(result.stdout);
     }),

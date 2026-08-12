@@ -74,11 +74,51 @@ describe("GitHub rate-limit snapshot", () => {
     };
     writeFileSync(path, `${JSON.stringify(stale)}\n`);
 
+    // Thirty minutes old: past the refresh TTL, inside the honesty
+    // ceiling — the case stale-but-valid was built for.
     expect(await readGithubRateLimit({
       path,
-      nowMs: 9_999_999,
+      nowMs: 30 * 60 * 1_000,
       probe: async () => null,
     })).toEqual(stale);
+  });
+
+  test("refuses to serve a snapshot past the staleness ceiling", async () => {
+    // The regression this guards: a probe that failed for ten hours
+    // kept the Redwall showing a full budget while the fleet spent the
+    // real one. Past the ceiling, "no data" is the honest answer.
+    const path = cachePath();
+    const fossil: GithubRateSnapshot = {
+      schemaVersion: 1,
+      updatedAtMs: 1,
+      core: { limit: 5000, remaining: 4926, used: 74, reset: 99 },
+      graphql: { limit: 5000, remaining: 4625, used: 375, reset: 99 },
+    };
+    writeFileSync(path, `${JSON.stringify(fossil)}\n`);
+
+    expect(await readGithubRateLimit({
+      path,
+      nowMs: 10 * 60 * 60 * 1_000,
+      probe: async () => null,
+    })).toBeNull();
+  });
+
+  test("a fossil cache still refreshes when the probe answers", async () => {
+    const path = cachePath();
+    const fossil: GithubRateSnapshot = {
+      schemaVersion: 1,
+      updatedAtMs: 1,
+      core: { limit: 5000, remaining: 4926, used: 74, reset: 99 },
+      graphql: { limit: 5000, remaining: 4625, used: 375, reset: 99 },
+    };
+    writeFileSync(path, `${JSON.stringify(fossil)}\n`);
+
+    const found = await readGithubRateLimit({
+      path,
+      nowMs: 10 * 60 * 60 * 1_000,
+      probe: async () => response,
+    });
+    expect(found?.updatedAtMs).toBe(10 * 60 * 60 * 1_000);
   });
 
   test("a concurrent refresh reads stale cache instead of spawning", async () => {

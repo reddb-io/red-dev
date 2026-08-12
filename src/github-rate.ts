@@ -26,6 +26,13 @@ import { transcriptDir } from "./transcript.ts";
 
 const TTL_MS = 15 * 60 * 1_000;
 const STALE_LOCK_MS = 30_000;
+// The ceiling past which stale-but-valid stops being either. Serving
+// the last snapshot through probe failures is what keeps the Redwall
+// from flickering to "no data" on one slow `gh` — but with no ceiling
+// it served a ten-hour-old budget as if it were current while the
+// fleet spent the real one. An hour is generous for "the probe is
+// having a bad moment" and far too short to fossilise.
+const MAX_STALE_MS = 60 * 60 * 1_000;
 
 export interface GithubRateBucket {
   readonly limit: number;
@@ -177,14 +184,19 @@ export async function readGithubRateLimit(
   const nowMs = options.nowMs ?? Date.now();
   const previous = existsSync(path) ? cached(path) : null;
   if (previous && nowMs - previous.updatedAtMs < TTL_MS) return previous;
+  // What a failed refresh may fall back to. Distinct from `previous`
+  // because the TTL check above and the fallbacks below answer
+  // different questions: "is this fresh enough to skip the probe" vs
+  // "is this honest enough to show when the probe fails".
+  const fallback = previous && nowMs - previous.updatedAtMs < MAX_STALE_MS ? previous : null;
 
   const fd = acquire(path, nowMs);
-  if (fd === null) return previous;
+  if (fd === null) return fallback;
   try {
     const raw = await (options.probe ?? defaultProbe)();
-    if (raw === null) return previous;
+    if (raw === null) return fallback;
     const next = parseProvider(raw, nowMs);
-    if (next === null) return previous;
+    if (next === null) return fallback;
     save(path, next);
     return next;
   } finally {
