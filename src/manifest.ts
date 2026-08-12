@@ -138,6 +138,7 @@ type ProviderSpec =
         | "blender"
         | "wsl-sync"
         | "claude-keybindings"
+        | "redwall-schedule"
         | "ssh-server";
     }
   /** Not installed here, deliberately. The reason is required. */
@@ -338,6 +339,7 @@ const builtin = (
     | "red-skills-herdr"
     | "blender"
     | "claude-keybindings"
+    | "redwall-schedule"
     | "ssh-server",
 ): Provider => ({ kind: "builtin", name });
 const skip = (reason: string): Provider => ({ kind: "skip", reason });
@@ -961,6 +963,25 @@ export const TOOLS: Tool[] = [
     managed: true,
     u24: builtin("claude-keybindings"),
     win: builtin("claude-keybindings"),
+  },
+  {
+    // Core, like hotkeys and for the same reason: the three targets that
+    // can display a Redwall are a desktop, a WSL distro whose images the
+    // Windows host shows, and native Windows — and no other scope spans
+    // all three. The builtin skips itself on a server and on a distro
+    // with no systemd, which is where the scope is wider than the
+    // feature.
+    //
+    // Last in core, after the binary itself is in place: the schedule
+    // names an absolute path to red-dev, and a timer installed before
+    // there is anything at that path fires into nothing every two
+    // minutes until the next converge.
+    name: "redwall-schedule",
+    about: "keeps the Redwall current, through systemd or Task Scheduler",
+    scope: "core",
+    managed: true,
+    u24: builtin("redwall-schedule"),
+    win: builtin("redwall-schedule"),
   },
   {
     name: "wsl-interop",

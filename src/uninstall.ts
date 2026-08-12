@@ -157,6 +157,18 @@ export async function removeConfiguration(p: Platform): Promise<string[]> {
     log.warn(`redwall: ${(err as Error).message}`);
   }
 
+  // Before the images and the roots would not be wrong, but after them
+  // is: a timer left enabled outlives everything else here, and it fires
+  // a binary that is about to stop existing. Isolated for the same
+  // reason the images above are — a user manager that cannot be reached
+  // is still a machine whose dotfiles must come out.
+  try {
+    const { removeRedwallSchedule } = await import("./redwall-schedule.ts");
+    removed.push(...(await removeRedwallSchedule(p)).removed);
+  } catch (err) {
+    log.warn(`redwall schedule: ${(err as Error).message}`);
+  }
+
   const targets = [
     `${home}/.local/share/red-dev`,
     `${home}/.config/red-dev`,

@@ -139,6 +139,20 @@ async function redwallStateStep(p: Platform, current: boolean): Promise<void> {
   const next = picked === on;
   await writePreferences(p, { redwall: next });
   log.ok(`redwall: ${next ? "on" : "off"}`);
+
+  // Acted on here rather than left to the next converge. The schedule is
+  // what makes the answer mean anything — a Redwall nothing regenerates
+  // is a wallpaper of the state the machine was in when it was switched
+  // on — and somebody who has just turned the feature off has said they
+  // want the two-minute timer to stop, not to stop after the next
+  // install. Reported and swallowed: this is a preference step, and a
+  // user manager that refused must not lose the answer just recorded.
+  try {
+    const { applyRedwallSchedule } = await import("./redwall-schedule.ts");
+    await applyRedwallSchedule(p);
+  } catch (err) {
+    log.warn(`redwall schedule: ${(err as Error).message}`);
+  }
 }
 
 /**

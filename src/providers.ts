@@ -932,6 +932,15 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
         await convergeClaudeKeybindings();
         return;
       }
+      if (pr.name === "redwall-schedule") {
+        const { applyRedwallSchedule } = await import("./redwall-schedule.ts");
+        // The outcome is dropped on purpose: every branch of it is a
+        // converged machine, and the ones worth a line have already
+        // printed one. Throwing is reserved for a machine that could
+        // hold a schedule and refused to.
+        await applyRedwallSchedule(ctx.platform);
+        return;
+      }
       if (pr.name === "ssh-server") {
         const { installSshServer } = await import("./ssh-server.ts");
         await installSshServer(ctx.platform);
