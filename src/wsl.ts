@@ -95,21 +95,49 @@ async function run(cmd: string[]): Promise<void> {
  * non-C: installs and domain accounts.
  */
 export async function windowsLocalAppData(): Promise<string> {
+  return await windowsDir("LOCALAPPDATA");
+}
+
+/**
+ * The roaming half of the same question, for the config Windows programs
+ * keep there.
+ *
+ * Here rather than in alacritty.ts, where two copies of it used to live:
+ * the boundary crossing is this module's subject, and a cached crossing
+ * spelled twice is a cache that is only warm for one of the callers.
+ */
+export async function windowsAppData(): Promise<string> {
+  return await windowsDir("APPDATA");
+}
+
+/**
+ * One of Windows' own directories, as this side spells it.
+ *
+ * Through the record in windows-env.ts, because the answer is a fact
+ * about the machine rather than about the run and asking costs a console
+ * program started through interop — which, from a process with no
+ * console of its own, is a window on somebody's screen. The Redwall
+ * timer is that process, every two minutes.
+ */
+async function windowsDir(name: "APPDATA" | "LOCALAPPDATA"): Promise<string> {
   // On native Windows the variable is simply ours; cmd.exe and wslpath
   // are WSL-crossing tools that do not exist there.
   if (process.platform === "win32") {
-    const local = process.env["LOCALAPPDATA"];
-    if (!local) throw new RedError("LOCALAPPDATA is not set");
-    return local;
+    const own = process.env[name];
+    if (!own) throw new RedError(`${name} is not set`);
+    return own;
   }
 
-  const raw = await capture([interopBin("cmd.exe"), "/c", "echo %LOCALAPPDATA%"]);
-  // cmd emits CRLF and may prefix a warning when cwd is a UNC path.
-  const winPath = raw.split("\n").pop()?.trim().replace(/\r$/, "") ?? "";
-  if (!/^[A-Za-z]:\\/.test(winPath)) {
-    throw new RedError(`could not read %LOCALAPPDATA% from Windows (got: ${raw})`);
-  }
-  return await capture(["wslpath", "-u", winPath]);
+  const { rememberedWindowsDir } = await import("./windows-env.ts");
+  return await rememberedWindowsDir(name, async () => {
+    const raw = await capture([interopBin("cmd.exe"), "/c", `echo %${name}%`]);
+    // cmd emits CRLF and may prefix a warning when cwd is a UNC path.
+    const winPath = raw.split("\n").pop()?.trim().replace(/\r$/, "") ?? "";
+    if (!/^[A-Za-z]:\\/.test(winPath)) {
+      throw new RedError(`could not read %${name}% from Windows (got: ${raw})`);
+    }
+    return await capture(["wslpath", "-u", winPath]);
+  });
 }
 
 /**

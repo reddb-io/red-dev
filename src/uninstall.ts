@@ -153,6 +153,13 @@ export async function removeConfiguration(p: Platform): Promise<string[]> {
     const { removeRedwall } = await import("./redwall.ts");
     const dir = await removeRedwall(p);
     if (dir) removed.push(dir);
+    // Its sibling, and named separately for the same reason: the script
+    // that lets red-dev repaint a desktop without flashing a console
+    // sits beside the images rather than in them, so removing the
+    // directory does not reach it.
+    const { removeHiddenRunner } = await import("./wallpaper.ts");
+    const runner = await removeHiddenRunner(p);
+    if (runner) removed.push(runner);
   } catch (err) {
     log.warn(`redwall: ${(err as Error).message}`);
   }
@@ -172,6 +179,10 @@ export async function removeConfiguration(p: Platform): Promise<string[]> {
   const targets = [
     `${home}/.local/share/red-dev`,
     `${home}/.config/red-dev`,
+    // What Windows answered when it was last asked. Cheap to rebuild and
+    // meaningless without red-dev, so it goes with everything else that
+    // only this tool ever reads.
+    `${home}/.cache/red-dev`,
     `${home}/.config/zellij/themes/red-dev.kdl`,
   ];
 

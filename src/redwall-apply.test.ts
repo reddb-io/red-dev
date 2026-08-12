@@ -20,7 +20,13 @@ import { describe, expect, test } from "bun:test";
 import type { Platform } from "./platform.ts";
 import { writePreferences } from "./preferences.ts";
 import type { RedwallState } from "./redwall-render.ts";
-import { applyRedwall, redwallDir, showRedwall } from "./redwall.ts";
+import {
+  applyRedwall,
+  redwallDir,
+  redwallRecord,
+  removeRedwall,
+  showRedwall,
+} from "./redwall.ts";
 import { setLockScreenBackground } from "./wallpaper.ts";
 
 const desktop: Platform = {
@@ -110,9 +116,17 @@ function screens(lockTakes = true) {
   };
 }
 
+/**
+ * The images in the directory, and not the record beside them.
+ *
+ * `shown` lives there too — deliberately, so that removing the Redwalls
+ * removes the note about them — and every claim here is about how many
+ * 4K PNGs a machine accumulates.
+ */
 const listing = async (p: Platform): Promise<string[]> => {
   const dir = await redwallDir(p);
-  return existsSync(dir) ? readdirSync(dir).sort() : [];
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).filter((name) => name.endsWith(".png")).sort();
 };
 
 describe("applying a Redwall", () => {
@@ -215,6 +229,138 @@ describe("applying a Redwall", () => {
       expect(outcome.written).toBe(true);
       expect(existsSync(outcome.path!)).toBe(true);
       expect(outcome.shown).toBe(false);
+    });
+  });
+});
+
+/**
+ * The tick that happens over and over.
+ *
+ * A two-minute timer means roughly seven hundred runs a day, and on all
+ * but a handful of them the state has not moved and the bytes are the
+ * ones already on disk. What that run costs is the subject here, and the
+ * unit of cost is a process: on WSL every question put to the desktop is
+ * a PowerShell started through interop from a systemd unit with no
+ * console of its own, and Windows allocates a console window for each
+ * one. The user watching their screen sees the cost, which is why "asks
+ * nothing" is a behaviour with tests rather than an optimisation.
+ */
+describe("an unchanged tick", () => {
+  /** A machine that counts what it was asked, and answers honestly. */
+  function watched() {
+    const shown: string[] = [];
+    const asked: string[] = [];
+    return {
+      shown,
+      asked,
+      apply: (p: Platform, slug: string) =>
+        applyRedwall(p, slug, {
+          state: async () => running,
+          inUse: async () => {
+            asked.push("inUse");
+            return shown.at(-1) ?? null;
+          },
+          show: async (path: string) => {
+            shown.push(path);
+            return true;
+          },
+        }),
+    };
+  }
+
+  test("repaints nothing and asks the desktop nothing", async () => {
+    await onFreshMachine(async () => {
+      await writePreferences(desktop, { redwall: true, theme: "dark" });
+
+      const s = watched();
+      const first = await s.apply(desktop, "dark");
+      const second = await s.apply(desktop, "dark");
+
+      expect(second.written).toBe(false);
+      expect(second.path).toBe(first.path);
+      // Still true. The desktop is showing the image — it was put there
+      // a moment ago — and reporting `shown: false` because this run did
+      // not do it would have the caller warn about a working machine.
+      expect(second.shown).toBe(true);
+      // Nothing was repainted and nothing was asked. Both are the point:
+      // one is a PowerShell to set a wallpaper that is already set, the
+      // other a PowerShell to read a registry value nothing would act on.
+      expect(s.shown).toEqual([first.path!]);
+      expect(s.asked).toEqual([]);
+    });
+  });
+
+  test("a repaint that failed is retried on the next tick", async () => {
+    // The record is written after the repaint, so a desktop that refused
+    // leaves nothing behind to short-circuit against. Otherwise one
+    // refusal would freeze the wallpaper until the bytes next changed.
+    await onFreshMachine(async () => {
+      await writePreferences(desktop, { redwall: true, theme: "dark" });
+
+      const refused = await applyRedwall(desktop, "dark", {
+        state: async () => running,
+        inUse: async () => null,
+        show: async () => false,
+      });
+      expect(refused.shown).toBe(false);
+
+      const s = watched();
+      const retried = await s.apply(desktop, "dark");
+
+      expect(retried.written).toBe(false);
+      expect(retried.shown).toBe(true);
+      expect(s.shown).toEqual([refused.path!]);
+    });
+  });
+
+  test("a record naming another image repaints rather than trusting it", async () => {
+    // What a theme switch leaves behind, and what a hand-edited record
+    // is: the note says one thing and the generated image is another, so
+    // the image wins.
+    await onFreshMachine(async () => {
+      await writePreferences(desktop, { redwall: true, theme: "dark" });
+
+      const s = watched();
+      const first = await s.apply(desktop, "dark");
+      await Bun.write(
+        `${await redwallDir(desktop)}/shown`,
+        redwallRecord(`${await redwallDir(desktop)}/cobalt-deadbeef.png`),
+      );
+      const second = await s.apply(desktop, "dark");
+
+      expect(second.written).toBe(false);
+      expect(s.shown).toEqual([first.path!, first.path!]);
+    });
+  });
+
+  test("the record names the image, under a header that says who wrote it", async () => {
+    await onFreshMachine(async () => {
+      await writePreferences(desktop, { redwall: true, theme: "dark" });
+
+      const s = watched();
+      const outcome = await s.apply(desktop, "marble");
+
+      const body = await Bun.file(`${await redwallDir(desktop)}/shown`).text();
+      expect(body).toContain("Managed by red-dev");
+      // Round-tripped rather than compared to a literal: the bytes are
+      // the contract between one tick and the next, and nothing else
+      // reads them.
+      expect(body).toBe(redwallRecord(outcome.path!));
+    });
+  });
+
+  test("the record goes with the images and never survives them", async () => {
+    // A note about a Redwall that no longer exists is worse than no
+    // note: it would short-circuit the tick that was meant to replace it.
+    await onFreshMachine(async () => {
+      await writePreferences(desktop, { redwall: true, theme: "dark" });
+
+      const s = watched();
+      await s.apply(desktop, "dark");
+      expect(existsSync(`${await redwallDir(desktop)}/shown`)).toBe(true);
+
+      await removeRedwall(desktop);
+      expect(existsSync(`${await redwallDir(desktop)}/shown`)).toBe(false);
     });
   });
 });

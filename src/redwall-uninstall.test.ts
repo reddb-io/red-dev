@@ -21,7 +21,8 @@ import { describe, expect, test } from "bun:test";
 import type { Platform } from "./platform.ts";
 import { redwallDir, removeRedwall } from "./redwall.ts";
 import { removeConfiguration } from "./uninstall.ts";
-import { wallpaperDir } from "./wallpaper.ts";
+import { imageRoot, wallpaperDir } from "./wallpaper.ts";
+import { HIDDEN_RUNNER, hiddenRunnerVbs } from "./windows-hidden.ts";
 
 const desktop: Platform = {
   os: "linux",
@@ -137,6 +138,24 @@ describe("uninstalling red-dev's configuration", () => {
       await removeConfiguration(desktop);
 
       expect(existsSync(chosen)).toBe(true);
+    });
+  });
+
+  test("takes the hidden runner beside the images with them", async () => {
+    // A sibling of the directory rather than a file in it, so removing
+    // the directory does not reach it — and on WSL it lives on the
+    // Windows disk, where none of the paths under the distro's home
+    // covers it either. Left behind, it is a .vbs under a removed tool's
+    // name that nothing on the machine could explain.
+    await onFreshMachine(async () => {
+      await withRedwalls(desktop);
+      const runner = `${await imageRoot(desktop)}/${HIDDEN_RUNNER}`;
+      writeFileSync(runner, hiddenRunnerVbs());
+
+      const removed = await removeConfiguration(desktop);
+
+      expect(removed).toContain(runner);
+      expect(existsSync(runner)).toBe(false);
     });
   });
 

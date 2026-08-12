@@ -26,10 +26,13 @@ import type { Platform } from "./platform.ts";
 import {
   applyRedwallSchedule,
   redwallBinary,
+  redwallTaskWrapper,
   redwallUnits,
+  redwallWrapperPath,
   removeRedwallSchedule,
   REDWALL_SERVICE,
   REDWALL_TASK,
+  REDWALL_TASK_WRAPPER,
   REDWALL_TIMER,
 } from "./redwall-schedule.ts";
 
@@ -374,56 +377,267 @@ describe("on a machine that cannot hold a schedule", () => {
   });
 });
 
+/**
+ * Windows, where the schedule runs a script and the script runs red-dev.
+ *
+ * The indirection is the feature. Task Scheduler starts `/TR` in a
+ * session of its own and red-dev.exe is a console program, so Windows
+ * allocates a console for it — a black window flashing over the desktop
+ * every two minutes, which is what the wallpaper is for. `wscript.exe`
+ * is a GUI-subsystem host and gets none, and the script it runs starts
+ * the binary hidden.
+ *
+ * It also splits what "stale" means in two, which is most of what these
+ * tests are about: the task knows only the script, so the binary path
+ * has moved out of the one field Task Scheduler could be asked about and
+ * into the script's own bytes.
+ */
 describe("on Windows", () => {
-  test("creates a two-minute task with the binary path quoted", async () => {
-    const host = supervisor({ "/Query": failed("ERROR: The system cannot find the file") });
+  /** A wrapper written somewhere the suite is allowed to write. */
+  async function onFreshWindows<T>(run: (wrapper: string) => Promise<T>): Promise<T> {
+    const dir = mkdtempSync(`${tmpdir()}/red-dev-redwall-wrapper-`);
+    return await run(`${dir}/${REDWALL_TASK_WRAPPER}`);
+  }
 
-    const outcome = await applyRedwallSchedule(windows, {
-      run: host.run,
-      enabled: on,
-      binary: "C:\\Users\\First Last\\AppData\\Local\\red-dev\\bin\\red-dev.exe",
+  const binary = "C:\\Users\\First Last\\AppData\\Local\\red-dev\\bin\\red-dev.exe";
+
+  test("creates a two-minute task that runs the wrapper through wscript", async () => {
+    await onFreshWindows(async (wrapper) => {
+      const host = supervisor({ "/Query": failed("ERROR: The system cannot find the file") });
+
+      const outcome = await applyRedwallSchedule(windows, {
+        run: host.run,
+        enabled: on,
+        binary,
+        wrapper,
+      });
+
+      expect(outcome.action).toBe("installed");
+      expect(outcome.written).toEqual([wrapper]);
+      const created = host.calls.find((argv) => argv.includes("/Create"));
+      expect(created).toBeDefined();
+      // wscript, never the binary. A task naming red-dev.exe directly is
+      // the bug: it works, and it flashes a console every two minutes.
+      expect(created).toContain(`wscript.exe //B //Nologo "${wrapper}"`);
+      expect(created?.join(" ")).not.toContain("red-dev.exe redwall");
+      expect(created?.join(" ")).toContain("/SC MINUTE /MO 2");
+      expect(created).toContain("/F");
     });
-
-    expect(outcome.action).toBe("installed");
-    const created = host.calls.find((argv) => argv.includes("/Create"));
-    expect(created).toBeDefined();
-    // Quoted inside the one argument Task Scheduler stores as a command
-    // line: unquoted, a path through "First Last" becomes a task that
-    // runs C:\Users\First.
-    expect(created).toContain('"C:\\Users\\First Last\\AppData\\Local\\red-dev\\bin\\red-dev.exe" redwall');
-    expect(created?.join(" ")).toContain("/SC MINUTE /MO 2");
-    expect(created).toContain("/F");
   });
 
-  test("leaves a task that already names this binary alone", async () => {
-    const binary = "C:\\Users\\me\\AppData\\Local\\red-dev\\bin\\red-dev.exe";
-    const host = supervisor({
-      "/Query": ok(`Task To Run: "${binary}" redwall\nRepeat: Every 2 minute(s)\n`),
+  test("the wrapper starts the binary hidden, with its path quoted", async () => {
+    const body = redwallTaskWrapper(binary);
+
+    // 0 is the window style and is the whole point. False rather than
+    // True so the script returns at once instead of holding a Task
+    // Scheduler slot for the length of a 4K compose.
+    expect(body).toContain(`shell.Run """${binary}"" redwall", 0, False`);
+    // Doubled quotes are VBScript's escape for one: unquoted, a path
+    // through "First Last" starts C:\Users\First.
+    expect(body).toContain('"""C:\\Users\\First Last\\');
+    expect(body).toContain("Managed by red-dev");
+    // CRLF: it is a Windows script file, and somebody will open it.
+    expect(body.split("\r\n").length).toBeGreaterThan(5);
+  });
+
+  test("goes beside the binary, so an upgrade moves both", async () => {
+    expect(redwallWrapperPath(binary)).toBe(
+      "C:\\Users\\First Last\\AppData\\Local\\red-dev\\bin\\red-dev-redwall.vbs",
+    );
+  });
+
+  test("leaves a task that already names this wrapper alone", async () => {
+    await onFreshWindows(async (wrapper) => {
+      const settled = supervisor({ "/Query": failed() });
+      await applyRedwallSchedule(windows, { run: settled.run, enabled: on, binary, wrapper });
+
+      const host = supervisor({
+        "/Query": ok(`Task To Run: wscript.exe //B //Nologo "${wrapper}"\n`),
+      });
+      const outcome = await applyRedwallSchedule(windows, {
+        run: host.run,
+        enabled: on,
+        binary,
+        wrapper,
+      });
+
+      expect(outcome.action).toBe("unchanged");
+      expect(outcome.written).toEqual([]);
+      expect(host.ran("/Create")).toBe(false);
     });
-
-    const outcome = await applyRedwallSchedule(windows, { run: host.run, enabled: on, binary });
-
-    expect(outcome.action).toBe("unchanged");
-    expect(host.ran("/Create")).toBe(false);
   });
 
-  test("deletes the task when the preference goes off", async () => {
-    const host = supervisor({ "/Query": ok("Task To Run: red-dev.exe redwall\n") });
+  test("re-creates a task that still names the binary directly", async () => {
+    // The machine this change was written for: a task installed by the
+    // previous release, running red-dev.exe with a console of its own.
+    await onFreshWindows(async (wrapper) => {
+      const settled = supervisor({ "/Query": failed() });
+      await applyRedwallSchedule(windows, { run: settled.run, enabled: on, binary, wrapper });
 
-    const outcome = await applyRedwallSchedule(windows, { run: host.run, enabled: off });
+      const host = supervisor({ "/Query": ok(`Task To Run: "${binary}" redwall\n`) });
+      const outcome = await applyRedwallSchedule(windows, {
+        run: host.run,
+        enabled: on,
+        binary,
+        wrapper,
+      });
 
-    expect(outcome.action).toBe("removed");
-    expect(outcome.removed).toEqual([REDWALL_TASK]);
-    expect(host.ran(`/Delete /TN ${REDWALL_TASK}`)).toBe(true);
+      expect(outcome.action).toBe("installed");
+      expect(host.ran("/Create")).toBe(true);
+    });
   });
 
-  test("deletes nothing when Task Scheduler says there is no such task", async () => {
-    const host = supervisor({ "/Query": failed("ERROR: The system cannot find the file") });
+  test("re-creates a task whose wrapper the upgrade moved out from under", async () => {
+    // Nothing Task Scheduler can be asked about changed: the task names
+    // the same script it always did. The binary inside that script is
+    // the field that went stale, and rewriting it is the only signal.
+    await onFreshWindows(async (wrapper) => {
+      writeFileSync(wrapper, redwallTaskWrapper("C:\\Old\\red-dev.exe"));
 
-    const outcome = await applyRedwallSchedule(windows, { run: host.run, enabled: off });
+      const host = supervisor({
+        "/Query": ok(`Task To Run: wscript.exe //B //Nologo "${wrapper}"\n`),
+      });
+      const outcome = await applyRedwallSchedule(windows, {
+        run: host.run,
+        enabled: on,
+        binary,
+        wrapper,
+      });
 
-    expect(outcome.action).toBe("absent");
-    expect(host.ran("/Delete")).toBe(false);
+      expect(outcome.action).toBe("installed");
+      expect(outcome.written).toEqual([wrapper]);
+      expect(await Bun.file(wrapper).text()).toContain(binary);
+      expect(host.ran("/Create")).toBe(true);
+    });
+  });
+
+  test("writes the wrapper when the task exists but the script never did", async () => {
+    await onFreshWindows(async (wrapper) => {
+      const host = supervisor({
+        "/Query": ok(`Task To Run: wscript.exe //B //Nologo "${wrapper}"\n`),
+      });
+      const outcome = await applyRedwallSchedule(windows, {
+        run: host.run,
+        enabled: on,
+        binary,
+        wrapper,
+      });
+
+      expect(outcome.action).toBe("installed");
+      expect(existsSync(wrapper)).toBe(true);
+      expect(host.ran("/Create")).toBe(true);
+    });
+  });
+
+  test("leaves an unchanged wrapper's bytes exactly where they were", async () => {
+    await onFreshWindows(async (wrapper) => {
+      const first = supervisor({ "/Query": failed() });
+      await applyRedwallSchedule(windows, { run: first.run, enabled: on, binary, wrapper });
+      const stamped = statSync(wrapper).mtimeMs;
+
+      const host = supervisor({
+        "/Query": ok(`Task To Run: wscript.exe //B //Nologo "${wrapper}"\n`),
+      });
+      await applyRedwallSchedule(windows, { run: host.run, enabled: on, binary, wrapper });
+
+      expect(statSync(wrapper).mtimeMs).toBe(stamped);
+    });
+  });
+
+  test("names the wrapper, not the binary, in the hand-repair hint", async () => {
+    await onFreshWindows(async (wrapper) => {
+      const host = supervisor({
+        "/Query": failed(),
+        "/Create": failed("ERROR: Access is denied."),
+      });
+
+      const { logged } = await lines(() =>
+        applyRedwallSchedule(windows, { run: host.run, enabled: on, binary, wrapper }),
+      );
+
+      // A hint that told somebody to point the task at red-dev.exe would
+      // hand them back the console flash this change removed.
+      const text = logged.join("\n");
+      expect(text).toContain("Access is denied");
+      expect(text).toContain(`wscript.exe //B //Nologo \\"${wrapper}\\"`);
+      expect(text).not.toContain(`\\"${binary}\\" redwall`);
+    });
+  });
+
+  test("deletes the task and the wrapper when the preference goes off", async () => {
+    await onFreshWindows(async (wrapper) => {
+      const settled = supervisor({ "/Query": failed() });
+      await applyRedwallSchedule(windows, { run: settled.run, enabled: on, binary, wrapper });
+
+      const host = supervisor({
+        "/Query": ok(`Task To Run: wscript.exe //B //Nologo "${wrapper}"\n`),
+      });
+      const outcome = await applyRedwallSchedule(windows, {
+        run: host.run,
+        enabled: off,
+        binary,
+        wrapper,
+      });
+
+      expect(outcome.action).toBe("removed");
+      expect(outcome.removed).toEqual([REDWALL_TASK, wrapper]);
+      // The script goes too. Left behind it is a file under a removed
+      // feature's name that nothing on the machine would explain.
+      expect(existsSync(wrapper)).toBe(false);
+      // After the delete, never before: a wrapper removed while the task
+      // still named it is a task that fails every two minutes in silence.
+      const order = host.calls.map((argv) => argv.join(" "));
+      expect(order.some((line) => line.includes("/Delete"))).toBe(true);
+    });
+  });
+
+  test("removes a wrapper the task delete already left behind", async () => {
+    await onFreshWindows(async (wrapper) => {
+      writeFileSync(wrapper, redwallTaskWrapper(binary));
+      const host = supervisor({ "/Query": failed("ERROR: The system cannot find the file") });
+
+      const outcome = await applyRedwallSchedule(windows, {
+        run: host.run,
+        enabled: off,
+        binary,
+        wrapper,
+      });
+
+      expect(outcome.action).toBe("removed");
+      expect(outcome.removed).toEqual([wrapper]);
+      expect(host.ran("/Delete")).toBe(false);
+    });
+  });
+
+  test("deletes nothing when there is neither a task nor a wrapper", async () => {
+    await onFreshWindows(async (wrapper) => {
+      const host = supervisor({ "/Query": failed("ERROR: The system cannot find the file") });
+
+      const outcome = await applyRedwallSchedule(windows, {
+        run: host.run,
+        enabled: off,
+        binary,
+        wrapper,
+      });
+
+      expect(outcome.action).toBe("absent");
+      expect(host.ran("/Delete")).toBe(false);
+    });
+  });
+
+  test("uninstalling takes the wrapper with the task", async () => {
+    await onFreshWindows(async (wrapper) => {
+      const settled = supervisor({ "/Query": failed() });
+      await applyRedwallSchedule(windows, { run: settled.run, enabled: on, binary, wrapper });
+
+      const host = supervisor({
+        "/Query": ok(`Task To Run: wscript.exe //B //Nologo "${wrapper}"\n`),
+      });
+      const outcome = await removeRedwallSchedule(windows, { run: host.run, binary, wrapper });
+
+      expect(outcome.removed).toEqual([REDWALL_TASK, wrapper]);
+      expect(existsSync(wrapper)).toBe(false);
+    });
   });
 });
 

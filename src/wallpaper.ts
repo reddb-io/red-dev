@@ -30,6 +30,13 @@
 import { existsSync, mkdirSync } from "node:fs";
 import type { Platform } from "./platform.ts";
 import { THEME_SLUGS, type Theme, type ThemeSlug } from "./themes.ts";
+import {
+  hiddenCapture,
+  HIDDEN_RUNNER,
+  powershellCommand,
+  runHidden,
+  windowsPathFor,
+} from "./windows-hidden.ts";
 
 import darkPng from "../assets/wallpapers/dark.png" with { type: "file" };
 import lightPng from "../assets/wallpapers/light.png" with { type: "file" };
@@ -133,6 +140,24 @@ export async function materialise(theme: Theme, key: string, p: Platform): Promi
   mkdirSync(dir, { recursive: true });
   const path = `${dir}/${key}-${digest}.png`;
   if (!existsSync(path)) await Bun.write(path, bytes);
+  return path;
+}
+
+/**
+ * Delete the script red-dev uses to reach the host without a window, and
+ * report whether there was one.
+ *
+ * Uninstall's business, and it has to be asked for by name for the same
+ * reason the Redwall directory does: on WSL this lives on the Windows
+ * disk, so none of the paths under the distro's home covers it, and a
+ * machine uninstalled from inside WSL would keep a .vbs under a removed
+ * tool's directory that nothing left on it could explain.
+ */
+export async function removeHiddenRunner(p: Platform): Promise<string | null> {
+  const path = `${await imageRoot(p)}/${HIDDEN_RUNNER}`;
+  if (!existsSync(path)) return null;
+  const { rmSync } = await import("node:fs");
+  rmSync(path, { force: true });
   return path;
 }
 
@@ -265,20 +290,33 @@ function windowsScript(winPath: string): string {
   ].join("");
 }
 
+/**
+ * Repaint the Windows desktop without drawing a window to do it.
+ *
+ * Through `runHidden` rather than spawning PowerShell here, and that is
+ * the whole point of the indirection: on WSL this runs from a systemd
+ * timer, and a console program started through interop by a process with
+ * no console of its own has one allocated for it — a black rectangle
+ * flashing on the desktop every two minutes, over a wallpaper. The same
+ * route is taken natively, because a scheduled task on Windows has the
+ * same problem and a second way of doing this would be a second thing to
+ * get wrong.
+ *
+ * The runner lives beside the images, under `imageRoot`. On WSL that is
+ * the host's own disk rather than the distro's — which is what makes it
+ * reachable by wscript at all, and it is the same rule that put the
+ * images there.
+ *
+ * Nothing comes back but the exit code. A hidden child has no streams,
+ * so "the desktop refused" is the whole of the detail available, and the
+ * one caller that asks only ever needed that much.
+ */
 async function setWindows(path: string, p: Platform): Promise<boolean> {
-  let winPath = path;
-  let shell = "powershell.exe";
-
-  if (p.env === "wsl") {
-    // The desktop belongs to the host, so the image has to live
-    // somewhere the host can read and be named the way it expects.
-    const toWin = Bun.spawn(["wslpath", "-w", path], { stdout: "pipe", stderr: "ignore" });
-    winPath = (await new Response(toWin.stdout).text()).trim();
-    if ((await toWin.exited) !== 0 || !winPath) return false;
-    shell = Bun.which("powershell.exe") ?? "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
-  }
-
-  return await run([shell, "-NoProfile", "-NonInteractive", "-Command", windowsScript(winPath)]);
+  // The desktop belongs to the host, so the image has to be named the
+  // way the host names it.
+  const winPath = await windowsPathFor(path, p);
+  if (winPath === null) return false;
+  return await runHidden(await imageRoot(p), powershellCommand(windowsScript(winPath)), p);
 }
 
 /**
@@ -315,36 +353,22 @@ export async function applyWallpaper(
  * deleted file — is visible to `doctor`.
  */
 export async function wallpaperPathInUse(p: Platform): Promise<string | null> {
-  if (p.os === "windows") {
-    const proc = Bun.spawn(
-      [
-        "powershell.exe",
-        "-NoProfile",
-        "-Command",
-        "(Get-ItemProperty 'HKCU:\\Control Panel\\Desktop' -Name WallPaper).WallPaper",
-      ],
-      { stdout: "pipe", stderr: "ignore" },
+  if (p.os === "windows" || p.env === "wsl") {
+    // Hidden, like the repaint next door and for the same reason: the
+    // sweep asks this question whenever it has an image to delete, which
+    // on a busy machine is most ticks of a two-minute timer, and a
+    // PowerShell started through interop by a process with no console is
+    // a window on the screen. Nothing is lost by hiding it — the answer
+    // comes back through a file either way.
+    const { out, code } = await hiddenCapture(
+      await imageRoot(p),
+      powershellCommand("(Get-ItemProperty 'HKCU:\\Control Panel\\Desktop' -Name WallPaper).WallPaper"),
+      p,
     );
-    const out = (await new Response(proc.stdout).text()).trim();
-    await proc.exited;
-    return out || null;
-  }
+    const winPath = out.trim();
+    if (code !== 0 || !winPath) return null;
+    if (p.env !== "wsl") return winPath;
 
-  if (p.env === "wsl") {
-    const shell =
-      Bun.which("powershell.exe") ??
-      "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
-    const proc = Bun.spawn(
-      [
-        shell,
-        "-NoProfile",
-        "-Command",
-        "(Get-ItemProperty 'HKCU:\\Control Panel\\Desktop' -Name WallPaper).WallPaper",
-      ],
-      { stdout: "pipe", stderr: "ignore" },
-    );
-    const winPath = (await new Response(proc.stdout).text()).trim();
-    if ((await proc.exited) !== 0 || !winPath) return null;
     // Translate back so existsSync can check it from this side.
     const conv = Bun.spawn(["wslpath", "-u", winPath], { stdout: "pipe", stderr: "ignore" });
     const unix = (await new Response(conv.stdout).text()).trim();

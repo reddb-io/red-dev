@@ -65,6 +65,22 @@ export const REDWALL_TIMER = "red-dev-redwall.timer";
 export const REDWALL_TASK = "red-dev-redwall";
 
 /**
+ * The script the Windows task runs instead of the binary.
+ *
+ * Task Scheduler starts what `/TR` names in a session of its own, and
+ * red-dev.exe is a console program: Windows allocates a console for one
+ * of those, so a task that named the binary directly flashed a black
+ * window on the desktop every two minutes. `wscript.exe` is a
+ * GUI-subsystem host and gets no console, and the script starts the
+ * binary with a window style of 0 — so nothing is ever drawn.
+ *
+ * Beside the binary rather than with the images, because it names the
+ * binary: the two go stale together, an upgrade that moves one moves the
+ * other, and an uninstall that removes the directory removes both.
+ */
+export const REDWALL_TASK_WRAPPER = "red-dev-redwall.vbs";
+
+/**
  * How often the supervisor fires, stated once for both targets.
  *
  * The systemd side spells it `2min` and Task Scheduler counts whole
@@ -122,6 +138,17 @@ export interface RedwallScheduleSeams {
   readonly unitDir?: string;
   /** The binary the schedule invokes. Defaults to where red-dev installs itself. */
   readonly binary?: string;
+  /**
+   * Where the Windows task's hidden wrapper is written. Defaults to
+   * beside the binary.
+   *
+   * A seam of its own rather than derived from `binary` in the tests,
+   * because the default is derived from it: a test that injected only a
+   * plausible Windows binary path would have this module create
+   * `C:\Users\...` as a directory in whatever the suite's cwd happened
+   * to be.
+   */
+  readonly wrapper?: string;
   /** Whether the preference is on. Defaults to the recorded preference. */
   readonly enabled?: () => Promise<boolean>;
 }
@@ -215,6 +242,58 @@ export function redwallUnits(binary: string): { service: string; timer: string }
 }
 
 /**
+ * Where the wrapper goes: beside the binary it names. PURE.
+ *
+ * Both separators, because the binary path is Windows' own and a seam
+ * may hand this a posix one in a test.
+ */
+export function redwallWrapperPath(binary: string): string {
+  const separator = binary.includes("\\") ? "\\" : "/";
+  return `${parentOf(binary)}${separator}${REDWALL_TASK_WRAPPER}`;
+}
+
+/**
+ * The directory part of a path spelled either way. PURE.
+ *
+ * Not `node:path`'s: that one is posix or win32 according to the machine
+ * running it, and this module reasons about Windows paths from a test
+ * suite that runs on Linux.
+ */
+function parentOf(path: string): string {
+  const cut = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
+  return cut === -1 ? "." : path.slice(0, cut);
+}
+
+/**
+ * The exact bytes of the wrapper, as a function of one path. PURE.
+ *
+ * Exported for the same reason `redwallUnits` is, and needed for one
+ * more: these bytes are half of what "the task is stale" means. Task
+ * Scheduler only knows it runs a script, so an upgrade that moved the
+ * binary changes nothing the task can be asked about — the wrapper is
+ * the only place the new path shows up.
+ *
+ * CRLF, because it is a Windows script file that a person may open.
+ */
+export function redwallTaskWrapper(binary: string): string {
+  return [
+    "' Managed by red-dev — rewritten on every converge.",
+    "'",
+    "' wscript.exe hosts this and is a GUI-subsystem image, so Windows",
+    "' allocates no console for it; 0 hides the child, and False returns",
+    "' at once rather than holding a Task Scheduler slot for the run.",
+    "Option Explicit",
+    "Dim shell",
+    'Set shell = CreateObject("WScript.Shell")',
+    // Doubled quotes are VBScript's escape for one: the binary sits
+    // under a profile that can contain a space, and unquoted,
+    // C:\Users\First Last\... starts C:\Users\First.
+    `shell.Run """${binary}"" redwall", 0, False`,
+    "",
+  ].join("\r\n");
+}
+
+/**
  * Whether this machine can hold a schedule at all, and why not when it
  * cannot. PURE.
  *
@@ -291,7 +370,7 @@ async function unschedule(
   p: Platform,
   seams: RedwallScheduleSeams,
 ): Promise<RedwallScheduleOutcome> {
-  return p.os === "windows" ? await unscheduleWindows(seams) : await unscheduleSystemd(seams);
+  return p.os === "windows" ? await unscheduleWindows(p, seams) : await unscheduleSystemd(seams);
 }
 
 function runner(
@@ -396,25 +475,47 @@ async function unscheduleSystemd(
   return { action: "removed", skipped: null, written: [], removed: present };
 }
 
+/**
+ * The command line the task holds.
+ *
+ * `//B` so a script error is an exit code rather than a dialog nobody is
+ * sitting in front of, and `//Nologo` so the host prints no banner into
+ * a stream nothing reads. PURE.
+ */
+function wrapperCommand(wrapper: string): string {
+  return `wscript.exe //B //Nologo "${wrapper}"`;
+}
+
 async function scheduleWindows(
   p: Platform,
   seams: RedwallScheduleSeams,
 ): Promise<RedwallScheduleOutcome> {
   const run = runner(seams);
   const binary = seams.binary ?? (await redwallBinary(p));
+  const wrapper = seams.wrapper ?? redwallWrapperPath(binary);
+
+  mkdirSync(parentOf(wrapper), { recursive: true });
+  const rewritten = await writeIfChanged(wrapper, redwallTaskWrapper(binary));
+
   const existing = await run(["schtasks", "/Query", "/TN", REDWALL_TASK, "/FO", "LIST", "/V"], {
     timeoutMs: 15_000,
   });
-  // Matched on the binary path rather than parsed: `schtasks /Query`
-  // renders in the machine's own language, so every label around the
-  // value is a locale away from meaning nothing. The path is the one
-  // field that is the same on every Windows, and it is also the field
-  // that goes stale — an upgrade that moves the binary is exactly what
-  // has to force a re-create.
-  const current = existing.exitCode === 0 &&
-    existing.stdout.toLowerCase().includes(binary.toLowerCase());
+  // Matched on a path rather than parsed: `schtasks /Query` renders in
+  // the machine's own language, so every label around the value is a
+  // locale away from meaning nothing.
+  //
+  // Two questions now, not one. The task names the wrapper, and the
+  // wrapper names the binary — so a task that still points at the binary
+  // directly is stale (it is the one that flashes a window), and so is a
+  // correct-looking task whose wrapper had to be rewritten because an
+  // upgrade moved red-dev.exe under it. Task Scheduler cannot be asked
+  // about the second: the wrapper's own bytes are the only place the
+  // binary path appears, and `rewritten` is the answer.
+  const current = !rewritten && existing.exitCode === 0 &&
+    existing.stdout.toLowerCase().includes(wrapper.toLowerCase());
   if (current) return { action: "unchanged", skipped: null, written: [], removed: [] };
 
+  const written = rewritten ? [wrapper] : [];
   const created = await run([
     "schtasks",
     "/Create",
@@ -424,39 +525,60 @@ async function scheduleWindows(
     // one command line and splits it itself: an unquoted path through
     // `C:\Users\First Last\...` becomes a task that runs `C:\Users\First`.
     "/TR",
-    `"${binary}" redwall`,
+    wrapperCommand(wrapper),
     "/SC",
     "MINUTE",
     "/MO",
     String(EVERY_MINUTES),
-    // The task exists but names the wrong binary is the case that got
-    // us here, and without /F schtasks refuses to replace it.
+    // The task exists but names the wrong thing is the case that got us
+    // here, and without /F schtasks refuses to replace it.
     "/F",
   ], { timeoutMs: 20_000 });
   if (created.exitCode !== 0) {
     log.warn(`redwall schedule: ${firstLine(created.stderr) || "schtasks could not create the task"}`);
+    // The wrapper is already on disk and correct, so this is the whole
+    // of what is left to do — and it has to name the wrapper rather than
+    // the binary, or a hand-repaired machine goes back to flashing a
+    // console every two minutes.
     log.plain(
       `       create it by hand: schtasks /Create /TN ${REDWALL_TASK} ` +
-        `/TR "\\"${binary}\\" redwall" /SC MINUTE /MO ${EVERY_MINUTES} /F`,
+        `/TR "wscript.exe //B //Nologo \\"${wrapper}\\"" /SC MINUTE /MO ${EVERY_MINUTES} /F`,
     );
   }
-  return { action: "installed", skipped: null, written: [], removed: [] };
+  return { action: "installed", skipped: null, written, removed: [] };
 }
 
 async function unscheduleWindows(
+  p: Platform,
   seams: RedwallScheduleSeams,
 ): Promise<RedwallScheduleOutcome> {
   const run = runner(seams);
+  const wrapper = seams.wrapper ?? redwallWrapperPath(seams.binary ?? (await redwallBinary(p)));
+  const orphan = existsSync(wrapper);
+
   const existing = await run(["schtasks", "/Query", "/TN", REDWALL_TASK], { timeoutMs: 15_000 });
-  // A non-zero query is how Task Scheduler says "no such task", which is
-  // the state the preference asks for. Silent for the same reason the
-  // systemd side is.
-  if (existing.exitCode !== 0) {
+  // A non-zero query is how Task Scheduler says "no such task". Silent
+  // for the same reason the systemd side is — unless the wrapper is
+  // still there, which is a file red-dev wrote and nothing else on the
+  // machine would ever explain.
+  if (existing.exitCode !== 0 && !orphan) {
     return { action: "absent", skipped: null, written: [], removed: [] };
   }
-  await run(["schtasks", "/Delete", "/TN", REDWALL_TASK, "/F"], { timeoutMs: 15_000 });
+
+  const removed: string[] = [];
+  if (existing.exitCode === 0) {
+    await run(["schtasks", "/Delete", "/TN", REDWALL_TASK, "/F"], { timeoutMs: 15_000 });
+    removed.push(REDWALL_TASK);
+  }
+  // After the task, not before: a wrapper deleted while a task still
+  // names it is a task that fails every two minutes until somebody looks.
+  if (orphan) {
+    rmSync(wrapper, { force: true });
+    removed.push(wrapper);
+  }
+
   log.ok("redwall schedule: removed — the preference is off");
-  return { action: "removed", skipped: null, written: [], removed: [REDWALL_TASK] };
+  return { action: "removed", skipped: null, written: [], removed };
 }
 
 function firstLine(text: string): string {

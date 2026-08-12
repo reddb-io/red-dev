@@ -338,7 +338,13 @@ async function windowsNetState(capture: Capture): Promise<NetState> {
 
 // ------------------------------------------------------------- the seam
 
-async function spawnCapture(cmd: string[]): Promise<Captured> {
+/**
+ * Exported for the one caller that replaces this seam and may have to
+ * hand the question back: Redwall runs the Windows probe hidden, and a
+ * command it cannot hide has to reach the machine some other way rather
+ * than reporting that the machine has no address.
+ */
+export async function spawnCapture(cmd: string[]): Promise<Captured> {
   try {
     const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
     // PowerShell reached through WSL interop writes UTF-16LE when its

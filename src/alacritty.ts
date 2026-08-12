@@ -121,13 +121,11 @@ async function removeThroughHost(winPath: string): Promise<void> {
 
 /** The Windows spelling of the Alacritty config directory. */
 async function windowsConfigDir(): Promise<string> {
-  const cmdExe = Bun.which("cmd.exe") ?? "/mnt/c/Windows/System32/cmd.exe";
-  const raw = await capture([cmdExe, "/c", "echo %APPDATA%"]);
-  const winPath = raw.split("\n").pop()?.trim().replace(/\r$/, "") ?? "";
-  if (!/^[A-Za-z]:\\/.test(winPath)) {
-    throw new RedError(`could not read %APPDATA% from Windows (got: ${raw})`);
-  }
-  return `${winPath}\\alacritty`;
+  const { windowsAppData } = await import("./wsl.ts");
+  // Back through wslpath rather than asking cmd.exe for the Windows
+  // spelling directly: the remembered answer is this side's, and a
+  // second crossing to re-spell it would undo the point of remembering.
+  return `${await capture(["wslpath", "-w", await windowsAppData()])}\\alacritty`;
 }
 
 /** Where Alacritty reads its config on the machine that will run it. */
@@ -139,16 +137,13 @@ export async function configDir(p: Platform): Promise<string> {
   }
 
   if (p.env === "wsl") {
-    // The terminal lives on the host, so its config does too. Resolve
-    // cmd.exe by absolute path when PATH has been stripped — `sudo -u`
-    // does exactly that.
-    const cmdExe = Bun.which("cmd.exe") ?? "/mnt/c/Windows/System32/cmd.exe";
-    const raw = await capture([cmdExe, "/c", "echo %APPDATA%"]);
-    const winPath = raw.split("\n").pop()?.trim().replace(/\r$/, "") ?? "";
-    if (!/^[A-Za-z]:\\/.test(winPath)) {
-      throw new RedError(`could not read %APPDATA% from Windows (got: ${raw})`);
-    }
-    return `${await capture(["wslpath", "-u", winPath])}/alacritty`;
+    // The terminal lives on the host, so its config does too — and this
+    // is where red-dev's own preferences live as well, which is why the
+    // answer is remembered rather than asked for on every read. A tick
+    // of the Redwall timer used to reach `readPreferences` three times
+    // and pay a cmd.exe through interop for each.
+    const { windowsAppData } = await import("./wsl.ts");
+    return `${await windowsAppData()}/alacritty`;
   }
 
   const home = process.env["HOME"] ?? process.env["USERPROFILE"];

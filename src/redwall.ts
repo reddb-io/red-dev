@@ -63,12 +63,13 @@
 import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { githubRatePercent, readGithubRateLimit } from "./github-rate.ts";
 import { mergeHostStates, readHostState, readWindowsWslHostState } from "./host-state.ts";
-import { resolveRedwallAddress } from "./lan-address.ts";
+import { resolveRedwallAddress, spawnCapture } from "./lan-address.ts";
 import type { Platform } from "./platform.ts";
 import { readPreferences, resolveRedwall } from "./preferences.ts";
 import { REDWALL_SUBSET } from "./redwall-font.ts";
 import { renderRedwall, type RedwallState } from "./redwall-render.ts";
 import { resolveThemeSlug, THEMES } from "./themes.ts";
+import { hiddenCapture, hiddenPowershell } from "./windows-hidden.ts";
 import {
   imageRoot,
   setDesktopBackground,
@@ -81,6 +82,51 @@ import {
 /** Where the generated images live. A sibling of `wallpapers/`, never inside it. */
 export async function redwallDir(p: Platform): Promise<string> {
   return `${await imageRoot(p)}/redwall`;
+}
+
+/**
+ * What red-dev last managed to put on this machine's desktop.
+ *
+ * A file rather than a question asked of the OS, and that distinction is
+ * the whole of why the timer stopped flashing a console window every two
+ * minutes. Asking Windows what it is displaying costs a PowerShell
+ * launched through interop, and repainting costs another — on the tick
+ * where nothing has changed, which is nearly every tick, both are spent
+ * to learn that the desktop is already showing exactly the file red-dev
+ * would have put there.
+ *
+ * Beside the images, without a `.png` on the end so the sweep next door
+ * walks past it, and inside the directory `removeRedwall` takes away
+ * whole — a record of a Redwall must not outlive the Redwalls.
+ */
+const SHOWN_RECORD = "shown";
+
+/** The exact bytes of that record. PURE. */
+export function redwallRecord(path: string): string {
+  return [
+    "# Managed by red-dev — the Redwall last put on this machine's desktop.",
+    "# Delete this file to have the next run repaint whatever it finds.",
+    path,
+    "",
+  ].join("\n");
+}
+
+async function readShownRedwall(p: Platform): Promise<string | null> {
+  try {
+    const path = `${await redwallDir(p)}/${SHOWN_RECORD}`;
+    if (!existsSync(path)) return null;
+    const body = await Bun.file(path).text();
+    return body.split("\n").map((line) => line.trim())
+      .find((line) => line !== "" && !line.startsWith("#")) ?? null;
+  } catch {
+    // A record that cannot be read is a record that says nothing, which
+    // costs a repaint and never a wrong one.
+    return null;
+  }
+}
+
+async function recordShownRedwall(p: Platform, path: string): Promise<void> {
+  await Bun.write(`${await redwallDir(p)}/${SHOWN_RECORD}`, redwallRecord(path));
 }
 
 /** Why nothing was generated, when nothing was. */
@@ -137,7 +183,7 @@ export async function redwallState(p: Platform): Promise<RedwallState> {
     p.os === "windows"
       ? Promise.all([readHostState(), readWindowsWslHostState()]).then(mergeHostStates)
       : readHostState(),
-    resolveRedwallAddress(p),
+    redwallAddress(p),
     readGithubRateLimit(),
   ]);
   return {
@@ -153,6 +199,30 @@ export async function redwallState(p: Platform): Promise<RedwallState> {
       },
     address,
   };
+}
+
+/**
+ * This machine's address, asked without putting a window on the screen.
+ *
+ * On WSL the question can only be answered by the host — the distro sees
+ * a NAT address nobody else can reach — so it is a PowerShell across the
+ * boundary, and from a systemd timer that is a console window allocated
+ * for it. Every other target answers from inside itself, so only WSL
+ * pays for the indirection.
+ *
+ * A shape `hiddenPowershell` does not recognise falls through to the
+ * ordinary spawn rather than to nothing: an address that is drawn with a
+ * window flashing beats a Redwall that stops naming the machine.
+ */
+async function redwallAddress(p: Platform): Promise<string | null> {
+  if (p.env !== "wsl") return await resolveRedwallAddress(p);
+
+  const dir = await imageRoot(p);
+  return await resolveRedwallAddress(p, async (cmd) => {
+    const command = hiddenPowershell(cmd);
+    if (command === null) return await spawnCapture(cmd);
+    return await hiddenCapture(dir, command, p);
+  });
 }
 
 /**
@@ -287,11 +357,36 @@ export async function applyRedwall(
   const outcome = await generateRedwall(p, seams, theme);
   if (outcome.path === null) return { ...outcome, shown: false };
 
+  // The tick that happens over and over, answered without touching the
+  // machine. Two facts and no processes: these bytes were already on
+  // disk under this name, and this is the file red-dev last saw land on
+  // the desktop — so the desktop is already showing it, and repainting
+  // would spend a PowerShell to produce no change at all. On WSL that
+  // PowerShell is launched through interop from a systemd unit with no
+  // console, which is a window on somebody's screen every two minutes.
+  //
+  // The tradeoff is stated rather than hidden: a user who changes their
+  // wallpaper by hand is not noticed until the Redwall's own bytes
+  // change, which on a working machine is minutes and on an idle one
+  // could be hours. That is the deliberate side to be wrong on — the
+  // alternative is asking the registry every two minutes, forever, to
+  // undo a choice the user just made on purpose. `doctor` still asks the
+  // live question, and `red-dev redwall` after deleting the record
+  // repaints at once.
+  if (!outcome.written && (await readShownRedwall(p)) === outcome.path) {
+    return { ...outcome, shown: true };
+  }
+
   const show = seams.show ?? showRedwall(p);
   const shown = await show(outcome.path);
   // Only when the repaint took. A desktop that refused is still pointed
   // at the previous Redwall, and that file is not this run's to remove.
   if (!shown) return { ...outcome, shown };
+
+  // After the repaint and never before it: a record written ahead of a
+  // repaint that then failed would short-circuit every following tick
+  // against a desktop that never received the image.
+  await recordShownRedwall(p, outcome.path);
 
   const removed = await sweepSupersededRedwalls(p, outcome.path, seams.inUse);
   return { ...outcome, removed: [...outcome.removed, ...removed], shown };
@@ -321,12 +416,21 @@ export async function sweepSupersededRedwalls(
   const dir = await redwallDir(p);
   if (!existsSync(dir)) return [];
 
+  const candidates = readdirSync(dir)
+    .filter((name) => name.endsWith(".png") && !samePath(`${dir}/${name}`, keep));
+  // Asked only when there is something the answer could save. The probe
+  // exists to spare the file on screen from deletion, so with nothing to
+  // delete it can only ever spare nothing — and on WSL it costs a
+  // PowerShell through interop, which on a two-minute timer is a console
+  // window flashing over the wallpaper it was asked about. This is the
+  // steady state: one image in the directory, and it is the keeper.
+  if (candidates.length === 0) return [];
+
   const displayed = await currentlyDisplayed(p, inUse);
   const removed: string[] = [];
-  for (const name of readdirSync(dir)) {
-    if (!name.endsWith(".png")) continue;
+  for (const name of candidates) {
     const path = `${dir}/${name}`;
-    if (samePath(path, keep) || samePath(path, displayed)) continue;
+    if (samePath(path, displayed)) continue;
     rmSync(path, { force: true });
     removed.push(name);
   }
