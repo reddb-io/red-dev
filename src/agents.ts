@@ -357,9 +357,10 @@ async function agentRuntimeEnvironment(
  * turns the steady state of an idempotent converge into a red line.
  */
 async function runWinget(argv: string[], label: string): Promise<void> {
-  const proc = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
-  const out = (await new Response(proc.stdout).text()) + (await new Response(proc.stderr).text());
-  const code = await proc.exited;
+  const { spawnLoggedCapture } = await import("./providers.ts");
+  const result = await spawnLoggedCapture(argv);
+  const out = result.out + result.err;
+  const { code } = result;
   if (code === 0) return;
 
   if (/No available upgrade found|already installed|No newer package versions/i.test(out)) {

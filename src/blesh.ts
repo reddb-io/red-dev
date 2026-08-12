@@ -36,8 +36,8 @@ export function isInstalled(): boolean {
 }
 
 async function run(cmd: string[]): Promise<void> {
-  const proc = Bun.spawn(cmd, { stdout: "ignore", stderr: "ignore", stdin: "ignore" });
-  if ((await proc.exited) !== 0) throw new RedError(`${cmd[0]} failed`);
+  const { spawnLogged } = await import("./providers.ts");
+  if ((await spawnLogged(cmd)) !== 0) throw new RedError(`${cmd[0]} failed`);
 }
 
 /**
