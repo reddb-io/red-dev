@@ -8,15 +8,14 @@
  * red-dev already ships atuin (which binds Ctrl-R and `?`), fzf (Ctrl-R,
  * Ctrl-T, Alt-C) and carapace (1500-odd completions). ble.sh does not
  * sit alongside bash's line editor — it replaces it. Whether those three
- * survive that replacement is an empirical question, and it can only be
- * answered from a real terminal session. Defaulting it on would mean
- * shipping an unverified change to every user's line editor.
+ * survive that replacement was an empirical question, and the trial
+ * answered it: atuin's Ctrl-R opens its TUI under an attached ble.sh
+ * (atuin upstream in fact recommends ble.sh for bash), and carapace
+ * needed its `bash-ble` integration selected in init.sh — which it now
+ * is. On by default since then; RED_BLE=0 opts out.
  *
- * So: opt in with RED_BLE=1, confirm Ctrl-R still reaches atuin, and the
- * default flips. That flip is one line in config/bash/rc.sh.
- *
- * Upstream also has no stable tag — the current release is
- * 0.4.0-devel3 — which is worth knowing before making it mandatory.
+ * Upstream still has no stable tag — the current release is
+ * 0.4.0-devel3 — which is worth remembering when it misbehaves.
  */
 
 import { existsSync, mkdirSync } from "node:fs";
@@ -117,6 +116,5 @@ export async function installBlesh(): Promise<void> {
   await run(["rm", "-rf", tmp]);
 
   log.ok(`ble.sh installed to ${dest}`);
-  log.plain("     Enable it with: export RED_BLE=1   (then open a new shell)");
-  log.plain("     Check that Ctrl-R still reaches atuin before relying on it.");
+  log.plain("     Active in new shells. Disable with: export RED_BLE=0");
 }

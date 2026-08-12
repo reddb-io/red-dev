@@ -69,18 +69,21 @@ if [ -z "${COLORTERM:-}" ] &&
   export COLORTERM=truecolor
 fi
 
-# ble.sh, when opted in.
+# ble.sh, on by default. RED_BLE=0 opts out.
 #
 # It has to load before everything else and attach after everything
 # else: it replaces bash's line editor rather than sitting beside it, so
 # anything that binds keys must be in place between the two halves.
 #
-# Off by default because red-dev already ships atuin, fzf and carapace,
-# all of which bind into the editor ble.sh replaces. Whether they
-# survive is an empirical question answerable only from a real terminal.
-# Set RED_BLE=1, confirm Ctrl-R still reaches atuin, and this default is
-# worth flipping.
-if [ "${RED_BLE:-0}" = "1" ] && [ -r "$HOME/.local/share/blesh/ble.sh" ]; then
+# It began as opt-in, because red-dev already ships atuin, fzf and
+# carapace, all of which bind into the editor ble.sh replaces. The trial
+# answered both open questions: Ctrl-R still reaches atuin under an
+# attached ble.sh (its TUI opens; atuin upstream in fact recommends
+# ble.sh for bash), and the one real casualty was carapace's completer,
+# whose plain-bash integration collides with ble.sh's \x01 escape
+# marker — init.sh now selects `carapace _carapace bash-ble` when
+# BLE_VERSION is set, which resolved it.
+if [ "${RED_BLE:-1}" = "1" ] && [ -r "$HOME/.local/share/blesh/ble.sh" ]; then
   # shellcheck disable=SC1091
   . "$HOME/.local/share/blesh/ble.sh" --noattach
 fi

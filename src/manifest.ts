@@ -695,9 +695,8 @@ export const TOOLS: Tool[] = [
     win: builtin("runtimes"),
   },
   {
-    // Installed but not enabled: see the note in src/blesh.ts. Turning
-    // it on is RED_BLE=1, and the reason it is not the default is that
-    // it replaces the line editor atuin, fzf and carapace bind into.
+    // On by default; RED_BLE=0 opts out. See the note in src/blesh.ts
+    // for how the trial that earned the default played out.
     name: "blesh",
     scope: "core",
     managed: true,

@@ -420,12 +420,14 @@ async function checkBlesh(): Promise<DriftCheck> {
   if (!isInstalled()) {
     return { name: "ble.sh", status: "n/a", detail: "not installed" };
   }
-  return process.env["RED_BLE"] === "1"
+  // Absent means enabled: rc.sh defaults RED_BLE to 1, so only an
+  // explicit 0 is an opt-out.
+  return process.env["RED_BLE"] !== "0"
     ? { name: "ble.sh", status: "ok", detail: "enabled" }
     : {
         name: "ble.sh",
         status: "n/a",
-        detail: "installed but not enabled — export RED_BLE=1 to try it",
+        detail: "installed but disabled by RED_BLE=0",
       };
 }
 
