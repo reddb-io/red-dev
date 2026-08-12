@@ -59,7 +59,7 @@ console.log("OBSERVED: " + detail);
     expect(result.timedOut).toBe(false);
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("--yes");
-    expect(result.stdout).toContain("--verbose");
+    expect(result.stdout).not.toContain("--verbose");
     expect(result.stdout + result.stderr).toContain(
       "REAL INSTALL ERROR: artifact unavailable",
     );

@@ -41,6 +41,7 @@ function frame(lines: string[]): string[] {
     scope: () => "core",
     finished: () => false,
     following: () => true,
+    followScroll: () => {},
     elapsedMs: () => 8000,
     total: 39,
     logScroll: createScrollArea({
@@ -51,7 +52,6 @@ function frame(lines: string[]): string[] {
     }),
     begin: () => {},
     note: () => {},
-    handleKey: () => false,
   } as unknown as InstallModel;
 
   return strip(renderToString(InstallLayout(model, WIDTH, HEIGHT), WIDTH, HEIGHT)).split("\n");

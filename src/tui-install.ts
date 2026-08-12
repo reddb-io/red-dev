@@ -16,9 +16,9 @@
 import {
   Box,
   ListItem,
-  LogViewer,
   MultiProgressBar,
   ProgressBar,
+  ScrollArea,
   Text,
   render,
   useApp,
@@ -120,6 +120,8 @@ export interface InstallModel {
   scope: () => string;
   finished: () => boolean;
   following: () => boolean;
+  /** Pause tail-following when the reader moves away; resume at the end. */
+  followScroll: (position: number) => void;
   elapsedMs: () => number;
   total: number;
   logScroll: ScrollAreaState;
@@ -139,55 +141,6 @@ export interface InstallModel {
    * renderer owns.
    */
   note: (line: string) => void;
-  /** True when the key was a scroll key and the caller should stop. */
-  handleKey: (input: string, key: KeyPress) => boolean;
-}
-
-export interface KeyPress {
-  upArrow?: boolean;
-  downArrow?: boolean;
-  pageUp?: boolean;
-  pageDown?: boolean;
-}
-
-/** Apply one install-log navigation key to the real scroll state. */
-export function handleInstallScroll(
-  logScroll: ScrollAreaState,
-  setFollowing: (following: boolean) => void,
-  input: string,
-  key: KeyPress,
-): boolean {
-  if (key.upArrow || input === "k") {
-    logScroll.scrollBy(-1);
-    setFollowing(false);
-    return true;
-  }
-  if (key.downArrow || input === "j") {
-    logScroll.scrollBy(1);
-    setFollowing(logScroll.scrollTop() >= logScroll.maxScroll());
-    return true;
-  }
-  if (key.pageUp) {
-    logScroll.pageUp();
-    setFollowing(false);
-    return true;
-  }
-  if (key.pageDown) {
-    logScroll.pageDown();
-    setFollowing(logScroll.scrollTop() >= logScroll.maxScroll());
-    return true;
-  }
-  if (input === "g") {
-    logScroll.scrollToTop();
-    setFollowing(false);
-    return true;
-  }
-  if (input === "G") {
-    logScroll.scrollToBottom();
-    setFollowing(true);
-    return true;
-  }
-  return false;
 }
 
 /**
@@ -368,6 +321,7 @@ export function useInstallModel(
     scope,
     finished,
     following,
+    followScroll: (position) => setFollowing(position >= logScroll.maxScroll()),
     // Frozen once the run ends.
     //
     // This read Date.now() on every render, and clearInterval only stops
@@ -399,24 +353,22 @@ export function useInstallModel(
       setStarted(true);
     },
     note: (line) => push(line.replace(/\x1b\[[0-9;]*m/g, "").trimEnd()),
-    handleKey: (input, key) => {
-      // Following the tail is right while a converge runs, but it makes
-      // the one thing you would want to do — read the error that
-      // scrolled past — impossible. Moving up stops the follow; reaching
-      // the bottom resumes it, so there is no mode to remember.
-      return handleInstallScroll(logScroll, setFollowing, input, key);
-    },
   };
 }
 
 /**
  * The converge view, as a function of the model and nothing else.
  *
- * No hooks in here on purpose: whoever owns the state decides when to
- * draw this, and a conditional hook call would shift the hook order
- * between frames.
+ * ScrollArea owns the input lifecycle for the viewport it draws. Callers
+ * build this layout on every frame and switch `isActive`; keeping the hook
+ * slot stable matters when the menu swaps between sections and the log.
  */
-export function InstallLayout(m: InstallModel, width: number, height: number) {
+export function InstallLayout(
+  m: InstallModel,
+  width: number,
+  height: number,
+  isActive: boolean = true,
+) {
   const results = [...m.setupResults(), ...m.results()];
   const total = m.total + m.setupTotal();
   const finished = m.finished();
@@ -437,7 +389,7 @@ export function InstallLayout(m: InstallModel, width: number, height: number) {
 
   // What a log line actually gets: Accented spends one column on its
   // bar and one on the margin. Once there is anything to scroll,
-  // LogViewer spends two more: its scrollbar glyph and its left margin.
+  // ScrollArea spends two more: its scrollbar glyph and its left margin.
   // Reserve all four up front so the scrollbar appearing cannot make
   // already-visible lines wrap and change the viewport height.
   const logTextWidth = Math.max(8, leftWidth - 4);
@@ -448,6 +400,31 @@ export function InstallLayout(m: InstallModel, width: number, height: number) {
   const elapsedMs = m.elapsedMs();
   const rightRows =
     14 + Math.min(failures.length, 6) + Math.min(deferrals.length, 6) + (finished ? 4 : 0);
+
+  const logContent = m.lines().map((line) => {
+    const fitted = fitToWidth(line, logTextWidth);
+    return Text(
+      { color: /(✗|failed)/.test(fitted) ? ui.danger : text },
+      fitted,
+    );
+  });
+  // Give the state the new bounds before deciding where "bottom" is.
+  // Waiting for ScrollArea.updateOptions would render one stale frame at
+  // the old offset, which is visible when the scrollbar first appears.
+  m.logScroll.setContent(logContent);
+  m.logScroll.setHeight(logRows);
+  if (m.following()) m.logScroll.scrollToBottom();
+
+  const logViewport = ScrollArea({
+    content: logContent,
+    height: logRows,
+    width: leftWidth - 2,
+    state: m.logScroll,
+    onScroll: m.followScroll,
+    isActive,
+  });
+  // ScrollArea intentionally has no auto-follow policy: it owns input,
+  // while the log decides whether new output should keep it at the tail.
 
   return Screen(
     width,
@@ -468,24 +445,7 @@ export function InstallLayout(m: InstallModel, width: number, height: number) {
           failures.length > 0 ? ui.warn : ui.accent,
           logRows,
           leftWidth,
-          LogViewer({
-            // Cut here rather than where the lines are made: this is
-            // where the width is known, and it is the width now rather
-            // than whatever it was when the line arrived. A fresh array
-            // each frame is safe — the scroll area keys off content
-            // length, which this does not change.
-            lines: m.lines().map((l) => fitToWidth(l, logTextWidth)),
-            height: logRows,
-            // Follow the tail only while nobody has scrolled away from
-            // it. Passing `true` unconditionally is what made the scroll
-            // position unreachable: LogViewer calls scrollToBottom() on
-            // every render when autoScroll is set, so a keypress moved
-            // the view and the next frame put it straight back.
-            autoScroll: m.following(),
-            state: m.logScroll,
-            highlightPattern: /(✗|failed)/,
-            highlightColor: ui.danger,
-          }),
+          logViewport,
         ),
       ),
 
@@ -705,7 +665,6 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<InstallOut
         else if (key.return || input === "q" || key.escape) exit();
         return;
       }
-      if (model.handleKey(input, key)) return;
       // Refused until it finishes: leaving halfway abandons the machine
       // mid-converge with no report of where it stopped. Once it has,
       // the same key goes back to the verdict rather than out — the
@@ -716,8 +675,12 @@ export async function runInstallTui(opts: InstallTuiOptions): Promise<InstallOut
     const width = size.columns ?? 100;
     const height = Math.max(size.rows ?? 24, 16);
     const finished = done();
+    // Built even while the completion screen is showing so ScrollArea's
+    // hook keeps the same slot; isActive prevents a hidden log from
+    // consuming navigation keys.
+    const installView = InstallLayout(model, width, height, !finished || reviewing());
     if (finished && !reviewing()) return CompletionLayout(finished, width, height, transcriptPath());
-    return InstallLayout(model, width, height);
+    return installView;
   }
 
   // fullHeight: the panels are drawn to the terminal's height rather

@@ -116,6 +116,7 @@ describe("the install progress panel", () => {
       scope: () => "setup",
       finished: () => false,
       following: () => true,
+      followScroll: () => {},
       elapsedMs: () => 18_000,
       total: 46,
       logScroll: createScrollArea({ height: 10, content: [], autoScroll: true }),
@@ -125,7 +126,6 @@ describe("the install progress panel", () => {
       setupStepEnd: () => {},
       begin: () => {},
       note: () => {},
-      handleKey: () => false,
     } as unknown as InstallModel;
 
     const frame = strip(renderToString(InstallLayout(model, 96, 30), 96, 30));
