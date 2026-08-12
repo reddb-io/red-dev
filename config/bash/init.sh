@@ -88,10 +88,22 @@ fi
 
 # Completions for hundreds of CLIs, generated rather than hand-written.
 # This is the closest bash gets to zsh's completion system.
+#
+# Two spellings of the integration, and the split is load-bearing: the
+# plain `bash` one parses carapace's reply with `read -d ''` on a \x01
+# delimiter, and \x01 is also ble.sh's internal escape marker — under an
+# attached ble.sh every Tab press prints `read: not a valid identifier`
+# twice and interleaves the candidates with the error text. carapace
+# ships `bash-ble` for exactly this, so choose by BLE_VERSION, which
+# rc.sh has already set by loading ble.sh --noattach before this file.
 if command -v carapace >/dev/null 2>&1; then
   export CARAPACE_BRIDGES='zsh,fish,bash,inshellisense'
   # shellcheck disable=SC1090  # process substitution; nothing to follow
-  source <(carapace _carapace bash) 2>/dev/null || true
+  if [ -n "${BLE_VERSION-}" ]; then
+    source <(carapace _carapace bash-ble) 2>/dev/null || true
+  else
+    source <(carapace _carapace bash) 2>/dev/null || true
+  fi
 fi
 
 # Shareable, searchable shell history. Replaces Ctrl-R with something
