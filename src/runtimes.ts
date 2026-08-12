@@ -87,11 +87,16 @@ export async function useRuntimes(ids: string[], observer: RuntimeObserver = {})
     observer.stepStart?.(id);
     log.step(`mise: ${id}`);
     const request = runtimeInstallRequest(id);
-    const { code, out } = await run([mise, "use", "-g", request.id], request.env);
+    const result = await run(
+      [mise, "use", "-g", "--yes", "--verbose", request.id],
+      request.env,
+      true,
+    );
+    const { code } = result;
     if (code !== 0) {
-      const detail = out.trim().split("\n").slice(-2).join(" ");
+      const detail = failureDetail(result, code);
       log.err(`${id}: ${detail}`);
-      observer.stepEnd?.(id, detail || `mise exited ${code}`);
+      observer.stepEnd?.(id, detail);
       continue;
     }
 
@@ -131,15 +136,58 @@ async function miseBin(): Promise<string | null> {
 async function run(
   cmd: string[],
   extraEnv: Record<string, string> = {},
-): Promise<{ code: number; out: string }> {
+  live = false,
+): Promise<{ code: number; out: string; err: string }> {
   const proc = Bun.spawn(cmd, {
     stdout: "pipe",
     stderr: "pipe",
+    stdin: "ignore",
     env: { ...process.env, ...extraEnv },
   });
-  const out = await new Response(proc.stdout).text();
-  const code = await proc.exited;
-  return { code, out };
+  const [out, err, code] = await Promise.all([
+    readRuntimeOutput(proc.stdout, live),
+    readRuntimeOutput(proc.stderr, live),
+    proc.exited,
+  ]);
+  return { code, out, err };
+}
+
+/** Forward mise progress without surrendering the error text needed by callers. */
+async function readRuntimeOutput(
+  stream: ReadableStream<Uint8Array>,
+  live: boolean,
+): Promise<string> {
+  const decoder = new TextDecoder();
+  let raw = "";
+  let rest = "";
+  const emit = (line: string): void => {
+    if (!live) return;
+    const current = line.includes("\r") ? line.slice(line.lastIndexOf("\r") + 1) : line;
+    if (current.trim()) log.plain(current.trimEnd());
+  };
+
+  for await (const chunk of stream) {
+    const text = decoder.decode(chunk as Uint8Array, { stream: true });
+    raw += text;
+    rest += text;
+    const lines = rest.split("\n");
+    rest = lines.pop() ?? "";
+    for (const line of lines) emit(line);
+  }
+  const final = decoder.decode();
+  raw += final;
+  rest += final;
+  emit(rest);
+  return raw;
+}
+
+function failureDetail(
+  result: { out: string; err: string },
+  code: number,
+): string {
+  const output = result.err.trim() || result.out.trim();
+  const last = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).at(-1);
+  return last || `mise exited ${code}`;
 }
 
 export async function installRuntimes(p: Platform): Promise<void> {
@@ -160,9 +208,14 @@ export async function installRuntimes(p: Platform): Promise<void> {
       continue;
     }
     log.step(`mise: ${runtime}`);
-    const { code, out } = await run([mise, "use", "-g", runtime]);
+    const result = await run(
+      [mise, "use", "-g", "--yes", "--verbose", runtime],
+      {},
+      true,
+    );
+    const { code } = result;
     if (code !== 0) {
-      throw new RedError(`mise use -g ${runtime} failed:\n${out.trim()}`);
+      throw new RedError(`mise use -g ${runtime} failed: ${failureDetail(result, code)}`);
     }
   }
 

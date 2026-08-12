@@ -17,15 +17,16 @@ import type { Platform } from "./platform.ts";
 import { missingRights } from "./rights.ts";
 
 /**
- * Inheriting stdin is only safe when there is a real terminal behind it.
- * Under CI, a pipe, or a background job, apt and dpkg can stop at a
- * prompt that nothing will ever answer — the process then sits at full
- * CPU forever rather than failing. Observed exactly once, for eight
- * minutes, which is how this guard came to exist. Detaching stdin turns
- * that deadlock into a normal non-zero exit.
+ * Provisioning never delegates a question to a child process.
+ *
+ * The public command may itself be interactive, but once the user has chosen
+ * what to install every provider is unattended. A child that unexpectedly
+ * prompts must receive EOF and fail instead of stealing keys from the TUI or
+ * waiting forever in CI, over SSH, or at an ordinary terminal.
  */
-const stdinMode = (): "inherit" | "ignore" =>
-  process.stdin.isTTY === true ? "inherit" : "ignore";
+export const providerStdinMode = (
+  _stdinIsTTY: boolean | undefined = process.stdin.isTTY,
+): "ignore" => "ignore";
 
 /**
  * Forward a child's stream into the log, one line at a time.
@@ -34,21 +35,47 @@ const stdinMode = (): "inherit" | "ignore" =>
  * line that rewrites itself becomes the last thing it said, rather than
  * every state it passed through concatenated into one unreadable row.
  */
-async function pumpToLog(stream: ReadableStream<Uint8Array> | null): Promise<void> {
-  if (!stream) return;
+async function pumpToLog(stream: ReadableStream<Uint8Array> | null): Promise<string> {
+  if (!stream) return "";
   const decoder = new TextDecoder();
+  let raw = "";
   let rest = "";
   const say = (raw: string): void => {
     const line = (raw.includes("\r") ? raw.slice(raw.lastIndexOf("\r") + 1) : raw).trimEnd();
     if (line) log.plain(line);
   };
   for await (const chunk of stream) {
-    rest += decoder.decode(chunk as Uint8Array, { stream: true });
+    const text = decoder.decode(chunk as Uint8Array, { stream: true });
+    raw += text;
+    rest += text;
     const parts = rest.split("\n");
     rest = parts.pop() ?? "";
     for (const part of parts) say(part);
   }
+  const final = decoder.decode();
+  raw += final;
+  rest += final;
   say(rest);
+  return raw;
+}
+
+/** Stream both child outputs through the logger and retain them for classification. */
+export async function spawnLoggedCapture(
+  cmd: string[],
+  extra: { env?: Record<string, string | undefined>; cwd?: string } = {},
+): Promise<{ code: number; out: string; err: string }> {
+  const proc = Bun.spawn(cmd, {
+    stdout: "pipe",
+    stderr: "pipe",
+    stdin: providerStdinMode(),
+    ...extra,
+  });
+  const [out, err, code] = await Promise.all([
+    pumpToLog(proc.stdout),
+    pumpToLog(proc.stderr),
+    proc.exited,
+  ]);
+  return { code, out, err };
 }
 
 /**
@@ -61,10 +88,9 @@ async function pumpToLog(stream: ReadableStream<Uint8Array> | null): Promise<voi
  * of installer output ended up painted through the middle of the
  * right-hand column on a 96-column window.
  *
- * stdin goes with it. A child inheriting stdin while the interface is
- * reading keys steals them, so captured means detached — which turns a
- * prompt nobody could have answered into a non-zero exit, exactly as
- * the apt guard above already does.
+ * stdin is always detached, independently of output routing. The caller has
+ * already made every product choice; a provider opening its own prompt is a
+ * failure, not a second interactive interface hidden inside the first.
  */
 export async function spawnLogged(
   cmd: string[],
@@ -74,20 +100,13 @@ export async function spawnLogged(
     const proc = Bun.spawn(cmd, {
       stdout: "inherit",
       stderr: "inherit",
-      stdin: stdinMode(),
+      stdin: providerStdinMode(),
       ...extra,
     });
     return await proc.exited;
   }
 
-  const proc = Bun.spawn(cmd, {
-    stdout: "pipe",
-    stderr: "pipe",
-    stdin: "ignore",
-    ...extra,
-  });
-  await Promise.all([pumpToLog(proc.stdout), pumpToLog(proc.stderr)]);
-  return await proc.exited;
+  return (await spawnLoggedCapture(cmd, extra)).code;
 }
 
 /** Keep Git's POSIX utilities visible when a caller supplies Windows PATH. */
@@ -228,7 +247,7 @@ export async function wingetInstall(id: string): Promise<void> {
   // treating every non-zero as a warning turns the steady state of an
   // idempotent converge into something that reads like a problem —
   // right underneath winget's own line saying it is fine.
-  const proc = Bun.spawn(
+  const result = await spawnLoggedCapture(
     wingetArgv([
       "install",
       "--id",
@@ -249,10 +268,9 @@ export async function wingetInstall(id: string): Promise<void> {
       // lines, which the pipe does capture.
       "--disable-interactivity",
     ]),
-    { stdout: "pipe", stderr: "pipe" },
   );
-  const out = await new Response(proc.stdout).text();
-  const code = await proc.exited;
+  const out = result.out + result.err;
+  const { code } = result;
 
   if (code === 0) return;
 
@@ -950,6 +968,7 @@ export async function systemUpdate(p: Platform): Promise<void> {
         "--silent",
         "--accept-package-agreements",
         "--accept-source-agreements",
+        "--disable-interactivity",
       ]),
       { allowFailure: true },
     );
