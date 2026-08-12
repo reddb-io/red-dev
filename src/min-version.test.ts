@@ -33,6 +33,15 @@ describe("parseVersion", () => {
     expect(parseVersion("zellij 0.44")).toBe("0.44.0");
   });
 
+  test("folds the reddb-io fork marker into a fourth segment", () => {
+    // Both dialects of the same build: cargo metadata on the binary,
+    // a pre-release dash on the tag. They must normalize identically,
+    // and differently from the stock release they patch.
+    expect(parseVersion("zellij 0.44.3+red.1")).toBe("0.44.3.1");
+    expect(parseVersion("v0.44.3-red.1")).toBe("0.44.3.1");
+    expect(parseVersion("zellij 0.44.3")).toBe("0.44.3");
+  });
+
   test("returns null when there is no version to find", () => {
     expect(parseVersion("")).toBeNull();
     expect(parseVersion("command not found")).toBeNull();

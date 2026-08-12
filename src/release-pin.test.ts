@@ -19,6 +19,7 @@ import {
   installState,
   isInstalled,
   isPresent,
+  parseVersion,
   TOOLS,
   type Tool,
 } from "./manifest.ts";
@@ -106,8 +107,10 @@ describe("installState under a pin", () => {
 describe("the zellij pin", () => {
   const zellij = TOOLS.find((t) => t.name === "zellij");
 
-  test("is declared at 0.44.1, the last release before the OSC leak", () => {
-    expect(zellij?.pinVersion).toBe("0.44.1");
+  test("is declared at the reddb-io fork build that fixes the OSC leak", () => {
+    // Four segments: 0.44.3 upstream plus the fork's red.1 — see
+    // parseVersion, which folds the marker into the last segment.
+    expect(zellij?.pinVersion).toBe("0.44.3.1");
   });
 
   test("carries the reason and the release condition beside it", () => {
@@ -121,23 +124,26 @@ describe("the zellij pin", () => {
     expect(comment.toLowerCase()).toContain("osc");
   });
 
-  test("fetches the pinned tag rather than whatever is newest", () => {
+  test("fetches the pinned fork tag rather than whatever is newest", () => {
     expect(zellij?.u24).toEqual({
       kind: "gh",
-      repo: "zellij-org/zellij",
+      repo: "reddb-io/zellij",
       asset: "zellij-x86_64-unknown-linux-musl.tar.gz",
-      version: "v0.44.1",
+      version: "v0.44.3-red.1",
     });
   });
 
   test("the tag and the version the binary reports agree", () => {
-    // Two fields saying the same thing in two dialects — a git tag and
-    // what `zellij --version` prints. They drift silently otherwise.
-    expect(zellij?.u24).toMatchObject({ version: `v${zellij?.pinVersion}` });
+    // Two fields saying the same thing in three dialects — a git tag
+    // (`v0.44.3-red.1`), what `zellij --version` prints
+    // (`0.44.3+red.1`), and the pin. parseVersion is the translator
+    // between them, so agreement is asserted through it; the fields
+    // drift silently otherwise.
+    expect(parseVersion(zellij!.u24!.version!)).toBe(zellij?.pinVersion);
   });
 
   test("plan names the tag it will fetch", () => {
-    expect(describeProvider(zellij!.u24)).toContain("v0.44.1");
+    expect(describeProvider(zellij!.u24)).toContain("v0.44.3-red.1");
   });
 });
 

@@ -573,26 +573,34 @@ export const TOOLS: Tool[] = [
     // .zip and an .msi), which an earlier revision of this manifest
     // wrongly claimed did not exist.
     //
-    // Held at 0.44.1, which is the last release that does not leak OSC
-    // replies. 0.44.2 began answering the terminal's OSC queries without
-    // consuming the replies, so they land in the pane as literal text —
-    // `11;rgb:...` sprayed across whatever is running — and the newer
-    // the release, the more of it. That is zellij-org/zellij#5174.
+    // Installed from the reddb-io fork, not upstream. 0.44.2 began
+    // answering the terminal's OSC queries without consuming the
+    // replies, so they land in the pane as literal text — `11;rgb:...`
+    // sprayed across whatever is running. That is zellij-org/zellij#5174;
+    // upstream main carries the fix but has never released it. The fork
+    // is v0.44.3 plus that fix backported (branch red/0.44), which keeps
+    // the 0.44.2+ features an earlier 0.44.1 pin gave up. Its releases
+    // publish binaries only — nothing goes to crates.io.
     //
-    // Lift the pin when #5174 closes, or when a later release is shown
-    // not to leak; either way move both numbers below, since the tag and
-    // the version the binary prints have to keep agreeing.
+    // The pin has four segments because the fork versions as
+    // 0.44.3+red.1 — see parseVersion, which folds the `red.N` marker
+    // into a fourth segment for both the binary and the tag spellings.
+    //
+    // Lift the fork when an upstream release ships the fix for #5174:
+    // point repo, tag and pin back at zellij-org and drop the fourth
+    // segment together.
     name: "zellij",
     scope: "core",
-    pinVersion: "0.44.1",
+    pinVersion: "0.44.3.1",
     u24: ghPinned(
-      "zellij-org/zellij",
-      "v0.44.1",
+      "reddb-io/zellij",
+      "v0.44.3-red.1",
       "zellij-x86_64-unknown-linux-musl.tar.gz",
     ),
-    // winget installs what its manifest has, which is the newest — so on
-    // Windows the pin is a report rather than a repair: the doctor names
-    // the machine as off the pinned version and the downgrade is manual.
+    // winget installs upstream's newest — so on Windows the pin is a
+    // report rather than a repair: the doctor names the machine as off
+    // the pinned version and the swap is manual. The fork's release
+    // does ship a windows-msvc .zip and .msi for exactly that swap.
     // Silence would be the alternative, and silence is how 0.44.3 got
     // onto a machine in the first place.
     win: winget("Zellij.Zellij"),
@@ -1173,10 +1181,24 @@ function probeVersion(candidates: string[]): string | null {
   return null;
 }
 
-/** The first dotted numeric run in --version output: "NVIM v0.9.5" -> "0.9.5". */
+/**
+ * The first dotted numeric run in --version output: "NVIM v0.9.5" ->
+ * "0.9.5".
+ *
+ * A `red.N` suffix becomes a fourth segment: "0.44.3+red.1" ->
+ * "0.44.3.1". That is the reddb-io fork marker — cargo build metadata
+ * on the binary (`+red.1`), a pre-release dash on the git tag
+ * (`v0.44.3-red.1`, because a `+` cannot appear in a tag name). Both
+ * spellings normalize to the same string so a pin, a tag and a
+ * --version output stay comparable. Without the extra segment a fork
+ * build and the stock release it patches are the same version, and the
+ * doctor waves through exactly the binary the fork exists to replace.
+ */
 export function parseVersion(output: string): string | null {
-  const m = /(\d+)\.(\d+)(?:\.(\d+))?/.exec(output);
-  return m ? `${m[1]}.${m[2]}.${m[3] ?? "0"}` : null;
+  const m = /(\d+)\.(\d+)(?:\.(\d+))?(?:[+-]red\.(\d+))?/.exec(output);
+  if (!m) return null;
+  const base = `${m[1]}.${m[2]}.${m[3] ?? "0"}`;
+  return m[4] ? `${base}.${m[4]}` : base;
 }
 
 /** -1, 0 or 1, comparing segment by segment with missing segments as zero. */
