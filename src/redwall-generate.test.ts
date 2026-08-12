@@ -46,6 +46,7 @@ const desktop: Platform = {
 const server: Platform = { ...desktop, env: "server", caps: { ...desktop.caps, gui: false } };
 
 const running: RedwallState = { workers: 3, address: "192.168.1.42" };
+const today = (): Date => new Date(2026, 7, 12, 12);
 
 /** A machine with nothing on it, torn down with the process. */
 async function onFreshMachine<T>(run: (home: string) => Promise<T>): Promise<T> {
@@ -66,7 +67,7 @@ async function onFreshMachine<T>(run: (home: string) => Promise<T>): Promise<T> 
  * keeps `gsettings` out of the run.
  */
 function generate(p: Platform, state: RedwallState = running) {
-  return generateRedwall(p, { state: async () => state, inUse: async () => null });
+  return generateRedwall(p, { state: async () => state, inUse: async () => null, now: today });
 }
 
 const listing = (dir: string): string[] => (existsSync(dir) ? readdirSync(dir).sort() : []);
@@ -228,6 +229,27 @@ describe("running it again", () => {
     });
   });
 
+  test("a new civil day advances the year and replaces yesterday's image", async () => {
+    await onFreshMachine(async () => {
+      await writePreferences(desktop, { redwall: true, theme: "dark" });
+
+      const first = await generateRedwall(desktop, {
+        state: async () => running,
+        inUse: async () => null,
+        now: today,
+      });
+      const second = await generateRedwall(desktop, {
+        state: async () => running,
+        inUse: async () => null,
+        now: () => new Date(2026, 7, 13, 12),
+      });
+
+      expect(second.path).not.toBe(first.path);
+      expect(second.written).toBe(true);
+      expect(second.removed).toEqual([first.path!.split("/").pop()!]);
+    });
+  });
+
   test("but never removes the image the desktop is currently showing", async () => {
     await onFreshMachine(async () => {
       await writePreferences(desktop, { redwall: true, theme: "dark" });
@@ -236,6 +258,7 @@ describe("running it again", () => {
       const first = await generateRedwall(desktop, {
         state: async () => running,
         inUse: async () => null,
+        now: today,
       });
       const second = await generateRedwall(desktop, {
         state: async () => ({ ...running, workers: 4 }),
@@ -243,6 +266,7 @@ describe("running it again", () => {
         // is how the background goes black in the gap before something
         // repoints it.
         inUse: async () => first.path,
+        now: today,
       });
 
       expect(second.removed).toEqual([]);

@@ -67,7 +67,7 @@ import { resolveRedwallAddress, spawnCapture } from "./lan-address.ts";
 import type { Platform } from "./platform.ts";
 import { readPreferences, resolveRedwall } from "./preferences.ts";
 import { REDWALL_SUBSET } from "./redwall-font.ts";
-import { renderRedwall, type RedwallState } from "./redwall-render.ts";
+import { renderRedwall, yearProgress, type RedwallState } from "./redwall-render.ts";
 import { resolveThemeSlug, THEMES } from "./themes.ts";
 import { hiddenCapture, hiddenPowershell } from "./windows-hidden.ts";
 import {
@@ -168,6 +168,8 @@ export interface RedwallSeams {
    * every screen this machine has rather than only the desktop.
    */
   readonly show?: (path: string) => Promise<boolean>;
+  /** The local civil day drawn in the year-progress calendar. */
+  readonly now?: () => Date;
 }
 
 /**
@@ -242,8 +244,8 @@ export async function generateRedwall(
    * A theme switch is exactly that caller, and it needs this: `red-dev
    * theme` does not record the new slug before it applies it, so a
    * Redwall that only ever read the preference would draw the machine's
-   * state over the art the user just switched away from. Omitted, the
-   * recorded preference is the answer — which is what the hook, firing
+ * state over the art the user just switched away from. Omitted, the
+ * recorded preference is the answer — which is what the hook, firing
    * on a state change rather than a theme change, has to fall back on.
    */
   theme?: string,
@@ -265,6 +267,7 @@ export async function generateRedwall(
     font: await Bun.file(REDWALL_SUBSET).bytes(),
     theme: THEMES[slug],
     state,
+    year: yearProgress((seams.now ?? (() => new Date()))()),
   });
 
   const dir = await redwallDir(p);

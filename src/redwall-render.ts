@@ -38,7 +38,9 @@
  * Top right. The left edge is where GNOME and Windows put desktop icons,
  * while the bottom belongs to the taskbar, activation notices and transient
  * system UI. Keeping a small instrument against the top-right edge leaves
- * the brand mark and the working edges of the desktop alone.
+ * the brand mark and the working edges of the desktop alone. Its lower
+ * half is a year-at-a-glance: week columns, weekday rows, and a continuous
+ * progress bar, all derived from the local civil day.
  */
 
 import { rgb } from "./brand.ts";
@@ -78,6 +80,60 @@ export interface RedwallInput {
   readonly font: Uint8Array;
   readonly theme: Theme;
   readonly state: RedwallState;
+  /** Local calendar day to visualise. Explicit keeps the renderer pure. */
+  readonly year: RedwallYear;
+}
+
+/** The part of a civil year needed to draw its progress. */
+export interface RedwallYear {
+  readonly year: number;
+  /** Days elapsed including today. */
+  readonly elapsed: number;
+  readonly days: 365 | 366;
+  /** Sunday = 0, matching Date#getDay(). */
+  readonly firstWeekday: number;
+}
+
+/** Turn a local instant into stable calendar coordinates. */
+export function yearProgress(at: Date): RedwallYear {
+  const year = at.getFullYear();
+  const month = at.getMonth();
+  const date = at.getDate();
+  const elapsed = Math.floor(
+    (Date.UTC(year, month, date) - Date.UTC(year, 0, 1)) / 86_400_000,
+  ) + 1;
+  const days = (new Date(year, 1, 29).getMonth() === 1 ? 366 : 365) as 365 | 366;
+  return {
+    year,
+    elapsed: Math.max(1, Math.min(days, elapsed)),
+    days,
+    firstWeekday: new Date(year, 0, 1).getDay(),
+  };
+}
+
+export function yearProgressLabel(value: RedwallYear): string {
+  return `${value.year} · ${Math.floor((value.elapsed / value.days) * 100)}%`;
+}
+
+export interface RedwallYearCell {
+  readonly day: number;
+  readonly column: number;
+  readonly row: number;
+  readonly state: "past" | "today" | "future";
+}
+
+/** One square per day, arranged as week columns and weekday rows. */
+export function yearCells(value: RedwallYear): RedwallYearCell[] {
+  return Array.from({ length: value.days }, (_, index) => {
+    const day = index + 1;
+    const slot = value.firstWeekday + index;
+    return {
+      day,
+      column: Math.floor(slot / 7),
+      row: slot % 7,
+      state: day < value.elapsed ? "past" : day === value.elapsed ? "today" : "future",
+    };
+  });
 }
 
 /** The card's bounding box. Everything outside its rounded shape is art. */
@@ -221,6 +277,10 @@ interface RedwallScale {
   margin: number;
   radius: number;
   rail: number;
+  calendarCell: number;
+  calendarGap: number;
+  calendarBar: number;
+  sectionGap: number;
 }
 
 interface RedwallLayout {
@@ -228,6 +288,11 @@ interface RedwallLayout {
   scale: RedwallScale;
   title: Mask;
   details: Mask[];
+  year: RedwallYear;
+  yearLabel: Mask;
+  calendarTop: number;
+  calendarWidth: number;
+  calendarHeight: number;
 }
 
 /** Two levels of type and the quiet space around them, scaled with the art. */
@@ -243,6 +308,10 @@ function scaleFor(height: number): RedwallScale {
     margin: Math.round(title * 1.35),
     radius: Math.round(title * 0.5),
     rail: Math.max(2, Math.round(title * 0.1)),
+    calendarCell: Math.max(2, Math.round(title * 0.15)),
+    calendarGap: Math.max(1, Math.round(title * 0.06)),
+    calendarBar: Math.max(2, Math.round(title * 0.14)),
+    sectionGap: Math.max(6, Math.round(detail * 0.7)),
   };
 }
 
@@ -250,18 +319,29 @@ function layoutFor(
   art: { readonly width: number; readonly height: number },
   font: Font,
   lines: readonly string[],
+  year: RedwallYear,
 ): RedwallLayout | null {
   if (lines.length === 0) return null;
   const scale = scaleFor(art.height);
   const title = typeset(font, [lines[0]!], scale.title);
   const details = lines.slice(1).map((line) => typeset(font, [line], scale.detail));
+  const yearLabel = typeset(font, [yearProgressLabel(year)], scale.detail);
+  const calendarColumns = Math.ceil((year.firstWeekday + year.days) / 7);
+  const calendarWidth = calendarColumns * scale.calendarCell +
+    (calendarColumns - 1) * scale.calendarGap;
+  const calendarHeight = 7 * scale.calendarCell + 6 * scale.calendarGap;
   const signalReserve = Math.round(scale.title * 1.5);
   const contentWidth = Math.max(
     title.width + signalReserve,
     ...details.map((mask) => mask.width),
+    yearLabel.width,
+    calendarWidth,
   );
-  const contentHeight = title.height +
+  const stateHeight = title.height +
     details.reduce((sum, mask) => sum + scale.gap + mask.height, 0);
+  const calendarTop = scale.padY + stateHeight + scale.sectionGap;
+  const contentHeight = stateHeight + scale.sectionGap + yearLabel.height + scale.gap +
+    calendarHeight + scale.gap + scale.calendarBar;
   const width = contentWidth + scale.padX * 2;
   const height = contentHeight + scale.padY * 2;
   return {
@@ -274,6 +354,11 @@ function layoutFor(
     scale,
     title,
     details,
+    year,
+    yearLabel,
+    calendarTop,
+    calendarWidth,
+    calendarHeight,
   };
 }
 
@@ -289,8 +374,9 @@ export function redwallBox(
   art: { readonly width: number; readonly height: number },
   font: Font,
   lines: readonly string[],
+  year: RedwallYear,
 ): RedwallBox | null {
-  return layoutFor(art, font, lines)?.box ?? null;
+  return layoutFor(art, font, lines, year)?.box ?? null;
 }
 
 /**
@@ -306,7 +392,7 @@ export function renderRedwall(input: RedwallInput): Uint8Array {
 
   const raster = decodePng(input.art);
   const font = readFont(input.font);
-  const layout = layoutFor(raster, font, lines)!;
+  const layout = layoutFor(raster, font, lines, input.year)!;
 
   paint(raster, layout, lines[0]!, redwallInk(input.theme));
   return encodePng(raster);
@@ -359,6 +445,76 @@ function paint(
     top += detail.height;
   }
   paintSignal(raster, layout, headline, ink);
+  paintYear(raster, layout, ink);
+}
+
+/** Draw a week-column calendar and its continuous progress rail. */
+function paintYear(raster: Raster, layout: RedwallLayout, ink: RedwallInk): void {
+  const { box, scale, year, yearLabel, calendarTop, calendarWidth, calendarHeight } = layout;
+  const left = box.x + scale.padX;
+  const labelTop = box.y + calendarTop;
+  pour(raster, yearLabel, left, labelTop, ink.plate, ink.secondary);
+
+  const gridTop = labelTop + yearLabel.height + scale.gap;
+  for (const cell of yearCells(year)) {
+    const { column, row } = cell;
+    const x = left + column * (scale.calendarCell + scale.calendarGap);
+    const y = gridTop + row * (scale.calendarCell + scale.calendarGap);
+    const colour = cell.state === "today"
+      ? ink.text
+      : cell.state === "past"
+      ? ink.signal
+      : ink.secondary;
+    const coverage = cell.state === "future" ? 72 : 255;
+    fillRect(raster, x, y, scale.calendarCell, scale.calendarCell, ink.plate, colour, coverage);
+  }
+
+  const barTop = gridTop + calendarHeight + scale.gap;
+  fillRect(
+    raster,
+    left,
+    barTop,
+    calendarWidth,
+    scale.calendarBar,
+    ink.plate,
+    ink.secondary,
+    72,
+  );
+  fillRect(
+    raster,
+    left,
+    barTop,
+    Math.max(1, Math.round(calendarWidth * year.elapsed / year.days)),
+    scale.calendarBar,
+    ink.plate,
+    ink.signal,
+    255,
+  );
+}
+
+function fillRect(
+  raster: Raster,
+  left: number,
+  top: number,
+  width: number,
+  height: number,
+  under: Hex,
+  over: Hex,
+  coverage: number,
+): void {
+  const [ur, ug, ub] = rgb(under);
+  const [or, og, ob] = rgb(over);
+  for (let y = top; y < top + height; y++) {
+    if (y < 0 || y >= raster.height) continue;
+    for (let x = left; x < left + width; x++) {
+      if (x < 0 || x >= raster.width) continue;
+      const at = (y * raster.width + x) * 4;
+      raster.data[at] = mix(ur, or, coverage);
+      raster.data[at + 1] = mix(ug, og, coverage);
+      raster.data[at + 2] = mix(ub, ob, coverage);
+      raster.data[at + 3] = 255;
+    }
+  }
 }
 
 function insideRounded(

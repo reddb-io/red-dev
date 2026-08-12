@@ -26,7 +26,11 @@ import {
   redwallInk,
   redwallLines,
   renderRedwall,
+  yearCells,
+  yearProgress,
+  yearProgressLabel,
   type RedwallState,
+  type RedwallYear,
 } from "./redwall-render.ts";
 import { THEMES, THEME_SLUGS, type ThemeSlug } from "./themes.ts";
 import { readFont } from "./ttf.ts";
@@ -55,10 +59,49 @@ function sheet(width = 1280, height = 720): Raster {
 
 const art = encodePng(sheet());
 const running: RedwallState = { workers: 3, address: "192.168.1.42" };
+const YEAR = yearProgress(new Date(2026, 7, 12, 12));
 
-function render(state: RedwallState, slug: ThemeSlug = "dark"): Uint8Array {
-  return renderRedwall({ art, font: fontBytes, theme: THEMES[slug], state });
+function render(
+  state: RedwallState,
+  slug: ThemeSlug = "dark",
+  year: RedwallYear = YEAR,
+): Uint8Array {
+  return renderRedwall({ art, font: fontBytes, theme: THEMES[slug], state, year });
 }
+
+describe("the current year", () => {
+  test("becomes stable civil-calendar progress", () => {
+    expect(YEAR).toEqual({ year: 2026, elapsed: 224, days: 365, firstWeekday: 4 });
+    expect(yearProgressLabel(YEAR)).toBe("2026 · 61%");
+    expect(yearProgress(new Date(2024, 11, 31, 23))).toEqual({
+      year: 2024,
+      elapsed: 366,
+      days: 366,
+      firstWeekday: 1,
+    });
+  });
+
+  test("maps every day to weekday rows and week columns", () => {
+    const cells = yearCells(YEAR);
+    expect(cells).toHaveLength(365);
+    expect(cells[0]).toEqual({ day: 1, column: 0, row: 4, state: "past" });
+    expect(cells[222]?.state).toBe("past");
+    expect(cells[223]?.state).toBe("today");
+    expect(cells[224]?.state).toBe("future");
+    expect(Math.max(...cells.map((cell) => cell.column))).toBe(52);
+    expect(new Set(cells.map((cell) => `${cell.column}:${cell.row}`)).size).toBe(365);
+  });
+
+  test("changes the image on the next day, not later on the same day", () => {
+    const morning = yearProgress(new Date(2026, 7, 12, 8));
+    const evening = yearProgress(new Date(2026, 7, 12, 22));
+    const tomorrow = yearProgress(new Date(2026, 7, 13, 8));
+    expect([...render(running, "dark", morning)]).toEqual([...render(running, "dark", evening)]);
+    expect([...render(running, "dark", morning)]).not.toEqual([
+      ...render(running, "dark", tomorrow),
+    ]);
+  });
+});
 
 describe("the same inputs", () => {
   test("produce byte-identical output", () => {
@@ -102,7 +145,7 @@ describe("the brand art underneath", () => {
   test("is present unmodified outside the region the overlay occupies", () => {
     const before = sheet();
     const after = decodePng(render(running));
-    const box = redwallBox(before, font, redwallLines(running))!;
+    const box = redwallBox(before, font, redwallLines(running), YEAR)!;
 
     let moved = 0;
     let insideBox = 0;
@@ -135,9 +178,9 @@ describe("the brand art underneath", () => {
     const real = await Bun.file(`${root}/assets/wallpapers/dark.png`).bytes();
     const before = decodePng(real);
     const after = decodePng(
-      renderRedwall({ art: real, font: fontBytes, theme: THEMES.dark, state: running }),
+      renderRedwall({ art: real, font: fontBytes, theme: THEMES.dark, state: running, year: YEAR }),
     );
-    const box = redwallBox(before, font, redwallLines(running))!;
+    const box = redwallBox(before, font, redwallLines(running), YEAR)!;
 
     expect(after.width).toBe(before.width);
     expect(after.height).toBe(before.height);
@@ -158,7 +201,7 @@ describe("the brand art underneath", () => {
   test("keeps the machine state quiet and out of the way at the top right", async () => {
     const real = await Bun.file(`${root}/assets/wallpapers/flare.png`).bytes();
     const before = decodePng(real);
-    const box = redwallBox(before, font, redwallLines(running))!;
+    const box = redwallBox(before, font, redwallLines(running), YEAR)!;
 
     // Desktop icons own the left edge. The top-right keeps the state visible
     // without competing with the taskbar and Windows activation watermark.
@@ -170,13 +213,15 @@ describe("the brand art underneath", () => {
     // deliberately relative so the same apparent weight survives on 1080p
     // and 4K sheets.
     expect(box.width).toBeLessThan(before.width / 8);
-    expect(box.height).toBeLessThan(before.height / 14);
+    // The year grid adds useful vertical density, but the whole instrument
+    // still occupies less than one eighth of the desktop height.
+    expect(box.height).toBeLessThan(before.height / 8);
   });
 
   test("is a rounded instrument with the brand signal at its edge", () => {
     const before = sheet();
     const after = decodePng(render(running));
-    const box = redwallBox(before, font, redwallLines(running))!;
+    const box = redwallBox(before, font, redwallLines(running), YEAR)!;
     const corner = (box.y * before.width + box.x) * 4;
     const middle = ((box.y + Math.floor(box.height / 2)) * before.width + box.x) * 4;
 
@@ -195,7 +240,7 @@ describe("what actually landed inside the region", () => {
   test.each([...THEME_SLUGS])("%s writes its declared ink on its declared plate", (slug) => {
     const ink = redwallInk(THEMES[slug]);
     const after = decodePng(render(running, slug));
-    const box = redwallBox(after, font, redwallLines(running))!;
+    const box = redwallBox(after, font, redwallLines(running), YEAR)!;
 
     const tally = new Map<string, number>();
     for (let y = box.y; y < box.y + box.height; y++) {
@@ -302,6 +347,6 @@ describe("the lines", () => {
   });
 
   test("and there is no box to draw when there are no lines", () => {
-    expect(redwallBox({ width: 100, height: 100 }, font, [])).toBeNull();
+    expect(redwallBox({ width: 100, height: 100 }, font, [], YEAR)).toBeNull();
   });
 });
