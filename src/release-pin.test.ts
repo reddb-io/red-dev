@@ -108,9 +108,9 @@ describe("the zellij pin", () => {
   const zellij = TOOLS.find((t) => t.name === "zellij");
 
   test("is declared at the reddb-io fork build that fixes the OSC leak", () => {
-    // Four segments: 0.44.3 upstream plus the fork's red.1 — see
+    // Four segments: 0.44.3 upstream plus the fork's red.N — see
     // parseVersion, which folds the marker into the last segment.
-    expect(zellij?.pinVersion).toBe("0.44.3.1");
+    expect(zellij?.pinVersion).toBe("0.44.3.2");
   });
 
   test("carries the reason and the release condition beside it", () => {
@@ -129,7 +129,7 @@ describe("the zellij pin", () => {
       kind: "gh",
       repo: "reddb-io/zellij",
       asset: "zellij-x86_64-unknown-linux-musl.tar.gz",
-      version: "v0.44.3-red.1",
+      version: "v0.44.3-red.2",
     });
   });
 
@@ -143,7 +143,7 @@ describe("the zellij pin", () => {
   });
 
   test("plan names the tag it will fetch", () => {
-    expect(describeProvider(zellij!.u24)).toContain("v0.44.3-red.1");
+    expect(describeProvider(zellij!.u24)).toContain("v0.44.3-red.2");
   });
 });
 

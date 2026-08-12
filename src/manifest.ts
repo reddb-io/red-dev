@@ -591,10 +591,10 @@ export const TOOLS: Tool[] = [
     // segment together.
     name: "zellij",
     scope: "core",
-    pinVersion: "0.44.3.1",
+    pinVersion: "0.44.3.2",
     u24: ghPinned(
       "reddb-io/zellij",
-      "v0.44.3-red.1",
+      "v0.44.3-red.2",
       "zellij-x86_64-unknown-linux-musl.tar.gz",
     ),
     // winget installs upstream's newest — so on Windows the pin is a
