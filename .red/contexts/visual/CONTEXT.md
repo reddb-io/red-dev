@@ -4,7 +4,7 @@ Visual system — themes, fonts, wallpapers, and the ownership of the configs th
 
 ## Redwall
 
-The theme's wallpaper with live machine state drawn over it. The brand art underneath is unchanged — Redwall composes on top of it, never in place of it, which is what keeps it compatible with the decision that the desktop carries the mark. It reaches two surfaces from one image: the desktop background and the lock screen. What it carries is state a person reads at a glance without unlocking — the count of active Workers, and the address this machine answers on.
+The theme's wallpaper with live machine state drawn over it. The brand art underneath is unchanged — Redwall composes on top of it, never in place of it, which is what keeps it compatible with the decision that the desktop carries the mark. It reaches two surfaces from one image: the desktop background and the lock screen. What it carries is state a person reads at a glance without unlocking — active Workers, queue and capacity, GitHub budget, the address this machine answers on, and the current year's progress. Year progress is a week-column grid of day squares plus a continuous bar; elapsed days use the theme signal, today uses strong ink, and future days stay muted.
 
 A Redwall is derived, never authored: the wallpaper is the source and the Redwall is regenerated whenever the state it displays changes. It therefore lives apart from the wallpapers, which are immutable per theme and content-addressed; a Redwall that shared that directory would make "retired" and "chosen by hand" indistinguishable to the sweep.
 
