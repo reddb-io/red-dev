@@ -10,7 +10,8 @@
 
 import { removeTemp, tempDir, tempFile } from "./temp.ts";
 import { copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
-import { log, logIsCaptured, RedError } from "./log.ts";
+import { formatBytes, formatDuration, log, logIsCaptured, RedError } from "./log.ts";
+import { parseChecksums, pickChecksumAsset, sha256Hex, verifyChecksum } from "./checksum.ts";
 import type { Provider } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
 import { missingRights } from "./rights.ts";
@@ -177,6 +178,11 @@ export async function aptInstall(pkgs: string[]): Promise<void> {
   if (pkgs.length === 0) return;
   await aptRefreshOnce();
   log.step(`apt: ${pkgs.join(" ")}`);
+  log.info(
+    pkgs.length === 1
+      ? `one package, from the archive apt is already configured with`
+      : `${pkgs.length} packages in one transaction, from the configured archives`,
+  );
   const env = { ...process.env, DEBIAN_FRONTEND: "noninteractive" };
   const code = await spawnLogged(["sudo", "-E", "apt-get", "install", "-y", ...pkgs], { env });
   if (code !== 0) throw new RedError(`apt-get install failed (${code})`);
@@ -211,6 +217,11 @@ export function wingetArgv(args: string[], platform: string = process.platform):
 
 export async function wingetInstall(id: string): Promise<void> {
   log.step(`winget: ${id}`);
+  // winget downloads, hashes and verifies the installer against the
+  // manifest itself, and refuses to install when they disagree — so
+  // there is nothing for this project to hash. Said out loud, because
+  // "no sha256 line here" otherwise reads as a gap.
+  log.info(`winget verifies the package hash against its own manifest`);
 
   // Captured rather than inherited so the outcome can be read. winget
   // signals "installed, nothing to upgrade" with a non-zero code, and
@@ -275,12 +286,108 @@ export async function wingetInstall(id: string): Promise<void> {
  */
 const DOWNLOAD_TIMEOUT_MS = 90_000;
 
+// ------------------------------------------------ verified download
+
+export interface DownloadOptions {
+  /** The publisher's own checksum file, when the release has one. */
+  checksumUrl?: string | null;
+  /** Injected by tests. The product always uses the global fetch. */
+  fetcher?: typeof fetch;
+  /** Injected by tests, so a download can be asserted without a disk. */
+  write?: (path: string, bytes: Uint8Array) => Promise<unknown>;
+  timeoutMs?: number;
+}
+
+/**
+ * Read a publisher's checksum file and find our asset's line in it.
+ *
+ * Every disappointment here is a warning, never a failure. A release
+ * that stopped publishing checksums, a checksums file behind a rate
+ * limit, an asset the file does not mention — none of those are evidence
+ * that the download is wrong, and refusing to install over them would
+ * make the strength of the check depend on GitHub's mood.
+ */
+async function publishedChecksum(
+  url: string,
+  file: string,
+  fetcher: typeof fetch,
+  timeoutMs: number,
+): Promise<string | null> {
+  const name = url.split("/").pop() ?? url;
+  log.info(`published checksums: ${name}`);
+  try {
+    const res = await fetcher(url, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) {
+      log.warn(`could not read ${name} (${res.status})`);
+      return null;
+    }
+    const hash = parseChecksums(await res.text(), file);
+    if (!hash) log.warn(`${name} has no entry for ${file}`);
+    return hash;
+  } catch (err) {
+    log.warn(`could not read ${name} (${(err as Error).name})`);
+    return null;
+  }
+}
+
+/**
+ * Fetch a file, say what came back, hash it, and only then write it.
+ *
+ * The order is the point. Verifying after writing leaves a rejected
+ * asset sitting in a temp directory that the next branch is about to
+ * unpack; verifying before it means a mismatch cannot be installed by a
+ * later line that forgot to check.
+ *
+ * The body is read whole before writing for the reason the download
+ * timeout exists at all: `Bun.write(path, response)` never returned for
+ * a 33 MB asset, with no child process and no error, and a converge sat
+ * there forever.
+ */
+export async function downloadVerified(
+  url: string,
+  dest: string,
+  opts: DownloadOptions = {},
+): Promise<{ sha256: string; bytes: number }> {
+  const fetcher = opts.fetcher ?? fetch;
+  const timeoutMs = opts.timeoutMs ?? DOWNLOAD_TIMEOUT_MS;
+  const file = url.split("/").pop() ?? "asset";
+
+  log.info(`downloading ${url}`);
+  log.info(`saving to ${dest}`);
+
+  const started = Date.now();
+  const res = await fetcher(url, { signal: AbortSignal.timeout(timeoutMs) }).catch(
+    (err: unknown) => {
+      throw new RedError(
+        `download did not finish within ${timeoutMs / 1000}s: ${url} (${(err as Error).name})`,
+      );
+    },
+  );
+  if (!res.ok) throw new RedError(`download failed ${res.status}: ${url}`);
+  const body = new Uint8Array(await res.arrayBuffer());
+  log.info(`received ${formatBytes(body.byteLength)} in ${formatDuration(Date.now() - started)}`);
+
+  const digest = sha256Hex(body);
+  log.info(`sha256 ${digest}`);
+  const expected = opts.checksumUrl
+    ? await publishedChecksum(opts.checksumUrl, file, fetcher, timeoutMs)
+    : null;
+  verifyChecksum(file, digest, expected);
+
+  await (opts.write ?? ((path: string, bytes: Uint8Array) => Bun.write(path, bytes)))(dest, body);
+  return { sha256: digest, bytes: body.byteLength };
+}
+
 // --------------------------------------------------- github release
 
-/** Exported for tests: asset matching is where a silent bug costs most. */
+/**
+ * Exported for tests: asset matching is where a silent bug costs most.
+ * Case-insensitive because upstreams rename freely — lazygit 0.64.0
+ * turned `Linux_x86_64` into `linux_x86_64` and the column went dark.
+ */
 export function globToRegExp(glob: string): RegExp {
   const escaped = glob.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
-  return new RegExp(`^${escaped}$`);
+  return new RegExp(`^${escaped}$`, "i");
 }
 
 interface GhAsset {
@@ -309,11 +416,37 @@ export function releaseApiUrl(repo: string, version?: string): string {
  * `version` names a tag to hold to; without it this is /releases/latest,
  * which is what every unpinned tool still gets.
  */
+export interface GhRelease {
+  /** The tag the release is published under, as the publisher wrote it. */
+  tag: string;
+  /** Where the matched asset is downloaded from. */
+  url: string;
+  /** The asset's own filename. */
+  file: string;
+  /**
+   * The asset carrying this file's sha256, when the release has one.
+   *
+   * Resolved here rather than by the caller because this is the only
+   * place holding the whole asset list — reconstructing a checksum
+   * filename from a convention is exactly the guess that the asset glob
+   * exists to stop making.
+   */
+  checksumUrl: string | null;
+}
+
 export async function resolveGhAsset(
   repo: string,
   glob: string,
   version?: string,
 ): Promise<string> {
+  return (await resolveGhRelease(repo, glob, version)).url;
+}
+
+export async function resolveGhRelease(
+  repo: string,
+  glob: string,
+  version?: string,
+): Promise<GhRelease> {
   const headers: Record<string, string> = { Accept: "application/vnd.github+json" };
   const token = process.env["GITHUB_TOKEN"];
   if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -343,7 +476,7 @@ export async function resolveGhAsset(
     );
   }
 
-  const body = (await res.json()) as { assets?: GhAsset[] };
+  const body = (await res.json()) as { assets?: GhAsset[]; tag_name?: string };
   const assets = body.assets ?? [];
   const re = globToRegExp(glob);
   const hit = assets.find((a) => re.test(a.name));
@@ -354,7 +487,19 @@ export async function resolveGhAsset(
       `no asset matching '${glob}' in ${version ?? "latest"} ${repo} release.\nAvailable:\n${available}`,
     );
   }
-  return hit.browser_download_url;
+
+  const checksum = pickChecksumAsset(
+    assets.map((a) => a.name),
+    hit.name,
+  );
+  return {
+    tag: body.tag_name ?? version ?? "latest",
+    url: hit.browser_download_url,
+    file: hit.name,
+    checksumUrl: checksum
+      ? (assets.find((a) => a.name === checksum)?.browser_download_url ?? null)
+      : null,
+  };
 }
 
 export async function ghInstall(
@@ -363,9 +508,10 @@ export async function ghInstall(
   bin?: string,
   version?: string,
 ): Promise<void> {
-  const url = await resolveGhAsset(repo, glob, version);
-  const file = url.split("/").pop() ?? "asset";
+  const release = await resolveGhRelease(repo, glob, version);
+  const { url, file } = release;
   log.step(`github: ${repo} -> ${file}`);
+  log.info(`release ${release.tag}${version ? " (pinned)" : " (latest)"} of ${repo}`);
 
   // tempDir, not /tmp and mkdir: on native Windows /tmp is not the
   // directory a spawned shell resolves, and there is no mkdir binary.
@@ -377,34 +523,20 @@ export async function ghInstall(
   // asset fetches in a second with curl — a step that cannot finish
   // must at least be able to fail. One tool failing never aborts the
   // rest; one tool hanging aborts everything.
-  const res = await fetch(url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) }).catch(
-    (err: unknown) => {
-      throw new RedError(
-        `download did not finish within ${DOWNLOAD_TIMEOUT_MS / 1000}s: ${url} (${(err as Error).name})`,
-      );
-    },
-  );
-  if (!res.ok) throw new RedError(`download failed ${res.status}: ${url}`);
-  // The body is read before it is written, and that is the whole fix for
-  // a converge that stopped dead.
-  //
-  // `Bun.write(path, res)` — handing the Response straight to the writer
-  // — never returns for a large asset. `red` is 33 MB and hung there
-  // forever with no child process, no output and no error; `tq` at
-  // 4.6 MB went through, which is what made it look like a network
-  // problem rather than a streaming one. Reading the body first takes
-  // 790ms for the same file.
-  await Bun.write(`${tmp}/${file}`, await res.arrayBuffer());
+  await downloadVerified(url, `${tmp}/${file}`, { checksumUrl: release.checksumUrl });
 
   if (file.endsWith(".deb")) {
     // The only branch that genuinely needs it: dpkg writes system-wide
     // and there is no user-level equivalent.
+    log.info(`installing the .deb with apt-get (needs sudo)`);
     await requireSudo();
     await run(["sudo", "apt-get", "install", "-y", `${tmp}/${file}`]);
   } else if (file.endsWith(".tar.gz") || file.endsWith(".tgz")) {
+    log.info(`extracting the archive into ${tmp}`);
     await run(["tar", "-xzf", `${tmp}/${file}`, "-C", tmp]);
     await installBinariesFrom(tmp);
   } else if (file.endsWith(".zip")) {
+    log.info(`extracting the archive into ${tmp}`);
     await run(["unzip", "-qo", `${tmp}/${file}`, "-d", tmp]);
     await installBinariesFrom(tmp);
   } else if (bin) {
@@ -412,10 +544,11 @@ export async function ghInstall(
     // archive, and its asset name usually encodes the platform rather
     // than the command, so the caller names it.
     const dir = userBinDir();
+    log.info(`bare binary — installing it as ${dir}/${bin}`);
     mkdirSync(dir, { recursive: true });
     await run(["chmod", "+x", `${tmp}/${file}`]);
     await run(["install", "-m", "0755", `${tmp}/${file}`, `${dir}/${bin}`]);
-    log.step(`installed ${dir}/${bin}`);
+    log.ok(`installed ${dir}/${bin}`);
   } else {
     throw new RedError(
       `don't know how to unpack ${file} — if it is a bare binary, give the provider a bin name`,
@@ -445,9 +578,10 @@ export async function ghInstallWindows(
   silentArgs?: string[],
   version?: string,
 ): Promise<void> {
-  const url = await resolveGhAsset(repo, glob, version);
-  const file = url.split("/").pop() ?? "asset";
+  const release = await resolveGhRelease(repo, glob, version);
+  const { url, file } = release;
   log.step(`github: ${repo} -> ${file}`);
+  log.info(`release ${release.tag}${version ? " (pinned)" : " (latest)"} of ${repo}`);
 
   // node:fs rather than cmd.exe for the file work. `mkdir` and `copy`
   // print "A subdirectory or file already exists." and "1 file(s)
@@ -458,11 +592,10 @@ export async function ghInstallWindows(
   mkdirSync(tmp, { recursive: true });
   const downloaded = `${tmp}\\${file}`;
 
-  const res = await fetch(url);
-  if (!res.ok) throw new RedError(`download failed ${res.status}: ${url}`);
-  // Same as the Linux path: a streamed Response handed straight to
-  // Bun.write never returns for a large asset.
-  await Bun.write(downloaded, await res.arrayBuffer());
+  // Same as the Linux path, and through the same helper: the download,
+  // the hash and the comparison against the published checksum must not
+  // be two implementations that can disagree about what verified means.
+  await downloadVerified(url, downloaded, { checksumUrl: release.checksumUrl });
 
   if (silentArgs) {
     // An installer, run the way its publisher documents. Verified
@@ -473,11 +606,12 @@ export async function ghInstallWindows(
     await run([downloaded, ...silentArgs]);
   } else if (bin) {
     const dir = windowsBinDir();
+    log.info(`bare binary — installing it as ${dir}\\${bin}.exe`);
     mkdirSync(dir, { recursive: true });
     // Copied rather than moved: the download and the destination can be
     // on different volumes, where a rename fails.
     copyFileSync(downloaded, `${dir}\\${bin}.exe`);
-    log.step(`installed ${dir}\\${bin}.exe`);
+    log.ok(`installed ${dir}\\${bin}.exe`);
   } else {
     throw new RedError(
       `don't know what to do with ${file} on Windows — give the provider a bin name, or silentArgs if it is an installer`,
@@ -540,6 +674,7 @@ async function installBinariesFrom(dir: string): Promise<void> {
     const base = path.split("/").pop() ?? "";
     if (/\.(md|txt)$/i.test(base) || /^(LICENSE|README)/i.test(base)) continue;
     await run(["install", "-m", "0755", path, `${dest}/`]);
+    log.ok(`installed ${dest}/${base}`);
   }
 }
 
@@ -622,10 +757,18 @@ export async function installerInstall(
   // with a drive letter — C:/Users/.../Temp/x.sh — is a spelling Git
   // Bash accepts and Bun writes to correctly.
   const tmp = tempFile(`installer-${Date.now()}.sh`);
+  log.info(`fetching the vendor script from ${url}`);
+  log.info(`saving to ${tmp}`);
   const res = await fetch(url);
   if (!res.ok) throw new RedError(`installer download failed ${res.status}: ${url}`);
   const body = await res.text();
   if (body.trim().length === 0) throw new RedError(`installer at ${url} was empty`);
+  // A vendor script publishes no checksum anywhere this can reach, so
+  // the hash is a record rather than a comparison — which is still the
+  // only way to tell afterwards that two machines ran the same script.
+  const script = new TextEncoder().encode(body);
+  log.info(`received ${formatBytes(script.byteLength)} of shell`);
+  verifyChecksum(url, sha256Hex(script), null);
   await Bun.write(tmp, body);
 
   // Run with the interpreter the script asks for, not with `sh`.
@@ -664,6 +807,7 @@ export async function installerInstall(
   // handles by preferring npm on Windows.
   if (process.platform !== "win32" && body.includes("sudo ")) await requireSudo();
 
+  log.info(`running it with ${shell}${args.length > 0 ? ` ${args.join(" ")}` : ""}`);
   const childEnv = env ? windowsInstallerEnvironment(shell, env) : undefined;
   const code = await spawnLogged([shell, tmp, ...args], childEnv ? { env: childEnv } : {});
   // node:fs, not `rm`. There is no rm on native Windows, so cleaning up
@@ -680,6 +824,7 @@ export async function installerInstall(
 export async function ppaInstall(ppa: string, pkgs: string[]): Promise<void> {
   await requireSudo();
   log.step(`ppa: ${ppa}`);
+  log.info(`adding ppa:${ppa}, then installing ${pkgs.join(" ")} from it`);
   // add-apt-repository refreshes the lists itself, but only for the
   // repository it just added; the batched refresh still has to happen.
   await run(["sudo", "-E", "add-apt-repository", "-y", `ppa:${ppa}`]);
@@ -727,10 +872,12 @@ export async function aptRepoInstall(
   if (!existsSync(spec.keyring)) {
     log.step(`key: ${spec.keyUrl}`);
     await run(["sudo", "install", "-m", "0755", "-d", "/etc/apt/keyrings"]);
-    const res = await fetch(spec.keyUrl);
-    if (!res.ok) throw new RedError(`key download failed ${res.status}: ${spec.keyUrl}`);
     const tmp = `/tmp/red-dev-key-${listName}`;
-    await Bun.write(tmp, res);
+    // Through the same helper as every other download, so the signing
+    // key gets the same line of provenance the assets do. No publisher
+    // here ships a checksum for it — the key *is* the trust anchor, and
+    // apt verifies every package against it afterwards.
+    await downloadVerified(spec.keyUrl, tmp);
 
     // .asc keys are armoured text and apt reads them directly; .gpg
     // must be binary, so dearmor when the target says so.
@@ -757,6 +904,7 @@ export async function aptRepoInstall(
     const current = existsSync(listPath) ? await Bun.file(listPath).text() : "";
     if (current.trim() !== entry.trim()) {
       log.step(`repo: ${listPath}`);
+      log.info(entry);
       await run(["sudo", "sh", "-c", `printf '%s\\n' "${entry}" > "${listPath}"`]);
       aptRefreshed = false;
     }
@@ -826,6 +974,37 @@ export interface ApplyContext {
   opacity: number;
 }
 
+type BuiltinName = Extract<Provider, { kind: "builtin" }>["name"];
+
+/**
+ * What each builtin is about to do, in one line.
+ *
+ * Written here rather than inside each module because the point is to
+ * say it *before* the work starts — a module that announces itself on
+ * its first line has already been imported, and the import of the agent
+ * and runtime phases is itself measurable.
+ */
+const BUILTIN_INTENT: Partial<Record<BuiltinName, string>> = {
+  "nerd-font": "installing the patched font and registering it with the host",
+  "windows-terminal": "writing the Windows Terminal profile: font, opacity, colours",
+  dotfiles: "writing the shell, git and editor dotfiles",
+  alacritty: "writing the Alacritty config, then theming every surface that takes one",
+  "wsl-interop": "checking that Windows binaries are reachable from inside the distro",
+  "wsl-runtime-dir": "making sure XDG_RUNTIME_DIR exists and is owned by this user",
+  blesh: "building and installing ble.sh, the bash line editor",
+  runtimes: "installing language runtimes through mise",
+  "shared-root": "creating the shared workspace root and its permissions",
+  hotkeys: "registering the Windows hotkeys",
+  "red-skills": "cloning or updating red-skills and wiring the agent plugins",
+  "red-skills-vscode": "installing the red-skills VS Code extension",
+  "red-skills-herdr": "installing the herdr plugin for red-skills",
+  blender: "installing Blender — this one is over a gigabyte",
+  "wsl-sync": "syncing the WSL distro settings with the host",
+  "claude-keybindings": "writing the Claude Code keybindings",
+  "redwall-schedule": "scheduling the wallpaper rotation",
+  "ssh-server": "installing and enabling the SSH server",
+};
+
 export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<void> {
   switch (pr.kind) {
     case "apt":
@@ -856,6 +1035,14 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
       await aptRepoInstall(pr, ctx.platform.codename ?? "stable");
       return;
     case "builtin": {
+      // The phases after the tools — plugins, dotfiles, themes, agents
+      // — are the longest silences in a converge, because they run
+      // TypeScript rather than a package manager whose own output fills
+      // the screen. One line naming what is being converged is the
+      // difference between a slow step and an apparently hung one.
+      log.step(`builtin: ${pr.name}`);
+      log.info(BUILTIN_INTENT[pr.name] ?? `converging ${pr.name} toward the desired state`);
+
       // Imported lazily so the Windows build does not pull WSL-only
       // code into a target that can never reach a WSL host.
       if (pr.name === "dotfiles") {

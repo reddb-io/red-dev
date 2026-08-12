@@ -19,7 +19,7 @@
  * up with exactly the same complete lines.
  */
 
-import { captureStart, captureStop } from "./log.ts";
+import { captureStart, captureStop, formatDuration } from "./log.ts";
 
 const useColor = process.stdout.isTTY === true && !process.env["NO_COLOR"];
 const paint = (code: string, s: string): string =>
@@ -60,13 +60,9 @@ export interface Entry {
   remedy?: string;
 }
 
-function human(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  const m = Math.floor(ms / 60_000);
-  const s = Math.round((ms % 60_000) / 1000);
-  return `${m}m ${s}s`;
-}
+// One implementation, shared with the narration in the log: a row that
+// says 3.4s beside a line that says 3400ms reads as two measurements.
+const human = formatDuration;
 
 function rule(label: string): string {
   const width = Math.min(process.stdout.columns ?? 72, 72);

@@ -28,9 +28,12 @@ import {
   isInstalled,
   providerFor,
   toolsInScope,
+  type InstallState,
   type Scope,
   type Tool,
 } from "./manifest.ts";
+import { verifyInstalled } from "./verify-install.ts";
+import { formatDuration, log } from "./log.ts";
 import type { Platform } from "./platform.ts";
 
 /**
@@ -166,6 +169,53 @@ export function outcomeForError(message: string): {
 }
 
 /**
+ * What this run is about to do to one item, and why. PURE.
+ *
+ * A converge used to print the tool's name and then go quiet for
+ * whatever a package manager took, which leaves the two questions
+ * somebody watching actually has unanswered: why is this being touched
+ * at all — it was here yesterday — and where is it coming from. Both
+ * are already known before anything executes; this is only the wording.
+ *
+ * Pure because the wording is the feature. A line claiming "upgrade" for
+ * a tool that is merely pinned to an older release describes the
+ * opposite of what is about to happen.
+ */
+export function intentLine(input: {
+  tool: string;
+  state: InstallState;
+  provider: string;
+  /** The version this machine has, when it has one that could be read. */
+  found: string | null;
+  pinVersion?: string;
+  minVersion?: string;
+  managed?: boolean;
+}): string {
+  const via = `via ${input.provider}`;
+  if (input.managed) {
+    return `converge ${input.tool} — a managed item, so the provider decides what changes — ${via}`;
+  }
+
+  const want = input.pinVersion
+    ? `exactly ${input.pinVersion}`
+    : input.minVersion
+      ? `${input.minVersion} or newer`
+      : null;
+  const found = input.found ?? "an unreadable version";
+
+  switch (input.state) {
+    case "absent":
+      return `install ${input.tool}${want ? ` (${want})` : ""} — nothing on this machine answers to it — ${via}`;
+    case "outdated":
+      return `upgrade ${input.tool}: ${found} is below the ${input.minVersion} floor, want ${want ?? "newer"} — ${via}`;
+    case "mismatched":
+      return `replace ${input.tool}: this machine has ${found}, the manifest wants ${want ?? "another version"} — ${via}`;
+    case "ok":
+      return `${input.tool} ${found} already satisfies the manifest — ${via}`;
+  }
+}
+
+/**
  * The three answers a script wrapping a converge has to tell apart.
  *
  * 0 converged, 1 something failed, 2 converged except work that needs
@@ -177,6 +227,24 @@ export function outcomeForError(message: string): {
 export function convergeExit(summary: { failed: number; deferred: number }): 0 | 1 | 2 {
   if (summary.failed > 0) return 1;
   return summary.deferred > 0 ? 2 : 0;
+}
+
+/**
+ * Look for what was just installed, run it, and say what it answered.
+ *
+ * Reported, never enforced — see verify-install.ts for why a binary that
+ * is not yet on PATH is a normal outcome of a correct install rather
+ * than a failure. The outcome the step reports is unchanged; what
+ * changes is that a wrong one is now visible in the log instead of
+ * being discovered by the next person to run the tool.
+ */
+function narrateVerification(tool: Tool): void {
+  try {
+    for (const { level, message } of verifyInstalled(tool).lines) log[level](message);
+  } catch {
+    // Verification is observation. It must not be able to fail an
+    // install that otherwise succeeded.
+  }
 }
 
 /** Total steps across every scope, so a progress bar has a denominator. */
@@ -254,10 +322,24 @@ export async function converge(
     const started = Date.now();
 
     const finish = (outcome: StepOutcome, detail?: string, remedy?: string): void => {
+      const ms = Date.now() - started;
+      // Only where work was attempted. A row that was skipped or already
+      // present has nothing to have taken time, and "present in 3ms" on
+      // thirty rows buries the one line that says four minutes.
+      //
+      // Before the observer, not after: both presentations stop
+      // capturing provider output at stepEnd, so a line logged after it
+      // lands under the *next* item.
+      if (outcome === "installed" || outcome === "applied") {
+        log.ok(`${tool.name} ${outcome} in ${formatDuration(ms)}`);
+      } else if (outcome === "failed" || outcome === "deferred") {
+        log.info(`${tool.name} gave up after ${formatDuration(ms)}`);
+      }
+
       const result: StepResult = {
         ...event,
         outcome,
-        ms: Date.now() - started,
+        ms,
         ...(detail ? { detail } : {}),
         ...(remedy ? { remedy } : {}),
       };
@@ -327,7 +409,8 @@ export async function converge(
         finish("skipped", pr.reason);
         continue;
       }
-      if (isInstalled(tool)) {
+      const state = installState(tool);
+      if (state === "ok") {
         finish("present");
         continue;
       }
@@ -335,6 +418,23 @@ export async function converge(
         finish("skipped", "dry run");
         continue;
       }
+
+      // Said before anything runs, and only for items that are going to
+      // be touched: this is the sentence a reader needs while the step
+      // is silent, not afterwards when the outcome already explains it.
+      // installedVersion spawns a process, so it is asked only where
+      // there is a version to report.
+      log.info(
+        intentLine({
+          tool: tool.name,
+          state,
+          provider: describeProvider(pr),
+          found: state === "absent" ? null : installedVersion(tool),
+          ...(tool.pinVersion ? { pinVersion: tool.pinVersion } : {}),
+          ...(tool.minVersion ? { minVersion: tool.minVersion } : {}),
+          ...(tool.managed ? { managed: tool.managed } : {}),
+        }),
+      );
 
       if (pr.kind === "apt") {
         // Attempted in the batch above; report what is actually true
@@ -344,8 +444,10 @@ export async function converge(
         // broken packages, and reporting it as twenty is how a whole
         // summary turns red over a single missing password.
         if (aptError) finishError(aptError);
-        else if (isInstalled(tool)) finish("installed");
-        else if (installState(tool) === "outdated") {
+        else if (isInstalled(tool)) {
+          narrateVerification(tool);
+          finish("installed");
+        } else if (installState(tool) === "outdated") {
           // Present and runnable, just too old — the archive has nothing
           // newer. Saying "absent" here sends the reader hunting for a
           // missing binary that is sitting right there on PATH.
@@ -362,6 +464,7 @@ export async function converge(
 
       try {
         await applyProvider(pr, ctx);
+        narrateVerification(tool);
         // A managed builtin converges rather than installs, and on a
         // second run legitimately changes nothing.
         finish(tool.managed ? "applied" : "installed");
@@ -428,7 +531,12 @@ export async function converge(
         );
         if (present) finish("present");
         else if (error) finishError(error);
-        else finish(tool.managed ? "applied" : "installed");
+        else {
+          // The elevated child did the work in another process, so this
+          // is the only place the result can be looked at from.
+          narrateVerification(tool);
+          finish(tool.managed ? "applied" : "installed");
+        }
       }
     }
   }

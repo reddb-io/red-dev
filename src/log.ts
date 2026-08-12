@@ -102,8 +102,46 @@ export const log = {
   warn: (msg: string) => emit(`${paint("1;33", "warn")} ${msg}`, console.warn),
   err: (msg: string) => emit(`${paint("1;31", "fail")} ${msg}`, console.error),
   skip: (msg: string) => emit(`${paint("1;90", "skip")} ${msg}`, console.log),
+  /**
+   * Narration: what is about to happen, what was downloaded, which hash
+   * it had, what the installed binary answered.
+   *
+   * A level of its own rather than more `step` calls, because `step`
+   * announces work and these announce facts about work already
+   * announced. Same four-column prefix as the rest so the marks stay a
+   * column the eye can scan.
+   */
+  info: (msg: string) => emit(`${paint("1;36", "info")} ${msg}`, console.log),
   plain: (msg: string) => emit(msg, console.log),
 };
+
+/**
+ * A duration a person reads rather than a number. PURE.
+ *
+ * Here rather than in report.ts because narration and the summary have
+ * to agree: an item whose row says 3.4s and whose narration says 3400ms
+ * reads as two different measurements of two different things.
+ */
+export function formatDuration(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const m = Math.floor(ms / 60_000);
+  const s = Math.round((ms % 60_000) / 1000);
+  return `${m}m ${s}s`;
+}
+
+/** Bytes, at the precision a download report needs. PURE. */
+export function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  const units = ["KB", "MB", "GB"];
+  let value = n / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return `${value.toFixed(1)} ${units[unit]}`;
+}
 
 export class RedError extends Error {}
 

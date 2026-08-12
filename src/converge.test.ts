@@ -7,9 +7,10 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { converge, convergeExit, countSteps, type StepResult } from "./converge.ts";
+import { converge, convergeExit, countSteps, intentLine, type StepResult } from "./converge.ts";
 import { applicableScopes, toolsInScope } from "./manifest.ts";
 import { privilegedItems, type BatchHost } from "./privileged.ts";
+import { captureStart, captureStop } from "./log.ts";
 import type { Platform } from "./platform.ts";
 
 const wsl: Platform = {
@@ -132,6 +133,89 @@ describe("converge", () => {
     const { events } = await run(["core", "optional"]);
     const scopes = events.filter((e) => e.startsWith("scope:")).map((e) => e.split(":")[1]);
     expect(scopes).toEqual(["core", "optional"]);
+  });
+});
+
+/**
+ * The sentence somebody watching a converge reads while the step is
+ * still silent. Its whole job is to be true: a line saying "upgrade"
+ * about a tool held at an older release describes the opposite of what
+ * is about to happen, and nothing downstream would catch it.
+ */
+describe("intentLine", () => {
+  test("an absent tool says what it is and where it comes from", () => {
+    const line = intentLine({
+      tool: "tq",
+      state: "absent",
+      provider: "gh:reddb-io/tq:tq-linux-x86_64",
+      found: null,
+    });
+    expect(line).toContain("install tq");
+    expect(line).toContain("nothing on this machine answers to it");
+    expect(line).toContain("via gh:reddb-io/tq:tq-linux-x86_64");
+  });
+
+  test("an absent tool with a floor names the version being aimed at", () => {
+    const line = intentLine({
+      tool: "nvim",
+      state: "absent",
+      provider: "gh:neovim/neovim:nvim-linux-x86_64.tar.gz",
+      found: null,
+      minVersion: "0.11.2",
+    });
+    expect(line).toContain("install nvim (0.11.2 or newer)");
+  });
+
+  test("an outdated tool is an upgrade, with both numbers", () => {
+    const line = intentLine({
+      tool: "nvim",
+      state: "outdated",
+      provider: "apt:neovim",
+      found: "0.9.5",
+      minVersion: "0.11.2",
+    });
+    expect(line).toContain("upgrade nvim");
+    expect(line).toContain("0.9.5");
+    expect(line).toContain("0.11.2");
+  });
+
+  test("a pinned tool on a newer build is a replacement, never an upgrade", () => {
+    // zellij 0.44.3 is *newer* than the pin and is the defect. Calling
+    // that an upgrade tells the reader the opposite of what will happen.
+    const line = intentLine({
+      tool: "zellij",
+      state: "mismatched",
+      provider: "gh:zellij-org/zellij@v0.44.1:zellij.tar.gz",
+      found: "0.44.3",
+      pinVersion: "0.44.1",
+    });
+    expect(line).toContain("replace zellij");
+    expect(line).toContain("this machine has 0.44.3");
+    expect(line).toContain("exactly 0.44.1");
+    expect(line).not.toContain("upgrade");
+  });
+
+  test("a managed item claims no version, because it has none", () => {
+    const line = intentLine({
+      tool: "dotfiles",
+      state: "absent",
+      provider: "builtin:dotfiles",
+      found: null,
+      managed: true,
+    });
+    expect(line).toContain("converge dotfiles");
+    expect(line).not.toContain("install");
+  });
+
+  test("an unreadable version is said out loud rather than guessed at", () => {
+    const line = intentLine({
+      tool: "docker",
+      state: "outdated",
+      provider: "aptrepo:docker-ce",
+      found: null,
+      minVersion: "20.0.0",
+    });
+    expect(line).toContain("an unreadable version");
   });
 });
 
@@ -298,6 +382,24 @@ describe("only the privileged remainder", () => {
     expect(steps.map((s) => s.outcome)).toEqual(names.map(() => "present"));
     expect(machine.calls).toEqual([`states:${names.join(",")}`]);
     expect(convergeExit(summary)).toBe(0);
+  });
+
+  test("every item that did work says how long it took", async () => {
+    // The narration and the row have to agree, so the shape is pinned
+    // here: the units come from formatDuration, which the summary also
+    // uses. Held rather than printed, which is also the assertion that
+    // it lands inside the step's own capture instead of over the next
+    // one's row.
+    captureStart();
+    let held: string[] = [];
+    try {
+      await remainder(windows, host());
+    } finally {
+      held = captureStop();
+    }
+    const timings = held.filter((line) => / (applied|installed) in \d/.test(line));
+    expect(timings).toHaveLength(names.length);
+    for (const line of timings) expect(line).toMatch(/ in \d+(\.\d+)?(ms|s)$|\d+m \d+s$/);
   });
 
   test("and a target with no privileged items touches nothing at all", async () => {
