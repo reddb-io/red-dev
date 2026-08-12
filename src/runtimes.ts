@@ -88,7 +88,7 @@ export async function useRuntimes(ids: string[], observer: RuntimeObserver = {})
     log.step(`mise: ${id}`);
     const request = runtimeInstallRequest(id);
     const result = await run(
-      [mise, "use", "-g", "--yes", "--verbose", request.id],
+      [mise, "use", "-g", "--yes", request.id],
       request.env,
       true,
     );
@@ -209,7 +209,7 @@ export async function installRuntimes(p: Platform): Promise<void> {
     }
     log.step(`mise: ${runtime}`);
     const result = await run(
-      [mise, "use", "-g", "--yes", "--verbose", runtime],
+      [mise, "use", "-g", "--yes", runtime],
       {},
       true,
     );
