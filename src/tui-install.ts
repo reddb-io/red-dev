@@ -31,10 +31,19 @@ import {
 // same place LogViewer comes from.
 import { createScrollArea, type ScrollAreaState } from "tuiuiu.js";
 import { VERSION } from "./cli.ts";
+import {
+  convergeVerdict,
+  shortenHome,
+  verdictFacts,
+  wrapTo,
+  VERDICT_MARK,
+  type VerdictItem,
+} from "./completion.ts";
 import { converge, countSteps, type StepResult } from "./converge.ts";
 import { captureStart, captureStop, captureTo } from "./log.ts";
 import { Accented, Header, Screen, Section, StatusLine, Surface } from "./tui-chrome.ts";
 import { muted, subtle, text, ui } from "./tui-theme.ts";
+import { transcriptPath } from "./transcript.ts";
 import type { Scope } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
 import type { ApplyContext } from "./providers.ts";
@@ -181,10 +190,26 @@ export function handleInstallScroll(
   return false;
 }
 
+/**
+ * What a finished converge hands back.
+ *
+ * The counts are what the exit status is made of; the results and the
+ * clock are what the completion screen and the banner after it are made
+ * of. Carried out rather than recomputed because the setup phase's
+ * items exist only in here — a verdict built from the converge summary
+ * alone would forget the agents and runtimes.
+ */
+export interface InstallOutcome {
+  failed: number;
+  deferred: number;
+  results: VerdictItem[];
+  elapsedMs: number;
+}
+
 export function useInstallModel(
   opts: InstallTuiOptions,
   logScroll: ScrollAreaState,
-  onFinish: (outcome: { failed: number; deferred: number }) => void,
+  onFinish: (outcome: InstallOutcome) => void,
 ): InstallModel {
   const total = countSteps(opts.scopes);
 
@@ -308,10 +333,29 @@ export function useInstallModel(
         },
       },
     ).then((summary) => {
-      setFinishedAt(Date.now());
+      const endedAt = Date.now();
+      setFinishedAt(endedAt);
       setFinished(true);
       const setupFailed = setupResults().filter((result) => result.outcome === "failed").length;
-      onFinish({ failed: summary.failed + setupFailed, deferred: summary.deferred });
+      // Setup first, converge second: the same order they ran in, and
+      // the order the completion screen counts them in.
+      // Mapped apart because they are different records: a setup result
+      // has no remedy at all, and a converge result has one only when
+      // something is waiting on a gate.
+      const all: VerdictItem[] = [
+        ...setupResults().map((r) => ({ tool: r.tool, outcome: r.outcome })),
+        ...summary.results.map((r) => ({
+          tool: r.tool,
+          outcome: r.outcome,
+          ...(r.remedy ? { remedy: r.remedy } : {}),
+        })),
+      ];
+      onFinish({
+        failed: summary.failed + setupFailed,
+        deferred: summary.deferred,
+        results: all,
+        elapsedMs: startedAt() === 0 ? 0 : endedAt - startedAt(),
+      });
     });
   });
 
@@ -554,34 +598,126 @@ export function InstallLayout(m: InstallModel, width: number, height: number) {
   );
 }
 
+/** The colour a verdict is drawn in, from the interface palette. */
+const VERDICT_COLOR: Record<string, string> = {
+  converged: ui.ok,
+  deferred: ui.warn,
+  failed: ui.danger,
+  preview: ui.info,
+};
+
+/**
+ * The screen a converge ends on.
+ *
+ * A run used to end by putting "done" in the header of a view that
+ * otherwise looked exactly as it had a second earlier, and then — the
+ * moment a key was pressed — by redrawing the menu over it. Someone who
+ * arrived through the PowerShell one-liner watched four minutes of work
+ * and was handed back a list of sections, with nothing anywhere saying
+ * the thing had finished or how it went.
+ *
+ * So the log gives up the screen at the end. It is not gone: `l` puts it
+ * back, which is what somebody chasing a failure wants and nobody else
+ * asks for.
+ */
+export function CompletionLayout(
+  outcome: InstallOutcome,
+  width: number,
+  height: number,
+  logPath: string | null,
+) {
+  const verdict = convergeVerdict(outcome.results, outcome.elapsedMs, {
+    logPath: shortenHome(logPath, process.env["HOME"] ?? process.env["USERPROFILE"]),
+  });
+  const color = VERDICT_COLOR[verdict.status] ?? ui.accent;
+  const room = Math.max(24, width - 8);
+
+  return Screen(
+    width,
+    height,
+    Header("red-dev", "finished"),
+    Text({}, ""),
+
+    Box(
+      {
+        flexDirection: "column",
+        justifyContent: "center",
+        // Centred vertically so the verdict lands where the eye already
+        // is, rather than at the top edge of a screen the reader has
+        // been watching the middle of.
+        height: Math.max(6, height - 6),
+      },
+      Accented(
+        color,
+        3,
+        width - 2,
+        Text({ color, bold: true }, `${VERDICT_MARK[verdict.status].glyph}  ${verdict.headline}`),
+        Text({}, ""),
+        ...verdictFacts(verdict).flatMap((fact) =>
+          wrapTo(fact, room).map((line) => Text({ color: muted }, line)),
+        ),
+      ),
+      Text({}, ""),
+      ...(verdict.nextSteps.length > 0
+        ? [
+            Text({ color: muted, bold: true }, "Next"),
+            ...verdict.nextSteps.flatMap((step) =>
+              wrapTo(step, room - 2).map((line, i) =>
+                Text({ color: text }, `${i === 0 ? "→ " : "  "}${line}`),
+              ),
+            ),
+          ]
+        : []),
+    ),
+
+    StatusLine("enter finish · l review the log", `red-dev ${VERSION}`),
+  );
+}
+
 /**
  * `red-dev install` on its own: one render, which is the only case this
  * still owns. Reaching the converge from the menu no longer comes
  * through here — see useInstallModel for why that mattered.
  */
-export async function runInstallTui(
-  opts: InstallTuiOptions,
-): Promise<{ failed: number; deferred: number }> {
-  let outcome = { failed: 0, deferred: 0 };
+export async function runInstallTui(opts: InstallTuiOptions): Promise<InstallOutcome> {
+  let outcome: InstallOutcome = { failed: 0, deferred: 0, results: [], elapsedMs: 0 };
   const logScroll = createScrollArea({ height: 10, content: [], autoScroll: true });
 
   function App() {
     const { exit } = useApp();
     const size = useTerminalSize();
+    // What the completion screen draws, and the flag that says it may.
+    // A signal rather than the closure alone: `outcome` is written from
+    // a promise callback, and a plain assignment schedules no frame.
+    const [done, setDone] = useState<InstallOutcome | null>(null);
+    const [reviewing, setReviewing] = useState(false);
     const model = useInstallModel(opts, logScroll, (finished) => {
       outcome = finished;
+      setDone(finished);
     });
 
     useEffect(() => model.begin());
 
     useInput((input, key) => {
+      const finished = done();
+      if (finished && !reviewing()) {
+        if (input === "l") setReviewing(true);
+        else if (key.return || input === "q" || key.escape) exit();
+        return;
+      }
       if (model.handleKey(input, key)) return;
       // Refused until it finishes: leaving halfway abandons the machine
-      // mid-converge with no report of where it stopped.
-      if (model.finished() && (key.return || input === "q" || key.escape)) exit();
+      // mid-converge with no report of where it stopped. Once it has,
+      // the same key goes back to the verdict rather than out — the
+      // screen that says it ended is the last thing, always.
+      if (finished && (key.return || input === "q" || key.escape)) setReviewing(false);
     });
 
-    return InstallLayout(model, size.columns ?? 100, Math.max(size.rows ?? 24, 16));
+    const width = size.columns ?? 100;
+    const height = Math.max(size.rows ?? 24, 16);
+    const finished = done();
+    if (finished && !reviewing()) return CompletionLayout(finished, width, height, transcriptPath());
+    return InstallLayout(model, width, height);
   }
 
   // fullHeight: the panels are drawn to the terminal's height rather

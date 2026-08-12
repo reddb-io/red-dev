@@ -36,7 +36,14 @@ import type { Platform } from "./platform.ts";
 import { summary } from "./platform.ts";
 import { swatches, THEMES, themeNames } from "./themes.ts";
 import { Header, Screen, StatusLine, Surface, Task } from "./tui-chrome.ts";
-import { InstallLayout, useInstallModel, type InstallTuiOptions } from "./tui-install.ts";
+import {
+  CompletionLayout,
+  InstallLayout,
+  useInstallModel,
+  type InstallOutcome,
+  type InstallTuiOptions,
+} from "./tui-install.ts";
+import { transcriptPath } from "./transcript.ts";
 import {
   SetupLayout,
   useSetupModel,
@@ -128,6 +135,16 @@ export interface TuiResult {
   /** Failures, when the converge ran inside the interface. */
   failed?: number;
   /**
+   * Every item the run touched, and how long it took.
+   *
+   * Carried out so the terminal can be handed the same verdict the
+   * completion screen showed. The interface is gone by the time anyone
+   * scrolls back through it, and a converge whose evidence dies with the
+   * frame is a converge nobody can check afterwards.
+   */
+  results?: InstallOutcome["results"];
+  elapsedMs?: number;
+  /**
    * Items that ran out of rights, counted apart from the failures.
    *
    * Carried separately all the way out because the caller turns it into
@@ -193,6 +210,13 @@ export async function runTui(
     const [taskTitle, setTaskTitle] = useState("");
     const [taskLines, setTaskLines] = useState<string[]>([]);
     const [taskDone, setTaskDone] = useState(false);
+    // The finished converge, and whether the reader has asked for the
+    // log back. A signal rather than the captured `result` alone: the
+    // converge resolves in a promise callback, and a plain assignment
+    // schedules no frame — the screen would keep showing the live view
+    // of a run that had ended.
+    const [done, setDone] = useState<InstallOutcome | null>(null);
+    const [reviewing, setReviewing] = useState(false);
 
     const names = themeNames();
 
@@ -234,8 +258,15 @@ export async function runTui(
     // between frames; the converge does not begin until begin() is
     // called, which is what the Enter key does.
     const model = install
-      ? useInstallModel(install, logScroll, ({ failed, deferred }) => {
-          result = { action: "installed", failed, deferred };
+      ? useInstallModel(install, logScroll, (finished) => {
+          result = {
+            action: "installed",
+            failed: finished.failed,
+            deferred: finished.deferred,
+            results: finished.results,
+            elapsedMs: finished.elapsedMs,
+          };
+          setDone(finished);
         })
       : null;
 
@@ -244,6 +275,19 @@ export async function runTui(
     const setup = actions.setup
       ? useSetupModel(actions.setup.steps, actions.setup.wizard)
       : null;
+
+    /**
+     * Leave the interface without discarding what a converge decided.
+     *
+     * Quitting used to write `{ action: null }` over whatever was there,
+     * which was right while the menu only chose commands. Now that a
+     * converge finishes in here and returns to the menu, that assignment
+     * would throw away its counts — and with them the exit status the
+     * shell gets and the banner the terminal is handed.
+     */
+    const leave = (): void => {
+      if (result.action !== "installed") result = { action: null };
+    };
 
     useInput((input, key) => {
       if (mode() === "task") {
@@ -293,10 +337,23 @@ export async function runTui(
       }
 
       if (mode() === "install" && model) {
+        const finished = done();
+        // The completion screen, once there is one. Enter goes back to
+        // the menu — the interface is where this converge was chosen, so
+        // it is where finishing it returns you — and the verdict is on
+        // screen until a key says otherwise, rather than being wiped by
+        // a menu redraw the moment the last step closed.
+        if (finished && !reviewing()) {
+          if (input === "l") setReviewing(true);
+          else if (key.return) setMode("sections");
+          else if (input === "q" || key.escape) exit();
+          return;
+        }
         if (model.handleKey(input, key)) return;
         // Refused until it finishes: leaving halfway abandons the machine
-        // mid-converge with no report of where it stopped.
-        if (model.finished() && (key.return || input === "q" || key.escape)) exit();
+        // mid-converge with no report of where it stopped. Afterwards the
+        // same key goes back to the verdict, never straight out.
+        if (finished && (key.return || input === "q" || key.escape)) setReviewing(false);
         return;
       }
 
@@ -309,7 +366,7 @@ export async function runTui(
       else if (key.downArrow || input === "j") setIndex(Math.min(max, index() + 1));
       else if (key.escape) {
         if (inThemes) setMode("sections");
-        else result = { action: null };
+        else leave();
       } else if (key.return) {
         if (inThemes) {
           const slug = names[themeIndex()]!;
@@ -347,7 +404,7 @@ export async function runTui(
           exit();
         }
       } else if (input === "q") {
-        result = { action: null };
+        leave();
         exit();
       }
     });
@@ -357,8 +414,15 @@ export async function runTui(
 
     if (mode() === "setup" && setup) return SetupLayout(setup, p, width, height);
 
-    // The converge takes the whole screen once it starts.
-    if (mode() === "install" && model) return InstallLayout(model, width, height);
+    // The converge takes the whole screen once it starts, and gives it
+    // up at the end to the screen that says so.
+    if (mode() === "install" && model) {
+      const finished = done();
+      if (finished && !reviewing()) {
+        return CompletionLayout(finished, width, height, transcriptPath());
+      }
+      return InstallLayout(model, width, height);
+    }
 
     if (mode() === "task") {
       return Screen(

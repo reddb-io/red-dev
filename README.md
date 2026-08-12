@@ -501,7 +501,22 @@ recovery path, not an edge case — one tool failing never aborts the rest:
 ```console
 warn alacritty: ENOEXEC: unknown error, posix_spawn 'cmd.exe'
  ok  themed: wallpaper, windows
- ok  converged — restart your shell
+```
+
+Every run ends on the same closing frame, whether it was watched in the
+fullscreen interface or piped into a file — the verdict, what it cost, where the
+run was written down, and whatever is left to do:
+
+```console
+┌──────────────────────────────────────────────────────────────────────┐
+│ ✔  this machine is converged                                         │
+│                                                                      │
+│ 45 items · 14 changed · 31 already present                           │
+│ took 21.4s                                                           │
+│ log  ~/.local/state/red-dev/2026-08-12T17-43-25-293-install.log      │
+│                                                                      │
+│ → Open a new terminal — PATH and shell changes load in new sessions. │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Everything that needs administrator, asked once

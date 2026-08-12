@@ -5,6 +5,7 @@
 
 import { appendFileSync, mkdirSync } from "node:fs";
 import { buildCli, parseArgs, VERSION, type Invocation } from "./cli.ts";
+import type { VerdictItem } from "./completion.ts";
 import type { StepOutcome } from "./converge.ts";
 import { log } from "./log.ts";
 import {
@@ -488,9 +489,13 @@ async function cmdInstall(
   // CI, in a pipe, over a dumb SSH session and on a narrow window.
   if (!inv.dryRun && interactive() && (process.stdout.columns ?? 0) >= 60) {
     const { runInstallTui } = await import("./tui-install.ts");
-    const { convergeExit } = await import("./converge.ts");
     const outcome = await runInstallTui({ platform: p, ctx, scopes });
-    return endInstall(convergeExit(outcome), outcome.deferred);
+    // The banner again, after the frame is released. The completion
+    // screen said this inside the interface, and the interface is gone
+    // by the time anyone scrolls back — the terminal has to hold the
+    // verdict too, or the evidence exists only for as long as the
+    // fullscreen did.
+    return await endInstall(outcome.results, outcome.elapsedMs);
   }
 
   log.step(summary(p).split("\n")[0] ?? "");
@@ -506,6 +511,7 @@ async function cmdInstall(
   let close:
     | ((outcome: StepOutcome, detail?: string, remedy?: string) => void)
     | null = null;
+  const startedAt = Date.now();
   const summaryOf = await converge(
     { platform: p, ctx, scopes: scopes, dryRun: inv.dryRun },
     {
@@ -523,34 +529,44 @@ async function cmdInstall(
 
   report.finish();
 
-  if (inv.dryRun) {
-    log.ok("dry run — nothing changed");
-    return 0;
-  }
-  const { convergeExit } = await import("./converge.ts");
-  return endInstall(convergeExit(summaryOf), summaryOf.deferred);
+  return await endInstall(summaryOf.results, Date.now() - startedAt, { dryRun: inv.dryRun });
 }
 
 /**
- * The last line of a converge, and the status the shell gets.
+ * The last thing a converge puts on the terminal, and the status the
+ * shell gets.
+ *
+ * It used to be one `ok` line under the summary, which is one more line
+ * in a transcript of sixty — a run that took four minutes ended by
+ * returning to a prompt, and whoever ran the one-liner had nothing
+ * telling them it was over, whether it worked, or what to do next. So
+ * this is a framed block instead: the verdict, what it cost, where the
+ * run was written down, and the outstanding work as instructions.
  *
  * Shared by both presentations so they cannot disagree about what a run
- * was, and separate from either so the third answer is stated once: 2
- * means every item that could run did, and the ones that needed rights
- * this run did not have are still waiting. Not 0, because something is
- * outstanding and a wrapper script has to be able to see it; not 1,
- * because nothing about this machine is broken.
+ * was, and the status still comes from convergeExit so the third answer
+ * stays stated once: 2 means every item that could run did, and the ones
+ * that needed rights this run did not have are still waiting. Not 0,
+ * because something is outstanding and a wrapper script has to be able
+ * to see it; not 1, because nothing about this machine is broken.
  */
-function endInstall(code: 0 | 1 | 2, deferred = 0): number {
-  if (code === 0) log.ok("converged — restart your shell");
-  else if (code === 2) {
-    log.warn(
-      deferred === 1
-        ? "converged, except one item that needs rights this run did not have"
-        : `converged, except ${deferred} items that need rights this run did not have`,
-    );
-  }
-  return code;
+async function endInstall(
+  items: readonly VerdictItem[],
+  elapsedMs: number,
+  options: { dryRun?: boolean } = {},
+): Promise<number> {
+  const { completionBanner, convergeVerdict, shortenHome } = await import("./completion.ts");
+  const { transcriptPath } = await import("./transcript.ts");
+  const { convergeExit } = await import("./converge.ts");
+
+  const verdict = convergeVerdict(items, elapsedMs, {
+    logPath: shortenHome(transcriptPath(), process.env["HOME"] ?? process.env["USERPROFILE"]),
+    ...(options.dryRun === true ? { dryRun: true } : {}),
+  });
+  for (const line of completionBanner(verdict, process.stdout.columns ?? 72)) log.plain(line);
+
+  if (options.dryRun === true) return 0;
+  return convergeExit({ failed: verdict.counts.failed, deferred: verdict.counts.deferred });
 }
 
 /**
@@ -1045,14 +1061,13 @@ async function cmdUi(p: Platform, inv: Invocation): Promise<number> {
   switch (result.action) {
     case "theme":
       return result.theme ? await cmdTheme(p, inv, result.theme) : 0;
-    case "installed": {
-      // The same three answers as the line report. A converge watched
-      // from the menu is still a converge, and a script that started
-      // this way reads the status the same way.
-      const { convergeExit } = await import("./converge.ts");
-      const deferred = result.deferred ?? 0;
-      return endInstall(convergeExit({ failed: result.failed ?? 0, deferred }), deferred);
-    }
+    case "installed":
+      // The same three answers, and now the same closing block, as the
+      // line report. A converge watched from the menu is still a
+      // converge: a script that started this way reads the status the
+      // same way, and a person who started this way is left holding the
+      // same verdict on the terminal the interface handed back.
+      return await endInstall(result.results ?? [], result.elapsedMs ?? 0);
     case "doctor":
       return await cmdDoctor(p, inv);
     case "apps":
