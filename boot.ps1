@@ -35,75 +35,60 @@ if ([Environment]::Is64BitOperatingSystem -eq $false) {
     Fail 'red-dev publishes 64-bit builds only'
 }
 
-# Channel, matching boot.sh and toon's installer. 'stable' asks for
-# /releases/latest, which by GitHub's definition never returns a
-# prerelease -- so a repository publishing only prereleases 404s there
-# and looks empty. 'next' lists all releases and takes the newest.
+# Channel, matching boot.sh and toon's installer. Stable uses GitHub's
+# public latest-release asset redirect, not the anonymously rate-limited
+# API. Next still needs the API because /latest excludes prereleases.
 $Channel = if ($env:RED_DEV_CHANNEL) { $env:RED_DEV_CHANNEL } else { 'stable' }
 if ($Channel -notin @('stable', 'next')) {
     Fail "RED_DEV_CHANNEL must be 'stable' or 'next' (got '$Channel')"
 }
 
-$api = if ($Channel -eq 'stable') {
-    "https://api.github.com/repos/$Repo/releases/latest"
-} else {
+$DownloadUrl = "https://github.com/$Repo/releases/latest/download/$Asset"
+$ExpectedBytes = $null
+
+if ($Channel -eq 'next') {
     # Not per_page=1: /releases is not ordered so the newest prerelease
     # comes first, and taking [0] handed the stable release to everyone
     # who asked for next. Fetch a page and filter below.
-    "https://api.github.com/repos/$Repo/releases?per_page=20"
+    $api = "https://api.github.com/repos/$Repo/releases?per_page=20"
 }
 
 Say "resolving $Channel release of $Repo"
 
-# Ask the API which assets exist rather than assembling a URL from an
-# assumed version -- the failure mode that motivated this project.
-$headers = @{ 'User-Agent' = 'red-dev-boot'; 'Accept' = 'application/vnd.github+json' }
-if ($env:GITHUB_TOKEN) { $headers['Authorization'] = "Bearer $env:GITHUB_TOKEN" }
+if ($Channel -eq 'next') {
+    $headers = @{ 'User-Agent' = 'red-dev-boot'; 'Accept' = 'application/vnd.github+json' }
+    if ($env:GITHUB_TOKEN) { $headers['Authorization'] = "Bearer $env:GITHUB_TOKEN" }
 
-try {
-    $release = Invoke-RestMethod $api -Headers $headers
-    if ($release -is [array]) {
+    try {
+        $release = Invoke-RestMethod $api -Headers $headers
         # Filter, do not index: the array mixes stable and prerelease
         # entries and is not ordered newest-prerelease-first.
         $release = $release | Where-Object { $_.prerelease } | Select-Object -First 1
         if (-not $release) { Fail "$Repo has no prerelease to install" }
-    }
-} catch {
-    $code = $_.Exception.Response.StatusCode.value__
-    # 404 is ambiguous: GitHub returns it both for "no releases" and for
-    # "you cannot see this repository". Reporting only the first sends
-    # someone with a private repo hunting a release that already exists.
-    if ($code -eq 404 -and $Channel -eq 'stable') {
-        # Distinguish "no stable yet" from "nothing at all" instead of
-        # guessing, the same way boot.sh does.
-        $any = $null
-        try {
-            $any = Invoke-RestMethod "https://api.github.com/repos/$Repo/releases?per_page=1" -Headers $headers
-        } catch { }
-        if ($any -and $any.Count -gt 0) {
-            Fail "$Repo has no stable release yet, only prereleases. Install the newest with: `$env:RED_DEV_CHANNEL='next'; irm .../boot.ps1 | iex"
+    } catch {
+        $code = $_.Exception.Response.StatusCode.value__
+        if ($code -eq 404) {
+            Fail "$Repo has no published prerelease"
+        } elseif ($code -eq 403) {
+            Fail "GitHub API refused the prerelease lookup (HTTP 403) -- set GITHUB_TOKEN and retry"
+        } elseif ($code -eq 401) {
+            Fail "GITHUB_TOKEN was rejected -- check that it can read $Repo"
+        } else {
+            Fail "cannot reach the GitHub API: $($_.Exception.Message)"
         }
-        Fail "no release found for $Repo. Either none has been published, or the repository is private -- in which case set GITHUB_TOKEN and retry."
-    } elseif ($code -eq 404) {
-        Fail "$Repo has no published releases yet"
-    } elseif ($code -eq 403) {
-        Fail "GitHub API rate limit reached -- set GITHUB_TOKEN and retry"
-    } elseif ($code -eq 401) {
-        Fail "GITHUB_TOKEN was rejected -- check that it can read $Repo"
-    } else {
-        Fail "cannot reach the GitHub API: $($_.Exception.Message)"
     }
+
+    $match = $release.assets | Where-Object { $_.name -eq $Asset } | Select-Object -First 1
+    if (-not $match) {
+        Write-Host "fail no asset named $Asset in the newest prerelease. Available:" -ForegroundColor Red
+        $release.assets | ForEach-Object { Write-Host "  $($_.name)" }
+        exit 1
+    }
+    $DownloadUrl = $match.browser_download_url
+    $ExpectedBytes = $match.size
 }
 
-$match = $release.assets | Where-Object { $_.name -eq $Asset } | Select-Object -First 1
-if (-not $match) {
-    Write-Host "fail no asset named $Asset in the latest release. Available:" -ForegroundColor Red
-    $release.assets | ForEach-Object { Write-Host "  $($_.name)" }
-    exit 1
-}
-
-$SizeMb = [math]::Round($match.size / 1MB, 1)
-Say "downloading $Asset ($SizeMb MB)"
+Say "downloading $Asset"
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 
 # Downloaded to a temporary file and moved into place: an interrupted
@@ -112,7 +97,7 @@ New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 # being there at all.
 $Tmp = "$Bin.download"
 try {
-    Invoke-WebRequest -Uri $match.browser_download_url -OutFile $Tmp -UseBasicParsing
+    Invoke-WebRequest -Uri $DownloadUrl -OutFile $Tmp -UseBasicParsing
 } catch {
     if (Test-Path $Tmp) { Remove-Item $Tmp -Force }
     Fail "download failed: $($_.Exception.Message)"
@@ -122,7 +107,8 @@ try {
 # confirm the size afterwards instead. A wrong one here is a truncated
 # or redirected download, not a working install.
 $Got = [math]::Round((Get-Item $Tmp).Length / 1MB, 1)
-if ((Get-Item $Tmp).Length -ne $match.size) {
+if ($ExpectedBytes -and (Get-Item $Tmp).Length -ne $ExpectedBytes) {
+    $SizeMb = [math]::Round($ExpectedBytes / 1MB, 1)
     Remove-Item $Tmp -Force
     Fail "downloaded $Got MB, expected $SizeMb MB -- transfer was incomplete"
 }
