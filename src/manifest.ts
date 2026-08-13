@@ -148,6 +148,15 @@ type ProviderSpec =
 /** One column of the manifest: how this platform gets this tool. */
 export type Provider = ProviderSpec & {
   /**
+   * This Linux provider eventually invokes sudo.
+   *
+   * The common package shapes (apt, PPA, apt repository and .deb release)
+   * imply this themselves. This flag exists for installers and builtins whose
+   * script body is the only other place the requirement could be discovered —
+   * too late to authenticate before the fullscreen renderer owns stdin.
+   */
+  needsSudo?: true;
+  /**
    * This column cannot complete without administrator rights.
    *
    * Declared per column, never per tool, because the need is not
@@ -334,6 +343,8 @@ const builtin = (
     | "ssh-server",
 ): Provider => ({ kind: "builtin", name });
 const skip = (reason: string): Provider => ({ kind: "skip", reason });
+/** A Linux provider whose implementation performs system work through sudo. */
+const sudoProvider = (pr: ProviderSpec): Provider => ({ ...pr, needsSudo: true });
 /**
  * Wraps a column that cannot complete without administrator rights.
  *
@@ -400,7 +411,7 @@ export const TOOLS: Tool[] = [
     name: "ssh-server",
     scope: "core",
     managed: true,
-    u24: builtin("ssh-server"),
+    u24: sudoProvider(builtin("ssh-server")),
     win: admin(builtin("ssh-server")),
   },
   {
@@ -739,10 +750,12 @@ export const TOOLS: Tool[] = [
     about: "open-source API client, powered by recker",
     cmd: ["red-request", "rr"],
     scope: "desktop",
-    u24: installer(
-      "https://raw.githubusercontent.com/reddb-io/red-request/main/install.sh",
-      "reddb-io/red-request — installs the .deb and verifies its checksum",
-      "--no-color",
+    u24: sudoProvider(
+      installer(
+        "https://raw.githubusercontent.com/reddb-io/red-request/main/install.sh",
+        "reddb-io/red-request — installs the .deb and verifies its checksum",
+        "--no-color",
+      ),
     ),
     // /S is NSIS's silent flag, and this asset really is NSIS: its PE
     // manifest asks for asInvoker, so it installs per-user with no UAC
@@ -785,11 +798,13 @@ export const TOOLS: Tool[] = [
     name: "dit",
     about: "push-to-toggle voice dictation, typed into the focused app",
     scope: "desktop",
-    u24: installer(
-      "https://raw.githubusercontent.com/reddb-io/dit/main/install.sh",
-      "reddb-io/dit — installs the binary and the /dev/uinput permissions it needs",
-      "--yes",
-      "--no-service",
+    u24: sudoProvider(
+      installer(
+        "https://raw.githubusercontent.com/reddb-io/dit/main/install.sh",
+        "reddb-io/dit — installs the binary and the /dev/uinput permissions it needs",
+        "--yes",
+        "--no-service",
+      ),
     ),
     win: gh("reddb-io/dit", "dit-windows-x86_64.exe", "dit"),
   },

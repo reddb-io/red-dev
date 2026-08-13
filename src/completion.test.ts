@@ -77,6 +77,25 @@ describe("the verdict", () => {
     expect(v.nextSteps.some((s) => s.includes("rights"))).toBe(true);
   });
 
+  test("deferred items show their shared cause without opening the log", () => {
+    const detail = "sudo needs a password and nothing here can supply one.";
+    const v = convergeVerdict(
+      [
+        item("btop", { outcome: "deferred", detail }),
+        item("red-ui", { outcome: "deferred", detail }),
+      ],
+      1_000,
+    );
+
+    expect(v.deferrals).toEqual([
+      { tool: "btop", detail },
+      { tool: "red-ui", detail },
+    ]);
+    const banner = plain(completionBanner(v, 72, { color: false })).join("\n");
+    expect(banner).toContain("Waiting");
+    expect(banner).toContain("sudo needs a password");
+  });
+
   test("a failure says the machine is not converged, and names the item", () => {
     const v = convergeVerdict([item("docker", { outcome: "failed" })], 90_000);
     expect(v.status).toBe("failed");
@@ -84,6 +103,24 @@ describe("the verdict", () => {
     expect(v.headline).toContain("docker");
     expect(v.nextSteps[0]).toContain("Re-run");
     expect(v.elapsed).toBe("1m 30s");
+  });
+
+  test("a failure carries its cause into the closing verdict", () => {
+    const failed = item("nerd-font", {
+      outcome: "failed",
+      detail: "GitHub API 403 for ryanoasis/nerd-fonts — rate limited",
+    });
+    const v = convergeVerdict([failed], 1_000);
+
+    expect(v.failures).toEqual([
+      {
+        tool: "nerd-font",
+        detail: "GitHub API 403 for ryanoasis/nerd-fonts — rate limited",
+      },
+    ]);
+    expect(plain(completionBanner(v, 72, { color: false })).join("\n")).toContain(
+      "GitHub API 403 for ryanoasis/nerd-fonts",
+    );
   });
 
   test("failures outrank deferrals when a run has both", () => {

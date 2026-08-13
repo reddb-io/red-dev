@@ -196,6 +196,11 @@ fi
 
 say "starting red-dev"
 
+# Tell the binary this launch is the installation handoff, not an ordinary
+# visit to its menu. On Ubuntu that lets it authenticate sudo once before the
+# fullscreen renderer owns stdin; providers themselves remain unattended.
+export RED_DEV_BOOTSTRAP=1
+
 # Reconnect stdin to the terminal before handing over.
 #
 # The documented way to run this is `curl ... | sh`, which makes the

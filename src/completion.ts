@@ -38,7 +38,15 @@ export type CompletionOutcome =
 export interface VerdictItem {
   tool: string;
   outcome: CompletionOutcome;
+  /** The provider's actual failure, carried all the way to the closing screen. */
+  detail?: string;
   remedy?: string;
+}
+
+export interface CompletionFailure {
+  tool: string;
+  /** Absent only when the provider itself supplied no diagnostic. */
+  detail?: string;
 }
 
 export interface VerdictOptions {
@@ -64,6 +72,10 @@ export interface CompletionVerdict {
   };
   elapsed: string;
   logPath: string | null;
+  /** Failed items and their immediate causes, in execution order. */
+  failures: CompletionFailure[];
+  /** Work that could not cross its rights gate, with the reason it stopped. */
+  deferrals: CompletionFailure[];
   /**
    * What to do next, in the order it has to be done.
    *
@@ -103,6 +115,14 @@ export function convergeVerdict(
   };
   const elapsed = formatDuration(elapsedMs);
   const logPath = options.logPath ?? null;
+  const failures = failed.map((item) => ({
+    tool: item.tool,
+    ...(item.detail?.trim() ? { detail: item.detail.replace(/\s+/g, " ").trim() } : {}),
+  }));
+  const deferrals = deferred.map((item) => ({
+    tool: item.tool,
+    ...(item.detail?.trim() ? { detail: item.detail.replace(/\s+/g, " ").trim() } : {}),
+  }));
 
   if (options.dryRun === true) {
     return {
@@ -111,6 +131,8 @@ export function convergeVerdict(
       counts,
       elapsed,
       logPath,
+      failures,
+      deferrals,
       nextSteps: ["Run `red-dev install` to carry this out."],
     };
   }
@@ -153,6 +175,8 @@ export function convergeVerdict(
       counts,
       elapsed,
       logPath,
+      failures,
+      deferrals,
       nextSteps,
     };
   }
@@ -167,6 +191,8 @@ export function convergeVerdict(
       counts,
       elapsed,
       logPath,
+      failures,
+      deferrals,
       nextSteps,
     };
   }
@@ -177,6 +203,8 @@ export function convergeVerdict(
     counts,
     elapsed,
     logPath,
+    failures,
+    deferrals,
     nextSteps,
   };
 }
@@ -204,6 +232,23 @@ export function verdictFacts(verdict: CompletionVerdict): string[] {
   const rows = [parts.join(" · "), `took ${verdict.elapsed}`];
   if (verdict.logPath) rows.push(`log  ${verdict.logPath}`);
   return rows;
+}
+
+/** Human-readable provider failures shared by both closing presentations. */
+export function failureFacts(verdict: CompletionVerdict): string[] {
+  return verdict.failures.map(
+    (failure) => `${failure.tool}: ${failure.detail ?? "no error detail was reported"}`,
+  );
+}
+
+/** Group a shared rights failure once, followed by every item it held back. */
+export function deferralFacts(verdict: CompletionVerdict): string[] {
+  const groups = new Map<string, string[]>();
+  for (const deferral of verdict.deferrals) {
+    const detail = deferral.detail ?? "no deferral detail was reported";
+    groups.set(detail, [...(groups.get(detail) ?? []), deferral.tool]);
+  }
+  return [...groups].map(([detail, tools]) => `${detail} — ${tools.join(", ")}`);
 }
 
 /**
@@ -299,6 +344,16 @@ export function completionBanner(
     const split = fact.indexOf("  ");
     const lead = split > 0 ? fact.slice(0, split + 2) : "";
     out.push(...item(lead, fact.slice(lead.length), "1;90"));
+  }
+  if (verdict.failures.length > 0) {
+    out.push(blank());
+    out.push(row("Errors", "1;31"));
+    for (const failure of failureFacts(verdict)) out.push(...item("✗ ", failure, "1;31"));
+  }
+  if (verdict.deferrals.length > 0) {
+    out.push(blank());
+    out.push(row("Waiting", "1;33"));
+    for (const deferral of deferralFacts(verdict)) out.push(...item("! ", deferral, "1;33"));
   }
   if (verdict.nextSteps.length > 0) {
     out.push(blank());
