@@ -30,7 +30,13 @@ import { CenteredScreen, centeredFrame, Surface } from "./tui-chrome.ts";
 import { muted, ui } from "./tui-theme.ts";
 import { DEFAULT_THEME, swatches, THEMES, themeNames } from "./themes.ts";
 import type { ThemeSlug } from "./themes.ts";
-import { runtimeIdsForPolicy, runtimeSelectedByDefault } from "./runtimes.ts";
+import {
+  runtimeSelectedByDefault,
+  runtimeVersionLabel,
+  selectedRuntimeId,
+  shiftRuntimeVersion,
+  toggleRuntimeSelection,
+} from "./runtimes.ts";
 
 export interface SetupAnswers {
   theme: string;
@@ -145,34 +151,11 @@ export function questions(
       description:
         "Owned by mise, so node resolves the same way in WSL, on the desktop " +
         "and in Git Bash. A version manager that manages nothing is how pnpm " +
-        "ends up working in one shell and not another. Java, Ruby and Go are " +
-        "available but start off; select them when a project needs them.",
+        "ends up working in one shell and not another. Space enables a language; " +
+        "left/right chooses its version. Java, Ruby and Go start off.",
       multi: true,
       choices: runtimes,
       preset: runtimes.filter((runtime) => runtimeSelectedByDefault(runtime.key)).map((runtime) => runtime.key),
-      applies: () => true,
-    },
-    {
-      id: "runtime-versions",
-      title: "Versions",
-      description:
-        "Recommended follows the compatibility channel chosen by red-dev — for " +
-        "example Node LTS and Python 3.13. Latest asks mise for the newest release " +
-        "of every runtime you selected.",
-      multi: false,
-      choices: [
-        {
-          key: "recommended",
-          label: "Recommended versions",
-          note: "the default — LTS, stable or a tested release where appropriate",
-        },
-        {
-          key: "latest",
-          label: "Latest versions",
-          note: "rewrite every selected runtime to @latest",
-        },
-      ],
-      preset: ["recommended"],
       applies: () => true,
     },
     {
@@ -313,6 +296,7 @@ interface SetupKey {
   upArrow?: boolean;
   downArrow?: boolean;
   leftArrow?: boolean;
+  rightArrow?: boolean;
   escape?: boolean;
   return?: boolean;
 }
@@ -342,10 +326,7 @@ export function useSetupModel(steps: Question[], wizard: ReturnType<typeof creat
         : {}),
       font: get("font")[0] ?? "firacode",
       apps: get("apps"),
-      runtimes: runtimeIdsForPolicy(
-        get("runtimes"),
-        get("runtime-versions")[0] === "latest" ? "latest" : "recommended",
-      ),
+      runtimes: get("runtimes"),
       agents: get("agents"),
       blesh: get("plugins").includes("blesh"),
       redwall: get("redwall")[0] === "yes",
@@ -365,12 +346,28 @@ export function useSetupModel(steps: Question[], wizard: ReturnType<typeof creat
         setCursor(Math.min(max, cursor() + 1));
         return "handled";
       }
+      if (q.id === "runtimes" && (key.leftArrow || key.rightArrow || input === "h" || input === "l")) {
+        const choice = q.choices[cursor()];
+        if (choice) {
+          setPicked({
+            ...picked(),
+            [q.id]: shiftRuntimeVersion(
+              selection(),
+              choice.key,
+              key.leftArrow || input === "h" ? -1 : 1,
+            ),
+          });
+        }
+        return "handled";
+      }
       if (input === " " && q.multi) {
         const k = q.choices[cursor()]!.key;
         const cur = selection();
         setPicked({
           ...picked(),
-          [q.id]: cur.includes(k) ? cur.filter((x) => x !== k) : [...cur, k],
+          [q.id]: q.id === "runtimes"
+            ? toggleRuntimeSelection(cur, k)
+            : cur.includes(k) ? cur.filter((x) => x !== k) : [...cur, k],
         });
         return "handled";
       }
@@ -385,7 +382,7 @@ export function useSetupModel(steps: Question[], wizard: ReturnType<typeof creat
         wizard.next();
         return "handled";
       }
-      if (key.leftArrow || key.escape) {
+      if ((key.leftArrow && q.id !== "runtimes") || key.escape) {
         if (stepIndex() > 0) {
           setStepIndex(stepIndex() - 1);
           setCursor(0);
@@ -428,6 +425,7 @@ export function SetupLayout(m: SetupModel, p: Platform, width: number, height: n
   const leftWidth = 26;
   const rightWidth = twoColumn ? frame.width - leftWidth - 3 : frame.width;
   const isTheme = q.id === "theme";
+  const isRuntimes = q.id === "runtimes";
   const activeKey = q.choices[m.cursor()]?.key ?? "";
 
   return CenteredScreen(
@@ -485,13 +483,19 @@ export function SetupLayout(m: SetupModel, p: Platform, width: number, height: n
           Text({}, ""),
           Text({ color: muted }, q.description),
           Text({}, ""),
-          ...q.choices.map((c, i) =>
-            ListItem({
-              primary: `${q.multi ? (m.selection().includes(c.key) ? "[x] " : "[ ] ") : ""}${c.label}`,
-              secondary: c.note,
+          ...q.choices.map((c, i) => {
+            const runtimeId = selectedRuntimeId(m.selection(), c.key);
+            const checked = isRuntimes
+              ? m.selection().includes(runtimeId)
+              : m.selection().includes(c.key);
+            return ListItem({
+              primary: isRuntimes
+                ? `${checked ? "[x]" : "[ ]"} ${c.label}  ‹ ${runtimeVersionLabel(runtimeId)} ›`
+                : `${q.multi ? (checked ? "[x] " : "[ ] ") : ""}${c.label}`,
+              ...(!isRuntimes ? { secondary: c.note } : {}),
               selected: i === m.cursor(),
-            }),
-          ),
+            });
+          }),
           // The reason this screen exists: the palette is visible while
           // the cursor moves, not after the choice is made.
           ...(isTheme
@@ -513,11 +517,13 @@ export function SetupLayout(m: SetupModel, p: Platform, width: number, height: n
         hints: [
           { shortcut: "up/down", action: "move" },
           ...(q.multi ? [{ shortcut: "space", action: "toggle" }] : []),
+          ...(isRuntimes ? [{ shortcut: "left/right", action: "version" }] : []),
           {
             shortcut: "enter",
             action: m.stepIndex() === m.steps.length - 1 ? "install" : "next",
           },
-          ...(m.stepIndex() > 0 ? [{ shortcut: "left", action: "back" }] : []),
+          ...(m.stepIndex() > 0 && !isRuntimes ? [{ shortcut: "left", action: "back" }] : []),
+          ...(m.stepIndex() > 0 && isRuntimes ? [{ shortcut: "esc", action: "back" }] : []),
           { shortcut: "q", action: "skip" },
         ],
       }),

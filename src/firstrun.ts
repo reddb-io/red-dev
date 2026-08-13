@@ -94,7 +94,7 @@ export async function setupPlan(p: Platform, choices: SetupChoices): Promise<Set
   const runtimes = [...choices.runtimes];
   if (!runtimes.some((runtime) => runtime.startsWith("node"))) {
     const needsNpm = chosen.some((agent) => agentInstallMethod(agent, p) === "npm");
-    if (needsNpm) runtimes.unshift("node@lts");
+    if (needsNpm) runtimes.unshift("node@24");
   }
   for (const runtime of chosen.flatMap((agent) => agent.runtimeNeeds ?? [])) {
     const name = runtime.split("@")[0]!;
@@ -154,7 +154,7 @@ export async function buildSetupSteps(p: Platform) {
     toolsInScope("optional")
       .filter((t) => providerFor(t, p).kind !== "skip")
       .map((t) => ({ key: t.name, label: t.name, note: t.about ?? "" })),
-    OFFERED_RUNTIMES.map((r) => ({ key: r.id, label: r.id, note: r.about })),
+    OFFERED_RUNTIMES.map((r) => ({ key: r.id, label: r.label, note: r.about })),
   );
 }
 
@@ -232,8 +232,8 @@ export async function carryOutChoices(
   // with "npm not on PATH", which is the tool reporting its own missing
   // prerequisite as the user's mistake.
   const runtimes = plan.filter((step) => step.kind === "runtime");
-  if (runtimes.some((step) => step.key === "node@lts") && !choices.runtimes.includes("node@lts")) {
-    log.plain("       an npm-installed agent was chosen, so node@lts comes with it");
+  if (runtimes.some((step) => step.key === "node@24") && !choices.runtimes.includes("node@24")) {
+    log.plain("       an npm-installed agent was chosen, so node@24 comes with it");
   }
   if (
     runtimes.some((step) => step.key === "python@3.13") &&
@@ -334,7 +334,7 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
       toolsInScope("optional")
         .filter((t) => providerFor(t, p).kind !== "skip")
         .map((t) => ({ key: t.name, label: t.name, note: t.about ?? "" })),
-      OFFERED_RUNTIMES.map((r) => ({ key: r.id, label: r.id, note: r.about })),
+      OFFERED_RUNTIMES.map((r) => ({ key: r.id, label: r.label, note: r.about })),
     );
 
     if (!answers) {
@@ -408,7 +408,7 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
   }
 
   // 3. What you build with.
-  const { OFFERED_RUNTIMES, runtimeIdsForPolicy, runtimeSelectedByDefault } =
+  const { OFFERED_RUNTIMES, offeredRuntime, runtimeSelectedByDefault } =
     await import("./runtimes.ts");
   const runtimeLabels = OFFERED_RUNTIMES.map((r) => `${r.id} — ${r.about}`);
   const pickedRuntimes = await checkbox(
@@ -416,18 +416,22 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
     runtimeLabels as [string, ...string[]],
     runtimeLabels.filter((label) => runtimeSelectedByDefault(label.split(" ")[0]!)),
   );
-  const runtimePolicy = await select(
-    "Which runtime versions?",
-    [
-      "recommended — LTS, stable or the tested release",
-      "latest — newest release of every selected runtime",
-    ] as const,
-    "recommended — LTS, stable or the tested release",
-  );
-  const selectedRuntimes = runtimeIdsForPolicy(
-    pickedRuntimes.map((label) => label.split(" ")[0]!),
-    runtimePolicy.startsWith("latest") ? "latest" : "recommended",
-  );
+  const selectedRuntimes: string[] = [];
+  for (const id of pickedRuntimes.map((label) => label.split(" ")[0]!)) {
+    const runtime = offeredRuntime(id);
+    if (!runtime) {
+      selectedRuntimes.push(id);
+      continue;
+    }
+    const versions = runtime.versions.map((version) => `${version.id} — ${version.label}`);
+    const fallback = versions.find((version) => version.startsWith(`${id} `)) ?? versions[0]!;
+    const picked = await select(
+      `${runtime.label} version?`,
+      versions as [string, ...string[]],
+      fallback,
+    );
+    selectedRuntimes.push(picked.split(" ")[0]!);
+  }
 
   // 4. Extra tools, all of them ticked.
   //

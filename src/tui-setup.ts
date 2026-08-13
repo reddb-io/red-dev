@@ -34,7 +34,12 @@ import { CenteredScreen, centeredFrame, Surface } from "./tui-chrome.ts";
 import { muted, ui } from "./tui-theme.ts";
 import { swatches } from "./themes.ts";
 import type { ThemeSlug } from "./themes.ts";
-import { runtimeIdsForPolicy } from "./runtimes.ts";
+import {
+  runtimeVersionLabel,
+  selectedRuntimeId,
+  shiftRuntimeVersion,
+  toggleRuntimeSelection,
+} from "./runtimes.ts";
 import { withConsoleSelectionSuspended } from "./windows-console-mode.ts";
 // The questions live in tui-setup-model.ts and only there. They were
 // declared in both files, identically, for two interfaces that ask the
@@ -94,10 +99,7 @@ export async function runSetupTui(
             : {}),
           font: get("font")[0] ?? "firacode",
           apps: get("apps"),
-          runtimes: runtimeIdsForPolicy(
-            get("runtimes"),
-            get("runtime-versions")[0] === "latest" ? "latest" : "recommended",
-          ),
+          runtimes: get("runtimes"),
           agents: get("agents"),
           blesh: get("plugins").includes("blesh"),
           redwall: get("redwall")[0] === "yes",
@@ -126,12 +128,29 @@ export async function runSetupTui(
         return;
       }
 
+      if (q.id === "runtimes" && (key.leftArrow || key.rightArrow || input === "h" || input === "l")) {
+        const choice = q.choices[cursor()];
+        if (choice) {
+          setPicked({
+            ...picked(),
+            [q.id]: shiftRuntimeVersion(
+              selection(),
+              choice.key,
+              key.leftArrow || input === "h" ? -1 : 1,
+            ),
+          });
+        }
+        return;
+      }
+
       if (input === " " && q.multi) {
         const k = q.choices[cursor()]!.key;
         const cur = selection();
         setPicked({
           ...picked(),
-          [q.id]: cur.includes(k) ? cur.filter((x) => x !== k) : [...cur, k],
+          [q.id]: q.id === "runtimes"
+            ? toggleRuntimeSelection(cur, k)
+            : cur.includes(k) ? cur.filter((x) => x !== k) : [...cur, k],
         });
         return;
       }
@@ -146,7 +165,7 @@ export async function runSetupTui(
         return;
       }
 
-      if (key.leftArrow || key.escape) {
+      if ((key.leftArrow && q.id !== "runtimes") || key.escape) {
         if (stepIndex() > 0) {
           setStepIndex(stepIndex() - 1);
           setCursor(0);
@@ -174,6 +193,7 @@ export async function runSetupTui(
     const leftWidth = 26;
     const rightWidth = twoColumn ? frame.width - leftWidth - 3 : frame.width;
     const isTheme = q.id === "theme";
+    const isRuntimes = q.id === "runtimes";
     const activeKey = q.choices[cursor()]?.key ?? "";
 
     return CenteredScreen(
@@ -233,13 +253,19 @@ export async function runSetupTui(
             Text({}, ""),
             Text({ color: muted }, q.description),
             Text({}, ""),
-            ...q.choices.map((c, i) =>
-              ListItem({
-                primary: `${q.multi ? (selection().includes(c.key) ? "[x] " : "[ ] ") : ""}${c.label}`,
-                secondary: c.note,
+            ...q.choices.map((c, i) => {
+              const runtimeId = selectedRuntimeId(selection(), c.key);
+              const checked = isRuntimes
+                ? selection().includes(runtimeId)
+                : selection().includes(c.key);
+              return ListItem({
+                primary: isRuntimes
+                  ? `${checked ? "[x]" : "[ ]"} ${c.label}  ‹ ${runtimeVersionLabel(runtimeId)} ›`
+                  : `${q.multi ? (checked ? "[x] " : "[ ] ") : ""}${c.label}`,
+                ...(!isRuntimes ? { secondary: c.note } : {}),
                 selected: i === cursor(),
-              }),
-            ),
+              });
+            }),
             // The reason this screen exists: the palette is visible
             // while the cursor moves, not after the choice is made.
             ...(isTheme
@@ -261,8 +287,10 @@ export async function runSetupTui(
           hints: [
             { shortcut: "up/down", action: "move" },
             ...(q.multi ? [{ shortcut: "space", action: "toggle" }] : []),
+            ...(isRuntimes ? [{ shortcut: "left/right", action: "version" }] : []),
             { shortcut: "enter", action: stepIndex() === steps.length - 1 ? "finish" : "next" },
-            ...(stepIndex() > 0 ? [{ shortcut: "left", action: "back" }] : []),
+            ...(stepIndex() > 0 && !isRuntimes ? [{ shortcut: "left", action: "back" }] : []),
+            ...(stepIndex() > 0 && isRuntimes ? [{ shortcut: "esc", action: "back" }] : []),
             { shortcut: "q", action: "skip setup" },
           ],
         }),

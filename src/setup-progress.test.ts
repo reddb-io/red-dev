@@ -43,7 +43,7 @@ describe("the setup work plan", () => {
     });
 
     expect(plan.map((step) => step.tool)).toEqual([
-      "node@lts",
+      "node@24",
       "Gemini CLI",
       "T3 Code",
       "red-skills",
@@ -68,7 +68,7 @@ describe("the setup work plan", () => {
     });
 
     expect(plan.map((step) => step.tool)).toEqual([
-      "node@lts",
+      "node@24",
       "python@3.13",
       "Hermes Agent",
       "red-skills",
@@ -83,7 +83,7 @@ describe("the setup work plan", () => {
     });
 
     expect(plan.map((step) => step.tool)).toEqual([
-      "node@lts",
+      "node@24",
       "python@3.13",
       "OpenClaw",
       "Hermes Agent",
