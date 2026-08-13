@@ -241,9 +241,9 @@ to make deliberately, and dit works without it. It also wants an
 `ELEVENLABS_API_KEY`, or `--engine local` for offline Whisper.
 
 **Coding agents** are chosen rather than assumed — `red-dev agents` offers
-`claude-code`, `codex` and `opencode` pre-ticked, plus `gemini`, `herdr`,
-`openclaw`, `hermes`, and the Claude, Codex and T3 Code desktop apps on
-Windows. `herdr` is not an agent but the thing agents run inside — it
+every agent applicable to the current platform pre-ticked, including the
+Claude, Codex and T3 Code desktop apps on Windows. Untick any of them to opt
+out. `herdr` is not an agent but the thing agents run inside — it
 multiplexes several into one terminal and keeps them alive across an SSH
 disconnect. Each
 installs by the path its publisher supports rather than one uniform mechanism,
@@ -321,6 +321,7 @@ red-dev install [scope]      # converge toward the manifest
 red-dev install --dry-run    # print the plan, touch nothing
 red-dev update               # upgrade what the package managers own
 red-dev theme [name]         # dark | light | obsidian | marble | cobalt | flare
+red-dev wallpaper [source]   # theme | Red artwork | absolute PNG path | HTTPS URL
 red-dev redwall              # redraw the wallpaper carrying this machine's state
 red-dev apps                 # choose optional tools
 red-dev lang                 # choose runtimes for mise to manage
@@ -405,10 +406,11 @@ deliberately:
 | --- | --- |
 | `red-dev` | the fullscreen interface, then whatever you pick — a line-based menu below 60 columns, and `--help` with no terminal at all |
 | `red-dev theme` | which theme, when given no name |
-| `red-dev apps` | which optional tools — ticked, minus anything that says it is too large to be a default |
-| `red-dev lang` | which runtimes mise should manage |
+| `red-dev wallpaper` | which bundled Red artwork, a custom PNG path/HTTPS URL, or whether to follow the theme |
+| `red-dev apps` | which optional tools — all ticked; untick to opt out |
+| `red-dev lang` | which runtimes mise should manage — all ticked; untick to opt out |
 | `red-dev shell` | whether a terminal lands in WSL or Git Bash |
-| `red-dev agents` | which coding agents — pre-ticked, then offers red-skills |
+| `red-dev agents` | which coding agents — all ticked; untick to opt out, then offers red-skills |
 | `red-dev uninstall` | what to remove — and confirms before removing it |
 | `red-dev wsl` | whether to set WSL up on a fresh Windows machine |
 | `red-dev rescue --apply` | whether to end the exact proven-orphan groups in the preview |
@@ -747,10 +749,11 @@ standardises on bash rather than treating Windows as a separate world.
 It hands over to `red-dev` itself, so you land in the fullscreen interface
 rather than in a converge that already started. Choosing **Install** asks first:
 where to share configuration, which shell the terminal opens, which agents,
-which runtimes, which optional tools, ble.sh, the font, and the theme — with
+which runtimes, which optional tools, ble.sh, the font, the theme, the wallpaper,
+and Redwall — with
 the palette previewed while the cursor moves. Previous answers come back
-pre-ticked, so agreeing again is enter, enter, enter, and `q` returns to the
-menu rather than starting anything.
+pre-ticked. Every install group starts fully selected and is opt-out, so agreeing
+is enter, enter, enter; `q` returns to the menu rather than starting anything.
 
 #### The distro, converged from the Windows side
 
@@ -899,11 +902,35 @@ A theme changes the things nothing else overrides:
 
 | surface | how |
 | --- | --- |
-| wallpaper | a brand sheet, embedded, named by its own content hash |
+| wallpaper | a brand sheet, embedded and content-addressed; follows the theme unless independently pinned |
 | Windows | dark mode, accent colour, and colour prevalence |
 | GNOME | light/dark preference and accent |
 | VS Code | `workbench.colorTheme`, in a settings file parsed as JSONC so comments and trailing commas survive |
-| Redwall | the new theme's art with this machine's state redrawn over it — workers, queue, actionable health, LAN address, and separate GitHub REST/GraphQL percentages — then put on the desktop and, on GNOME, the lock screen; GitHub is read from a locked 15-minute snapshot, never queried by every repaint |
+| Redwall | the selected art with this machine's state redrawn over it — workers, queue, actionable health, LAN address, and separate GitHub REST/GraphQL percentages — then put on the desktop and, on GNOME, the lock screen; GitHub is read from a locked 15-minute snapshot, never queried by every repaint |
+
+Wallpaper and colour theme are linked by default, not welded together. Choose
+`red-dev wallpaper flare`, for example, to keep Flare's Red artwork while the
+system and editor use another theme. A custom PNG works too:
+
+```bash
+red-dev wallpaper '/home/filipe/Pictures/wall.png'
+red-dev wallpaper 'C:\Users\filipe\Pictures\wall.png'
+red-dev wallpaper 'https://example.com/wall.png?variant=wide'
+```
+
+The Windows path works from native Windows and WSL. Remote imports require
+HTTPS, follow only HTTPS redirects, time out after 30 seconds, and are capped at
+32 MB; PNG decoding is capped at 8K. Quote URLs that contain shell characters.
+red-dev validates the PNG and copies it under a content-addressed managed name,
+then forgets the original path or URL. The source can move or disappear and a
+query string never lands in preferences. `red-dev wallpaper theme` reconnects
+the wallpaper to the colour theme. When Redwall is enabled, it composes over the
+selected bundled or imported artwork rather than reverting to the theme sheet.
+
+Desktop application is supported on native Windows, WSL's Windows host, and
+Linux GNOME. GNOME also receives the lock-screen setting it exposes; Windows
+lock-screen wallpaper remains intentionally unmanaged. Headless servers skip
+the wallpaper entirely.
 
 Both steps are written down: [ADR 0002](.red/adr/0002-the-terminal-palette-is-fixed.md)
 made the palette fixed, [ADR 0003](.red/adr/0003-red-dev-does-not-colour-the-terminal.md)

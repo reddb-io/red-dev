@@ -33,6 +33,7 @@ import { summary } from "./platform.ts";
 import { Screen, Surface } from "./tui-chrome.ts";
 import { muted, ui } from "./tui-theme.ts";
 import { swatches } from "./themes.ts";
+import type { ThemeSlug } from "./themes.ts";
 import { withConsoleSelectionSuspended } from "./windows-console-mode.ts";
 // The questions live in tui-setup-model.ts and only there. They were
 // declared in both files, identically, for two interfaces that ask the
@@ -87,6 +88,9 @@ export async function runSetupTui(
         const get = (id: string): string[] => picked()[id] ?? [];
         result = {
           theme: get("theme")[0] ?? "tokyo-night",
+          ...(get("wallpaper")[0] && get("wallpaper")[0] !== "theme"
+            ? { wallpaper: get("wallpaper")[0] as ThemeSlug }
+            : {}),
           font: get("font")[0] ?? "firacode",
           apps: get("apps"),
           runtimes: get("runtimes"),

@@ -21,7 +21,7 @@ import { describe, expect, test } from "bun:test";
 import type { Platform } from "./platform.ts";
 import { redwallDir, removeRedwall } from "./redwall.ts";
 import { removeConfiguration } from "./uninstall.ts";
-import { imageRoot, wallpaperDir } from "./wallpaper.ts";
+import { customWallpaperDir, imageRoot, wallpaperDir } from "./wallpaper.ts";
 import { HIDDEN_RUNNER, hiddenRunnerVbs } from "./windows-hidden.ts";
 
 const desktop: Platform = {
@@ -99,8 +99,8 @@ describe("removing the generated images", () => {
 
   test("succeeds and reports nothing on a machine that never enabled it", async () => {
     await onFreshMachine(async () => {
-      // Redwall is off by default, so this is the common machine, not
-      // the edge case. Nothing to remove is an ordinary answer.
+      // A machine may opt out before the first generation. Nothing to
+      // remove is an ordinary answer.
       expect(await removeRedwall(desktop)).toBeNull();
       expect(existsSync(await redwallDir(desktop))).toBe(false);
     });
@@ -156,6 +156,21 @@ describe("uninstalling red-dev's configuration", () => {
 
       expect(removed).toContain(runner);
       expect(existsSync(runner)).toBe(false);
+    });
+  });
+
+  test("takes managed imports but never the user's original", async () => {
+    await onFreshMachine(async (home) => {
+      const original = withChosenWallpaper(home);
+      const managed = await customWallpaperDir(desktop);
+      mkdirSync(managed, { recursive: true });
+      writeFileSync(`${managed}/${"a".repeat(64)}.png`, "managed copy");
+
+      const removed = await removeConfiguration(desktop);
+
+      expect(removed).toContain(managed);
+      expect(existsSync(managed)).toBe(false);
+      expect(existsSync(original)).toBe(true);
     });
   });
 

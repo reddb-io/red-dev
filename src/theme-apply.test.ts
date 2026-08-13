@@ -15,8 +15,9 @@ import { DEFAULT_THEME, THEMES } from "./themes.ts";
  * these assertions would say something different on a machine that had
  * turned Redwall on than they do in CI.
  */
-const redwallOff: ThemeSurfaceContext = { redwall: false };
-const redwallOn: ThemeSurfaceContext = { redwall: true };
+const redwallOff: ThemeSurfaceContext = { redwall: false, wallpaper: null };
+const redwallOn: ThemeSurfaceContext = { redwall: true, wallpaper: null };
+const wallpaperPinned: ThemeSurfaceContext = { redwall: true, wallpaper: "flare" };
 
 const basePlatform = {
   distro: null,
@@ -166,6 +167,19 @@ describe("the slug reaches every surface intact", () => {
     const { seen, surfaces } = spy();
     await applyThemeEverywhere(DEFAULT_THEME, wsl, surfaces, redwallOn);
     for (const call of seen) expect(call.theme).toBe(THEMES[DEFAULT_THEME].name);
+  });
+
+  test("a pinned wallpaper changes only wallpaper and Redwall", async () => {
+    const { seen, surfaces } = spy();
+    await applyThemeEverywhere("cobalt", wsl, surfaces, wallpaperPinned);
+
+    for (const call of seen) {
+      if (call.name === "wallpaper" || call.name === "redwall") {
+        expect(call).toMatchObject({ slug: "flare", theme: THEMES.flare.name });
+      } else {
+        expect(call).toMatchObject({ slug: "cobalt", theme: THEMES.cobalt.name });
+      }
+    }
   });
 
   test("an unknown slug throws rather than resolving to something", async () => {

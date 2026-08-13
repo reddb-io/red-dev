@@ -24,7 +24,7 @@ import { applyProvider, systemUpdate, type ApplyContext } from "./providers.ts";
 import { applyContextForEntry, type ApplyContextEntryPath } from "./preferences.ts";
 import { themeFor, themeNames } from "./themes.ts";
 import { transcriptDir } from "./transcript.ts";
-import { interactive, select } from "./ui.ts";
+import { interactive, select, text } from "./ui.ts";
 
 function resolveScopes(p: Platform, arg?: string): Scope[] {
   return arg ? [arg as Scope] : applicableScopes(p);
@@ -747,6 +747,80 @@ async function cmdTheme(p: Platform, inv: Invocation, name?: string): Promise<nu
   return 0;
 }
 
+async function cmdWallpaper(p: Platform, inv: Invocation, name?: string): Promise<number> {
+  if (p.env === "server") {
+    log.skip("wallpaper: no desktop on this machine");
+    return 0;
+  }
+
+  const { readPreferences, resolveRedwall, writePreferences } = await import(
+    "./preferences.ts"
+  );
+  const prefs = await readPreferences(p);
+  const choices = ["theme", ...themeNames(), "custom"] as [string, ...string[]];
+  let chosen =
+    name ??
+    (await select(
+      "Wallpaper? ('theme' follows the colour theme; 'custom' imports a PNG)",
+      choices,
+      prefs.wallpaper && themeFor(prefs.wallpaper)
+        ? prefs.wallpaper
+        : prefs.wallpaper?.startsWith("custom:")
+          ? "custom"
+          : "theme",
+    ));
+  if (chosen === "custom") {
+    if (!interactive()) {
+      log.err("custom wallpaper needs an absolute PNG path or HTTPS URL");
+      return 1;
+    }
+    chosen = await text("Absolute PNG path or HTTPS URL?");
+  }
+
+  const colourSlug = (await contextFor(p, inv, "theme")).theme;
+  let preference: string | undefined;
+  let label: string;
+  if (chosen === "theme") {
+    preference = undefined;
+    label = `${colourSlug} (follows theme)`;
+  } else if (themeFor(chosen)) {
+    preference = chosen;
+    label = chosen;
+  } else {
+    try {
+      const { importCustomWallpaper } = await import("./wallpaper.ts");
+      const imported = await importCustomWallpaper(chosen, p);
+      preference = imported.preference;
+      label = `custom PNG (${Math.ceil(imported.bytes / 1024)} KiB imported)`;
+    } catch (err) {
+      log.err(`wallpaper: ${(err as Error).message}`);
+      return 1;
+    }
+  }
+
+  if (await resolveRedwall(p)) {
+    const { applyRedwall } = await import("./redwall.ts");
+    const outcome = await applyRedwall(p, colourSlug, {}, preference ?? null);
+    if (!outcome.shown) {
+      log.warn("wallpaper selected, but the desktop refused the repaint");
+      return 1;
+    }
+  } else {
+    const { applyWallpaperPreference, sweepRetiredWallpapers } = await import("./wallpaper.ts");
+    if (!(await applyWallpaperPreference(themeFor(colourSlug)!, colourSlug, preference, p))) {
+      log.warn("wallpaper selected, but the desktop refused the repaint");
+      return 1;
+    }
+    await sweepRetiredWallpapers(p);
+  }
+
+  await writePreferences(p, { wallpaper: preference });
+  const { sweepCustomWallpapers } = await import("./wallpaper.ts");
+  await sweepCustomWallpapers(p, preference);
+  log.ok(`wallpaper: ${label}`);
+  return 0;
+}
+
 /**
  * Regenerate this machine's Redwall.
  *
@@ -762,18 +836,17 @@ async function cmdTheme(p: Platform, inv: Invocation, name?: string): Promise<nu
  */
 async function cmdRedwall(p: Platform): Promise<number> {
   const { applyRedwall } = await import("./redwall.ts");
-  const { readPreferences } = await import("./preferences.ts");
-  const { resolveThemeSlug } = await import("./themes.ts");
+  const { resolveWallpaperSlug } = await import("./preferences.ts");
 
   // Generate AND repaint. This command exists so a schedule or a hook
   // can keep the desktop current with no arguments and no knowledge of
   // the configuration — and a schedule that only manufactures PNGs
   // while the desktop stays pointed at last week's is the bug this
-  // command shipped with. The recorded theme is the right canvas here:
-  // unlike `red-dev theme`, nothing is being switched away from.
+  // command shipped with. The resolved wallpaper is the right canvas
+  // here: it may follow the theme or be independently pinned.
   let outcome: Awaited<ReturnType<typeof applyRedwall>>;
   try {
-    const slug = resolveThemeSlug((await readPreferences(p)).theme);
+    const slug = await resolveWallpaperSlug(p);
     outcome = await applyRedwall(p, slug);
   } catch (err) {
     // Composing failed, which is a real fault rather than a state: the
@@ -829,7 +902,15 @@ async function cmdApps(p: Platform, inv: Invocation): Promise<number> {
     `${t.name}${t.about ? ` — ${t.about}` : ""}${already.includes(t.name) ? "  (installed)" : ""}`,
   );
 
-  const picked = await checkbox("Which optional tools?", labels as [string, ...string[]], []);
+  // Every install choice is opt-out, but a fallback must never install
+  // the whole catalog when there is no terminal to show that choice.
+  if (!interactive()) {
+    log.err("choosing optional tools needs a terminal");
+    log.plain("     Run `red-dev apps` interactively and untick what you do not want.");
+    return 1;
+  }
+
+  const picked = await checkbox("Which optional tools?", labels as [string, ...string[]], labels);
   if (picked.length === 0) {
     log.skip("nothing selected");
     return 0;
@@ -1061,6 +1142,8 @@ async function cmdUi(p: Platform, inv: Invocation): Promise<number> {
   switch (result.action) {
     case "theme":
       return result.theme ? await cmdTheme(p, inv, result.theme) : 0;
+    case "wallpaper":
+      return await cmdWallpaper(p, inv);
     case "installed":
       // The same three answers, and now the same closing block, as the
       // line report. A converge watched from the menu is still a
@@ -1183,9 +1266,7 @@ async function cmdAgents(p: Platform, inv: Invocation): Promise<number> {
   const labels = available.map(
     (a) => `${a.key} — ${a.label}, ${a.about}${isAgentInstalled(a) ? "  (installed)" : ""}`,
   );
-  const preTicked = labels.filter((_, i) => available[i]?.recommended);
-
-  const picked = await checkbox("Which agents?", labels as [string, ...string[]], preTicked);
+  const picked = await checkbox("Which agents?", labels as [string, ...string[]], labels);
   if (picked.length === 0) {
     log.skip("nothing selected");
     return 0;
@@ -1266,7 +1347,7 @@ async function cmdLang(p: Platform, inv: Invocation): Promise<number> {
       return `${r.id} — ${r.about}${current.includes(name) ? "  (installed)" : ""}`;
     });
 
-    const picked = await checkbox("Which runtimes?", labels as [string, ...string[]], []);
+    const picked = await checkbox("Which runtimes?", labels as [string, ...string[]], labels);
     ids = picked.map((label) => label.split(" ")[0]!.trim());
   }
 
@@ -1337,6 +1418,7 @@ async function cmdMenu(p: Platform, inv: Invocation, cliHelp: string): Promise<n
     shell: () => cmdShell(p, inv),
     uninstall: () => cmdUninstall(p),
     applyTheme: (name) => cmdTheme(p, inv, name),
+    applyWallpaper: (name) => cmdWallpaper(p, inv, name),
     applyFont: async (font, size) => {
       const wsl = await import("./wsl.ts");
       const spec = wsl.NERD_FONTS[font];
@@ -1481,6 +1563,8 @@ async function main(): Promise<number> {
       return await cmdPrivileged(p, inv);
     case "theme":
       return await cmdTheme(p, inv, inv.scope);
+    case "wallpaper":
+      return await cmdWallpaper(p, inv, inv.wallpaperName);
     case "redwall":
       return await cmdRedwall(p);
     case "apps":

@@ -1,7 +1,7 @@
 /**
  * PNG, read and written, because composing over one needs both halves.
  *
- * Redwall draws state over the theme's wallpaper. The wallpapers are
+ * Redwall draws state over the selected bundled or imported wallpaper. The inputs are
  * PNGs, what the desktop wants back is a PNG, and there is nothing in
  * Bun or in this project's two dependencies that turns one into pixels.
  * So this is the codec — the whole of it, and no more of it than the six
@@ -55,6 +55,8 @@ const SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] as const;
 
 /** Bytes per pixel in the raw stream, by colour type. */
 const CHANNELS: Record<number, number> = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 };
+/** 8K UHD plus a little headroom; decoded RGBA stays below about 128 MiB. */
+const MAX_PIXELS = 33_554_432;
 
 // ------------------------------------------------------------- checksum
 
@@ -132,6 +134,9 @@ export function decodePng(bytes: Uint8Array): Raster {
   const interlace = header[12]!;
 
   if (width === 0 || height === 0) throw new Error(`PNG is ${width}x${height}, which has no pixels`);
+  if (width > Math.floor(MAX_PIXELS / height)) {
+    throw new Error(`PNG is ${width}x${height}, above the 8K import limit`);
+  }
   if (depth !== 8) throw new Error(`PNG is ${depth} bits a channel; this reader handles 8`);
   if (interlace !== 0) throw new Error("PNG is interlaced; this reader handles the progressive-free form");
   const channels = CHANNELS[colour];

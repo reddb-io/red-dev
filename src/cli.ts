@@ -150,6 +150,17 @@ export function buildCli(): CLI {
           },
         ],
       },
+      wallpaper: {
+        description: "choose bundled art or import a PNG independently from the colour theme",
+        positional: [
+          {
+            name: "wallpaper_name",
+            description:
+              `theme, ${themeNames().join(", ")}, or an absolute PNG path/HTTPS URL`,
+            required: false,
+          },
+        ],
+      },
       theme: {
         description: "apply a colour scheme",
         positional: [
@@ -255,6 +266,8 @@ export interface Invocation {
   /** Explicit selections make agents/lang safe to invoke across WSL unattended. */
   agentKeys: string[] | undefined;
   runtimeIds: string[] | undefined;
+  /** `wallpaper [theme|slug|absolute-path|https-url]` — absent opens the picker. */
+  wallpaperName: string | undefined;
   /**
    * Parse and validation failures. Strict mode means an unrecognised
    * command lands here too, with the list of real ones — so there is no
@@ -299,6 +312,13 @@ export function parseArgs(cli: CLI, argv: string[]): Invocation {
     errors.push(`unknown theme '${rawName}' (known: ${themeNames().join(", ")})`);
   }
 
+  // cli-args-parser treats a Windows drive prefix (`C:`) as metadata and
+  // silently removes the positional. Recover the literal argv token for
+  // this command; paths and signed HTTPS URLs must arrive byte-for-byte.
+  const wallpaperCommand = argv.indexOf("wallpaper");
+  const literalWallpaper = wallpaperCommand >= 0 ? argv[wallpaperCommand + 1] : undefined;
+  const rawWallpaper = pos["wallpaper_name"] ??
+    (literalWallpaper && !literalWallpaper.startsWith("-") ? literalWallpaper : undefined);
   return {
     command: r.command[0] ?? null,
     // `theme <name>` and `plan <scope>` both land in the positional map
@@ -313,6 +333,7 @@ export function parseArgs(cli: CLI, argv: string[]): Invocation {
       typeof pos["runtime_selection"] === "string"
         ? pos["runtime_selection"].split(",").map((value) => value.trim()).filter(Boolean)
         : undefined,
+    wallpaperName: typeof rawWallpaper === "string" ? rawWallpaper : undefined,
     themeName: typeof opts["theme"] === "string" ? opts["theme"] : DEFAULT_THEME,
     font: typeof opts["font"] === "string" ? opts["font"] : "firacode",
     opacity: clampOpacity(opts["opacity"], errors),

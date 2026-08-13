@@ -24,15 +24,10 @@ const vscode = TOOLS.find((t) => t.name === "red-skills-vscode");
 const herdr = TOOLS.find((t) => t.name === "red-skills-herdr");
 const src = readFileSync("src/red-skills-ext.ts", "utf8");
 
-describe("both are offered rather than assumed", () => {
+describe("both are offered in the opt-out setup", () => {
   test("are in the optional scope", () => {
     expect(vscode?.scope).toBe("optional");
     expect(herdr?.scope).toBe("optional");
-  });
-
-  test("and unticked, because both build a turbo workspace first", () => {
-    expect(vscode?.offByDefault).toBe(true);
-    expect(herdr?.offByDefault).toBe(true);
   });
 
   test("herdr's is skipped on Windows, which has no stable herdr", () => {

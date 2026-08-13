@@ -1,5 +1,5 @@
 /**
- * Redwall is off until someone says otherwise.
+ * Redwall is on until someone says otherwise.
  *
  * The default is the whole of this slice's risk. Nothing generates or
  * applies an image yet, so a wrong preference costs nothing today — but
@@ -7,9 +7,9 @@
  * rewrites a desktop nobody offered it. That is the overreach ADR 0003
  * reversed one surface over, and it is far easier to keep than to undo.
  *
- * So the first three tests are the same assertion approached from three
- * directions: no file, a file with other answers in it, and a file with
- * the question answered no. Flipping the default fails all three.
+ * Absence now means the product default, while the boolean false remains
+ * a durable opt-out. Invalid values still fail closed instead of becoming
+ * true merely because a non-empty string is truthy.
  */
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
@@ -54,12 +54,13 @@ const prefsPath = (home: string): string => `${home}/.config/alacritty/red-dev.j
 function answers(overrides: Partial<SetupAnswers> = {}): SetupAnswers {
   return {
     theme: "dark",
+    wallpaper: undefined,
     font: "firacode",
     apps: [],
     runtimes: [],
     agents: [],
     blesh: false,
-    redwall: false,
+    redwall: true,
     share: false,
     completed: true,
     ...overrides,
@@ -67,9 +68,9 @@ function answers(overrides: Partial<SetupAnswers> = {}): SetupAnswers {
 }
 
 describe("redwall, before anyone has been asked", () => {
-  test("is off on a machine with no preferences at all", async () => {
+  test("is on on a machine with no preferences at all", async () => {
     await onFreshMachine(async (home) => {
-      expect(await resolveRedwall(linux)).toBe(false);
+      expect(await resolveRedwall(linux)).toBe(true);
       // And reading it wrote nothing. A default that has to be
       // materialised to be read is a decision recorded on somebody's
       // behalf.
@@ -77,17 +78,14 @@ describe("redwall, before anyone has been asked", () => {
     });
   });
 
-  test("is off on a machine set up before the question existed", async () => {
-    // Every machine red-dev has already configured has a preferences
-    // file with setupCompleted in it and no redwall key. An upgrade must
-    // not read that silence as consent.
+  test("is on on a machine set up before the question existed", async () => {
     await onFreshMachine(async (home) => {
       mkdirSync(`${home}/.config/alacritty`, { recursive: true });
       await Bun.write(
         prefsPath(home),
         JSON.stringify({ setupCompleted: true, theme: "cobalt", font: "hack" }) + "\n",
       );
-      expect(await resolveRedwall(linux)).toBe(false);
+      expect(await resolveRedwall(linux)).toBe(true);
     });
   });
 
@@ -118,7 +116,17 @@ describe("the first-run answer", () => {
     });
   });
 
-  test("is asked, and asked with declining as the answer enter gives", () => {
+  test("records an independent wallpaper beside Redwall", async () => {
+    await onFreshMachine(async () => {
+      await writePreferences(
+        linux,
+        preferencesFromAnswers(answers({ wallpaper: "flare", redwall: true })),
+      );
+      expect(await readPreferences(linux)).toMatchObject({ wallpaper: "flare", redwall: true });
+    });
+  });
+
+  test("is asked, and asked with accepting as the answer enter gives", () => {
     // A single-choice step commits whatever the cursor is on and the
     // cursor starts at zero, so the first choice is the real default —
     // `preset` is what the timeline shows, not what enter selects. Both
@@ -128,9 +136,9 @@ describe("the first-run answer", () => {
     const block = src.slice(src.indexOf('id: "redwall"'));
     const step = block.slice(0, block.indexOf("applies:"));
     expect(step).toContain("Redwall");
-    expect(step.indexOf('key: "no"')).toBeGreaterThan(-1);
-    expect(step.indexOf('key: "no"')).toBeLessThan(step.indexOf('key: "yes"'));
-    expect(step).toContain('preset: ["no"]');
+    expect(step.indexOf('key: "yes"')).toBeGreaterThan(-1);
+    expect(step.indexOf('key: "yes"')).toBeLessThan(step.indexOf('key: "no"'));
+    expect(step).toContain('preset: ["yes"]');
   });
 
   test("is carried out of both interviews", () => {
@@ -141,6 +149,7 @@ describe("the first-run answer", () => {
     const tui = readFileSync("src/tui-setup.ts", "utf8");
     for (const src of [model, tui]) {
       expect(src).toContain('redwall: get("redwall")[0] === "yes"');
+      expect(src).toContain('get("wallpaper")[0]');
     }
   });
 
@@ -149,7 +158,7 @@ describe("the first-run answer", () => {
     // wizard, and a question that exists on only one of those paths is
     // one somebody never gets asked.
     const src = readFileSync("src/firstrun.ts", "utf8");
-    expect(src).toContain('confirm("Enable Redwall?", false)');
+    expect(src).toContain('confirm("Enable Redwall?", true)');
     expect(src).toContain("redwall,");
   });
 });

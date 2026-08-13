@@ -157,7 +157,9 @@ export async function removeConfiguration(p: Platform): Promise<string[]> {
     // that lets red-dev repaint a desktop without flashing a console
     // sits beside the images rather than in them, so removing the
     // directory does not reach it.
-    const { removeHiddenRunner } = await import("./wallpaper.ts");
+    const { removeCustomWallpapers, removeHiddenRunner } = await import("./wallpaper.ts");
+    const custom = await removeCustomWallpapers(p);
+    if (custom) removed.push(custom);
     const runner = await removeHiddenRunner(p);
     if (runner) removed.push(runner);
   } catch (err) {

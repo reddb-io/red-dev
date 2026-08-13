@@ -23,6 +23,7 @@ import { checkbox, confirm, interactive, select } from "./ui.ts";
 
 export interface FirstRunChoices {
   theme?: string;
+  wallpaper?: string;
   font?: string;
   /** Names of optional tools to install alongside core. */
   apps: string[];
@@ -68,6 +69,7 @@ export function preferencesFromAnswers(answers: SetupAnswers): Preferences {
   return {
     setupCompleted: true,
     theme: answers.theme,
+    wallpaper: answers.wallpaper,
     font: answers.font,
     blesh: answers.blesh,
     redwall: answers.redwall,
@@ -151,7 +153,7 @@ export async function buildSetupSteps(p: Platform) {
     })),
     toolsInScope("optional")
       .filter((t) => providerFor(t, p).kind !== "skip")
-      .map((t) => ({ key: t.name, label: t.name, note: t.about ?? "", off: t.offByDefault })),
+      .map((t) => ({ key: t.name, label: t.name, note: t.about ?? "" })),
     OFFERED_RUNTIMES.map((r) => ({ key: r.id, label: r.id, note: r.about })),
   );
 }
@@ -331,7 +333,7 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
       })),
       toolsInScope("optional")
         .filter((t) => providerFor(t, p).kind !== "skip")
-        .map((t) => ({ key: t.name, label: t.name, note: t.about ?? "", off: t.offByDefault })),
+        .map((t) => ({ key: t.name, label: t.name, note: t.about ?? "" })),
       OFFERED_RUNTIMES.map((r) => ({ key: r.id, label: r.id, note: r.about })),
     );
 
@@ -360,6 +362,7 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
 
     return {
       theme: answers.theme,
+      wallpaper: answers.wallpaper,
       font: answers.font,
       apps: answers.apps,
       runtimes: answers.runtimes,
@@ -410,9 +413,7 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
   const pickedRuntimes = await checkbox(
     "Language runtimes for mise to manage?",
     runtimeLabels as [string, ...string[]],
-    runtimeLabels.filter(
-      (label) => label.startsWith("node@lts ") || label.startsWith("python@3.13 "),
-    ),
+    runtimeLabels,
   );
 
   // 4. Extra tools, all of them ticked.
@@ -425,30 +426,23 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
   const { toolsInScope, providerFor } = await import("./manifest.ts");
   const optional = toolsInScope("optional").filter((t) => providerFor(t, p).kind !== "skip");
   const appLabels = optional.map((t) => `${t.name} — ${t.about ?? ""}`);
-  // Ticked, minus whatever the manifest says is too large to be a
-  // default. Same rule the fullscreen interview follows, read from the
-  // same place rather than repeated as a list of names.
-  const appDefaults = optional
-    .filter((t) => !t.offByDefault)
-    .map((t) => `${t.name} — ${t.about ?? ""}`);
   const pickedApps =
     appLabels.length > 0
       ? await checkbox(
           "Optional tools? (space to untick what you do not want)",
           appLabels as [string, ...string[]],
-          appDefaults,
+          appLabels,
         )
       : [];
 
   // 5. Plugins — things that attach to bash rather than sit beside it.
-  //    ble.sh is the only one, and the only question here with a real
-  //    caveat, so it gets stated before the question rather than after.
+  //    The caveat stays visible, but the answer follows the same opt-out
+  //    contract as every other install choice.
   log.plain("");
   log.plain("     ble.sh adds autosuggestions and syntax highlighting to bash.");
   log.plain("     It replaces the line editor that atuin, fzf and carapace bind");
-  log.plain("     into, so it is off by default until you confirm Ctrl-R still");
-  log.plain("     reaches atuin.");
-  const blesh = await confirm("Enable ble.sh?", false);
+  log.plain("     into; untick it if you prefer the stock line editor.");
+  const blesh = await confirm("Enable ble.sh?", true);
 
   // 6. Paint. Last, because it is the only thing here that changes
   //    nothing but how it looks — and `red-dev theme` previews these
@@ -460,18 +454,25 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
     DEFAULT_THEME,
   );
 
+  const wallpaperChoice = await select(
+    "Wallpaper?",
+    ["theme — follow the colour theme", ...themeNames()] as [string, ...string[]],
+    "theme — follow the colour theme",
+  );
+  const wallpaper = wallpaperChoice.startsWith("theme ") ? undefined : wallpaperChoice;
+
   // 7. And whether that wallpaper reports on the machine it is sitting
   //    on. Asked after the theme because it draws over whatever the
-  //    theme chose, and defaulted to no because a desktop is somebody's
-  //    own — the menu is where anyone who wants it turns it on.
+  //    theme chose. It follows the setup's opt-out contract.
   log.plain("");
-  log.plain("     Redwall draws live machine state over the theme's wallpaper —");
+  log.plain("     Redwall draws live machine state over the selected wallpaper —");
   log.plain("     Workers running, and the address this machine answers on —");
   log.plain("     so the lock screen reports without being unlocked.");
-  const redwall = await confirm("Enable Redwall?", false);
+  const redwall = await confirm("Enable Redwall?", true);
 
   const choices: FirstRunChoices = {
     theme,
+    wallpaper,
     font,
     apps: pickedApps.map((l) => l.split(" ")[0]!),
     runtimes: pickedRuntimes.map((l) => l.split(" ")[0]!),
@@ -481,6 +482,7 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
   await writePreferences(p, {
     setupCompleted: true,
     theme,
+    wallpaper,
     font,
     blesh,
     redwall,

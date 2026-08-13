@@ -12,7 +12,7 @@
  *
  * What is left is the desktop: the wallpaper, the system accent and
  * light-dark, the editor that is a window rather than a pane, and — for
- * the machines that asked for it — the Redwall drawn over the new art.
+ * the machines that use it — the Redwall drawn over the selected art.
  *
  * Each writer is independent and failure-tolerant: a missing application
  * is not an error, it is just a surface that does not exist here.
@@ -20,7 +20,7 @@
 
 import { log } from "./log.ts";
 import type { Platform } from "./platform.ts";
-import { themeFor, type Theme } from "./themes.ts";
+import { isThemeSlug, themeFor, type Theme } from "./themes.ts";
 
 /**
  * What a surface needs to know that the platform does not say.
@@ -34,21 +34,27 @@ import { themeFor, type Theme } from "./themes.ts";
  * `cmd.exe` once per surface under WSL to find %APPDATA%.
  */
 export interface ThemeSurfaceContext {
-  /** Whether Redwall is on for this machine. Off unless someone said so. */
+  /** Whether Redwall is on for this machine. */
   readonly redwall: boolean;
+  /** Bundled slug or managed custom reference; null follows the colour theme. */
+  readonly wallpaper: string | null;
 }
 
 /** What this machine has decided, for the surfaces that ask. */
 export async function themeSurfaceContext(p: Platform): Promise<ThemeSurfaceContext> {
-  const { resolveRedwall } = await import("./preferences.ts");
-  return { redwall: await resolveRedwall(p) };
+  const { readPreferences, resolveRedwall, validWallpaperPreference } = await import("./preferences.ts");
+  const choice = (await readPreferences(p)).wallpaper;
+  return {
+    redwall: await resolveRedwall(p),
+    wallpaper: validWallpaperPreference(choice) ? choice : null,
+  };
 }
 
 export interface ThemeSurfaceSpec {
   name: string;
   /** False on a target that has no such surface at all. */
   applies: (p: Platform, ctx: ThemeSurfaceContext) => boolean;
-  apply: (theme: Theme, slug: string, p: Platform) => Promise<boolean>;
+  apply: (theme: Theme, slug: string, p: Platform, ctx: ThemeSurfaceContext) => Promise<boolean>;
 }
 
 /**
@@ -76,9 +82,9 @@ export const THEME_SURFACES: ThemeSurfaceSpec[] = [
     // it — which is the shape of a thing one caller eventually forgets.
     name: "wallpaper",
     applies: (p) => p.env !== "server",
-    apply: async (theme, slug, p) => {
-      const { applyWallpaper, sweepRetiredWallpapers } = await import("./wallpaper.ts");
-      const ok = await applyWallpaper(theme, slug, p);
+    apply: async (theme, slug, p, ctx) => {
+      const { applyWallpaperPreference, sweepRetiredWallpapers } = await import("./wallpaper.ts");
+      const ok = await applyWallpaperPreference(theme, slug, ctx.wallpaper, p);
       // Swept after the desktop has been repointed, never before: the
       // other order leaves a moment where the OS references a file that
       // has just been deleted. Only red-dev's own directory is touched.
@@ -116,15 +122,13 @@ export const THEME_SURFACES: ThemeSurfaceSpec[] = [
     // one red-dev can write — see `setLockScreenBackground`, which is
     // also where the reason Windows is not such a target is recorded.
     //
-    // The slug is passed down rather than re-read: `red-dev theme` does
-    // not record the new theme before applying it, so a Redwall that
-    // consulted the preference would draw over the art being switched
-    // away from.
+    // The resolved surface slug is passed down rather than re-read: it
+    // may be the new theme or an independently pinned wallpaper.
     name: "redwall",
     applies: (p, ctx) => ctx.redwall && p.env !== "server",
-    apply: async (_theme, slug, p) => {
+    apply: async (_theme, slug, p, ctx) => {
       const { applyRedwall } = await import("./redwall.ts");
-      const { shown, removed } = await applyRedwall(p, slug);
+      const { shown, removed } = await applyRedwall(p, slug, {}, ctx.wallpaper);
       if (removed.length > 0) log.plain(`       removed ${removed.length} superseded redwall(s)`);
       return shown;
     },
@@ -185,7 +189,11 @@ export async function applyThemeEverywhere(
 
   for (const surface of surfaces.filter((s) => s.applies(p, context))) {
     try {
-      if (await surface.apply(theme, slug, p)) applied.push(surface.name);
+      const surfaceSlug = surface.name === "wallpaper" || surface.name === "redwall"
+        ? (context.wallpaper && isThemeSlug(context.wallpaper) ? context.wallpaper : slug)
+        : slug;
+      const surfaceTheme = themeFor(surfaceSlug)!;
+      if (await surface.apply(surfaceTheme, surfaceSlug, p, context)) applied.push(surface.name);
       else skipped.push(surface.name);
     } catch (err) {
       log.warn(`${surface.name}: ${(err as Error).message}`);

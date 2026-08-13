@@ -29,7 +29,16 @@
 
 import { existsSync, mkdirSync } from "node:fs";
 import type { Platform } from "./platform.ts";
-import { THEME_SLUGS, type Theme, type ThemeSlug } from "./themes.ts";
+import { decodePng } from "./png.ts";
+import { customWallpaperDigest } from "./preferences.ts";
+import {
+  isThemeSlug,
+  resolveThemeSlug,
+  THEMES,
+  THEME_SLUGS,
+  type Theme,
+  type ThemeSlug,
+} from "./themes.ts";
 import {
   hiddenCapture,
   HIDDEN_RUNNER,
@@ -92,6 +101,144 @@ export async function wallpaperDir(p: Platform): Promise<string> {
   return `${await imageRoot(p)}/wallpapers`;
 }
 
+/** Imported user art lives apart from the finite set of bundled sheets. */
+export async function customWallpaperDir(p: Platform): Promise<string> {
+  return `${await imageRoot(p)}/custom-wallpapers`;
+}
+
+const MAX_CUSTOM_WALLPAPER_BYTES = 32 * 1024 * 1024;
+
+export interface CustomWallpaperImport {
+  /** Safe to persist: it contains neither the source path nor URL. */
+  readonly preference: string;
+  /** The managed copy used by both the plain wallpaper and Redwall. */
+  readonly path: string;
+  readonly bytes: number;
+}
+
+export interface WallpaperImportSeams {
+  readonly fetch?: (
+    input: string | URL | Request,
+    init?: RequestInit,
+  ) => Promise<Response>;
+  readonly windowsToUnix?: (path: string) => Promise<string | null>;
+}
+
+function windowsAbsolute(path: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(path) || /^\\\\[^\\]+\\[^\\]+/.test(path);
+}
+
+export async function wallpaperSourcePath(
+  source: string,
+  p: Platform,
+  convert?: (path: string) => Promise<string | null>,
+): Promise<string> {
+  if (windowsAbsolute(source)) {
+    if (p.env === "wsl") {
+      if (convert) {
+        const translated = await convert(source);
+        if (translated) return translated;
+      } else {
+        const proc = Bun.spawn(["wslpath", "-u", source], { stdout: "pipe", stderr: "ignore" });
+        const translated = (await new Response(proc.stdout).text()).trim();
+        if ((await proc.exited) === 0 && translated) return translated;
+      }
+      throw new Error("could not translate the Windows wallpaper path through WSL");
+    }
+    if (p.os === "windows") return source;
+    throw new Error("a Windows wallpaper path is only valid on Windows or WSL");
+  }
+  if (source.startsWith("/")) return source;
+  throw new Error("wallpaper path must be absolute (for example C:\\Users\\me\\wall.png or /home/me/wall.png)");
+}
+
+async function boundedResponse(response: Response): Promise<Uint8Array> {
+  if (!response.ok) throw new Error(`wallpaper download returned HTTP ${response.status}`);
+  if (response.url && new URL(response.url).protocol !== "https:") {
+    throw new Error("wallpaper download redirected outside HTTPS");
+  }
+  const declared = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > MAX_CUSTOM_WALLPAPER_BYTES) {
+    throw new Error("wallpaper is larger than the 32 MB import limit");
+  }
+  if (!response.body) throw new Error("wallpaper download returned no body");
+
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for await (const chunk of response.body) {
+    total += chunk.byteLength;
+    if (total > MAX_CUSTOM_WALLPAPER_BYTES) {
+      throw new Error("wallpaper is larger than the 32 MB import limit");
+    }
+    chunks.push(chunk);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
+async function customWallpaperBytes(
+  source: string,
+  p: Platform,
+  seams: WallpaperImportSeams,
+): Promise<Uint8Array> {
+  let parsed: URL | null = null;
+  try {
+    parsed = new URL(source);
+  } catch {
+    // It is a filesystem path; Windows drive letters also parse as URLs,
+    // but their one-letter protocol is handled below as a path.
+  }
+
+  if (parsed && parsed.protocol.length > 2) {
+    if (parsed.protocol !== "https:") throw new Error("remote wallpaper must use HTTPS");
+    const get = seams.fetch ?? fetch;
+    const response = await get(parsed, { signal: AbortSignal.timeout(30_000) });
+    return await boundedResponse(response);
+  }
+
+  const path = await wallpaperSourcePath(source, p, seams.windowsToUnix);
+  const file = Bun.file(path);
+  if (!(await file.exists())) throw new Error("wallpaper file does not exist");
+  if (file.size > MAX_CUSTOM_WALLPAPER_BYTES) {
+    throw new Error("wallpaper is larger than the 32 MB import limit");
+  }
+  return await file.bytes();
+}
+
+/**
+ * Import one PNG by absolute path or HTTPS URL.
+ *
+ * The source itself is intentionally forgotten. A content-addressed local
+ * copy makes scheduled Redwall repaints deterministic, keeps URL query
+ * strings out of preferences, and gives native Windows and WSL one shared
+ * physical image without asking them to agree on path spelling.
+ */
+export async function importCustomWallpaper(
+  source: string,
+  p: Platform,
+  seams: WallpaperImportSeams = {},
+): Promise<CustomWallpaperImport> {
+  const bytes = await customWallpaperBytes(source.trim(), p, seams);
+  decodePng(bytes); // validates format, checksum, encoding and bounded dimensions
+  const digest = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
+  const dir = await customWallpaperDir(p);
+  mkdirSync(dir, { recursive: true });
+  const path = `${dir}/${digest}.png`;
+  if (!existsSync(path)) await Bun.write(path, bytes);
+  return { preference: `custom:${digest}`, path, bytes: bytes.byteLength };
+}
+
+/** Resolve a managed custom reference without trusting an arbitrary edited path. */
+export async function customWallpaperPath(preference: unknown, p: Platform): Promise<string | null> {
+  const digest = customWallpaperDigest(preference);
+  return digest === null ? null : `${await customWallpaperDir(p)}/${digest}.png`;
+}
+
 /**
  * Eight hex of a sha256, which is how red-dev names an image after its
  * contents.
@@ -117,6 +264,38 @@ export async function wallpaperBytes(key: string): Promise<Uint8Array> {
   const source = EMBEDDED[key as ThemeSlug];
   if (!source) throw new Error(`no wallpaper for theme '${key}'`);
   return await Bun.file(source).bytes();
+}
+
+export interface WallpaperArt {
+  readonly bytes: Uint8Array;
+  /** Stable filename stem for a derived Redwall. */
+  readonly key: string;
+  /** Palette used for the Redwall card drawn over this art. */
+  readonly theme: Theme;
+  readonly path: string | null;
+}
+
+/** Resolve bundled or imported art while keeping the colour theme independent. */
+export async function resolveWallpaperArt(
+  p: Platform,
+  colourTheme: string,
+  preference: unknown,
+): Promise<WallpaperArt> {
+  const custom = await customWallpaperPath(preference, p);
+  if (custom !== null) {
+    if (!existsSync(custom)) throw new Error("the imported custom wallpaper is missing; choose it again");
+    return {
+      bytes: await Bun.file(custom).bytes(),
+      key: `custom-${customWallpaperDigest(preference)}`,
+      theme: THEMES[resolveThemeSlug(colourTheme)],
+      path: custom,
+    };
+  }
+
+  const slug = typeof preference === "string" && isThemeSlug(preference)
+    ? preference
+    : resolveThemeSlug(colourTheme);
+  return { bytes: await wallpaperBytes(slug), key: slug, theme: THEMES[slug], path: null };
 }
 
 /**
@@ -344,6 +523,48 @@ export async function applyWallpaper(
   if (p.env === "server") return false;
 
   return await setDesktopBackground(await materialise(theme, key, p), p);
+}
+
+/** Apply the selected imported image, or the selected/following bundled sheet. */
+export async function applyWallpaperPreference(
+  colourTheme: Theme,
+  colourThemeKey: string,
+  preference: unknown,
+  p: Platform,
+): Promise<boolean> {
+  const custom = await customWallpaperPath(preference, p);
+  if (custom !== null) {
+    if (!existsSync(custom)) throw new Error("the imported custom wallpaper is missing; choose it again");
+    return await setDesktopBackground(custom, p);
+  }
+  const key = typeof preference === "string" && isThemeSlug(preference)
+    ? preference
+    : resolveThemeSlug(colourThemeKey);
+  return await applyWallpaper(THEMES[key] ?? colourTheme, key, p);
+}
+
+/** Keep only the selected imported source; derived Redwalls live elsewhere. */
+export async function sweepCustomWallpapers(p: Platform, preference: unknown): Promise<string[]> {
+  const dir = await customWallpaperDir(p);
+  if (!existsSync(dir)) return [];
+  const keep = customWallpaperDigest(preference);
+  const { readdirSync, rmSync } = await import("node:fs");
+  const removed: string[] = [];
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith(".png") || name === `${keep}.png`) continue;
+    rmSync(`${dir}/${name}`, { force: true });
+    removed.push(name);
+  }
+  return removed;
+}
+
+/** Remove only red-dev's imported copies; the user's original is never touched. */
+export async function removeCustomWallpapers(p: Platform): Promise<string | null> {
+  const dir = await customWallpaperDir(p);
+  if (!existsSync(dir)) return null;
+  const { rmSync } = await import("node:fs");
+  rmSync(dir, { recursive: true, force: true });
+  return dir;
 }
 
 /**
