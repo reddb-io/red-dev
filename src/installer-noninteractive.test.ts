@@ -55,6 +55,31 @@ describe("unattended provider commands", () => {
     }
   });
 
+  test("a silent child reports that it is alive before it finishes", async () => {
+    const seen: string[] = [];
+    const release = captureTo((line) => seen.push(line));
+    try {
+      const child = spawnLoggedCapture(
+        [
+          process.execPath,
+          "-e",
+          'setTimeout(() => console.log("FINISHED"), 180)',
+        ],
+        { heartbeatMs: 40 },
+      );
+
+      await Bun.sleep(110);
+      expect(seen.some((line) => line.includes("still running"))).toBe(true);
+      expect(seen.some((line) => line.includes("no output for"))).toBe(true);
+      expect(
+        seen.filter((line) => line.includes("still running")).length,
+      ).toBeGreaterThanOrEqual(2);
+      await child;
+    } finally {
+      release();
+    }
+  });
+
   test("every winget path uses the observable capture helper", () => {
     expect(providers).toContain("await spawnLoggedCapture(");
     expect(agents).toContain("await spawnLoggedCapture(argv)");

@@ -42,7 +42,12 @@ interface Ran {
   out: string;
 }
 
-async function run(cmd: string[]): Promise<Ran> {
+async function run(cmd: string[], live = false): Promise<Ran> {
+  if (live) {
+    const { spawnLoggedCapture } = await import("./providers.ts");
+    const result = await spawnLoggedCapture(cmd);
+    return { ok: result.code === 0, out: (result.out + result.err).trim() };
+  }
   const proc = Bun.spawn(cmd, {
     stdout: "pipe",
     stderr: "pipe",
@@ -91,7 +96,7 @@ export async function installSshServerLinux(p: Platform): Promise<void> {
     "install",
     "-y",
     "openssh-server",
-  ]);
+  ], true);
   if (!install.ok) {
     // Raised rather than warned past, and this is the item that made
     // the distinction necessary. Warning and returning left the converge
