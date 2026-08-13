@@ -30,14 +30,15 @@ esac
 
 command -v curl >/dev/null 2>&1 || fail "curl is required"
 
-# Channel, the way toon's installer does it. `stable` asks for
-# /releases/latest, which by GitHub's definition never returns a
-# prerelease — so a repository publishing only prereleases 404s there
-# and looks empty. `next` lists all releases and takes the newest.
+# Channel, the way toon's installer does it. Stable needs no API lookup:
+# GitHub's public /releases/latest/download/<asset> redirect resolves the
+# newest non-prerelease by contract. That matters on a fresh machine,
+# where an anonymous API request spends a shared per-IP quota unrelated
+# to any PAT or GitHub App the user has configured elsewhere.
 CHANNEL="${RED_DEV_CHANNEL:-stable}"
 
 case "$CHANNEL" in
-  stable) API="https://api.github.com/repos/$REPO/releases/latest" ;;
+  stable) URL="https://github.com/$REPO/releases/latest/download/$ASSET" ;;
   # /releases is not ordered the way you would hope: the newest
   # prerelease is not reliably first, and taking [0] served the stable
   # release to everyone who asked for `next`. Fetch a page and pick the
@@ -48,60 +49,32 @@ esac
 
 say "resolving $CHANNEL release of $REPO"
 
-# Ask the API which assets the release actually has, rather than
-# constructing a URL from a version we assume. Guessing that is exactly
-# the bug that motivated this project.
-
-# Capture the status rather than relying on curl -f, so each failure
-# gets the hint that actually applies. A 404 here means no release has
-# been published, and telling that person to check their rate limit
-# sends them hunting the wrong problem.
-BODY=$(mktemp)
-if [ -n "${GITHUB_TOKEN:-}" ]; then
-  STATUS=$(curl -sSL -o "$BODY" -w '%{http_code}' \
-    -H "Authorization: Bearer $GITHUB_TOKEN" "$API" || echo 000)
-else
-  STATUS=$(curl -sSL -o "$BODY" -w '%{http_code}' "$API" || echo 000)
-fi
-
-case "$STATUS" in
-  200) ;;
-  404)
-    rm -f "$BODY"
-    # /releases/latest 404s for three different reasons, and guessing
-    # wrong sends people hunting the wrong problem. Ask the plain
-    # /releases endpoint which of the three this is.
-    if [ "$CHANNEL" = "stable" ]; then
-      PRERELEASES="$(curl -sSL "https://api.github.com/repos/$REPO/releases?per_page=1" \
-        ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} 2>/dev/null \
-        | grep -c '"tag_name"' || true)"
-      if [ "${PRERELEASES:-0}" -gt 0 ]; then
-        printf 'fail %s has no stable release yet, only prereleases.\n' "$REPO" >&2
-        printf '     Install the newest prerelease with:\n' >&2
-        printf '       RED_DEV_CHANNEL=next curl -fsSL .../boot.sh | sh\n' >&2
-        exit 1
-      fi
-    fi
-    printf 'fail no release found for %s.\n' "$REPO" >&2
-    printf '     Either none has been published, or the repository is\n' >&2
-    printf '     private -- in which case export GITHUB_TOKEN and retry.\n' >&2
-    exit 1
-    ;;
-  403) rm -f "$BODY"; fail "GitHub API rate limit reached — set GITHUB_TOKEN and retry" ;;
-  401) rm -f "$BODY"; fail "GITHUB_TOKEN was rejected — check that it can read $REPO" ;;
-  000) rm -f "$BODY"; fail "could not reach github.com — check your network" ;;
-  *)   rm -f "$BODY"; fail "GitHub API returned HTTP $STATUS" ;;
-esac
-
-JSON=$(cat "$BODY")
-rm -f "$BODY"
-
-# On `next` the response is an array of releases and only some are
-# prereleases. Walk it in order, remember the most recent asset URL seen
-# for our platform, and commit to it the moment a "prerelease": true
-# closes that release's block. Picking by position instead served the
-# stable build to everyone who asked for next.
 if [ "$CHANNEL" = "next" ]; then
+  # `next` cannot use /latest because GitHub deliberately excludes
+  # prereleases there. This explicit opt-in is the only path that pays
+  # for an API request and may therefore need GITHUB_TOKEN.
+  BODY=$(mktemp)
+  if [ -n "${GITHUB_TOKEN:-}" ]; then
+    STATUS=$(curl -sSL -o "$BODY" -w '%{http_code}' \
+      -H "Authorization: Bearer $GITHUB_TOKEN" "$API" || echo 000)
+  else
+    STATUS=$(curl -sSL -o "$BODY" -w '%{http_code}' "$API" || echo 000)
+  fi
+
+  case "$STATUS" in
+    200) ;;
+    404) rm -f "$BODY"; fail "$REPO has no published prerelease" ;;
+    403) rm -f "$BODY"; fail "GitHub API refused the prerelease lookup (HTTP 403) — set GITHUB_TOKEN and retry" ;;
+    401) rm -f "$BODY"; fail "GITHUB_TOKEN was rejected — check that it can read $REPO" ;;
+    000) rm -f "$BODY"; fail "could not reach github.com — check your network" ;;
+    *)   rm -f "$BODY"; fail "GitHub API returned HTTP $STATUS" ;;
+  esac
+
+  JSON=$(cat "$BODY")
+  rm -f "$BODY"
+
+  # Walk all releases in order and take the first prerelease carrying
+  # the platform asset. Picking element zero served stable to `next`.
   # Field order inside each release object is: tag_name, then
   # prerelease, then assets. So the flag has to be set first and the
   # asset matched after — accumulating the asset and checking the flag
@@ -120,19 +93,11 @@ if [ "$CHANNEL" = "next" ]; then
       if (n >= 4 && q[4] ~ ("/" asset "$")) { print q[4]; exit }
     }
   ')
-else
-  URL=$(printf '%s' "$JSON" \
-    | tr ',' '\n' \
-    | grep '"browser_download_url"' \
-    | sed 's/.*"\(https[^"]*\)".*/\1/' \
-    | grep "/$ASSET\$" \
-    | head -1)
-fi
-
-if [ -z "$URL" ]; then
-  printf 'fail no asset named %s in the latest release. Available:\n' "$ASSET" >&2
-  printf '%s' "$JSON" | tr ',' '\n' | grep '"name"' | sed 's/.*"name": *"\([^"]*\)".*/  \1/' >&2
-  exit 1
+  if [ -z "$URL" ]; then
+    printf 'fail no asset named %s in the newest prerelease. Available:\n' "$ASSET" >&2
+    printf '%s' "$JSON" | tr ',' '\n' | grep '"name"' | sed 's/.*"name": *"\([^"]*\)".*/  \1/' >&2
+    exit 1
+  fi
 fi
 
 # Arguments turn this into a run, not an install.
