@@ -23,7 +23,7 @@ import {
   unlinkSync,
 } from "node:fs";
 import { log, RedError } from "./log.ts";
-import { unattendedEnvironment } from "./unattended.ts";
+import { tlsTrustFailure, unattendedEnvironment } from "./unattended.ts";
 import type { Platform } from "./platform.ts";
 
 export interface AgentSpec {
@@ -266,9 +266,11 @@ export async function isAgentReady(a: AgentSpec): Promise<boolean> {
  * file had its own two-line copy of the wrong half.
  */
 async function run(cmd: string[], env?: Record<string, string | undefined>): Promise<void> {
-  const { spawnLogged } = await import("./providers.ts");
-  const code = await spawnLogged(cmd, env ? { env } : {});
-  if (code !== 0) throw new RedError(`${cmd[0]} exited non-zero`);
+  const { spawnLoggedCapture } = await import("./providers.ts");
+  const result = await spawnLoggedCapture(cmd, env ? { env } : {});
+  if (result.code !== 0) {
+    throw new RedError(tlsTrustFailure(result.out + result.err) ?? `${cmd[0]} exited non-zero`);
+  }
 }
 
 /**

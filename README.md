@@ -263,6 +263,14 @@ stay on 24 LTS while Python moves to 3.14, for example. The unattended forms
 are `red-dev agents claude-code,codex` and `red-dev lang node@26,bun@1.3`.
 Add `--latest` to the latter to choose the newest release of every selected
 runtime; an exact mise version such as `python@3.14.1` is accepted too.
+Every provider and vendor installer also inherits the machine certificate
+store. On Linux and WSL, red-dev points curl, Git, npm/Node/Bun, pip/Requests,
+uv and Deno at the `update-ca-certificates` bundle; on Windows, Node, Deno and
+uv use the Windows certificate store. TLS verification stays enabled. This
+lets a corporate interception proxy work after its CA has been registered by
+the administrator, including inside npm lifecycle scripts and other nested
+installers. If the CA is absent, the result names the untrusted certificate
+chain instead of reducing it to `npm exited non-zero`.
 Convergence makes the input gestures a workstation contract rather than an
 agent-specific surprise. Shift+Enter is emitted as CSI-u by Alacritty and
 Windows Terminal, mapped to a newline in Claude Code, and stated explicitly in

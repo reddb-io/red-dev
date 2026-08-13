@@ -7,6 +7,10 @@
  * then carries this contract through second- and third-level installers.
  */
 
+import { existsSync } from "node:fs";
+
+const LINUX_SYSTEM_CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt";
+
 export const UNATTENDED_ENV = {
   RED_DEV_UNATTENDED: "1",
   // Widely understood by JS package managers and lifecycle scripts.
@@ -33,7 +37,25 @@ export const UNATTENDED_ENV = {
   npm_config_fund: "false",
   npm_config_update_notifier: "false",
   npm_config_progress: "false",
+  // Keep verification on. Trust comes from the machine's CA store below;
+  // accepting every certificate would turn a corporate proxy fix into a
+  // silent man-in-the-middle vulnerability.
+  npm_config_strict_ssl: "true",
   COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
+
+  // Node 22.19+/24.6+ adds the OS trust store to its bundled Mozilla roots.
+  // npm and its lifecycle descendants inherit this automatically.
+  NODE_USE_SYSTEM_CA: "1",
+
+  // Deno otherwise defaults to Mozilla roots only.
+  DENO_TLS_CA_STORE: "system,mozilla",
+
+  // uv otherwise uses its bundled Mozilla roots. System certificates are
+  // required for managed workstations whose proxy CA lives in the OS store.
+  // Keep the legacy spelling too: older uv releases used it and vendor
+  // installers may bring their own uv binary.
+  UV_SYSTEM_CERTS: "true",
+  UV_NATIVE_TLS: "true",
 
   // Python and mise runtime/plugin installers.
   PIP_NO_INPUT: "1",
@@ -46,12 +68,48 @@ export const UNATTENDED_ENV = {
   YARN_PREFER_INTERACTIVE: "false",
 } as const satisfies Record<string, string>;
 
+const UNTRUSTED_TLS_CHAIN =
+  /SELF_SIGNED_CERT_IN_CHAIN|self[- ]signed certificate in certificate chain|UnknownIssuer|unknown issuer|unable to get local issuer certificate|unable to verify the first certificate|certificate signed by unknown authority/i;
+
+/** Turn the common corporate-proxy TLS failures into one actionable error. */
+export function tlsTrustFailure(output: string): string | null {
+  if (!UNTRUSTED_TLS_CHAIN.test(output)) return null;
+  return "TLS certificate chain is not trusted — install the corporate CA in the machine trust store, then re-run red-dev";
+}
+
+/**
+ * Point OpenSSL/npm/Bun at the CA bundle maintained by update-ca-certificates.
+ *
+ * Windows has no PEM bundle to name: NODE_USE_SYSTEM_CA and Deno's `system`
+ * store read the Windows Certificate Store directly, while native curl uses
+ * Schannel. On Linux and WSL, the bundle contains both public roots and any
+ * private CA the administrator installed into the machine trust chain.
+ */
+function machineTrustEnvironment(
+  current: Record<string, string | undefined>,
+): Record<string, string> {
+  if (process.platform === "win32") return {};
+  const cafile = current["SSL_CERT_FILE"] ??
+    (existsSync(LINUX_SYSTEM_CA_BUNDLE) ? LINUX_SYSTEM_CA_BUNDLE : undefined);
+  if (!cafile) return {};
+  return {
+    ...(current["SSL_CERT_FILE"] ? {} : { SSL_CERT_FILE: cafile }),
+    ...(current["CURL_CA_BUNDLE"] ? {} : { CURL_CA_BUNDLE: cafile }),
+    ...(current["NODE_EXTRA_CA_CERTS"] ? {} : { NODE_EXTRA_CA_CERTS: cafile }),
+    ...(current["REQUESTS_CA_BUNDLE"] ? {} : { REQUESTS_CA_BUNDLE: cafile }),
+    ...(current["PIP_CERT"] ? {} : { PIP_CERT: cafile }),
+    ...(current["GIT_SSL_CAINFO"] ? {} : { GIT_SSL_CAINFO: cafile }),
+    ...(current["npm_config_cafile"] ? {} : { npm_config_cafile: cafile }),
+  };
+}
+
 /** Merge caller-specific values, then enforce the unattended contract. */
 export function unattendedEnvironment(
   current: Record<string, string | undefined> = process.env,
   extra: Record<string, string | undefined> = {},
 ): Record<string, string | undefined> {
-  return { ...current, ...extra, ...UNATTENDED_ENV };
+  const merged = { ...current, ...extra };
+  return { ...merged, ...machineTrustEnvironment(merged), ...UNATTENDED_ENV };
 }
 
 function shellWord(value: string): string {
@@ -66,7 +124,19 @@ export function unattendedShellCommand(
   command: string,
   extra: Record<string, string> = {},
 ): string {
-  const assignments = Object.entries({ ...extra, ...UNATTENDED_ENV })
+  // This function's destination is always an Ubuntu WSL distro. Its bundle
+  // cannot be discovered from the Windows host where this string is built.
+  const assignments = Object.entries({
+    SSL_CERT_FILE: LINUX_SYSTEM_CA_BUNDLE,
+    CURL_CA_BUNDLE: LINUX_SYSTEM_CA_BUNDLE,
+    NODE_EXTRA_CA_CERTS: LINUX_SYSTEM_CA_BUNDLE,
+    REQUESTS_CA_BUNDLE: LINUX_SYSTEM_CA_BUNDLE,
+    PIP_CERT: LINUX_SYSTEM_CA_BUNDLE,
+    GIT_SSL_CAINFO: LINUX_SYSTEM_CA_BUNDLE,
+    npm_config_cafile: LINUX_SYSTEM_CA_BUNDLE,
+    ...extra,
+    ...UNATTENDED_ENV,
+  })
     .map(([name, value]) => `${name}=${shellWord(value)}`)
     .join(" ");
   return `env ${assignments} ${command}`;
