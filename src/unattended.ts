@@ -74,7 +74,7 @@ const UNTRUSTED_TLS_CHAIN =
 /** Turn the common corporate-proxy TLS failures into one actionable error. */
 export function tlsTrustFailure(output: string): string | null {
   if (!UNTRUSTED_TLS_CHAIN.test(output)) return null;
-  return "TLS certificate chain is not trusted — install the corporate CA in the machine trust store, then re-run red-dev";
+  return "TLS certificate chain is not trusted — install the corporate CA in the machine trust store, then retry red-dev";
 }
 
 /**

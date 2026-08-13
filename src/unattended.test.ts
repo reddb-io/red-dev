@@ -45,7 +45,7 @@ const expected = {
 
 describe("the unattended provisioning envelope", () => {
   test("translates intercepted TLS failures into the machine-trust remedy", () => {
-    const remedy = "TLS certificate chain is not trusted — install the corporate CA in the machine trust store, then re-run red-dev";
+    const remedy = "TLS certificate chain is not trusted — install the corporate CA in the machine trust store, then retry red-dev";
     expect(tlsTrustFailure("npm error SELF_SIGNED_CERT_IN_CHAIN")).toBe(remedy);
     expect(tlsTrustFailure("invalid peer certificate: UnknownIssuer")).toBe(remedy);
     expect(tlsTrustFailure("unable to get local issuer certificate")).toBe(remedy);
