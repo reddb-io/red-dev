@@ -364,15 +364,42 @@ describe("on a machine that cannot hold a schedule", () => {
   test("WSL with systemd is an ordinary Linux target", async () => {
     await onFreshMachine(async (unitDir) => {
       // The images live on the Windows disk, but the binary that writes
-      // them runs in here — so the distro is where the timer belongs.
+      // them can run in here when the Windows host has no native owner.
       const outcome = await applyRedwallSchedule(wsl, {
         unitDir,
         run: supervisor({ "is-enabled": failed() }).run,
         enabled: on,
+        windowsOwns: async () => false,
       });
 
       expect(outcome.skipped).toBeNull();
       expect(outcome.action).toBe("installed");
+    });
+  });
+
+  test("WSL removes its timer when the Windows task already owns this desktop", async () => {
+    await onFreshMachine(async (unitDir) => {
+      await applyRedwallSchedule(wsl, {
+        unitDir,
+        run: supervisor({ "is-enabled": failed() }).run,
+        enabled: on,
+        windowsOwns: async () => false,
+      });
+
+      const host = supervisor();
+      const outcome = await applyRedwallSchedule(wsl, {
+        unitDir,
+        run: host.run,
+        enabled: on,
+        windowsOwns: async () => true,
+      });
+
+      expect(outcome.action).toBe("removed");
+      expect(outcome.removed.sort()).toEqual(
+        [`${unitDir}/${REDWALL_SERVICE}`, `${unitDir}/${REDWALL_TIMER}`].sort(),
+      );
+      expect(host.ran(`disable --now ${REDWALL_TIMER}`)).toBe(true);
+      expect(existsSync(`${unitDir}/${REDWALL_TIMER}`)).toBe(false);
     });
   });
 });

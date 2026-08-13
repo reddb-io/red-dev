@@ -151,6 +151,8 @@ export interface RedwallScheduleSeams {
   readonly wrapper?: string;
   /** Whether the preference is on. Defaults to the recorded preference. */
   readonly enabled?: () => Promise<boolean>;
+  /** Whether a native Windows task already owns this WSL desktop. */
+  readonly windowsOwns?: () => Promise<boolean>;
 }
 
 function home(): string {
@@ -330,7 +332,49 @@ export async function applyRedwallSchedule(
 
   const wanted = await (seams.enabled ?? (() => resolveRedwall(p)))();
   if (!wanted) return await unschedule(p, seams);
+  if (p.env === "wsl" && await windowsOwnsRedwall(seams)) {
+    // Windows and WSL point at the same preference and paint the same
+    // Windows desktop. Keeping both supervisors made two binaries race
+    // every two minutes (and let an older distro binary repaint after a
+    // newer native one). Native Windows survives the distro shutting
+    // down, so it is the canonical owner when its task is healthy.
+    return await unscheduleSystemd(seams, "windows");
+  }
   return p.os === "windows" ? await scheduleWindows(p, seams) : await scheduleSystemd(p, seams);
+}
+
+/**
+ * Whether Windows has a complete native Redwall producer.
+ *
+ * A task name alone is not enough: an old task can outlive the binary or
+ * wrapper it names. All three pieces must exist before WSL gives up its
+ * fallback timer. The injectable answer keeps tests away from the real
+ * host scheduler.
+ */
+async function windowsOwnsRedwall(seams: RedwallScheduleSeams): Promise<boolean> {
+  if (seams.windowsOwns) return await seams.windowsOwns();
+
+  try {
+    const { windowsLocalAppData } = await import("./wsl.ts");
+    const root = `${await windowsLocalAppData()}/red-dev/bin`;
+    if (!existsSync(`${root}/red-dev.exe`) || !existsSync(`${root}/${REDWALL_TASK_WRAPPER}`)) {
+      return false;
+    }
+
+    // A systemd user manager does not inherit WSL's augmented PATH.
+    // Resolve the host executable absolutely when needed, just as the
+    // rest of the WSL boundary does for PowerShell and cmd.exe.
+    const absolute = "/mnt/c/Windows/System32/schtasks.exe";
+    const schtasks = Bun.which("schtasks.exe") ?? (existsSync(absolute) ? absolute : "schtasks.exe");
+    const task = await runner(seams)([schtasks, "/Query", "/TN", REDWALL_TASK], {
+      timeoutMs: 5_000,
+    });
+    return task.exitCode === 0;
+  } catch {
+    // Host interop being unavailable is not evidence that Windows owns
+    // the refresh. Keep the local fallback alive.
+    return false;
+  }
 }
 
 /**
@@ -451,6 +495,7 @@ async function scheduleSystemd(
 
 async function unscheduleSystemd(
   seams: RedwallScheduleSeams,
+  owner: "off" | "windows" = "off",
 ): Promise<RedwallScheduleOutcome> {
   const dir = seams.unitDir ?? redwallUnitDir();
   const paths = [`${dir}/${REDWALL_TIMER}`, `${dir}/${REDWALL_SERVICE}`];
@@ -471,7 +516,11 @@ async function unscheduleSystemd(
   for (const path of present) rmSync(path, { force: true });
   await run(["systemctl", "--user", "daemon-reload"], { timeoutMs: 10_000 });
 
-  log.ok("redwall schedule: removed — the preference is off");
+  log.ok(
+    owner === "windows"
+      ? "redwall schedule: removed from WSL — Windows owns this desktop"
+      : "redwall schedule: removed — the preference is off",
+  );
   return { action: "removed", skipped: null, written: [], removed: present };
 }
 

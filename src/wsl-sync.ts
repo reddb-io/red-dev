@@ -33,6 +33,7 @@ import { spawnLogged } from "./providers.ts";
 import { OFFERED_RUNTIMES } from "./runtimes.ts";
 import { detectWsl, setWsl2Default, type WslDistribution } from "./wsl-provision.ts";
 import { readWindowsOutput } from "./windows-output.ts";
+import { unattendedShellCommand } from "./unattended.ts";
 
 const BOOT_URL = "https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.sh";
 
@@ -114,7 +115,7 @@ export async function syncSelectedTooling(
       "--",
       "bash",
       "-lc",
-      command,
+      unattendedShellCommand(command),
     ]);
     if (code !== 0) {
       log.warn(`${selected.name}: \`${command}\` failed (${code})`);
@@ -207,7 +208,7 @@ async function ensureDistroRedDev(distro: string): Promise<number> {
     "--",
     "bash",
     "-lc",
-    `curl -fsSL ${BOOT_URL} | RED_DEV_NO_LAUNCH=1 sh`,
+    `curl -fsSL ${BOOT_URL} | ${unattendedShellCommand("sh", { RED_DEV_NO_LAUNCH: "1" })}`,
   ]);
 }
 
@@ -276,7 +277,7 @@ export async function syncWslDistro(p: Platform): Promise<void> {
     "--",
     "bash",
     "-lc",
-    "red-dev install core",
+    unattendedShellCommand("red-dev install core"),
   ]);
   log.plain(`       ── end of ${distro}; counts above are the distro's, not this run's`);
   if (converged !== 0) {

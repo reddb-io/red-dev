@@ -205,6 +205,35 @@ describe("the menu", () => {
   });
 });
 
+describe("a theme chosen after setup", () => {
+  test("the command records the choice before a scheduled Redwall can repaint", () => {
+    // This is deliberately pinned at the command boundary. Applying the
+    // surfaces is not enough: `red-dev redwall` is another process and
+    // reconstructs its canvas from this preference on every timer tick.
+    // Without the write, a visible cobalt switch over a recorded flare
+    // lasts only until that next tick.
+    const main = readFileSync(`${import.meta.dir}/main.ts`, "utf8");
+    const start = main.indexOf("async function cmdTheme");
+    const end = main.indexOf("async function cmdWallpaper", start);
+    const command = main.slice(start, end);
+    const write = command.indexOf("writePreferences(p, { theme: chosen })");
+    const apply = command.indexOf("applyThemeEverywhere(chosen, p)");
+
+    expect(write).toBeGreaterThan(-1);
+    expect(write).toBeLessThan(apply);
+  });
+
+  test("the recorded choice is the canvas a later Redwall tick resolves", async () => {
+    await onFreshMachine(async () => {
+      await writePreferences(linux, { redwall: true, theme: "flare" });
+      await writePreferences(linux, { theme: "cobalt" });
+
+      const { resolveWallpaperSlug } = await import("./preferences.ts");
+      expect(await resolveWallpaperSlug(linux)).toBe("cobalt");
+    });
+  });
+});
+
 /**
  * The pin, which is an override and nothing more: absent is the normal
  * state of this setting, and the default route is what absent means.

@@ -714,6 +714,19 @@ async function cmdTheme(p: Platform, inv: Invocation, name?: string): Promise<nu
     return 1;
   }
 
+  // Record the decision before touching a surface. Redwall is repainted
+  // by another process every two minutes, and that process reconstructs
+  // its canvas from preferences; applying cobalt while leaving flare on
+  // disk makes the switch last only until the next tick. Writing first
+  // also closes the race where a tick fires halfway through this command.
+  try {
+    const { writePreferences } = await import("./preferences.ts");
+    await writePreferences(p, { theme: chosen });
+  } catch (err) {
+    log.err(`theme preference: ${(err as Error).message}`);
+    return 1;
+  }
+
   let failures = 0;
 
   // Alacritty is the terminal on every target, so this is the branch

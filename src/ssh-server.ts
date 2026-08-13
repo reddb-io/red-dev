@@ -34,6 +34,7 @@ import type { PrivilegedState } from "./drift.ts";
 import { log, RedError } from "./log.ts";
 import type { Platform } from "./platform.ts";
 import { classifyRights } from "./rights.ts";
+import { unattendedEnvironment } from "./unattended.ts";
 
 /** Ran, and what it printed. */
 interface Ran {
@@ -42,7 +43,12 @@ interface Ran {
 }
 
 async function run(cmd: string[]): Promise<Ran> {
-  const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+  const proc = Bun.spawn(cmd, {
+    stdout: "pipe",
+    stderr: "pipe",
+    stdin: "ignore",
+    env: unattendedEnvironment(),
+  });
   const out = (
     (await new Response(proc.stdout).text()) + (await new Response(proc.stderr).text())
   ).trim();
@@ -75,7 +81,17 @@ async function linuxUnit(): Promise<string | null> {
  * both a failure and a success.
  */
 export async function installSshServerLinux(p: Platform): Promise<void> {
-  const install = await run(["sudo", "-n", "apt-get", "install", "-y", "openssh-server"]);
+  // -n refuses a missing credential; -E carries the unattended envelope
+  // through sudo into apt, dpkg and package maintainer scripts.
+  const install = await run([
+    "sudo",
+    "-n",
+    "-E",
+    "apt-get",
+    "install",
+    "-y",
+    "openssh-server",
+  ]);
   if (!install.ok) {
     // Raised rather than warned past, and this is the item that made
     // the distinction necessary. Warning and returning left the converge

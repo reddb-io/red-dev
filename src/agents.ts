@@ -23,6 +23,7 @@ import {
   unlinkSync,
 } from "node:fs";
 import { log, RedError } from "./log.ts";
+import { unattendedEnvironment } from "./unattended.ts";
 import type { Platform } from "./platform.ts";
 
 export interface AgentSpec {
@@ -305,7 +306,7 @@ export function executablesEnvironment(
       ) === index;
     });
   const path = [...dirs, inherited].filter(Boolean).join(sep);
-  return { ...current, PATH: path, Path: path };
+  return unattendedEnvironment(current, { PATH: path, Path: path });
 }
 
 export function executableEnvironment(
