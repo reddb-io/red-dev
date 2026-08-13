@@ -48,9 +48,19 @@ async function pumpToLog(stream: ReadableStream<Uint8Array> | null): Promise<str
     const text = decoder.decode(chunk as Uint8Array, { stream: true });
     raw += text;
     rest += text;
-    const parts = rest.split("\n");
-    rest = parts.pop() ?? "";
-    for (const part of parts) say(part);
+    // curl, mise and several archive tools redraw download progress with a
+    // carriage return and do not send a newline until they finish. Waiting for
+    // `\n` made an active Ubuntu install look frozen for the whole download.
+    // A chunk may contain several redraws, so publish only its newest state:
+    // this stays live between chunks without filling the log with 10/11/12%.
+    const lines = rest.split("\n");
+    rest = lines.pop() ?? "";
+    for (const line of lines) say(line);
+    if (rest.includes("\r")) {
+      const redraws = rest.split("\r");
+      rest = redraws.pop() ?? "";
+      say(redraws.at(-1) ?? "");
+    }
   }
   const final = decoder.decode();
   raw += final;

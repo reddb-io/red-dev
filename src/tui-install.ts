@@ -15,7 +15,6 @@
 
 import {
   Box,
-  ListItem,
   MultiProgressBar,
   ProgressBar,
   ScrollArea,
@@ -40,7 +39,7 @@ import {
   type VerdictItem,
 } from "./completion.ts";
 import { converge, countSteps, type StepResult } from "./converge.ts";
-import { captureStart, captureStop, captureTo } from "./log.ts";
+import { captureTo } from "./log.ts";
 import { Accented, Header, Screen, Section, StatusLine, Surface } from "./tui-chrome.ts";
 import { muted, subtle, text, ui } from "./tui-theme.ts";
 import { transcriptPath } from "./transcript.ts";
@@ -88,6 +87,8 @@ export interface InstallTuiOptions {
   platform: Platform;
   ctx: ApplyContext;
   scopes: Scope[];
+  /** Test seam for exercising the renderer across live converge events. */
+  converge?: typeof converge;
 }
 
 /**
@@ -218,7 +219,40 @@ export function useInstallModel(
   useEffect(() => {
     if (!started()) return;
 
-    void converge(
+    // A step owns a live redirect for exactly as long as it runs. Holding
+    // these lines until stepEnd made the current provider completely silent:
+    // on Ubuntu, `dit — present` remained the last row while the following
+    // Nerd Font download was already under way. There is no concurrency here,
+    // so streaming cannot interleave two tools; releasing before the outcome
+    // row keeps the same grouping while making the active work observable.
+    let releaseStep: (() => void) | null = null;
+
+    const setupVerdicts = (): VerdictItem[] =>
+      setupResults().map((r) => ({ tool: r.tool, outcome: r.outcome }));
+
+    const finishRun = (
+      summary: { failed: number; deferred: number; results: StepResult[] },
+      endedAt: number,
+    ): void => {
+      setFinishedAt(endedAt);
+      setFinished(true);
+      const setupFailed = setupResults().filter((result) => result.outcome === "failed").length;
+      onFinish({
+        failed: summary.failed + setupFailed,
+        deferred: summary.deferred,
+        results: [
+          ...setupVerdicts(),
+          ...summary.results.map((r) => ({
+            tool: r.tool,
+            outcome: r.outcome,
+            ...(r.remedy ? { remedy: r.remedy } : {}),
+          })),
+        ],
+        elapsedMs: startedAt() === 0 ? 0 : endedAt - startedAt(),
+      });
+    };
+
+    void (opts.converge ?? converge)(
       { platform: opts.platform, ctx: opts.ctx, scopes: opts.scopes, dryRun: false },
       {
         scopeStart: (s, n) => {
@@ -254,12 +288,12 @@ export function useInstallModel(
         },
         stepStart: (e) => {
           setCurrent(e.tool);
-          // Hold provider chatter so it lands under its own step rather
-          // than interleaving with the next one.
-          captureStart();
+          push(`:: ${e.tool} — ${e.provider}`);
+          releaseStep = captureTo((line) => push(`    ${plain(line)}`));
         },
         stepEnd: (r) => {
-          const held = captureStop();
+          releaseStep?.();
+          releaseStep = null;
           // LogViewer takes plain strings, so the glyph is chosen here
           // rather than by a component.
           // A deferral gets its own glyph rather than the failure's: it
@@ -274,7 +308,6 @@ export function useInstallModel(
                   ? "·"
                   : "✓";
           push(`${glyph} ${r.tool.padEnd(16)} ${r.outcome}${r.ms >= 1000 ? `  ${human(r.ms)}` : ""}`);
-          for (const h of held) push(`    ${plain(h)}`);
           if (r.detail && (r.outcome === "failed" || r.outcome === "deferred")) {
             push(`    ${r.detail}`);
           }
@@ -285,31 +318,42 @@ export function useInstallModel(
           setResults((prev) => [...prev, r]);
         },
       },
-    ).then((summary) => {
-      const endedAt = Date.now();
-      setFinishedAt(endedAt);
-      setFinished(true);
-      const setupFailed = setupResults().filter((result) => result.outcome === "failed").length;
-      // Setup first, converge second: the same order they ran in, and
-      // the order the completion screen counts them in.
-      // Mapped apart because they are different records: a setup result
-      // has no remedy at all, and a converge result has one only when
-      // something is waiting on a gate.
-      const all: VerdictItem[] = [
-        ...setupResults().map((r) => ({ tool: r.tool, outcome: r.outcome })),
-        ...summary.results.map((r) => ({
-          tool: r.tool,
-          outcome: r.outcome,
-          ...(r.remedy ? { remedy: r.remedy } : {}),
-        })),
-      ];
-      onFinish({
-        failed: summary.failed + setupFailed,
-        deferred: summary.deferred,
-        results: all,
-        elapsedMs: startedAt() === 0 ? 0 : endedAt - startedAt(),
-      });
-    });
+    ).then(
+      (summary) => finishRun(summary, Date.now()),
+      (err: unknown) => {
+        // No rejected converge may leave the fullscreen UI saying
+        // "working…" forever. Most provider failures are ordinary step
+        // outcomes; this is the guard for failures outside that bracket
+        // (a probe, observer, transcript or future orchestration bug).
+        releaseStep?.();
+        releaseStep = null;
+        releaseBatch?.();
+        releaseBatch = null;
+        const message = (err as Error).message || String(err);
+        const completed = results();
+        const fatal: StepResult = {
+          scope: opts.scopes.at(-1) ?? "core",
+          tool: current() || "red-dev",
+          provider: "internal",
+          index: completed.length + 1,
+          total,
+          outcome: "failed",
+          ms: 0,
+          detail: message,
+        };
+        push(`✗ ${fatal.tool.padEnd(16)} failed`);
+        push(`    ${message}`);
+        setResults((previous) => [...previous, fatal]);
+        finishRun(
+          {
+            failed: completed.filter((result) => result.outcome === "failed").length + 1,
+            deferred: completed.filter((result) => result.outcome === "deferred").length,
+            results: [...completed, fatal],
+          },
+          Date.now(),
+        );
+      },
+    );
   });
 
   return {
@@ -507,14 +551,14 @@ export function InstallLayout(
                 Text({ color: ui.warn, bold: true }, "Deferred"),
                 ...deferrals
                   .slice(0, 6)
-                  .map((d) => ListItem({ primary: d.tool, status: "warning" })),
+                  .map((d) => Text({ color: ui.warn }, `! ${d.tool}`)),
               ]
             : []),
 
           ...(failures.length > 0
             ? [
                 Text({ color: ui.danger, bold: true }, "Failed"),
-                ...failures.slice(0, 6).map((f) => ListItem({ primary: f.tool, status: "error" })),
+                ...failures.slice(0, 6).map((f) => Text({ color: ui.danger }, `✗ ${f.tool}`)),
               ]
             : []),
 

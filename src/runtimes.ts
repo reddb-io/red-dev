@@ -47,6 +47,12 @@ export const OFFERED_RUNTIMES: { id: string; about: string }[] = [
   { id: "java@lts", about: "Java LTS" },
 ];
 
+/** Common runtimes start checked; the heavier project-specific three are opt-in. */
+export function runtimeSelectedByDefault(id: string): boolean {
+  const name = id.split("@")[0];
+  return name !== "go" && name !== "ruby" && name !== "java";
+}
+
 export interface RuntimeObserver {
   stepStart?: (id: string) => void;
   stepEnd?: (id: string, error: string | null) => void;
@@ -173,6 +179,11 @@ async function readRuntimeOutput(
     const lines = rest.split("\n");
     rest = lines.pop() ?? "";
     for (const line of lines) emit(line);
+    if (rest.includes("\r")) {
+      const redraws = rest.split("\r");
+      rest = redraws.pop() ?? "";
+      emit(redraws.at(-1) ?? "");
+    }
   }
   const final = decoder.decode();
   raw += final;

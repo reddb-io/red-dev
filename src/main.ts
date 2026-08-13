@@ -1322,7 +1322,8 @@ async function cmdAgents(p: Platform, inv: Invocation): Promise<number> {
 /** Choose which language runtimes mise manages. */
 async function cmdLang(p: Platform, inv: Invocation): Promise<number> {
   const { checkbox } = await import("./ui.ts");
-  const { OFFERED_RUNTIMES, useRuntimes, currentRuntimes } = await import("./runtimes.ts");
+  const { OFFERED_RUNTIMES, useRuntimes, currentRuntimes, runtimeSelectedByDefault } =
+    await import("./runtimes.ts");
 
   let ids = inv.runtimeIds;
   if (ids !== undefined) {
@@ -1347,7 +1348,11 @@ async function cmdLang(p: Platform, inv: Invocation): Promise<number> {
       return `${r.id} — ${r.about}${current.includes(name) ? "  (installed)" : ""}`;
     });
 
-    const picked = await checkbox("Which runtimes?", labels as [string, ...string[]], labels);
+    const picked = await checkbox(
+      "Which runtimes?",
+      labels as [string, ...string[]],
+      labels.filter((label) => runtimeSelectedByDefault(label.split(" ")[0]!)),
+    );
     ids = picked.map((label) => label.split(" ")[0]!.trim());
   }
 

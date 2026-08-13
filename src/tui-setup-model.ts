@@ -30,6 +30,7 @@ import { Screen, Surface } from "./tui-chrome.ts";
 import { muted, ui } from "./tui-theme.ts";
 import { DEFAULT_THEME, swatches, THEMES, themeNames } from "./themes.ts";
 import type { ThemeSlug } from "./themes.ts";
+import { runtimeSelectedByDefault } from "./runtimes.ts";
 
 export interface SetupAnswers {
   theme: string;
@@ -144,10 +145,11 @@ export function questions(
       description:
         "Owned by mise, so node resolves the same way in WSL, on the desktop " +
         "and in Git Bash. A version manager that manages nothing is how pnpm " +
-        "ends up working in one shell and not another.",
+        "ends up working in one shell and not another. Java, Ruby and Go are " +
+        "available but start off; select them when a project needs them.",
       multi: true,
       choices: runtimes,
-      preset: runtimes.map((runtime) => runtime.key),
+      preset: runtimes.filter((runtime) => runtimeSelectedByDefault(runtime.key)).map((runtime) => runtime.key),
       applies: () => true,
     },
     {
