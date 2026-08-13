@@ -30,22 +30,117 @@ import { unattendedEnvironment } from "./unattended.ts";
  * `mise use`. A prompt that installs four runtimes nobody asked for is
  * how a dev environment becomes 8 GB.
  */
-const DEFAULT_RUNTIMES = ["node@lts"] as const;
+const DEFAULT_RUNTIMES = ["node@24"] as const;
 
 /**
  * Offered by `red-dev lang`. omakub asks the same question at first
  * run; here it is a command you can re-run, because the answer changes
  * when a project does.
  */
-export const OFFERED_RUNTIMES: { id: string; about: string }[] = [
-  { id: "node@lts", about: "Node.js LTS — also brings npm and corepack" },
-  { id: "bun@latest", about: "Bun — runtime, bundler and package manager" },
-  { id: "deno@latest", about: "Deno" },
-  { id: "python@3.13", about: "Python 3.13" },
-  { id: "go@latest", about: "Go" },
-  { id: "rust@stable", about: "Rust, via rustup" },
-  { id: "ruby@3.4", about: "Ruby 3.4" },
-  { id: "java@lts", about: "Java LTS" },
+export interface RuntimeVersionChoice {
+  id: string;
+  label: string;
+}
+
+export interface OfferedRuntime {
+  /** Default selector used when the language is first checked. */
+  id: string;
+  label: string;
+  about: string;
+  versions: RuntimeVersionChoice[];
+}
+
+/**
+ * Supported lines shown directly on the language picker.
+ *
+ * Every list ends in a moving channel so the UI remains useful between
+ * red-dev releases, while the numbered entries let a project stay on a
+ * major/minor line. Mise resolves each selector to the newest patch on it.
+ */
+export const OFFERED_RUNTIMES: OfferedRuntime[] = [
+  {
+    id: "node@24",
+    label: "Node.js",
+    about: "also brings npm and corepack",
+    versions: [
+      { id: "node@22", label: "22 LTS" },
+      { id: "node@24", label: "24 LTS" },
+      { id: "node@26", label: "26 Current" },
+      { id: "node@latest", label: "Latest" },
+    ],
+  },
+  {
+    id: "bun@1.3",
+    label: "Bun",
+    about: "runtime, bundler and package manager",
+    versions: [
+      { id: "bun@1.2", label: "1.2" },
+      { id: "bun@1.3", label: "1.3" },
+      { id: "bun@latest", label: "Latest" },
+    ],
+  },
+  {
+    id: "deno@2.9",
+    label: "Deno",
+    about: "secure JavaScript and TypeScript runtime",
+    versions: [
+      { id: "deno@2.8", label: "2.8" },
+      { id: "deno@2.9", label: "2.9" },
+      { id: "deno@latest", label: "Latest" },
+    ],
+  },
+  {
+    id: "python@3.13",
+    label: "Python",
+    about: "CPython with SQLite support verified after install",
+    versions: [
+      { id: "python@3.13", label: "3.13" },
+      { id: "python@3.14", label: "3.14" },
+      { id: "python@latest", label: "Latest" },
+    ],
+  },
+  {
+    id: "go@1.26",
+    label: "Go",
+    about: "compiler and standard toolchain",
+    versions: [
+      { id: "go@1.25", label: "1.25" },
+      { id: "go@1.26", label: "1.26" },
+      { id: "go@latest", label: "Latest" },
+    ],
+  },
+  {
+    id: "rust@1.97",
+    label: "Rust",
+    about: "via rustup",
+    versions: [
+      { id: "rust@1.96", label: "1.96" },
+      { id: "rust@1.97", label: "1.97" },
+      { id: "rust@stable", label: "Stable" },
+    ],
+  },
+  {
+    id: "ruby@3.4",
+    label: "Ruby",
+    about: "MRI Ruby",
+    versions: [
+      { id: "ruby@3.3", label: "3.3" },
+      { id: "ruby@3.4", label: "3.4" },
+      { id: "ruby@4.0", label: "4.0" },
+      { id: "ruby@latest", label: "Latest" },
+    ],
+  },
+  {
+    id: "java@25",
+    label: "Java",
+    about: "OpenJDK",
+    versions: [
+      { id: "java@21", label: "21 LTS" },
+      { id: "java@25", label: "25 LTS" },
+      { id: "java@26", label: "26 Current" },
+      { id: "java@latest", label: "Latest" },
+    ],
+  },
 ];
 
 export type RuntimeVersionPolicy = "recommended" | "latest";
@@ -53,6 +148,52 @@ export type RuntimeVersionPolicy = "recommended" | "latest";
 const RUNTIME_NAMES = new Set(
   OFFERED_RUNTIMES.map((runtime) => runtime.id.split("@")[0]!),
 );
+
+function runtimeName(id: string): string {
+  return id.split("@")[0] ?? id;
+}
+
+/** The catalog entry for any selector belonging to a known runtime. */
+export function offeredRuntime(id: string): OfferedRuntime | undefined {
+  const name = runtimeName(id);
+  return OFFERED_RUNTIMES.find((runtime) => runtimeName(runtime.id) === name);
+}
+
+/** The currently selected id for this language, or its displayed default. */
+export function selectedRuntimeId(ids: string[], defaultId: string): string {
+  const name = runtimeName(defaultId);
+  return ids.find((id) => runtimeName(id) === name) ?? defaultId;
+}
+
+/** Human label for the selector currently shown on a language row. */
+export function runtimeVersionLabel(id: string): string {
+  const runtime = offeredRuntime(id);
+  return runtime?.versions.find((version) => version.id === id)?.label ?? id.split("@")[1] ?? id;
+}
+
+/** Check or uncheck one language without creating two versions of it. */
+export function toggleRuntimeSelection(ids: string[], defaultId: string): string[] {
+  const name = runtimeName(defaultId);
+  const found = ids.findIndex((id) => runtimeName(id) === name);
+  if (found >= 0) return ids.filter((_, index) => index !== found);
+  return [...ids, defaultId];
+}
+
+/** Cycle one language's selector in place, preserving every other choice. */
+export function shiftRuntimeVersion(ids: string[], defaultId: string, delta: -1 | 1): string[] {
+  const runtime = offeredRuntime(defaultId);
+  if (!runtime || runtime.versions.length === 0) return [...ids];
+  const name = runtimeName(defaultId);
+  const selectedIndex = ids.findIndex((id) => runtimeName(id) === name);
+  // Version arrows change a checked language; they do not also opt an
+  // unchecked language in. Space owns that decision.
+  if (selectedIndex < 0) return [...ids];
+  const current = ids[selectedIndex]!;
+  const currentIndex = Math.max(0, runtime.versions.findIndex((version) => version.id === current));
+  const nextIndex = (currentIndex + delta + runtime.versions.length) % runtime.versions.length;
+  const next = runtime.versions[nextIndex]!.id;
+  return ids.map((id, index) => (index === selectedIndex ? next : id));
+}
 
 /** Apply the setup's version policy without changing which runtimes were chosen. */
 export function runtimeIdsForPolicy(

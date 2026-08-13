@@ -163,11 +163,11 @@ describe("ordering and implication", () => {
     expect(runtimesAt).toBeLessThan(agentsAt);
   });
 
-  test("choosing an npm agent implies node@lts", () => {
+  test("choosing an npm agent implies the default Node line", () => {
     // Picking Gemini without ticking node is not a contradiction the
     // user should have to notice; it names an end and leaves the means
     // to the tool whose job that is.
-    expect(firstrun).toContain('runtimes.unshift("node@lts")');
+    expect(firstrun).toContain('runtimes.unshift("node@24")');
   });
 });
 

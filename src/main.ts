@@ -1370,10 +1370,10 @@ async function cmdLang(p: Platform, inv: Invocation): Promise<number> {
   const { checkbox, select } = await import("./ui.ts");
   const {
     OFFERED_RUNTIMES,
+    offeredRuntime,
     useRuntimes,
     currentRuntimes,
     resolveRuntimeIds,
-    runtimeIdsForPolicy,
     runtimeSelectedByDefault,
   } =
     await import("./runtimes.ts");
@@ -1415,15 +1415,23 @@ async function cmdLang(p: Platform, inv: Invocation): Promise<number> {
     );
     ids = picked.map((label) => label.split(" ")[0]!.trim());
 
-    const policy = await select(
-      "Which versions?",
-      [
-        "recommended — LTS, stable or the tested release",
-        "latest — newest release of every selected runtime",
-      ] as const,
-      "recommended — LTS, stable or the tested release",
-    );
-    ids = runtimeIdsForPolicy(ids, policy.startsWith("latest") ? "latest" : "recommended");
+    const versioned: string[] = [];
+    for (const id of ids) {
+      const runtime = offeredRuntime(id);
+      if (!runtime) {
+        versioned.push(id);
+        continue;
+      }
+      const versions = runtime.versions.map((version) => `${version.id} — ${version.label}`);
+      const fallback = versions.find((version) => version.startsWith(`${id} `)) ?? versions[0]!;
+      const picked = await select(
+        `${runtime.label} version?`,
+        versions as [string, ...string[]],
+        fallback,
+      );
+      versioned.push(picked.split(" ")[0]!);
+    }
+    ids = versioned;
   }
 
   if (ids.length === 0) {

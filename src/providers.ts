@@ -15,7 +15,7 @@ import { parseChecksums, pickChecksumAsset, sha256Hex, verifyChecksum } from "./
 import type { Provider } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
 import { missingRights } from "./rights.ts";
-import { unattendedEnvironment } from "./unattended.ts";
+import { tlsTrustFailure, unattendedEnvironment } from "./unattended.ts";
 
 /**
  * Provisioning never delegates a question to a child process.
@@ -868,7 +868,7 @@ export async function installerInstall(
   }
 
   const childEnv = windowsInstallerEnvironment(shell, installerEnv);
-  const code = await spawnLogged([shell, tmp, ...args], { env: childEnv });
+  const result = await spawnLoggedCapture([shell, tmp, ...args], { env: childEnv });
   if (sudoShim) removeTemp(sudoShim);
   // node:fs, not `rm`. There is no rm on native Windows, so cleaning up
   // failed with `Executable not found in $PATH: "rm"` — reported as the
@@ -876,7 +876,11 @@ export async function installerInstall(
   // script instead of at this line.
   removeTemp(tmp);
 
-  if (code !== 0) throw new RedError(`installer exited ${code}: ${url}`);
+  if (result.code !== 0) {
+    throw new RedError(
+      tlsTrustFailure(result.out + result.err) ?? `installer exited ${result.code}: ${url}`,
+    );
+  }
 }
 
 // ------------------------------------------------- ppa / apt repos

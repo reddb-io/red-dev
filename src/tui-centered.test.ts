@@ -3,6 +3,7 @@
 import { describe, expect, test } from "bun:test";
 import { renderToString } from "tuiuiu.js";
 import type { Platform } from "./platform.ts";
+import { OFFERED_RUNTIMES } from "./runtimes.ts";
 import {
   questions,
   SetupLayout,
@@ -28,15 +29,20 @@ function setupFrame(width: number, height: number): string[] {
     UBUNTU_26,
     [choice("codex")],
     [choice("btop")],
-    [choice("node@lts")],
+    OFFERED_RUNTIMES.map((runtime) => ({
+      key: runtime.id,
+      label: runtime.label,
+      note: runtime.about,
+    })),
   );
+  const runtimeStep = steps.findIndex((step) => step.id === "runtimes");
   const model = {
     steps,
-    stepIndex: () => 2,
+    stepIndex: () => runtimeStep,
     cursor: () => 0,
-    selection: () => ["node@lts"],
+    selection: () => ["node@24"],
     pickedFor: () => [],
-    wizard: { isCompleted: (index: number) => index < 2 },
+    wizard: { isCompleted: (index: number) => index < runtimeStep },
   } as unknown as SetupModel;
   return strip(renderToString(SetupLayout(model, UBUNTU_26, width, height), width, height))
     .split("\n");
@@ -64,7 +70,7 @@ describe("the Ubuntu installer composition", () => {
   test("still fits a normal 80x24 terminal", () => {
     const rows = setupFrame(80, 24);
     expect(rows).toHaveLength(24);
-    expect(rows.some((row) => row.includes("Versions"))).toBe(true);
+    expect(rows.some((row) => row.includes("24 LTS"))).toBe(true);
     expect(rows.some((row) => row.length > 80)).toBe(false);
   });
 });

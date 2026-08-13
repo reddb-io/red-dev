@@ -257,10 +257,20 @@ marketplace in Claude Code and Codex and generates plugin modules for OpenCode.
 On native Windows, a WSL terminal choice makes the selection a workstation
 choice: compatible CLI agents and runtimes are installed on Windows **and** in
 the selected WSL 2 distro. Desktop applications remain on Windows. Choosing Git
-Bash keeps the selection native-Windows only. The unattended forms are
-`red-dev agents claude-code,codex` and `red-dev lang node@lts,bun@latest`.
+Bash keeps the selection native-Windows only. On the runtime screen, Space
+enables a language and Left/Right changes that language's version — Node can
+stay on 24 LTS while Python moves to 3.14, for example. The unattended forms
+are `red-dev agents claude-code,codex` and `red-dev lang node@26,bun@1.3`.
 Add `--latest` to the latter to choose the newest release of every selected
 runtime; an exact mise version such as `python@3.14.1` is accepted too.
+Every provider and vendor installer also inherits the machine certificate
+store. On Linux and WSL, red-dev points curl, Git, npm/Node/Bun, pip/Requests,
+uv and Deno at the `update-ca-certificates` bundle; on Windows, Node, Deno and
+uv use the Windows certificate store. TLS verification stays enabled. This
+lets a corporate interception proxy work after its CA has been registered by
+the administrator, including inside npm lifecycle scripts and other nested
+installers. If the CA is absent, the result names the untrusted certificate
+chain instead of reducing it to `npm exited non-zero`.
 Convergence makes the input gestures a workstation contract rather than an
 agent-specific surprise. Shift+Enter is emitted as CSI-u by Alacritty and
 Windows Terminal, mapped to a newline in Claude Code, and stated explicitly in
@@ -327,7 +337,7 @@ red-dev wallpaper [source]   # theme | Red artwork | absolute PNG path | HTTPS U
 red-dev redwall              # redraw the wallpaper carrying this machine's state
 red-dev apps                 # choose optional tools
 red-dev lang                 # choose runtimes for mise to manage
-red-dev lang node@lts,bun@latest # unattended, recommended channels
+red-dev lang node@24,bun@1.3 # unattended, independently selected versions
 red-dev lang --latest node,python # newest release of each
 red-dev shell                # Windows + WSL: where a terminal lands
 red-dev agents               # choose coding agents, wire in red-skills

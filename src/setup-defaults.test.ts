@@ -62,24 +62,17 @@ describe("the optional tools", () => {
 describe("multi-choice defaults", () => {
   test("language runtimes leave Java, Ruby and Go unmarked", () => {
     const runtimes = [
-      { key: "node@lts", label: "Node", note: "" },
-      { key: "bun@latest", label: "Bun", note: "" },
+      { key: "node@24", label: "Node", note: "" },
+      { key: "bun@1.3", label: "Bun", note: "" },
       { key: "python@3.13", label: "Python", note: "" },
-      { key: "go@latest", label: "Go", note: "" },
+      { key: "go@1.26", label: "Go", note: "" },
       { key: "ruby@3.4", label: "Ruby", note: "" },
-      { key: "java@lts", label: "Java", note: "" },
+      { key: "java@25", label: "Java", note: "" },
     ];
     const q = questions(WSL, choices(2), choices(3), runtimes).find(
       (candidate) => candidate.id === "runtimes",
     );
-    expect(q?.preset).toEqual(["node@lts", "bun@latest", "python@3.13"]);
-  });
-
-  test("runtime versions default to the recommended compatibility channels", () => {
-    const q = step("runtime-versions");
-    expect(q.multi).toBe(false);
-    expect(q.preset).toEqual(["recommended"]);
-    expect(q.choices.map((choice) => choice.key)).toEqual(["recommended", "latest"]);
+    expect(q?.preset).toEqual(["node@24", "bun@1.3", "python@3.13"]);
   });
 
   test("all agents arrive marked", () => {
