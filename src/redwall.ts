@@ -68,14 +68,14 @@ import type { Platform } from "./platform.ts";
 import { readPreferences, resolveRedwall } from "./preferences.ts";
 import { REDWALL_SUBSET } from "./redwall-font.ts";
 import { renderRedwall, yearProgress, type RedwallState } from "./redwall-render.ts";
-import { resolveThemeSlug, THEMES } from "./themes.ts";
+import { resolveThemeSlug } from "./themes.ts";
 import { hiddenCapture, hiddenPowershell } from "./windows-hidden.ts";
 import {
   imageRoot,
+  resolveWallpaperArt,
   setDesktopBackground,
   setLockScreenBackground,
   shortDigest,
-  wallpaperBytes,
   wallpaperPathInUse,
 } from "./wallpaper.ts";
 
@@ -249,30 +249,34 @@ export async function generateRedwall(
    * on a state change rather than a theme change, has to fall back on.
    */
   theme?: string,
+  /** Explicit art choice during a switch; undefined reads the recorded preference. */
+  wallpaper?: string | null,
 ): Promise<RedwallOutcome> {
   if (!(await resolveRedwall(p))) return skipped("off");
   // Not a failure, and not a thing to warn about either: a server is a
   // machine that never had a desktop to write on.
   if (p.env === "server") return skipped("headless");
 
-  // Through resolveThemeSlug, so a machine still carrying one of the
-  // retired slugs draws its Redwall on the art it is actually themed
-  // with rather than failing to find a wallpaper for a name nothing
-  // holds any more.
-  const slug = resolveThemeSlug(theme ?? (await readPreferences(p)).theme);
+  const prefs = await readPreferences(p);
+  const colourSlug = resolveThemeSlug(theme ?? prefs.theme ?? "");
+  const art = await resolveWallpaperArt(
+    p,
+    colourSlug,
+    wallpaper === undefined ? prefs.wallpaper : wallpaper,
+  );
   const state = await (seams.state ?? (() => redwallState(p)))();
 
   const bytes = renderRedwall({
-    art: await wallpaperBytes(slug),
+    art: art.bytes,
     font: await Bun.file(REDWALL_SUBSET).bytes(),
-    theme: THEMES[slug],
+    theme: art.theme,
     state,
     year: yearProgress((seams.now ?? (() => new Date()))()),
   });
 
   const dir = await redwallDir(p);
   mkdirSync(dir, { recursive: true });
-  const path = `${dir}/${slug}-${shortDigest(bytes)}.png`;
+  const path = `${dir}/${art.key}-${shortDigest(bytes)}.png`;
 
   // The skip is the point, not an optimisation: rewriting identical
   // bytes would move the file's timestamp, and a hook that fires on
@@ -356,8 +360,9 @@ export async function applyRedwall(
   p: Platform,
   theme: string,
   seams: RedwallSeams = {},
+  wallpaper?: string | null,
 ): Promise<RedwallApplied> {
-  const outcome = await generateRedwall(p, seams, theme);
+  const outcome = await generateRedwall(p, seams, theme, wallpaper);
   if (outcome.path === null) return { ...outcome, shown: false };
 
   // The tick that happens over and over, answered without touching the
@@ -457,10 +462,9 @@ export async function sweepSupersededRedwalls(
  * wallpaper somebody chose by hand is a decision that outlives the tool
  * uninstalled around it.
  *
- * Null, not an empty list, when there was nothing here. Redwall is off
- * by default, so "this machine never generated one" is the common
- * answer and has to read as success rather than as a thing that failed
- * to happen.
+ * Null, not an empty list, when there was nothing here. A machine can
+ * opt out before ever generating one, and that ordinary state has to
+ * read as success rather than as a thing that failed to happen.
  */
 export async function removeRedwall(p: Platform): Promise<string | null> {
   const dir = await redwallDir(p);

@@ -18,7 +18,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import type { ApplyContext } from "./providers.ts";
 import type { Platform } from "./platform.ts";
-import { resolveThemeSlug } from "./themes.ts";
+import { isThemeSlug, resolveThemeSlug, type ThemeSlug } from "./themes.ts";
 
 export type TerminalShell = "wsl" | "gitbash";
 
@@ -35,6 +35,8 @@ export interface Preferences {
    */
   setupCompleted?: boolean;
   theme?: string;
+  /** A Red wallpaper slug or managed `custom:<sha256>` image. Absent follows the theme. */
+  wallpaper?: string;
   font?: string;
   /** Terminal font size in points. omakub offers 7 to 14. */
   fontSize?: number;
@@ -43,9 +45,8 @@ export interface Preferences {
    * Whether the wallpaper carries live machine state — see Redwall in
    * .red/contexts/visual/CONTEXT.md.
    *
-   * Absent means off, and the absence is the setting rather than a gap
-   * waiting to be filled: a machine that has never been asked has not
-   * agreed to have its desktop written over.
+   * Absent means on. Boolean false is the durable opt-out and is never
+   * overwritten by a later converge.
    */
   redwall?: boolean;
   /**
@@ -111,10 +112,8 @@ export async function resolveTerminalShell(p: Platform): Promise<TerminalShell> 
 /**
  * Whether Redwall is on for this machine.
  *
- * Off unless someone said otherwise. ADR 0003 settled the same question
- * one surface over — a terminal's colours are not red-dev's to choose —
- * and a desktop someone looks at all day is no more red-dev's to write
- * over because a converge happened to run.
+ * On unless someone said otherwise. Redwall is part of the default
+ * desktop experience; boolean false is the explicit opt-out.
  *
  * `=== true` rather than a truthy read, because this file is JSON a
  * person can edit and "off" written as a string should not turn a
@@ -122,7 +121,33 @@ export async function resolveTerminalShell(p: Platform): Promise<TerminalShell> 
  */
 export async function resolveRedwall(p: Platform): Promise<boolean> {
   const prefs = await readPreferences(p);
-  return prefs.redwall === true;
+  return prefs.redwall === undefined ? true : prefs.redwall === true;
+}
+
+/** Resolve the art independently from the colour theme when one was pinned. */
+export function wallpaperSlugFor(preference: unknown, theme: string): ThemeSlug {
+  return typeof preference === "string" && isThemeSlug(preference)
+    ? preference
+    : resolveThemeSlug(theme);
+}
+
+/** A content-addressed custom wallpaper reference, never its original path or URL. */
+export function customWallpaperDigest(preference: unknown): string | null {
+  if (typeof preference !== "string") return null;
+  const match = /^custom:([a-f0-9]{64})$/.exec(preference);
+  return match?.[1] ?? null;
+}
+
+/** Whether an edited preference still names a wallpaper red-dev knows how to resolve. */
+export function validWallpaperPreference(preference: unknown): preference is string {
+  return typeof preference === "string" &&
+    (isThemeSlug(preference) || customWallpaperDigest(preference) !== null);
+}
+
+/** The Red wallpaper this machine should display for the current theme. */
+export async function resolveWallpaperSlug(p: Platform, theme?: string): Promise<ThemeSlug> {
+  const prefs = await readPreferences(p);
+  return wallpaperSlugFor(prefs.wallpaper, theme ?? prefs.theme ?? "");
 }
 
 /**

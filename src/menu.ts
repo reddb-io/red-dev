@@ -15,7 +15,7 @@
 import { hostNetState, routableInterfaces } from "./lan-address.ts";
 import { log } from "./log.ts";
 import type { Platform } from "./platform.ts";
-import { readPreferences, writePreferences } from "./preferences.ts";
+import { readPreferences, resolveRedwall, writePreferences } from "./preferences.ts";
 import { resolveThemeSlug, themeFor, themeNames } from "./themes.ts";
 import { banner, number, select, text } from "./ui.ts";
 import type { Invocation } from "./cli.ts";
@@ -54,6 +54,7 @@ type Handlers = {
   shell: () => Promise<number>;
   uninstall: () => Promise<number>;
   applyTheme: (name: string) => Promise<number>;
+  applyWallpaper: (name?: string) => Promise<number>;
   applyFont: (font: string, size: number) => Promise<void>;
 };
 
@@ -73,6 +74,30 @@ async function themeMenu(p: Platform, h: Handlers): Promise<void> {
     await writePreferences(p, { theme: picked });
     return;
   }
+}
+
+async function wallpaperMenu(p: Platform, h: Handlers): Promise<void> {
+  const prefs = await readPreferences(p);
+  const follow = "theme — follow the colour theme";
+  const custom = "custom — import an absolute PNG path or HTTPS URL";
+  const labels = themeNames().map((name) => `${name} — ${themeFor(name)!.name}`);
+  const current = prefs.wallpaper?.startsWith("custom:")
+    ? custom
+    : prefs.wallpaper
+      ? (labels.find((label) => label.startsWith(`${prefs.wallpaper} — `)) ?? follow)
+      : follow;
+  const picked = await select(
+    `Wallpaper? (current: ${prefs.wallpaper?.startsWith("custom:") ? "custom" : prefs.wallpaper ?? "follows theme"})`,
+    options(follow, ...labels, custom, BACK),
+    current,
+  );
+  if (picked === BACK) return;
+  if (picked === custom) {
+    const source = await text("Absolute PNG path or HTTPS URL?");
+    if (source.trim()) await h.applyWallpaper(source);
+    return;
+  }
+  await h.applyWallpaper(picked === follow ? "theme" : picked.split(" ")[0]!);
 }
 
 async function fontMenu(p: Platform, h: Handlers): Promise<void> {
@@ -115,11 +140,8 @@ async function fontMenu(p: Platform, h: Handlers): Promise<void> {
 /**
  * Redwall, on or off.
  *
- * A preference and nothing else for now: no image is generated or
- * applied yet, so this submenu records an intent rather than repainting
- * a desktop. It is still the surface that matters — Redwall is off on
- * every machine until somebody comes here, which is the trade for not
- * asking twice at first boot.
+ * The menu records the durable opt-out as well as an explicit opt-in;
+ * without either answer Redwall follows the product default and is on.
  *
  * Read fresh on entry rather than passed in, so the current state shown
  * is the file's and not a snapshot the menu loop has been holding since
@@ -205,12 +227,13 @@ async function redwallInterfaceStep(p: Platform, pin: string | null): Promise<vo
 async function redwallMenu(p: Platform): Promise<void> {
   for (;;) {
     const prefs = await readPreferences(p);
-    const state = `State — ${prefs.redwall === true ? "on" : "off"}`;
+    const redwall = await resolveRedwall(p);
+    const state = `State — ${redwall ? "on" : "off"}`;
     const iface = `Interface — ${prefs.redwallInterface ?? "default route"}`;
 
     const picked = await select("Redwall", options(state, iface, BACK), state);
     if (picked === BACK) return;
-    if (picked === state) await redwallStateStep(p, prefs.redwall === true);
+    if (picked === state) await redwallStateStep(p, redwall);
     else await redwallInterfaceStep(p, prefs.redwallInterface ?? null);
   }
 }
@@ -234,6 +257,7 @@ export async function runMenu(
     const entries = [
       "Install — converge this machine",
       "Theme — colour scheme",
+      "Wallpaper — Red artwork",
       "Font — family and size",
       "Redwall — machine state on the wallpaper",
       "Apps — optional tools",
@@ -256,6 +280,9 @@ export async function runMenu(
         break;
       case "Theme":
         await themeMenu(p, h);
+        break;
+      case "Wallpaper":
+        await wallpaperMenu(p, h);
         break;
       case "Font":
         await fontMenu(p, h);

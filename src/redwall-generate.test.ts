@@ -27,6 +27,7 @@ import type { RedwallState } from "./redwall-render.ts";
 import { generateRedwall, redwallDir } from "./redwall.ts";
 import {
   expectedWallpaperNames,
+  importCustomWallpaper,
   materialise,
   sweepRetiredWallpapers,
   wallpaperDir,
@@ -75,8 +76,7 @@ const listing = (dir: string): string[] => (existsSync(dir) ? readdirSync(dir).s
 describe("with the preference off", () => {
   test("the command succeeds and writes nothing at all", async () => {
     await onFreshMachine(async (home) => {
-      // No preference written: absent is off, and that is the state a
-      // machine that has never been asked is in.
+      await writePreferences(desktop, { redwall: false });
       const outcome = await generate(desktop);
 
       expect(outcome.skipped).toBe("off");
@@ -134,6 +134,32 @@ describe("with the preference on", () => {
       await writePreferences(desktop, { redwall: true, theme: "flare" });
       const outcome = await generate(desktop);
       expect(outcome.path!.split("/").pop()!.startsWith("flare-")).toBe(true);
+    });
+  });
+
+  test("a pinned Red wallpaper wins over the colour theme", async () => {
+    await onFreshMachine(async () => {
+      await writePreferences(desktop, { redwall: true, theme: "cobalt", wallpaper: "flare" });
+      const outcome = await generate(desktop);
+      expect(outcome.path!.split("/").pop()!.startsWith("flare-")).toBe(true);
+    });
+  });
+
+  test("an imported PNG is the source Redwall composes over", async () => {
+    await onFreshMachine(async () => {
+      const source = await materialise(THEMES.dark, "dark", desktop);
+      const imported = await importCustomWallpaper(source, desktop);
+      await writePreferences(desktop, {
+        redwall: true,
+        theme: "cobalt",
+        wallpaper: imported.preference,
+      });
+
+      const outcome = await generate(desktop);
+      expect(outcome.path!.split("/").pop()).toStartWith(
+        `custom-${imported.preference.slice("custom:".length)}-`,
+      );
+      expect(existsSync(outcome.path!)).toBe(true);
     });
   });
 

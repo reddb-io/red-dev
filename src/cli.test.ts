@@ -19,6 +19,23 @@ describe("command parsing", () => {
     ]);
   });
 
+  test("reads a wallpaper independently from the theme", () => {
+    expect(parse(["wallpaper", "flare"])).toMatchObject({
+      command: "wallpaper",
+      wallpaperName: "flare",
+      errors: [],
+    });
+    expect(parse(["wallpaper", "theme"]).errors).toEqual([]);
+    expect(parse(["wallpaper", "C:\\Users\\filipe\\Pictures\\wall.png"])).toMatchObject({
+      wallpaperName: "C:\\Users\\filipe\\Pictures\\wall.png",
+      errors: [],
+    });
+    expect(parse(["wallpaper", "https://example.com/wall.png?variant=wide"])).toMatchObject({
+      wallpaperName: "https://example.com/wall.png?variant=wide",
+      errors: [],
+    });
+  });
+
   test("reads the command and its positional", () => {
     const inv = parse(["install", "core"]);
     expect(inv.command).toBe("install");

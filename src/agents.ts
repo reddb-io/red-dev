@@ -3,9 +3,8 @@
  *
  * These moved out of `core` because installing five agents on every
  * machine is a decision nobody made — they were unconditional before,
- * which is not the same as chosen. They are offered pre-ticked where
- * they used to be automatic, so the default behaviour is unchanged and
- * the answer is now the user's.
+ * which is not the same as chosen. The setup offers every applicable
+ * agent pre-ticked so the user can opt out explicitly.
  *
  * red-skills is the reason this is a group rather than loose entries:
  * it registers a marketplace in Claude Code and Codex CLI and generates

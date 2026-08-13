@@ -75,7 +75,7 @@ export interface RedwallState {
 }
 
 export interface RedwallInput {
-  /** The theme's wallpaper, as PNG bytes. */
+  /** The selected bundled or imported wallpaper, as PNG bytes. */
   readonly art: Uint8Array;
   /** The face to rasterise with — the bytes at `REDWALL_SUBSET`. */
   readonly font: Uint8Array;

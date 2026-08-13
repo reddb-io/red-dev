@@ -114,8 +114,8 @@ async function herdrHasPlugin(): Promise<boolean> {
 /**
  * Rebuild whichever of the two is installed and behind the checkout.
  *
- * Only what is already there. Both are offByDefault and optional, and
- * `update` advancing a machine into software it never asked for would
+ * Only what is already there. Both are optional, and `update` advancing
+ * a machine into software it never asked for would
  * be a worse bug than the staleness this fixes — so absence is left
  * alone and presence is kept current.
  */

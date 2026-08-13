@@ -5,16 +5,12 @@
  * optional tools shipped with none of them ticked and a description
  * arguing that empty was a good answer, which is true for a list you
  * have to evaluate one by one and wrong for a curated one — the whole
- * premise of an omakase setup is that somebody already chose.
- *
- * ble.sh is the deliberate exception, and it needs to stay one: it
- * replaces the line editor that atuin, fzf and carapace bind into, and
- * whether they survive it has never been confirmed from a real terminal.
+ * premise of an omakase setup is that somebody already chose. Every
+ * multi-choice step is therefore opt-out: enter accepts the whole set.
  */
 
 import { describe, expect, test } from "bun:test";
 import { questions, type Choice } from "./tui-setup-model.ts";
-import { TOOLS } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
 
 const WSL: Platform = {
@@ -42,32 +38,13 @@ describe("the optional tools", () => {
     expect(q.preset).toEqual(q.choices.map((c) => c.key));
   });
 
-  test("except what declares itself too large to be a default", () => {
-    // Blender is 1.2 GB. A curated list is a set of answers, but not
-    // one that hands somebody a gigabyte for pressing enter.
+  test("include entries whose cost is stated in their label", () => {
     const apps = [
       { key: "just", label: "just", note: "" },
-      { key: "blender", label: "blender", note: "", off: true },
+      { key: "blender", label: "blender", note: "1.2 GB" },
     ];
     const q = step("apps", apps);
-    expect(q.choices.map((c) => c.key)).toContain("blender");
-    expect(q.preset).toEqual(["just"]);
-  });
-
-  test("and the manifest is where that is declared", () => {
-    // Not a name hardcoded in the interview: the cost and the exception
-    // live in the same place, so the next heavy tool needs no UI change.
-    const blender = TOOLS.find((t) => t.name === "blender");
-    expect(blender?.offByDefault).toBe(true);
-    // Named one by one on purpose. Each is unticked for a reason worth
-    // stating — Blender is 1.2 GB, and the two extensions build a turbo
-    // workspace before they install anything — and a fourth appearing
-    // here should be a decision rather than a diff nobody read.
-    expect(TOOLS.filter((t) => t.offByDefault).map((t) => t.name).sort()).toEqual([
-      "blender",
-      "red-skills-herdr",
-      "red-skills-vscode",
-    ]);
+    expect(q.preset).toEqual(["just", "blender"]);
   });
 
   test("stay ticked however many there are", () => {
@@ -83,8 +60,16 @@ describe("the optional tools", () => {
   });
 });
 
-describe("language runtimes", () => {
-  test("Node and Python arrive marked together", () => {
+describe("every multi-choice step", () => {
+  test("uses one opt-out contract", () => {
+    for (const q of questions(WSL, choices(4), choices(5), choices(3)).filter(
+      (candidate) => candidate.multi,
+    )) {
+      expect(q.preset, q.id).toEqual(q.choices.map((choice) => choice.key));
+    }
+  });
+
+  test("all language runtimes arrive marked", () => {
     const runtimes = [
       { key: "node@lts", label: "Node", note: "" },
       { key: "bun@latest", label: "Bun", note: "" },
@@ -93,7 +78,28 @@ describe("language runtimes", () => {
     const q = questions(WSL, choices(2), choices(3), runtimes).find(
       (candidate) => candidate.id === "runtimes",
     );
-    expect(q?.preset).toEqual(["node@lts", "python@3.13"]);
+    expect(q?.preset).toEqual(runtimes.map((runtime) => runtime.key));
+  });
+
+  test("all agents arrive marked", () => {
+    const q = step("agents");
+    expect(q.preset).toEqual(q.choices.map((choice) => choice.key));
+  });
+});
+
+describe("the wallpaper", () => {
+  test("follows the theme by default and offers every Red artwork", () => {
+    const q = step("wallpaper");
+    expect(q.preset).toEqual(["theme"]);
+    expect(q.choices.map((choice) => choice.key)).toEqual([
+      "theme",
+      "dark",
+      "light",
+      "obsidian",
+      "marble",
+      "cobalt",
+      "flare",
+    ]);
   });
 });
 
@@ -112,9 +118,8 @@ describe("ble.sh", () => {
     );
   });
 
-  test("is the one thing here that is not ticked", () => {
-    // Deliberate, and the reason is empirical rather than taste: it
-    // replaces the line editor atuin, fzf and carapace bind into.
-    expect(step("plugins").preset).toEqual([]);
+  test("arrives ticked and can be opted out", () => {
+    const q = step("plugins");
+    expect(q.preset).toEqual(q.choices.map((choice) => choice.key));
   });
 });

@@ -170,17 +170,6 @@ export type Provider = ProviderSpec & {
 export interface Tool {
   /** Stable logical name — what the user thinks they have. */
   name: string;
-  /**
-   * Offered unticked.
-   *
-   * The Tools step arrives with everything selected, on the grounds
-   * that a curated list is a set of answers rather than a quiz. That
-   * argument holds while the entries cost megabytes. Blender is 1.2 GB,
-   * which is not a default anyone should acquire by pressing enter — so
-   * the exception is recorded next to the cost that justifies it,
-   * rather than as a name hardcoded in the interview.
-   */
-  offByDefault?: boolean;
   /** One line shown when offering this tool in a selection list. */
   about?: string;
   /**
@@ -682,10 +671,9 @@ export const TOOLS: Tool[] = [
   },
   // Coding agents moved to src/agents.ts. They sat in this scope, which
   // meant every machine got all three whether or not anyone wanted
-  // them — unconditional is not the same as chosen. They are offered
-  // pre-ticked now, so the default outcome is unchanged and the
-  // decision exists, and choosing any of them pulls in red-skills to
-  // wire them up.
+  // them — unconditional is not the same as chosen. The setup offers
+  // every applicable agent pre-ticked so the user can opt out, and
+  // choosing any of them pulls in red-skills to wire them up.
   {
     // Installing mise without using it leaves the machine with a
     // version manager and no versions — which is how `pnpm` ends up
@@ -835,20 +823,17 @@ export const TOOLS: Tool[] = [
     // rest.
     name: "blender",
     about: "3D creation suite — 1.2 GB, the official build",
-    offByDefault: true,
     scope: "optional",
     managed: true,
     u24: builtin("blender"),
     win: winget("BlenderFoundation.Blender"),
   },
   {
-    // Offered rather than assumed, and unticked: both build from the
-    // red-skills monorepo, which means a pnpm install of a turbo
-    // workspace the first time. That is not a cost to hand somebody for
-    // pressing enter.
+    // Both build from the red-skills monorepo, which means a pnpm install
+    // of a turbo workspace the first time. The note exposes that cost;
+    // the setup still follows its uniform opt-out contract.
     name: "red-skills-vscode",
     about: "RedSkills panel for VS Code — builds from source, needs pnpm",
-    offByDefault: true,
     scope: "optional",
     managed: true,
     u24: builtin("red-skills-vscode"),
@@ -857,7 +842,6 @@ export const TOOLS: Tool[] = [
   {
     name: "red-skills-herdr",
     about: "RedSkills plugin for herdr — live workers, logs and PRs",
-    offByDefault: true,
     scope: "optional",
     managed: true,
     u24: builtin("red-skills-herdr"),

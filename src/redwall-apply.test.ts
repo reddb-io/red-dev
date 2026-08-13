@@ -186,6 +186,7 @@ describe("applying a Redwall", () => {
 
   test("with the preference off nothing is drawn and nothing is shown", async () => {
     await onFreshMachine(async () => {
+      await writePreferences(desktop, { redwall: false });
       const s = screen();
       const outcome = await s.apply(desktop, "marble");
 
@@ -408,10 +409,10 @@ describe("the lock screen", () => {
   });
 
   test("is left alone when the preference is off", async () => {
-    // Not "set back to the plain art", which would be a second decision
-    // red-dev never made: a machine that did not ask for a Redwall has a
-    // lock screen belonging to whoever configured it.
+    // Not "set back to the plain art", which would be a second decision:
+    // a machine that opted out keeps the lock screen already configured.
     await onFreshMachine(async () => {
+      await writePreferences(desktop, { redwall: false });
       const s = screens();
       const outcome = await s.apply(desktop, "marble");
 

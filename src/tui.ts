@@ -95,6 +95,15 @@ const SECTIONS: MenuSection[] = [
     ],
   },
   {
+    key: "wallpaper",
+    label: "Wallpaper",
+    notes: [
+      "Choose bundled Red artwork or import",
+      "a PNG without changing the colour theme,",
+      "or return to following that theme.",
+    ],
+  },
+  {
     key: "install",
     label: "Install",
     notes: [

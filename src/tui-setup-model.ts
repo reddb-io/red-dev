@@ -29,15 +29,18 @@ import { summary } from "./platform.ts";
 import { Screen, Surface } from "./tui-chrome.ts";
 import { muted, ui } from "./tui-theme.ts";
 import { DEFAULT_THEME, swatches, THEMES, themeNames } from "./themes.ts";
+import type { ThemeSlug } from "./themes.ts";
 
 export interface SetupAnswers {
   theme: string;
+  /** Fixed Red wallpaper, or undefined to follow the theme. */
+  wallpaper?: ThemeSlug;
   font: string;
   apps: string[];
   runtimes: string[];
   agents: string[];
   blesh: boolean;
-  /** Whether the wallpaper carries live machine state. Off unless asked for. */
+  /** Whether the wallpaper carries live machine state. On unless opted out. */
   redwall: boolean;
   terminalShell?: "wsl" | "gitbash";
   /** Whether to set up the one directory both environments read. */
@@ -50,8 +53,6 @@ export interface Choice {
   key: string;
   label: string;
   note: string;
-  /** Shown unticked even in a step that ticks everything. */
-  off?: boolean;
 }
 
 /** One step: a question, its choices, and how many may be picked. */
@@ -134,7 +135,7 @@ export function questions(
         "marketplace in Claude Code and Codex and generates plugin modules for OpenCode.",
       multi: true,
       choices: agents,
-      preset: agents.filter((a) => a.key.match(/^(claude-code|codex|opencode)$/)).map((a) => a.key),
+      preset: agents.map((agent) => agent.key),
       applies: () => true,
     },
     {
@@ -146,9 +147,7 @@ export function questions(
         "ends up working in one shell and not another.",
       multi: true,
       choices: runtimes,
-      preset: runtimes
-        .filter((runtime) => runtime.key === "node@lts" || runtime.key === "python@3.13")
-        .map((runtime) => runtime.key),
+      preset: runtimes.map((runtime) => runtime.key),
       applies: () => true,
     },
     {
@@ -160,13 +159,10 @@ export function questions(
         "only thing that decides.",
       multi: true,
       choices: apps,
-      // All of them, minus what says it costs too much to be a default.
-      // The first version preset nothing and argued that empty was a
-      // good answer, which is true for a tool you have never heard of
-      // and wrong for a curated list — the point of an omakase setup is
-      // that somebody already chose. The exception is declared in the
-      // manifest, next to the size that earns it.
-      preset: apps.filter((a) => !a.off).map((a) => a.key),
+      // The note still names exceptional costs (Blender says 1.2 GB),
+      // but the selection contract is uniform: everything starts on and
+      // the person removes what they do not want.
+      preset: apps.map((app) => app.key),
       applies: () => apps.length > 0,
     },
     {
@@ -191,11 +187,7 @@ export function questions(
           note: "autosuggestions and syntax highlighting — replaces the line editor",
         },
       ],
-      // Unticked, and the one place in this interview where that is
-      // deliberate: ble.sh replaces the line editor that atuin, fzf and
-      // carapace bind into, and whether they survive it is an empirical
-      // question nobody here has answered from a real terminal.
-      preset: [],
+      preset: ["blesh"],
       applies: () => true,
     },
     {
@@ -223,27 +215,45 @@ export function questions(
       applies: () => true,
     },
     {
-      // After Theme, because it composes on the wallpaper that answer
-      // chooses rather than replacing it — and last, because it is the
-      // only question here whose honest default is "no".
+      id: "wallpaper",
+      title: "Wallpaper",
+      description:
+        "Follow the colour theme, or pin any Red wallpaper independently. " +
+        "A pinned wallpaper stays put when the theme changes; Redwall draws " +
+        "the machine state over whichever art you choose.",
+      multi: false,
+      choices: [
+        { key: "theme", label: "Follow the theme", note: "the default" },
+        ...themeNames().map((name) => ({
+          key: name,
+          label: THEMES[name].name,
+          note: THEMES[name].blurb,
+        })),
+      ],
+      preset: ["theme"],
+      applies: (pl: Platform) => pl.env !== "server",
+    },
+    {
+      // After Wallpaper, because it composes on that answer rather than
+      // assuming the colour theme's art.
       id: "redwall",
       title: "Redwall",
       description:
-        "The theme's wallpaper with live machine state drawn over it: how many " +
+        "The selected wallpaper with live machine state drawn over it: how many " +
         "Workers are running and the address this machine answers on, readable " +
         "from the lock screen without unlocking it. The art underneath is " +
         "unchanged — Redwall composes on top, never in place of it.",
       multi: false,
       choices: [
-        // Declining first, and that ordering is load-bearing. A
+        // Accepting first, and that ordering is load-bearing. A
         // single-choice step commits whatever the cursor is on, and the
         // cursor starts at zero — so the answer someone gets for
         // pressing enter through the interview is the one at the top of
         // this list, not the one named in `preset`.
-        { key: "no", label: "Leave the wallpaper alone", note: "the default" },
-        { key: "yes", label: "Draw machine state on it", note: "desktop and lock screen" },
+        { key: "yes", label: "Draw machine state on it", note: "the default — desktop and lock screen" },
+        { key: "no", label: "Leave the wallpaper alone", note: "opt out" },
       ],
-      preset: ["no"],
+      preset: ["yes"],
       applies: () => true,
     },
   ].filter((q) => q.applies(p));
@@ -302,6 +312,9 @@ export function useSetupModel(steps: Question[], wizard: ReturnType<typeof creat
     wizard,
     answers: () => ({
       theme: get("theme")[0] ?? DEFAULT_THEME,
+      ...(get("wallpaper")[0] && get("wallpaper")[0] !== "theme"
+        ? { wallpaper: get("wallpaper")[0] as ThemeSlug }
+        : {}),
       font: get("font")[0] ?? "firacode",
       apps: get("apps"),
       runtimes: get("runtimes"),
