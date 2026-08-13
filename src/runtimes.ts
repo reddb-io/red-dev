@@ -20,6 +20,7 @@
 
 import { log, RedError } from "./log.ts";
 import type { Platform } from "./platform.ts";
+import { unattendedEnvironment } from "./unattended.ts";
 
 /**
  * Runtimes installed on every machine.
@@ -148,7 +149,7 @@ async function run(
     stdout: "pipe",
     stderr: "pipe",
     stdin: "ignore",
-    env: { ...process.env, ...extraEnv },
+    env: unattendedEnvironment(process.env, extraEnv),
   });
   const [out, err, code] = await Promise.all([
     readRuntimeOutput(proc.stdout, live),

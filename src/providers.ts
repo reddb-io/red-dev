@@ -9,12 +9,13 @@
  */
 
 import { removeTemp, tempDir, tempFile } from "./temp.ts";
-import { copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { formatBytes, formatDuration, log, logIsCaptured, RedError } from "./log.ts";
 import { parseChecksums, pickChecksumAsset, sha256Hex, verifyChecksum } from "./checksum.ts";
 import type { Provider } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
 import { missingRights } from "./rights.ts";
+import { unattendedEnvironment } from "./unattended.ts";
 
 /**
  * Provisioning never delegates a question to a child process.
@@ -74,11 +75,13 @@ export async function spawnLoggedCapture(
   cmd: string[],
   extra: { env?: Record<string, string | undefined>; cwd?: string } = {},
 ): Promise<{ code: number; out: string; err: string }> {
+  const { env, ...spawnOptions } = extra;
   const proc = Bun.spawn(cmd, {
     stdout: "pipe",
     stderr: "pipe",
     stdin: providerStdinMode(),
-    ...extra,
+    ...spawnOptions,
+    env: unattendedEnvironment(process.env, env),
   });
   const [out, err, code] = await Promise.all([
     pumpToLog(proc.stdout),
@@ -107,11 +110,13 @@ export async function spawnLogged(
   extra: { env?: Record<string, string | undefined>; cwd?: string } = {},
 ): Promise<number> {
   if (!logIsCaptured()) {
+    const { env, ...spawnOptions } = extra;
     const proc = Bun.spawn(cmd, {
       stdout: "inherit",
       stderr: "inherit",
       stdin: providerStdinMode(),
-      ...extra,
+      ...spawnOptions,
+      env: unattendedEnvironment(process.env, env),
     });
     return await proc.exited;
   }
@@ -558,7 +563,9 @@ export async function ghInstall(
     // and there is no user-level equivalent.
     log.info(`installing the .deb with apt-get (needs sudo)`);
     await requireSudo();
-    await run(["sudo", "apt-get", "install", "-y", `${tmp}/${file}`]);
+    // -E is not cosmetic: without it sudo discards the unattended envelope
+    // before apt launches dpkg and its maintainer scripts.
+    await run(["sudo", "-E", "apt-get", "install", "-y", `${tmp}/${file}`]);
   } else if (file.endsWith(".tar.gz") || file.endsWith(".tgz")) {
     log.info(`extracting the archive into ${tmp}`);
     await run(["tar", "-xzf", `${tmp}/${file}`, "-C", tmp]);
@@ -833,11 +840,36 @@ export async function installerInstall(
   // A script that genuinely needs root cannot run here regardless; that
   // is a reason to not reach this function, which installAgent now
   // handles by preferring npm on Windows.
-  if (process.platform !== "win32" && body.includes("sudo ")) await requireSudo();
+  const usesSudo = process.platform !== "win32" && body.includes("sudo ");
+  if (usesSudo) await requireSudo();
 
   log.info(`running it with ${shell}${args.length > 0 ? ` ${args.join(" ")}` : ""}`);
-  const childEnv = env ? windowsInstallerEnvironment(shell, env) : undefined;
-  const code = await spawnLogged([shell, tmp, ...args], childEnv ? { env: childEnv } : {});
+  let installerEnv = unattendedEnvironment(process.env, env);
+  let sudoShim: string | null = null;
+
+  // An installer child inherits our variables, but an internal `sudo apt`
+  // normally erases them before dpkg and maintainer scripts start. Put a
+  // private shim first on PATH for the audited vendor script: it delegates to
+  // the real sudo with -E, preserving exactly the envelope we supplied. The
+  // password itself was already handled visibly by the top-level preflight.
+  if (usesSudo) {
+    const realSudo = Bun.which("sudo");
+    if (realSudo) {
+      sudoShim = tempDir(`sudo-env-${Date.now()}`);
+      const wrapper = `${sudoShim}/sudo`;
+      const quoted = `'${realSudo.replace(/'/g, `'"'"'`)}'`;
+      await Bun.write(wrapper, `#!/bin/sh\nexec ${quoted} -E "$@"\n`);
+      chmodSync(wrapper, 0o700);
+      installerEnv = {
+        ...installerEnv,
+        PATH: `${sudoShim}:${installerEnv["PATH"] ?? ""}`,
+      };
+    }
+  }
+
+  const childEnv = windowsInstallerEnvironment(shell, installerEnv);
+  const code = await spawnLogged([shell, tmp, ...args], { env: childEnv });
+  if (sudoShim) removeTemp(sudoShim);
   // node:fs, not `rm`. There is no rm on native Windows, so cleaning up
   // failed with `Executable not found in $PATH: "rm"` — reported as the
   // installer's own failure, which sent the reader looking at the vendor
