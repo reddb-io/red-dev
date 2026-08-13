@@ -30,7 +30,7 @@ import { log, RedError } from "./log.ts";
 import type { Platform } from "./platform.ts";
 import { readPreferences, type TerminalShell } from "./preferences.ts";
 import { spawnLogged } from "./providers.ts";
-import { OFFERED_RUNTIMES } from "./runtimes.ts";
+import { isKnownRuntimeId } from "./runtimes.ts";
 import { detectWsl, setWsl2Default, type WslDistribution } from "./wsl-provision.ts";
 import { readWindowsOutput } from "./windows-output.ts";
 import { unattendedShellCommand } from "./unattended.ts";
@@ -48,8 +48,7 @@ export function distroSetupCommands(
   // Preferences are user-editable JSON and eventually cross a shell
   // boundary. Resolve them against closed catalogs before constructing
   // argv text: unknown data is ignored, never interpolated.
-  const knownRuntimes = new Set(OFFERED_RUNTIMES.map((runtime) => runtime.id));
-  const runtimes = runtimeIds.filter((id) => knownRuntimes.has(id));
+  const runtimes = runtimeIds.filter(isKnownRuntimeId);
   const cliAgents = agentKeys.filter((key) => {
     const agent = AGENTS.find((candidate) => candidate.key === key);
     return agent !== undefined && !agent.desktopOnly;

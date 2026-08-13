@@ -34,6 +34,7 @@ import { Screen, Surface } from "./tui-chrome.ts";
 import { muted, ui } from "./tui-theme.ts";
 import { swatches } from "./themes.ts";
 import type { ThemeSlug } from "./themes.ts";
+import { runtimeIdsForPolicy } from "./runtimes.ts";
 import { withConsoleSelectionSuspended } from "./windows-console-mode.ts";
 // The questions live in tui-setup-model.ts and only there. They were
 // declared in both files, identically, for two interfaces that ask the
@@ -93,7 +94,10 @@ export async function runSetupTui(
             : {}),
           font: get("font")[0] ?? "firacode",
           apps: get("apps"),
-          runtimes: get("runtimes"),
+          runtimes: runtimeIdsForPolicy(
+            get("runtimes"),
+            get("runtime-versions")[0] === "latest" ? "latest" : "recommended",
+          ),
           agents: get("agents"),
           blesh: get("plugins").includes("blesh"),
           redwall: get("redwall")[0] === "yes",

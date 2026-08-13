@@ -1367,24 +1367,38 @@ async function cmdAgents(p: Platform, inv: Invocation): Promise<number> {
 
 /** Choose which language runtimes mise manages. */
 async function cmdLang(p: Platform, inv: Invocation): Promise<number> {
-  const { checkbox } = await import("./ui.ts");
-  const { OFFERED_RUNTIMES, useRuntimes, currentRuntimes, runtimeSelectedByDefault } =
+  const { checkbox, select } = await import("./ui.ts");
+  const {
+    OFFERED_RUNTIMES,
+    useRuntimes,
+    currentRuntimes,
+    resolveRuntimeIds,
+    runtimeIdsForPolicy,
+    runtimeSelectedByDefault,
+  } =
     await import("./runtimes.ts");
 
   let ids = inv.runtimeIds;
   if (ids !== undefined) {
-    const known = new Set(OFFERED_RUNTIMES.map((runtime) => runtime.id));
-    const unknown = ids.filter((id) => !known.has(id));
+    // `--latest` makes the channel explicit, so the terse and natural
+    // `red-dev lang --latest node,python` is enough. Selectors supplied
+    // alongside it are intentionally replaced by the same policy.
+    const resolved = resolveRuntimeIds(ids, inv.latest ? "latest" : "recommended");
+    ids = resolved.ids;
+    const { unknown } = resolved;
     if (unknown.length > 0) {
       log.err(`unknown runtime(s): ${unknown.join(", ")}`);
-      log.plain(`     known runtimes: ${OFFERED_RUNTIMES.map((runtime) => runtime.id).join(", ")}`);
+      log.plain(
+        `     known runtime names: ${OFFERED_RUNTIMES.map((runtime) => runtime.id.split("@")[0]).join(", ")}`,
+      );
+      log.plain("     use @latest, the recommended selector shown by `red-dev lang`, or an exact version");
       return 1;
     }
   } else {
     if (!interactive()) {
       log.err("choosing runtimes needs a terminal");
       log.plain("     For unattended installs, name them explicitly:");
-      log.plain("       red-dev lang node@lts,bun@latest");
+      log.plain("       red-dev lang --latest node,bun");
       return 1;
     }
 
@@ -1400,6 +1414,16 @@ async function cmdLang(p: Platform, inv: Invocation): Promise<number> {
       labels.filter((label) => runtimeSelectedByDefault(label.split(" ")[0]!)),
     );
     ids = picked.map((label) => label.split(" ")[0]!.trim());
+
+    const policy = await select(
+      "Which versions?",
+      [
+        "recommended — LTS, stable or the tested release",
+        "latest — newest release of every selected runtime",
+      ] as const,
+      "recommended — LTS, stable or the tested release",
+    );
+    ids = runtimeIdsForPolicy(ids, policy.startsWith("latest") ? "latest" : "recommended");
   }
 
   if (ids.length === 0) {

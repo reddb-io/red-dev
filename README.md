@@ -259,6 +259,8 @@ choice: compatible CLI agents and runtimes are installed on Windows **and** in
 the selected WSL 2 distro. Desktop applications remain on Windows. Choosing Git
 Bash keeps the selection native-Windows only. The unattended forms are
 `red-dev agents claude-code,codex` and `red-dev lang node@lts,bun@latest`.
+Add `--latest` to the latter to choose the newest release of every selected
+runtime; an exact mise version such as `python@3.14.1` is accepted too.
 Convergence makes the input gestures a workstation contract rather than an
 agent-specific surprise. Shift+Enter is emitted as CSI-u by Alacritty and
 Windows Terminal, mapped to a newline in Claude Code, and stated explicitly in
@@ -325,7 +327,8 @@ red-dev wallpaper [source]   # theme | Red artwork | absolute PNG path | HTTPS U
 red-dev redwall              # redraw the wallpaper carrying this machine's state
 red-dev apps                 # choose optional tools
 red-dev lang                 # choose runtimes for mise to manage
-red-dev lang node@lts,bun@latest # unattended runtime selection
+red-dev lang node@lts,bun@latest # unattended, recommended channels
+red-dev lang --latest node,python # newest release of each
 red-dev shell                # Windows + WSL: where a terminal lands
 red-dev agents               # choose coding agents, wire in red-skills
 red-dev agents claude-code,codex # unattended agent selection
@@ -408,7 +411,7 @@ deliberately:
 | `red-dev theme` | which theme, when given no name |
 | `red-dev wallpaper` | which bundled Red artwork, a custom PNG path/HTTPS URL, or whether to follow the theme |
 | `red-dev apps` | which optional tools — all ticked; untick to opt out |
-| `red-dev lang` | which runtimes mise should manage — Java, Ruby and Go start off; the rest are opt-out |
+| `red-dev lang` | which runtimes mise should manage, then recommended or latest versions — Java, Ruby and Go start off; the rest are opt-out |
 | `red-dev shell` | whether a terminal lands in WSL or Git Bash |
 | `red-dev agents` | which coding agents — all ticked; untick to opt out, then offers red-skills |
 | `red-dev uninstall` | what to remove — and confirms before removing it |

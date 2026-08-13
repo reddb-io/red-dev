@@ -48,6 +48,46 @@ export const OFFERED_RUNTIMES: { id: string; about: string }[] = [
   { id: "java@lts", about: "Java LTS" },
 ];
 
+export type RuntimeVersionPolicy = "recommended" | "latest";
+
+const RUNTIME_NAMES = new Set(
+  OFFERED_RUNTIMES.map((runtime) => runtime.id.split("@")[0]!),
+);
+
+/** Apply the setup's version policy without changing which runtimes were chosen. */
+export function runtimeIdsForPolicy(
+  ids: string[],
+  policy: RuntimeVersionPolicy,
+): string[] {
+  if (policy === "recommended") return [...ids];
+  return ids.map((id) => `${id.split("@")[0]}@latest`);
+}
+
+/**
+ * Runtime ids accepted at the CLI and safe to mirror through a WSL shell.
+ *
+ * The runtime name stays inside our catalog, while the mise selector may be
+ * a channel (`latest`, `lts`, `stable`) or an exact version. Keeping the
+ * selector deliberately boring also means a preference can be interpolated
+ * into `red-dev lang ...` without becoming shell syntax.
+ */
+export function isKnownRuntimeId(id: string): boolean {
+  const match = /^([a-z0-9-]+)@([A-Za-z0-9][A-Za-z0-9._+-]*)$/.exec(id);
+  return match !== null && RUNTIME_NAMES.has(match[1]!);
+}
+
+/** Normalize an explicit CLI selection, returning bad values without running mise. */
+export function resolveRuntimeIds(
+  ids: string[],
+  policy: RuntimeVersionPolicy,
+): { ids: string[]; unknown: string[] } {
+  const resolved = runtimeIdsForPolicy(ids, policy);
+  return {
+    ids: resolved,
+    unknown: resolved.filter((id) => !isKnownRuntimeId(id)),
+  };
+}
+
 /** Common runtimes start checked; the heavier project-specific three are opt-in. */
 export function runtimeSelectedByDefault(id: string): boolean {
   const name = id.split("@")[0];
@@ -74,6 +114,9 @@ export function runtimeInstallRequest(id: string): RuntimeInstallRequest {
       id: "python@3.13.14",
       env: { MISE_PYTHON_COMPILE: "0" },
     };
+  }
+  if (id.startsWith("python@")) {
+    return { id, env: { MISE_PYTHON_COMPILE: "0" } };
   }
   return { id, env: {} };
 }

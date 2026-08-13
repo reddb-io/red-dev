@@ -30,7 +30,7 @@ import { Screen, Surface } from "./tui-chrome.ts";
 import { muted, ui } from "./tui-theme.ts";
 import { DEFAULT_THEME, swatches, THEMES, themeNames } from "./themes.ts";
 import type { ThemeSlug } from "./themes.ts";
-import { runtimeSelectedByDefault } from "./runtimes.ts";
+import { runtimeIdsForPolicy, runtimeSelectedByDefault } from "./runtimes.ts";
 
 export interface SetupAnswers {
   theme: string;
@@ -150,6 +150,29 @@ export function questions(
       multi: true,
       choices: runtimes,
       preset: runtimes.filter((runtime) => runtimeSelectedByDefault(runtime.key)).map((runtime) => runtime.key),
+      applies: () => true,
+    },
+    {
+      id: "runtime-versions",
+      title: "Versions",
+      description:
+        "Recommended follows the compatibility channel chosen by red-dev — for " +
+        "example Node LTS and Python 3.13. Latest asks mise for the newest release " +
+        "of every runtime you selected.",
+      multi: false,
+      choices: [
+        {
+          key: "recommended",
+          label: "Recommended versions",
+          note: "the default — LTS, stable or a tested release where appropriate",
+        },
+        {
+          key: "latest",
+          label: "Latest versions",
+          note: "rewrite every selected runtime to @latest",
+        },
+      ],
+      preset: ["recommended"],
       applies: () => true,
     },
     {
@@ -319,7 +342,10 @@ export function useSetupModel(steps: Question[], wizard: ReturnType<typeof creat
         : {}),
       font: get("font")[0] ?? "firacode",
       apps: get("apps"),
-      runtimes: get("runtimes"),
+      runtimes: runtimeIdsForPolicy(
+        get("runtimes"),
+        get("runtime-versions")[0] === "latest" ? "latest" : "recommended",
+      ),
       agents: get("agents"),
       blesh: get("plugins").includes("blesh"),
       redwall: get("redwall")[0] === "yes",

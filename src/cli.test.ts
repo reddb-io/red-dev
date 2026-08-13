@@ -17,6 +17,10 @@ describe("command parsing", () => {
       "node@lts",
       "bun@latest",
     ]);
+    expect(parse(["lang", "--latest", "node,python"])).toMatchObject({
+      runtimeIds: ["node", "python"],
+      latest: true,
+    });
   });
 
   test("reads a wallpaper independently from the theme", () => {
