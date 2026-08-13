@@ -43,8 +43,11 @@ describe("selected tooling sent into WSL", () => {
       distroSetupCommands(
         "wsl",
         ["claude-code", "$(touch nope)", "not-an-agent"],
-        ["node@lts", "bad; command"],
+        ["node@lts", "bad; command", "python@latest", "ruby@3.4.7"],
       ),
-    ).toEqual(["red-dev lang node@lts", "red-dev agents claude-code"]);
+    ).toEqual([
+      "red-dev lang node@lts,python@latest,ruby@3.4.7",
+      "red-dev agents claude-code",
+    ]);
   });
 });

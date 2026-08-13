@@ -75,6 +75,13 @@ describe("multi-choice defaults", () => {
     expect(q?.preset).toEqual(["node@lts", "bun@latest", "python@3.13"]);
   });
 
+  test("runtime versions default to the recommended compatibility channels", () => {
+    const q = step("runtime-versions");
+    expect(q.multi).toBe(false);
+    expect(q.preset).toEqual(["recommended"]);
+    expect(q.choices.map((choice) => choice.key)).toEqual(["recommended", "latest"]);
+  });
+
   test("all agents arrive marked", () => {
     const q = step("agents");
     expect(q.preset).toEqual(q.choices.map((choice) => choice.key));

@@ -408,12 +408,25 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
   }
 
   // 3. What you build with.
-  const { OFFERED_RUNTIMES, runtimeSelectedByDefault } = await import("./runtimes.ts");
+  const { OFFERED_RUNTIMES, runtimeIdsForPolicy, runtimeSelectedByDefault } =
+    await import("./runtimes.ts");
   const runtimeLabels = OFFERED_RUNTIMES.map((r) => `${r.id} — ${r.about}`);
   const pickedRuntimes = await checkbox(
     "Language runtimes for mise to manage?",
     runtimeLabels as [string, ...string[]],
     runtimeLabels.filter((label) => runtimeSelectedByDefault(label.split(" ")[0]!)),
+  );
+  const runtimePolicy = await select(
+    "Which runtime versions?",
+    [
+      "recommended — LTS, stable or the tested release",
+      "latest — newest release of every selected runtime",
+    ] as const,
+    "recommended — LTS, stable or the tested release",
+  );
+  const selectedRuntimes = runtimeIdsForPolicy(
+    pickedRuntimes.map((label) => label.split(" ")[0]!),
+    runtimePolicy.startsWith("latest") ? "latest" : "recommended",
   );
 
   // 4. Extra tools, all of them ticked.
@@ -475,7 +488,7 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
     wallpaper,
     font,
     apps: pickedApps.map((l) => l.split(" ")[0]!),
-    runtimes: pickedRuntimes.map((l) => l.split(" ")[0]!),
+    runtimes: selectedRuntimes,
     blesh,
   };
 

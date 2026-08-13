@@ -194,6 +194,13 @@ export function buildCli(): CLI {
       },
       lang: {
         description: "choose language runtimes for mise to manage",
+        options: {
+          latest: {
+            type: "boolean",
+            description: "install the newest release of every selected runtime",
+            default: false,
+          },
+        },
         positional: [
           {
             name: "runtime_selection",
@@ -266,6 +273,8 @@ export interface Invocation {
   /** Explicit selections make agents/lang safe to invoke across WSL unattended. */
   agentKeys: string[] | undefined;
   runtimeIds: string[] | undefined;
+  /** `lang --latest`: rewrite every selected runtime selector to `latest`. */
+  latest: boolean;
   /** `wallpaper [theme|slug|absolute-path|https-url]` — absent opens the picker. */
   wallpaperName: string | undefined;
   /**
@@ -333,6 +342,7 @@ export function parseArgs(cli: CLI, argv: string[]): Invocation {
       typeof pos["runtime_selection"] === "string"
         ? pos["runtime_selection"].split(",").map((value) => value.trim()).filter(Boolean)
         : undefined,
+    latest: opts["latest"] === true,
     wallpaperName: typeof rawWallpaper === "string" ? rawWallpaper : undefined,
     themeName: typeof opts["theme"] === "string" ? opts["theme"] : DEFAULT_THEME,
     font: typeof opts["font"] === "string" ? opts["font"] : "firacode",
