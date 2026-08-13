@@ -3,7 +3,10 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import {
   githubRatePercent,
+  githubRatesFromHistoryJson,
+  mergeGithubCredentialRates,
   readGithubRateLimit,
+  readRedskilledGithubRates,
   type GithubRateSnapshot,
 } from "./github-rate.ts";
 
@@ -27,6 +30,79 @@ const response = JSON.stringify({
 });
 
 describe("GitHub rate-limit snapshot", () => {
+  test("reduces the PAT and optional App snapshots into four numbers", () => {
+    const askedAt = "2026-08-12T20:30:00Z";
+    expect(githubRatesFromHistoryJson(JSON.stringify([
+      { pool: "rest", remaining: 4500, limit: 5000, asked_at: askedAt },
+      { pool: "graphql", remaining: 3500, limit: 5000, asked_at: askedAt },
+      { identity: "app:153309957", pool: "rest", remaining: 4900, limit: 5000, asked_at: askedAt },
+      { identity: "app:153309957", pool: "graphql", remaining: 4250, limit: 5000, asked_at: askedAt },
+    ]), Date.parse("2026-08-12T20:45:00Z"))).toEqual({
+      pat: { api: 90, graphql: 70 },
+      app: { api: 98, graphql: 85 },
+    });
+  });
+
+  test("keeps github_app optional and refuses a fossil PAT snapshot", () => {
+    const fossil = JSON.stringify([
+      { pool: "rest", remaining: 5000, limit: 5000, asked_at: "2026-08-12T19:00:00Z" },
+      { pool: "graphql", remaining: 5000, limit: 5000, asked_at: "2026-08-12T19:00:00Z" },
+    ]);
+    expect(githubRatesFromHistoryJson(
+      fossil,
+      Date.parse("2026-08-12T20:00:00Z"),
+    )).toBeNull();
+  });
+
+  test("reads PAT and App from the identity-aware balance history", async () => {
+    const path = cachePath();
+    writeFileSync(path, "placeholder\n");
+    const directory = path.slice(0, path.lastIndexOf("/"));
+    writeFileSync(`${directory}/balance-history.toonl`, "toonl is converted by the injected tq\n");
+    const history = JSON.stringify([
+      { pool: "rest", remaining: 4500, limit: 5000, asked_at: "2026-08-12T20:30:00Z" },
+      { pool: "graphql", remaining: 3500, limit: 5000, asked_at: "2026-08-12T20:30:00Z" },
+      {
+        identity: "app:153309957",
+        pool: "rest",
+        remaining: 4900,
+        limit: 5000,
+        asked_at: "2026-08-12T20:31:00Z",
+      },
+      {
+        identity: "app:153309957",
+        pool: "graphql",
+        remaining: 4250,
+        limit: 5000,
+        asked_at: "2026-08-12T20:31:00Z",
+      },
+    ]);
+    expect(await readRedskilledGithubRates({
+      path: directory,
+      nowMs: Date.parse("2026-08-12T20:45:00Z"),
+      command: async () => ({
+        exitCode: 0,
+        stdout: history,
+        stderr: "",
+        timedOut: false,
+        groupGone: true,
+      }),
+    })).toEqual({
+      pat: { api: 90, graphql: 70 },
+      app: { api: 98, graphql: 85 },
+    });
+  });
+
+  test("merges domains by the tightest credential bucket instead of summing", () => {
+    expect(mergeGithubCredentialRates([
+      { pat: { api: 90, graphql: 80 }, app: { api: 70, graphql: 60 } },
+      { pat: { api: 50, graphql: 85 }, app: null },
+    ])).toEqual({
+      pat: { api: 50, graphql: 80 },
+      app: { api: 70, graphql: 60 },
+    });
+  });
+
   test("keeps REST and GraphQL separate and reports percent remaining", async () => {
     const snapshot = await readGithubRateLimit({
       path: cachePath(),

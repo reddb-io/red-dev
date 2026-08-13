@@ -1019,6 +1019,7 @@ const BUILTIN_INTENT: Partial<Record<BuiltinName, string>> = {
   "red-skills-herdr": "installing the herdr plugin for red-skills",
   blender: "installing Blender — this one is over a gigabyte",
   "wsl-sync": "syncing the WSL distro settings with the host",
+  "codex-statusline": "writing project, branch, model, effort, context and quotas into the Codex statusline",
   "claude-keybindings": "writing the Claude Code keybindings",
   "redwall-schedule": "scheduling the wallpaper rotation",
   "ssh-server": "installing and enabling the SSH server",
@@ -1136,6 +1137,11 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
       if (pr.name === "claude-keybindings") {
         const { convergeClaudeKeybindings } = await import("./claude-keybindings.ts");
         await convergeClaudeKeybindings();
+        return;
+      }
+      if (pr.name === "codex-statusline") {
+        const { configureCodexStatusline } = await import("./codex-statusline.ts");
+        await configureCodexStatusline();
         return;
       }
       if (pr.name === "redwall-schedule") {

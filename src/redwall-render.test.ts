@@ -301,11 +301,15 @@ describe("the lines", () => {
       capacity: 6,
       queued: 18,
       attention: null,
-      github: { api: 95, graphql: 0 },
+      github: {
+        pat: { api: 95, graphql: 0 },
+        app: { api: 88, graphql: 72 },
+      },
     })).toEqual([
       "redskilled at work",
       "3/6 workers · 18 queued",
-      "github api 95% · gql 0%",
+      "github pat api 95% · gql 0%",
+      "github app api 88% · gql 72%",
       "192.168.1.42",
     ]);
   });
@@ -313,8 +317,20 @@ describe("the lines", () => {
   test("drops invalid GitHub percentages without dropping machine state", () => {
     expect(redwallLines({
       ...running,
-      github: { api: 101, graphql: -1 },
+      github: { pat: { api: 101, graphql: -1 }, app: null },
     })).toEqual(["redskilled at work", "3 workers", "192.168.1.42"]);
+  });
+
+  test("draws only PAT when the optional GitHub App is not configured", () => {
+    expect(redwallLines({
+      ...running,
+      github: { pat: { api: 98, graphql: 85 }, app: null },
+    })).toEqual([
+      "redskilled at work",
+      "3 workers",
+      "github pat api 98% · gql 85%",
+      "192.168.1.42",
+    ]);
   });
 
   test("distinguishes standing by, capacity, attention and unavailable", () => {

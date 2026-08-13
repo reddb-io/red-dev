@@ -21,7 +21,11 @@ import {
 } from "node:fs";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
-import { runBounded } from "./bounded-command.ts";
+import {
+  runBounded,
+  type BoundedCommandOptions,
+  type BoundedCommandResult,
+} from "./bounded-command.ts";
 import { transcriptDir } from "./transcript.ts";
 
 const TTL_MS = 15 * 60 * 1_000;
@@ -57,13 +61,184 @@ export interface GithubRateOptions {
   readonly probe?: () => Promise<string | null>;
 }
 
+export interface GithubRatePercentPair {
+  readonly api: number;
+  readonly graphql: number;
+}
+
+/** Independent credential ceilings. They are deliberately never summed. */
+export interface GithubCredentialRates {
+  readonly pat: GithubRatePercentPair | null;
+  readonly app: GithubRatePercentPair | null;
+}
+
+export interface RedskilledGithubRateOptions {
+  readonly path?: string;
+  readonly nowMs?: number;
+  readonly command?: GithubRateCommand;
+}
+
+export type GithubRateCommand = (
+  argv: string[],
+  options?: BoundedCommandOptions,
+) => Promise<BoundedCommandResult>;
+
 export function githubRatePath(): string {
   return `${transcriptDir()}/github-rate-limit.json`;
+}
+
+export function redskilledGithubHistoryPath(home = process.env["HOME"] ?? process.env["USERPROFILE"] ?? ""): string {
+  return `${home.replace(/\\/g, "/")}/.red/redskilled/state/github/balance-history.toonl`;
 }
 
 export function githubRatePercent(bucket: GithubRateBucket): number {
   if (!Number.isFinite(bucket.limit) || bucket.limit <= 0) return 0;
   return Math.max(0, Math.min(100, Math.floor((bucket.remaining / bucket.limit) * 100)));
+}
+
+interface GithubHistoryRow {
+  readonly identity: string;
+  readonly pool: "rest" | "graphql";
+  readonly remaining: number;
+  readonly limit: number;
+  readonly askedAtMs: number;
+}
+
+function historyRow(value: unknown): GithubHistoryRow | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const found = value as Record<string, unknown>;
+  const identity = found["identity"] === undefined ? "pat" : found["identity"];
+  const pool = found["pool"];
+  const remaining = found["remaining"];
+  const limit = found["limit"];
+  const askedAtMs = Date.parse(String(found["asked_at"] ?? ""));
+  if (
+    typeof identity !== "string" || (identity !== "pat" && !identity.startsWith("app:")) ||
+    (pool !== "rest" && pool !== "graphql") ||
+    !validNonNegative(remaining) || !validNonNegative(limit) || limit === 0 || remaining > limit ||
+    !Number.isFinite(askedAtMs)
+  ) return null;
+  return { identity, pool, remaining, limit, askedAtMs };
+}
+
+/** Reduce redskilled's identity-aware history into independent credential ceilings. PURE. */
+export function githubRatesFromHistoryJson(
+  raw: string,
+  nowMs = Date.now(),
+): GithubCredentialRates | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed)) return null;
+
+  const latest = new Map<string, GithubHistoryRow>();
+  for (const value of parsed) {
+    const row = historyRow(value);
+    if (
+      row === null || nowMs - row.askedAtMs >= MAX_STALE_MS ||
+      row.askedAtMs > nowMs + 60_000
+    ) continue;
+    const key = `${row.identity}:${row.pool}`;
+    if ((latest.get(key)?.askedAtMs ?? -1) <= row.askedAtMs) latest.set(key, row);
+  }
+
+  const pair = (identity: string): GithubRatePercentPair | null => {
+    const rest = latest.get(`${identity}:rest`);
+    const graphql = latest.get(`${identity}:graphql`);
+    return rest === undefined || graphql === undefined ? null : {
+      api: Math.floor((rest.remaining / rest.limit) * 100),
+      graphql: Math.floor((graphql.remaining / graphql.limit) * 100),
+    };
+  };
+  const appIdentities = [...new Set(
+    [...latest.values()].map((row) => row.identity).filter((identity) => identity.startsWith("app:")),
+  )].sort((left, right) => {
+    const newest = (identity: string): number => Math.max(
+      latest.get(`${identity}:rest`)?.askedAtMs ?? -1,
+      latest.get(`${identity}:graphql`)?.askedAtMs ?? -1,
+    );
+    return newest(right) - newest(left);
+  });
+  const rates = {
+    pat: pair("pat"),
+    app: appIdentities.map(pair).find((value) => value !== null) ?? null,
+  };
+  return rates.pat === null && rates.app === null ? null : rates;
+}
+
+/** Read the two redskilled credential buckets without asking GitHub again. */
+export async function readRedskilledGithubRates(
+  options: RedskilledGithubRateOptions = {},
+): Promise<GithubCredentialRates | null> {
+  const configuredPath = options.path ?? redskilledGithubHistoryPath();
+  const path = configuredPath.endsWith(".toonl")
+    ? configuredPath
+    : `${configuredPath}/balance-history.toonl`;
+  if (!existsSync(path)) return null;
+  const tq = Bun.which("tq");
+  if (!tq && options.command === undefined) return null;
+  try {
+    const result = await (options.command ?? runBounded)(
+      [tq ?? "tq", "-p", "toonl", "-s", "-c", "-o", "json", ".", path],
+      { timeoutMs: 2_000, killGraceMs: 250 },
+    );
+    return result.timedOut || result.exitCode !== 0
+      ? null
+      : githubRatesFromHistoryJson(result.stdout, options.nowMs);
+  } catch {
+    return null;
+  }
+}
+
+/** Merge execution domains conservatively: the tightest visible bucket wins. */
+export function mergeGithubCredentialRates(
+  values: readonly (GithubCredentialRates | null)[],
+): GithubCredentialRates | null {
+  const merge = (identity: "pat" | "app"): GithubRatePercentPair | null => {
+    const known = values.flatMap((value) => value?.[identity] ? [value[identity]] : []);
+    return known.length === 0 ? null : {
+      api: Math.min(...known.map((value) => value.api)),
+      graphql: Math.min(...known.map((value) => value.graphql)),
+    };
+  };
+  const rates = { pat: merge("pat"), app: merge("app") };
+  return rates.pat === null && rates.app === null ? null : rates;
+}
+
+const WSL_GITHUB_BALANCES_PROGRAM = [
+  'f="$HOME/.red/redskilled/state/github/balance-history.toonl"',
+  '[ -f "$f" ] || exit 3',
+  'q=$(command -v tq 2>/dev/null || true)',
+  '[ -n "$q" ] || exit 3',
+  '"$q" -p toonl -s -c -o json . "$f"',
+].join("; ");
+const WSL_GITHUB_BALANCES_SCRIPT =
+  `printf %s ${Buffer.from(WSL_GITHUB_BALANCES_PROGRAM).toString("base64")} | base64 -d | sh`;
+
+/** Read every already-running WSL domain without waking a stopped distro. */
+export async function readWindowsWslGithubRates(
+  run: GithubRateCommand = runBounded,
+  nowMs = Date.now(),
+): Promise<GithubCredentialRates | null> {
+  const wsl = Bun.which("wsl.exe");
+  if (!wsl && run === runBounded) return null;
+  const listed = await run([wsl ?? "wsl.exe", "--list", "--running", "--quiet"], { timeoutMs: 2_000 });
+  if (listed.timedOut || listed.exitCode !== 0) return null;
+  const distros = listed.stdout.replace(/\0/g, "").split(/\r?\n/)
+    .map((name) => name.trim().replace(/^\*\s*/, "")).filter(Boolean);
+  const rates = await Promise.all(distros.map(async (distro) => {
+    const result = await run(
+      [wsl ?? "wsl.exe", "-d", distro, "--", "sh", "-lc", WSL_GITHUB_BALANCES_SCRIPT],
+      { timeoutMs: 5_000, killGraceMs: 250 },
+    );
+    return result.timedOut || result.exitCode !== 0
+      ? null
+      : githubRatesFromHistoryJson(result.stdout, nowMs);
+  }));
+  return mergeGithubCredentialRates(rates);
 }
 
 function validNonNegative(value: unknown): value is number {

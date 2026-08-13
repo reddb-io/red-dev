@@ -68,8 +68,11 @@ export interface RedwallState {
   readonly queued?: number | null;
   /** The highest-severity condition the daemon can state compactly. */
   readonly attention?: HostStateAttention | null;
-  /** Remaining GitHub budgets, kept separate because API and GraphQL reset independently. */
-  readonly github?: { readonly api: number; readonly graphql: number } | null;
+  /** PAT and App budgets; neither identity can spend the other's ceiling. */
+  readonly github?: {
+    readonly pat: { readonly api: number; readonly graphql: number } | null;
+    readonly app: { readonly api: number; readonly graphql: number } | null;
+  } | null;
   /** The address this machine answers on, as a dotted quad. */
   readonly address: string | null;
 }
@@ -191,9 +194,9 @@ export function redwallLines(state: RedwallState): string[] {
   const address = state.address !== null && validAddress(state.address) && drawable(state.address)
     ? state.address
     : null;
-  const github = githubLine(state.github);
+  const github = githubLines(state.github);
   if (state.workers === null) {
-    return ["redskilled unavailable", github, address].filter((line): line is string => line !== null);
+    return ["redskilled unavailable", ...github, address].filter((line): line is string => line !== null);
   }
   if (!Number.isSafeInteger(state.workers) || state.workers < 0) return [];
 
@@ -220,14 +223,19 @@ export function redwallLines(state: RedwallState): string[] {
   }
 
   const lines = [headline, detail];
-  if (github !== null) lines.push(github);
+  lines.push(...github);
   if (address !== null) lines.push(address);
   return lines.every(drawable) ? lines : [];
 }
 
-function githubLine(value: RedwallState["github"]): string | null {
-  if (!value || !validPercent(value.api) || !validPercent(value.graphql)) return null;
-  return `github api ${value.api}% · gql ${value.graphql}%`;
+function githubLines(value: RedwallState["github"]): string[] {
+  if (!value) return [];
+  const line = (identity: "pat" | "app"): string | null => {
+    const rate = value[identity];
+    if (!rate || !validPercent(rate.api) || !validPercent(rate.graphql)) return null;
+    return `github ${identity} api ${rate.api}% · gql ${rate.graphql}%`;
+  };
+  return [line("pat"), line("app")].filter((value): value is string => value !== null);
 }
 
 function validPercent(value: number): boolean {
