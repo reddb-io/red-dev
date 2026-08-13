@@ -45,6 +45,10 @@ const ALLOWED = new Map<string, string>([
     "`red-dev uninstall` is a plain command with no fullscreen view; it prints a plan and asks at the terminal.",
   ],
   [
+    "sudo-preflight.ts",
+    "`sudo -v` is the explicit boundary before a human install starts fullscreen rendering; bootstrap and direct install call it before render, while unattended paths never call it.",
+  ],
+  [
     "wsl-provision.ts",
     "`wsl --install` and `--set-version` prompt for a UNIX username and take minutes. They need real stdin, which spawnLogged's captured branch sets to ignore — so routing them through it would hang rather than tear. Known gap: reachable from the TUI menu, where it WOULD tear. Not fixed here because the fix is to refuse the capture, not to pipe it.",
   ],

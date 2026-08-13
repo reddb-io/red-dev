@@ -32,6 +32,8 @@ import { createScrollArea, type ScrollAreaState } from "tuiuiu.js";
 import { VERSION } from "./cli.ts";
 import {
   convergeVerdict,
+  deferralFacts,
+  failureFacts,
   shortenHome,
   verdictFacts,
   wrapTo,
@@ -228,7 +230,11 @@ export function useInstallModel(
     let releaseStep: (() => void) | null = null;
 
     const setupVerdicts = (): VerdictItem[] =>
-      setupResults().map((r) => ({ tool: r.tool, outcome: r.outcome }));
+      setupResults().map((r) => ({
+        tool: r.tool,
+        outcome: r.outcome,
+        ...(r.detail ? { detail: r.detail } : {}),
+      }));
 
     const finishRun = (
       summary: { failed: number; deferred: number; results: StepResult[] },
@@ -245,6 +251,7 @@ export function useInstallModel(
           ...summary.results.map((r) => ({
             tool: r.tool,
             outcome: r.outcome,
+            ...(r.detail ? { detail: r.detail } : {}),
             ...(r.remedy ? { remedy: r.remedy } : {}),
           })),
         ],
@@ -662,6 +669,28 @@ export function CompletionLayout(
         ),
       ),
       Text({}, ""),
+      ...(verdict.failures.length > 0
+        ? [
+            Text({ color: ui.danger, bold: true }, "Errors"),
+            ...failureFacts(verdict).flatMap((failure) =>
+              wrapTo(failure, room - 2).map((line, i) =>
+                Text({ color: ui.danger }, `${i === 0 ? "✗ " : "  "}${line}`),
+              ),
+            ),
+            Text({}, ""),
+          ]
+        : []),
+      ...(verdict.deferrals.length > 0
+        ? [
+            Text({ color: ui.warn, bold: true }, "Waiting"),
+            ...deferralFacts(verdict).flatMap((deferral) =>
+              wrapTo(deferral, room - 2).map((line, i) =>
+                Text({ color: ui.warn }, `${i === 0 ? "! " : "  "}${line}`),
+              ),
+            ),
+            Text({}, ""),
+          ]
+        : []),
       ...(verdict.nextSteps.length > 0
         ? [
             Text({ color: muted, bold: true }, "Next"),

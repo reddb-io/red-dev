@@ -30,6 +30,14 @@ function resolveScopes(p: Platform, arg?: string): Scope[] {
   return arg ? [arg as Scope] : applicableScopes(p);
 }
 
+/** Warm sudo while the ordinary terminal still owns stdin. */
+async function prepareSudo(p: Platform, scopes: Scope[]): Promise<boolean> {
+  const { primeSudoInteractive, sudoItemsFor } = await import("./sudo-preflight.ts");
+  if (sudoItemsFor(p, scopes).length === 0) return false;
+  await primeSudoInteractive();
+  return true;
+}
+
 async function contextFor(
   p: Platform,
   inv: Invocation,
@@ -447,6 +455,7 @@ async function cmdInstall(
 ): Promise<number> {
   let ctx = await contextFor(p, inv, entry);
   let extraScopes: Scope[] = [];
+  let sudoPrepared = false;
 
   // Ask once, on a real terminal, when this machine is new. Every ui.ts
   // primitive returns its fallback without a TTY, so this is inert in
@@ -467,6 +476,16 @@ async function cmdInstall(
         if (choices.apps.length > 0) extraScopes = ["optional"];
         await writeShellEnv(p, choices.blesh);
 
+        // Before agents, runtimes or optional apps can reach a package
+        // provider. This is a visible top-level authentication, never a
+        // prompt hidden inside one of their unattended children.
+        if (!inv.yes && interactive()) {
+          sudoPrepared = await prepareSudo(p, [
+            ...resolveScopes(p, inv.scope),
+            ...extraScopes,
+          ]);
+        }
+
         // One implementation, reachable from both paths. It used to live
         // only here, so the fullscreen menu asked which agents you wanted
         // and installed none of them.
@@ -483,6 +502,13 @@ async function cmdInstall(
   }
 
   const scopes = [...resolveScopes(p, inv.scope), ...extraScopes];
+
+  // Direct `red-dev install` reaches here without the first-run interview.
+  // Prime once before either fullscreen or line reporting begins. `--yes`
+  // remains strictly unattended and non-TTY runs never ask anything.
+  if (!inv.dryRun && !inv.yes && interactive() && !sudoPrepared) {
+    await prepareSudo(p, scopes);
+  }
 
   // Fullscreen when there is a terminal wide enough for it: the live
   // view is the default experience, and the line report is what runs in
@@ -1085,6 +1111,13 @@ async function cmdUi(p: Platform, inv: Invocation): Promise<number> {
     log.err("the fullscreen interface needs a terminal");
     log.plain("     Use `red-dev` for the menu, or a command directly.");
     return 1;
+  }
+
+  // The bootstrap one-liner is an explicit installation entry. Warm sudo
+  // before its first fullscreen frame; later bare `red-dev` launches are a
+  // menu and must not demand a password merely to inspect a theme or doctor.
+  if (process.env["RED_DEV_BOOTSTRAP"] === "1" && !inv.yes) {
+    await prepareSudo(p, resolveScopes(p, inv.scope));
   }
 
   const { runTui } = await import("./tui.ts");
