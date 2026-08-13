@@ -61,7 +61,13 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
-import { githubRatePercent, readGithubRateLimit } from "./github-rate.ts";
+import {
+  githubRatePercent,
+  mergeGithubCredentialRates,
+  readGithubRateLimit,
+  readRedskilledGithubRates,
+  readWindowsWslGithubRates,
+} from "./github-rate.ts";
 import { mergeHostStates, readHostState, readWindowsWslHostState } from "./host-state.ts";
 import { resolveRedwallAddress, spawnCapture } from "./lan-address.ts";
 import type { Platform } from "./platform.ts";
@@ -181,23 +187,31 @@ export interface RedwallSeams {
  * throw. The address is resolved without the daemon's help so it survives.
  */
 export async function redwallState(p: Platform): Promise<RedwallState> {
-  const [host, address, githubRate] = await Promise.all([
+  const [host, address, redskilledGithub] = await Promise.all([
     p.os === "windows"
       ? Promise.all([readHostState(), readWindowsWslHostState()]).then(mergeHostStates)
       : readHostState(),
     redwallAddress(p),
-    readGithubRateLimit(),
+    p.os === "windows"
+      ? Promise.all([readRedskilledGithubRates(), readWindowsWslGithubRates()]).then(mergeGithubCredentialRates)
+      : readRedskilledGithubRates(),
   ]);
+  // The daemon already paid to learn this answer. Only installations from
+  // before its identity-labelled history ask `gh` themselves as a fallback.
+  const githubRate = redskilledGithub?.pat ? null : await readGithubRateLimit();
+  const fallbackPat = githubRate === null
+    ? null
+    : { api: githubRatePercent(githubRate.core), graphql: githubRatePercent(githubRate.graphql) };
   return {
     workers: host?.workers ?? null,
     capacity: host?.capacity ?? null,
     queued: host?.queued ?? null,
     attention: host?.attention ?? null,
-    github: githubRate === null
+    github: redskilledGithub === null && fallbackPat === null
       ? null
       : {
-        api: githubRatePercent(githubRate.core),
-        graphql: githubRatePercent(githubRate.graphql),
+        pat: redskilledGithub?.pat ?? fallbackPat,
+        app: redskilledGithub?.app ?? null,
       },
     address,
   };

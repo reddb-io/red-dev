@@ -137,6 +137,7 @@ type ProviderSpec =
         | "red-skills-herdr"
         | "blender"
         | "wsl-sync"
+        | "codex-statusline"
         | "claude-keybindings"
         | "redwall-schedule"
         | "ssh-server";
@@ -327,6 +328,7 @@ const builtin = (
     | "red-skills-vscode"
     | "red-skills-herdr"
     | "blender"
+    | "codex-statusline"
     | "claude-keybindings"
     | "redwall-schedule"
     | "ssh-server",
@@ -936,6 +938,14 @@ export const TOOLS: Tool[] = [
     managed: true,
     u24: builtin("red-skills"),
     win: builtin("red-skills"),
+  },
+  {
+    name: "codex-statusline",
+    about: "project, branch, model, effort, context and quota windows in the Codex TUI",
+    scope: "core",
+    managed: true,
+    u24: builtin("codex-statusline"),
+    win: builtin("codex-statusline"),
   },
   {
     // Skipped silently when claude is not installed. Idempotent and

@@ -121,6 +121,13 @@ describe("isInstalled", () => {
 });
 
 describe("the manifest itself", () => {
+  test("the Codex statusline is a managed core surface on every supported host", () => {
+    const tool = TOOLS.find((candidate) => candidate.name === "codex-statusline");
+    expect(tool).toMatchObject({ scope: "core", managed: true });
+    expect(providerFor(tool!, WSL24)).toEqual({ kind: "builtin", name: "codex-statusline" });
+    expect(providerFor(tool!, WINDOWS)).toEqual({ kind: "builtin", name: "codex-statusline" });
+  });
+
   test("Linux desktop declares wl-clipboard for Zellij copy", () => {
     const tool = TOOLS.find((t) => t.name === "wl-clipboard");
     expect(tool?.scope).toBe("desktop");
