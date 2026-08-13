@@ -14,6 +14,7 @@ import { formatBytes, formatDuration, log, logIsCaptured, RedError } from "./log
 import { parseChecksums, pickChecksumAsset, sha256Hex, verifyChecksum } from "./checksum.ts";
 import type { Provider } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
+import { startProcessHeartbeat } from "./process-heartbeat.ts";
 import { missingRights } from "./rights.ts";
 import { tlsTrustFailure, unattendedEnvironment } from "./unattended.ts";
 
@@ -36,7 +37,10 @@ export const providerStdinMode = (
  * line that rewrites itself becomes the last thing it said, rather than
  * every state it passed through concatenated into one unreadable row.
  */
-async function pumpToLog(stream: ReadableStream<Uint8Array> | null): Promise<string> {
+async function pumpToLog(
+  stream: ReadableStream<Uint8Array> | null,
+  activity: () => void = () => {},
+): Promise<string> {
   if (!stream) return "";
   const decoder = new TextDecoder();
   let raw = "";
@@ -46,6 +50,7 @@ async function pumpToLog(stream: ReadableStream<Uint8Array> | null): Promise<str
     if (line) log.plain(line);
   };
   for await (const chunk of stream) {
+    activity();
     const text = decoder.decode(chunk as Uint8Array, { stream: true });
     raw += text;
     rest += text;
@@ -73,9 +78,14 @@ async function pumpToLog(stream: ReadableStream<Uint8Array> | null): Promise<str
 /** Stream both child outputs through the logger and retain them for classification. */
 export async function spawnLoggedCapture(
   cmd: string[],
-  extra: { env?: Record<string, string | undefined>; cwd?: string } = {},
+  extra: {
+    env?: Record<string, string | undefined>;
+    cwd?: string;
+    /** Test seam; production uses the shared five-second cadence. */
+    heartbeatMs?: number;
+  } = {},
 ): Promise<{ code: number; out: string; err: string }> {
-  const { env, ...spawnOptions } = extra;
+  const { env, heartbeatMs, ...spawnOptions } = extra;
   const proc = Bun.spawn(cmd, {
     stdout: "pipe",
     stderr: "pipe",
@@ -83,12 +93,17 @@ export async function spawnLoggedCapture(
     ...spawnOptions,
     env: unattendedEnvironment(process.env, env),
   });
-  const [out, err, code] = await Promise.all([
-    pumpToLog(proc.stdout),
-    pumpToLog(proc.stderr),
-    proc.exited,
-  ]);
-  return { code, out, err };
+  const heartbeat = startProcessHeartbeat(cmd, heartbeatMs);
+  try {
+    const [out, err, code] = await Promise.all([
+      pumpToLog(proc.stdout, heartbeat.activity),
+      pumpToLog(proc.stderr, heartbeat.activity),
+      proc.exited,
+    ]);
+    return { code, out, err };
+  } finally {
+    heartbeat.stop();
+  }
 }
 
 /**
@@ -107,10 +122,14 @@ export async function spawnLoggedCapture(
  */
 export async function spawnLogged(
   cmd: string[],
-  extra: { env?: Record<string, string | undefined>; cwd?: string } = {},
+  extra: {
+    env?: Record<string, string | undefined>;
+    cwd?: string;
+    heartbeatMs?: number;
+  } = {},
 ): Promise<number> {
   if (!logIsCaptured()) {
-    const { env, ...spawnOptions } = extra;
+    const { env, heartbeatMs, ...spawnOptions } = extra;
     const proc = Bun.spawn(cmd, {
       stdout: "inherit",
       stderr: "inherit",
@@ -118,7 +137,14 @@ export async function spawnLogged(
       ...spawnOptions,
       env: unattendedEnvironment(process.env, env),
     });
-    return await proc.exited;
+    // Inherited output cannot be observed here, so do not claim it has been
+    // silent. The elapsed heartbeat still proves the child is alive.
+    const heartbeat = startProcessHeartbeat(cmd, heartbeatMs, false);
+    try {
+      return await proc.exited;
+    } finally {
+      heartbeat.stop();
+    }
   }
 
   return (await spawnLoggedCapture(cmd, extra)).code;

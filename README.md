@@ -271,6 +271,10 @@ lets a corporate interception proxy work after its CA has been registered by
 the administrator, including inside npm lifecycle scripts and other nested
 installers. If the CA is absent, the result names the untrusted certificate
 chain instead of reducing it to `npm exited non-zero`.
+Long-running child processes report a heartbeat every five seconds. It names
+the executable, total elapsed time and, where red-dev owns the output stream,
+how long that child has been silent. A quiet compiler or package-manager lock
+therefore stays visibly alive instead of looking identical to a frozen run.
 Convergence makes the input gestures a workstation contract rather than an
 agent-specific surprise. Shift+Enter is emitted as CSI-u by Alacritty and
 Windows Terminal, mapped to a newline in Claude Code, and stated explicitly in

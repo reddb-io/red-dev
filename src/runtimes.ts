@@ -19,6 +19,7 @@
  */
 
 import { log, RedError } from "./log.ts";
+import { startProcessHeartbeat } from "./process-heartbeat.ts";
 import type { Platform } from "./platform.ts";
 import { unattendedEnvironment } from "./unattended.ts";
 
@@ -335,18 +336,24 @@ async function run(
     stdin: "ignore",
     env: unattendedEnvironment(process.env, extraEnv),
   });
-  const [out, err, code] = await Promise.all([
-    readRuntimeOutput(proc.stdout, live),
-    readRuntimeOutput(proc.stderr, live),
-    proc.exited,
-  ]);
-  return { code, out, err };
+  const heartbeat = live ? startProcessHeartbeat(cmd) : null;
+  try {
+    const [out, err, code] = await Promise.all([
+      readRuntimeOutput(proc.stdout, live, heartbeat?.activity),
+      readRuntimeOutput(proc.stderr, live, heartbeat?.activity),
+      proc.exited,
+    ]);
+    return { code, out, err };
+  } finally {
+    heartbeat?.stop();
+  }
 }
 
 /** Forward mise progress without surrendering the error text needed by callers. */
 async function readRuntimeOutput(
   stream: ReadableStream<Uint8Array>,
   live: boolean,
+  activity: (() => void) | undefined = undefined,
 ): Promise<string> {
   const decoder = new TextDecoder();
   let raw = "";
@@ -358,6 +365,7 @@ async function readRuntimeOutput(
   };
 
   for await (const chunk of stream) {
+    activity?.();
     const text = decoder.decode(chunk as Uint8Array, { stream: true });
     raw += text;
     rest += text;
