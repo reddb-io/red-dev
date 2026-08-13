@@ -27,6 +27,7 @@ export function startProcessHeartbeat(
   command: string[],
   intervalMs = PROCESS_HEARTBEAT_MS,
   tracksOutput = true,
+  inactivityLabel = "no output for",
 ): ProcessHeartbeat {
   const started = Date.now();
   let lastActivity = started;
@@ -34,7 +35,7 @@ export function startProcessHeartbeat(
   const timer = setInterval(() => {
     const now = Date.now();
     const silence = tracksOutput
-      ? ` · no output for ${formatDuration(now - lastActivity)}`
+      ? ` · ${inactivityLabel} ${formatDuration(now - lastActivity)}`
       : "";
     log.info(`${name} still running — ${formatDuration(now - started)} elapsed${silence}`);
   }, intervalMs);

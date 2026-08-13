@@ -355,6 +355,60 @@ export interface DownloadOptions {
   /** Injected by tests, so a download can be asserted without a disk. */
   write?: (path: string, bytes: Uint8Array) => Promise<unknown>;
   timeoutMs?: number;
+  /** Test seam; production uses the shared five-second cadence. */
+  heartbeatMs?: number;
+}
+
+interface ObservedFetchOptions {
+  fetcher?: typeof fetch;
+  init?: RequestInit;
+  timeoutMs: number;
+  heartbeatMs?: number;
+}
+
+/** Fetch headers and body while keeping network silence visible. */
+async function fetchObservedBytes(
+  url: string,
+  opts: ObservedFetchOptions,
+): Promise<{ response: Response; body: Uint8Array }> {
+  const heartbeat = startProcessHeartbeat(
+    ["fetch"],
+    opts.heartbeatMs,
+    true,
+    "no response data for",
+  );
+  try {
+    const response = await (opts.fetcher ?? fetch)(url, {
+      ...opts.init,
+      signal: AbortSignal.timeout(opts.timeoutMs),
+    });
+    heartbeat.activity();
+    if (!response.body) return { response, body: new Uint8Array() };
+
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    for (;;) {
+      const next = await reader.read();
+      if (next.done) break;
+      heartbeat.activity();
+      chunks.push(next.value);
+      size += next.value.byteLength;
+    }
+    const body = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      body.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return { response, body };
+  } finally {
+    heartbeat.stop();
+  }
+}
+
+function requestTimedOut(err: unknown): boolean {
+  return (err as Error).name === "TimeoutError" || (err as Error).name === "AbortError";
 }
 
 /**
@@ -375,12 +429,12 @@ async function publishedChecksum(
   const name = url.split("/").pop() ?? url;
   log.info(`published checksums: ${name}`);
   try {
-    const res = await fetcher(url, { signal: AbortSignal.timeout(timeoutMs) });
+    const { response: res, body } = await fetchObservedBytes(url, { fetcher, timeoutMs });
     if (!res.ok) {
       log.warn(`could not read ${name} (${res.status})`);
       return null;
     }
-    const hash = parseChecksums(await res.text(), file);
+    const hash = parseChecksums(new TextDecoder().decode(body), file);
     if (!hash) log.warn(`${name} has no entry for ${file}`);
     return hash;
   } catch (err) {
@@ -415,15 +469,21 @@ export async function downloadVerified(
   log.info(`saving to ${dest}`);
 
   const started = Date.now();
-  const res = await fetcher(url, { signal: AbortSignal.timeout(timeoutMs) }).catch(
+  const fetched = await fetchObservedBytes(url, {
+    fetcher,
+    timeoutMs,
+    heartbeatMs: opts.heartbeatMs,
+  }).catch(
     (err: unknown) => {
       throw new RedError(
-        `download did not finish within ${timeoutMs / 1000}s: ${url} (${(err as Error).name})`,
+        requestTimedOut(err)
+          ? `download did not finish within ${timeoutMs / 1000}s: ${url}`
+          : `download failed: ${url} (${(err as Error).message})`,
       );
     },
   );
+  const { response: res, body } = fetched;
   if (!res.ok) throw new RedError(`download failed ${res.status}: ${url}`);
-  const body = new Uint8Array(await res.arrayBuffer());
   log.info(`received ${formatBytes(body.byteLength)} in ${formatDuration(Date.now() - started)}`);
 
   const digest = sha256Hex(body);
@@ -515,14 +575,17 @@ export async function resolveGhRelease(
   // and nothing else — never even the "github: …" line, which is logged
   // after this call returns — so the API request was where it sat, with
   // no child process to notice and no error to report.
-  const res = await fetch(releaseApiUrl(repo, version), {
-    headers,
-    signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+  const fetched = await fetchObservedBytes(releaseApiUrl(repo, version), {
+    init: { headers },
+    timeoutMs: DOWNLOAD_TIMEOUT_MS,
   }).catch((err: unknown) => {
     throw new RedError(
-      `GitHub API did not answer within ${DOWNLOAD_TIMEOUT_MS / 1000}s for ${repo} (${(err as Error).name})`,
+      requestTimedOut(err)
+        ? `GitHub API did not answer within ${DOWNLOAD_TIMEOUT_MS / 1000}s for ${repo}`
+        : `GitHub API failed for ${repo} (${(err as Error).message})`,
     );
   });
+  const { response: res, body: responseBody } = fetched;
   if (!res.ok) {
     throw new RedError(
       `GitHub API ${res.status} for ${repo}` +
@@ -535,7 +598,10 @@ export async function resolveGhRelease(
     );
   }
 
-  const body = (await res.json()) as { assets?: GhAsset[]; tag_name?: string };
+  const body = JSON.parse(new TextDecoder().decode(responseBody)) as {
+    assets?: GhAsset[];
+    tag_name?: string;
+  };
   const assets = body.assets ?? [];
   const re = globToRegExp(glob);
   const hit = assets.find((a) => re.test(a.name));
@@ -800,6 +866,7 @@ export async function installerInstall(
   note: string,
   args: string[] = [],
   env?: Record<string, string | undefined>,
+  network: { heartbeatMs?: number; timeoutMs?: number } = {},
 ): Promise<void> {
   log.step(`installer: ${url}`);
   log.plain(`       ${note}`);
@@ -820,9 +887,20 @@ export async function installerInstall(
   const tmp = tempFile(`installer-${Date.now()}.sh`);
   log.info(`fetching the vendor script from ${url}`);
   log.info(`saving to ${tmp}`);
-  const res = await fetch(url);
+  const timeoutMs = network.timeoutMs ?? DOWNLOAD_TIMEOUT_MS;
+  const fetched = await fetchObservedBytes(url, {
+    timeoutMs,
+    heartbeatMs: network.heartbeatMs,
+  }).catch((err: unknown) => {
+    throw new RedError(
+      requestTimedOut(err)
+        ? `installer download did not finish within ${timeoutMs / 1000}s: ${url}`
+        : `installer download failed: ${url} (${(err as Error).message})`,
+    );
+  });
+  const { response: res, body: responseBody } = fetched;
   if (!res.ok) throw new RedError(`installer download failed ${res.status}: ${url}`);
-  const body = await res.text();
+  const body = new TextDecoder().decode(responseBody);
   if (body.trim().length === 0) throw new RedError(`installer at ${url} was empty`);
   // A vendor script publishes no checksum anywhere this can reach, so
   // the hash is a record rather than a comparison — which is still the

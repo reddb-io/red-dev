@@ -275,6 +275,10 @@ Long-running child processes report a heartbeat every five seconds. It names
 the executable, total elapsed time and, where red-dev owns the output stream,
 how long that child has been silent. A quiet compiler or package-manager lock
 therefore stays visibly alive instead of looking identical to a frozen run.
+Network work uses the same heartbeat before response headers and while reading
+the body. Provider downloads have a total 90-second deadline, so a proxy that
+accepts a connection but never completes it becomes an attributed failure
+rather than pinning the whole converge indefinitely.
 Convergence makes the input gestures a workstation contract rather than an
 agent-specific surprise. Shift+Enter is emitted as CSI-u by Alacritty and
 Windows Terminal, mapped to a newline in Claude Code, and stated explicitly in

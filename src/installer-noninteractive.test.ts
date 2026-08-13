@@ -6,7 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { captureTo } from "./log.ts";
-import { providerStdinMode, spawnLoggedCapture } from "./providers.ts";
+import { installerInstall, providerStdinMode, spawnLoggedCapture } from "./providers.ts";
 
 const providers = readFileSync(`${import.meta.dir}/providers.ts`, "utf8");
 const agents = readFileSync(`${import.meta.dir}/agents.ts`, "utf8");
@@ -77,6 +77,59 @@ describe("unattended provider commands", () => {
       await child;
     } finally {
       release();
+    }
+  });
+
+  test("a vendor script fetch stays observable before response headers arrive", async () => {
+    const seen: string[] = [];
+    const server = Bun.serve({
+      port: 0,
+      fetch: async () => {
+        await Bun.sleep(180);
+        return new Response("#!/bin/sh\nexit 0\n");
+      },
+    });
+    const release = captureTo((line) => seen.push(line));
+    try {
+      const install = installerInstall(
+        `http://127.0.0.1:${server.port}/install.sh`,
+        "delayed fixture",
+        [],
+        undefined,
+        { heartbeatMs: 40, timeoutMs: 1_000 },
+      );
+
+      await Bun.sleep(110);
+      const beforeHeaders = [...seen];
+      await install;
+      expect(beforeHeaders.some((line) => line.includes("fetch still running"))).toBe(true);
+      expect(beforeHeaders.some((line) => line.includes("no response data for"))).toBe(true);
+    } finally {
+      release();
+      server.stop(true);
+    }
+  });
+
+  test("a vendor script fetch has a total deadline instead of waiting forever", async () => {
+    const server = Bun.serve({
+      port: 0,
+      fetch: async () => {
+        await Bun.sleep(5_000);
+        return new Response("#!/bin/sh\nexit 0\n");
+      },
+    });
+    try {
+      await expect(
+        installerInstall(
+          `http://127.0.0.1:${server.port}/install.sh`,
+          "stalled fixture",
+          [],
+          undefined,
+          { heartbeatMs: 20, timeoutMs: 80 },
+        ),
+      ).rejects.toThrow(/installer download did not finish within/);
+    } finally {
+      server.stop(true);
     }
   });
 
