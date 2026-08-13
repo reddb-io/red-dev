@@ -408,7 +408,7 @@ deliberately:
 | `red-dev theme` | which theme, when given no name |
 | `red-dev wallpaper` | which bundled Red artwork, a custom PNG path/HTTPS URL, or whether to follow the theme |
 | `red-dev apps` | which optional tools — all ticked; untick to opt out |
-| `red-dev lang` | which runtimes mise should manage — all ticked; untick to opt out |
+| `red-dev lang` | which runtimes mise should manage — Java, Ruby and Go start off; the rest are opt-out |
 | `red-dev shell` | whether a terminal lands in WSL or Git Bash |
 | `red-dev agents` | which coding agents — all ticked; untick to opt out, then offers red-skills |
 | `red-dev uninstall` | what to remove — and confirms before removing it |
@@ -752,8 +752,9 @@ where to share configuration, which shell the terminal opens, which agents,
 which runtimes, which optional tools, ble.sh, the font, the theme, the wallpaper,
 and Redwall — with
 the palette previewed while the cursor moves. Previous answers come back
-pre-ticked. Every install group starts fully selected and is opt-out, so agreeing
-is enter, enter, enter; `q` returns to the menu rather than starting anything.
+pre-ticked. Tools and agents are opt-out; Java, Ruby and Go start off because
+they are project-specific toolchains. Agreeing is enter, enter, enter; `q`
+returns to the menu rather than starting anything.
 
 #### The distro, converged from the Windows side
 

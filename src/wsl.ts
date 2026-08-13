@@ -334,24 +334,18 @@ export const NERD_FONTS: Record<string, NerdFontSpec> = {
 };
 
 async function ghAsset(repo: string, name: string): Promise<string> {
-  const headers: Record<string, string> = { Accept: "application/vnd.github+json" };
-  const token = process.env["GITHUB_TOKEN"];
-  if (token) headers["Authorization"] = `Bearer ${token}`;
+  // One GitHub resolver for every provider: authenticated when a token is
+  // available, bounded to 90 seconds, and explicit about rate limits. The
+  // old font-only request had no deadline, so `nerd-font` could wait forever
+  // immediately after the visible `dit — present` row.
+  const { resolveGhAsset } = await import("./providers.ts");
+  return await resolveGhAsset(repo, name);
+}
 
-  const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
-    headers,
-  });
-  if (!res.ok) throw new RedError(`GitHub API ${res.status} for ${repo}`);
-
-  const body = (await res.json()) as { assets?: { name: string; browser_download_url: string }[] };
-  const hit = (body.assets ?? []).find((a) => a.name === name);
-  if (!hit) {
-    throw new RedError(
-      `no asset named '${name}' in latest ${repo} release. Available:\n` +
-        (body.assets ?? []).map((a) => `  ${a.name}`).join("\n"),
-    );
-  }
-  return hit.browser_download_url;
+/** Download a font archive through the same bounded, narrated path as tools. */
+async function downloadFont(url: string, dest: string): Promise<void> {
+  const { downloadVerified } = await import("./providers.ts");
+  await downloadVerified(url, dest);
 }
 
 /**
@@ -406,9 +400,7 @@ async function installWindowsNerdFont(key: string): Promise<void> {
   // failure rather than as red-dev's plumbing.
   const tmp = tempDir(`font-${spec.asset}`);
 
-  const res = await fetch(url);
-  if (!res.ok) throw new RedError(`font download failed ${res.status}`);
-  await Bun.write(`${tmp}/font.zip`, res);
+  await downloadFont(url, `${tmp}/font.zip`);
   await run(["unzip", "-qo", `${tmp}/font.zip`, "-d", tmp]);
 
   await run(["mkdir", "-p", fontDir]);
@@ -468,9 +460,7 @@ async function installLinuxNerdFont(key: string): Promise<void> {
   // failure rather than as red-dev's plumbing.
   const tmp = tempDir(`font-${spec.asset}`);
 
-  const res = await fetch(url);
-  if (!res.ok) throw new RedError(`font download failed ${res.status}`);
-  await Bun.write(`${tmp}/font.zip`, res);
+  await downloadFont(url, `${tmp}/font.zip`);
   await run(["unzip", "-qo", `${tmp}/font.zip`, "-d", tmp]);
 
   const fontDir = `${process.env["HOME"] ?? ""}/.local/share/fonts/red-dev/${spec.asset}`;

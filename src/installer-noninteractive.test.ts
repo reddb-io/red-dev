@@ -37,6 +37,24 @@ describe("unattended provider commands", () => {
     }
   });
 
+  test("carriage-return progress reaches the TUI before the child exits", async () => {
+    const seen: string[] = [];
+    const release = captureTo((line) => seen.push(line));
+    try {
+      const child = spawnLoggedCapture([
+        process.execPath,
+        "-e",
+        'process.stderr.write("download 25%\\r"); setTimeout(() => process.stderr.write("download 100%\\n"), 250)',
+      ]);
+
+      await Bun.sleep(100);
+      expect(seen).toContain("download 25%");
+      await child;
+    } finally {
+      release();
+    }
+  });
+
   test("every winget path uses the observable capture helper", () => {
     expect(providers).toContain("await spawnLoggedCapture(");
     expect(agents).toContain("await spawnLoggedCapture(argv)");

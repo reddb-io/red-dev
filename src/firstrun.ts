@@ -408,12 +408,12 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
   }
 
   // 3. What you build with.
-  const { OFFERED_RUNTIMES } = await import("./runtimes.ts");
+  const { OFFERED_RUNTIMES, runtimeSelectedByDefault } = await import("./runtimes.ts");
   const runtimeLabels = OFFERED_RUNTIMES.map((r) => `${r.id} — ${r.about}`);
   const pickedRuntimes = await checkbox(
     "Language runtimes for mise to manage?",
     runtimeLabels as [string, ...string[]],
-    runtimeLabels,
+    runtimeLabels.filter((label) => runtimeSelectedByDefault(label.split(" ")[0]!)),
   );
 
   // 4. Extra tools, all of them ticked.

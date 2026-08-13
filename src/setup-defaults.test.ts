@@ -3,10 +3,9 @@
  *
  * A preset is not a detail: it is the answer most people will give. The
  * optional tools shipped with none of them ticked and a description
- * arguing that empty was a good answer, which is true for a list you
- * have to evaluate one by one and wrong for a curated one — the whole
- * premise of an omakase setup is that somebody already chose. Every
- * multi-choice step is therefore opt-out: enter accepts the whole set.
+ * arguing that empty was a good answer. Curated tools and agents are
+ * opt-out; project-specific language toolchains may deliberately start
+ * off while remaining one keypress away.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -60,25 +59,20 @@ describe("the optional tools", () => {
   });
 });
 
-describe("every multi-choice step", () => {
-  test("uses one opt-out contract", () => {
-    for (const q of questions(WSL, choices(4), choices(5), choices(3)).filter(
-      (candidate) => candidate.multi,
-    )) {
-      expect(q.preset, q.id).toEqual(q.choices.map((choice) => choice.key));
-    }
-  });
-
-  test("all language runtimes arrive marked", () => {
+describe("multi-choice defaults", () => {
+  test("language runtimes leave Java, Ruby and Go unmarked", () => {
     const runtimes = [
       { key: "node@lts", label: "Node", note: "" },
       { key: "bun@latest", label: "Bun", note: "" },
       { key: "python@3.13", label: "Python", note: "" },
+      { key: "go@latest", label: "Go", note: "" },
+      { key: "ruby@3.4", label: "Ruby", note: "" },
+      { key: "java@lts", label: "Java", note: "" },
     ];
     const q = questions(WSL, choices(2), choices(3), runtimes).find(
       (candidate) => candidate.id === "runtimes",
     );
-    expect(q?.preset).toEqual(runtimes.map((runtime) => runtime.key));
+    expect(q?.preset).toEqual(["node@lts", "bun@latest", "python@3.13"]);
   });
 
   test("all agents arrive marked", () => {
