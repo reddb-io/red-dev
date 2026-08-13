@@ -30,7 +30,9 @@ describe("every fullscreen view", () => {
       // The bug this replaces: all three returned a bare Box, so the
       // background was whatever the user's profile was — #012456 on a
       // default Windows PowerShell.
-      expect(sourceOf(view)).toContain("return Screen(");
+      // CentredScreen is a composition over Screen, so it preserves the
+      // full-viewport paint while constraining the application card.
+      expect(sourceOf(view)).toMatch(/return (?:Centered)?Screen\(/);
     });
 
     test(`${view} draws no borders`, () => {

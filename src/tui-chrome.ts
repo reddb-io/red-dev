@@ -44,6 +44,60 @@ export function Screen(width: number, height: number, ...children: Parameters<ty
   );
 }
 
+export interface CenteredFrame {
+  width: number;
+  height: number;
+}
+
+/** Size of a composed card inside Screen's one-cell outer padding. */
+export function centeredFrame(
+  viewportWidth: number,
+  viewportHeight: number,
+  maxWidth: number,
+  maxHeight: number,
+): CenteredFrame {
+  return {
+    width: Math.max(1, Math.min(maxWidth, viewportWidth - 2)),
+    height: Math.max(1, Math.min(maxHeight, viewportHeight - 2)),
+  };
+}
+
+/**
+ * A bounded, horizontally and vertically centred application surface.
+ *
+ * Omarchy Quattro's provisioner measures the live console and composes its
+ * logo/form in the middle instead of starting at row one. The reactive TUI
+ * already redraws when geometry changes; this is the corresponding layout
+ * primitive, keeping a large Ubuntu terminal from stretching the installer
+ * across the whole display while still consuming every cell on a small one.
+ */
+export function CenteredScreen(
+  width: number,
+  height: number,
+  maxWidth: number,
+  maxHeight: number,
+  ...children: Parameters<typeof Box>[1][]
+) {
+  const frame = centeredFrame(width, height, maxWidth, maxHeight);
+  return Screen(
+    width,
+    height,
+    Box(
+      {
+        flexDirection: "column",
+        width: Math.max(1, width - 2),
+        height: Math.max(1, height - 2),
+        alignItems: "center",
+        justifyContent: "center",
+      },
+      Box(
+        { flexDirection: "column", width: frame.width, height: frame.height },
+        ...children,
+      ),
+    ),
+  );
+}
+
 /**
  * One step up from the screen: the column that holds decisions.
  *
