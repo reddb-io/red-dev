@@ -52,7 +52,10 @@ console.log("OBSERVED: " + detail);
     );
 
     const result = await runBounded([process.execPath, harness], {
-      timeoutMs: 2_000,
+      // This deliberately crosses pipe-buffer capacity. Two seconds was
+      // enough alone but raced the full GitHub Actions matrix while Bun
+      // drained all 8,000 diagnostics, making a healthy child look hung.
+      timeoutMs: 10_000,
       env: { ...process.env, PATH: `${dir}:${process.env.PATH ?? ""}` },
     });
 

@@ -35,7 +35,15 @@ import { captureTo } from "./log.ts";
 import type { Platform } from "./platform.ts";
 import { summary } from "./platform.ts";
 import { swatches, THEMES, themeNames } from "./themes.ts";
-import { Header, Screen, StatusLine, Surface, Task } from "./tui-chrome.ts";
+import {
+  CenteredScreen,
+  centeredFrame,
+  Header,
+  Screen,
+  StatusLine,
+  Surface,
+  Task,
+} from "./tui-chrome.ts";
 import {
   CompletionLayout,
   InstallLayout,
@@ -455,16 +463,19 @@ export async function runTui(
     const activeTheme = names[themeIndex()] ?? names[0]!;
     const section = SECTIONS[sectionIndex()];
 
-    // Two columns, sized from the real terminal rather than assumed:
-    // an 80-column window and a 200-column one should both look
-    // deliberate.
-    const leftWidth = Math.max(22, Math.floor(width * 0.32));
-    const rightWidth = width - leftWidth - 5;
-    const bodyRows = Math.max(8, height - 6);
+    // Bounded like Omarchy Quattro's centred provisioner: an 80-column
+    // terminal still uses the available room, while a 200-column one
+    // remains a composed menu rather than two islands at opposite edges.
+    const frame = centeredFrame(width, height, 112, 34);
+    const leftWidth = Math.max(22, Math.floor(frame.width * 0.30));
+    const rightWidth = frame.width - leftWidth - 2;
+    const bodyRows = Math.max(8, frame.height - 4);
 
-    return Screen(
+    return CenteredScreen(
       width,
       height,
+      112,
+      34,
 
       Header("red-dev", inThemes ? "theme" : (section?.label.toLowerCase() ?? "")),
       Text({}, ""),
@@ -508,7 +519,7 @@ export async function runTui(
                     flexDirection: "column",
                     alignItems: "center",
                     justifyContent: "center",
-                    height: Math.max(8, (size.rows ?? 24) - 8),
+                    height: Math.max(8, bodyRows - 2),
                   },
                   BigText({
                     text: "red-dev",

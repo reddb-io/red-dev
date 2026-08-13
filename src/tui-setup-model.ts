@@ -26,7 +26,7 @@ import {
 import { createWizard } from "tuiuiu.js/hooks";
 import type { Platform } from "./platform.ts";
 import { summary } from "./platform.ts";
-import { Screen, Surface } from "./tui-chrome.ts";
+import { CenteredScreen, centeredFrame, Surface } from "./tui-chrome.ts";
 import { muted, ui } from "./tui-theme.ts";
 import { DEFAULT_THEME, swatches, THEMES, themeNames } from "./themes.ts";
 import type { ThemeSlug } from "./themes.ts";
@@ -420,18 +420,21 @@ export function setupSteps(
  */
 export function SetupLayout(m: SetupModel, p: Platform, width: number, height: number) {
   const q = m.steps[m.stepIndex()]!;
-  const bodyRows = Math.max(10, height - 8);
-  const twoColumn = width >= 86;
+  const frame = centeredFrame(width, height, 110, 34);
+  const bodyRows = Math.max(10, frame.height - 6);
+  const twoColumn = frame.width >= 86;
   // 26, not 22: at 22 the status dot pushed every title into an ellipsis
   // ("Termin…", "Runtim…"), which is worse than no timeline at all.
   const leftWidth = 26;
-  const rightWidth = twoColumn ? width - leftWidth - 7 : width - 4;
+  const rightWidth = twoColumn ? frame.width - leftWidth - 3 : frame.width;
   const isTheme = q.id === "theme";
   const activeKey = q.choices[m.cursor()]?.key ?? "";
 
-  return Screen(
+  return CenteredScreen(
     width,
     height,
+    110,
+    34,
 
     Box(
       { flexDirection: "row", justifyContent: "space-between" },
@@ -444,7 +447,7 @@ export function SetupLayout(m: SetupModel, p: Platform, width: number, height: n
       ProgressBar({
         value: m.stepIndex(),
         max: m.steps.length,
-        width: Math.min(width - 12, 48),
+        width: Math.min(frame.width - 8, 48),
         style: "block",
         color: ui.accent,
       }),
