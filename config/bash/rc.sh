@@ -69,6 +69,73 @@ if [ -z "${COLORTERM:-}" ] &&
   export COLORTERM=truecolor
 fi
 
+# XDG_RUNTIME_DIR, which WSL exports before anything creates it.
+#
+# With systemd on, wsl.exe puts XDG_RUNTIME_DIR=/run/user/<uid> in every
+# shell it starts, and starts that shell immediately — while systemd is
+# still booting. user@<uid>.service is ordered After=systemd-user-sessions
+# .service, so on a cold boot the directory arrives seconds after the
+# first prompt does. `red-dev` already enables linger, and linger does not
+# help: a lingering user still waits for the same barrier.
+#
+# The window is not cosmetic, because of what fills it. Two programs read
+# the variable during this file:
+#
+#   zellij     panics and exits 101, and the terminal comes up as a plain
+#              shell — the failure in the banner above.
+#   ble.sh     prints "XDG_RUNTIME_DIR is not a directory", then falls
+#              back to /tmp/blesh/<uid> and keeps its per-process temp
+#              files there.
+#
+# ble.sh's fallback is the worse half, because /tmp is not stable during
+# this same window: systemd-tmpfiles ships `D /tmp 1777 root root 30d`
+# and systemd-tmpfiles-setup runs --remove at boot, which empties /tmp
+# out from under the already-attached ble.sh. Every keystroke after that
+# writes to a directory that no longer exists, so the session floods with
+#
+#   -bash: /tmp/blesh/<uid>/<pid>.util.assign.tmp.0: No such file...
+#
+# until it is closed. Nothing recovers on its own: _ble_base_run was
+# resolved once, at load.
+#
+# So: wait a moment for the real directory, since on a cold boot it is
+# usually about a second away and joining the real user session is worth
+# far more than the wait — then give up and use one under $HOME, which no
+# boot-time cleaner touches. Both paths end with the variable naming a
+# directory that exists, which is the whole contract. If even $HOME will
+# not take one, unset it: a variable pointing at nothing is worse than no
+# variable, because it is exactly what stops programs from falling back.
+_red_xdg_usable() {
+  [ -n "${XDG_RUNTIME_DIR:-}" ] &&
+    [ -d "$XDG_RUNTIME_DIR" ] &&
+    [ -O "$XDG_RUNTIME_DIR" ] &&
+    [ -w "$XDG_RUNTIME_DIR" ] &&
+    [ -x "$XDG_RUNTIME_DIR" ]
+}
+
+if [ -n "${XDG_RUNTIME_DIR:-}" ] && ! _red_xdg_usable; then
+  # Ten tries at 0.2s. `sleep 0.2` is coreutils and not POSIX, so a shell
+  # whose sleep rejects it breaks out rather than sleeping ten seconds.
+  _red_xdg_tries=0
+  while [ "$_red_xdg_tries" -lt 10 ] && ! _red_xdg_usable; do
+    sleep 0.2 2>/dev/null || break
+    _red_xdg_tries=$((_red_xdg_tries + 1))
+  done
+  unset _red_xdg_tries
+
+  if ! _red_xdg_usable; then
+    _red_xdg_home="$HOME/.local/state/red-dev/run"
+    if mkdir -p "$_red_xdg_home" 2>/dev/null && chmod 700 "$_red_xdg_home" 2>/dev/null; then
+      XDG_RUNTIME_DIR="$_red_xdg_home"
+      export XDG_RUNTIME_DIR
+    else
+      unset XDG_RUNTIME_DIR
+    fi
+    unset _red_xdg_home
+  fi
+fi
+unset -f _red_xdg_usable
+
 # ble.sh, on by default. RED_BLE=0 opts out.
 #
 # It has to load before everything else and attach after everything
