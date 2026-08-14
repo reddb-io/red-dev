@@ -5,6 +5,18 @@ import { executablesEnvironment, npmArgv, resolveNpm } from "./agents.ts";
 import { log, RedError } from "./log.ts";
 import type { Platform } from "./platform.ts";
 import { requireSudo, spawnLoggedCapture } from "./providers.ts";
+import { UNATTENDED_ENV } from "./unattended.ts";
+
+const ELEVATED_PUPPETEER_ENV = [
+  "PATH",
+  "PUPPETEER_CACHE_DIR",
+  "SSL_CERT_FILE",
+  "CURL_CA_BUNDLE",
+  "NODE_EXTRA_CA_CERTS",
+  "REQUESTS_CA_BUNDLE",
+  "npm_config_cafile",
+  ...Object.keys(UNATTENDED_ENV),
+] as const;
 
 async function checked(
   argv: string[],
@@ -19,6 +31,19 @@ async function checked(
 /** Global executable path npm creates for Puppeteer's CLI. */
 export function puppeteerCli(prefix: string, p: Platform): string {
   return p.os === "windows" ? `${prefix}/puppeteer.cmd` : `${prefix}/bin/puppeteer`;
+}
+
+/** Keep mise's Node, machine trust and unattended mode across sudo's secure_path. */
+export function elevatedPuppeteerArgv(
+  cli: string,
+  args: string[],
+  env: Record<string, string | undefined>,
+): string[] {
+  const assignments = ELEVATED_PUPPETEER_ENV.flatMap((name) => {
+    const value = env[name];
+    return value === undefined ? [] : [`${name}=${value}`];
+  });
+  return ["sudo", "-E", "/usr/bin/env", ...assignments, ...npmArgv(cli, args)];
 }
 
 export async function installPuppeteer(p: Platform): Promise<void> {
@@ -61,7 +86,7 @@ export async function installPuppeteer(p: Platform): Promise<void> {
     await requireSudo();
     log.info("installing Chrome's Ubuntu libraries through Puppeteer's --install-deps contract");
     await checked(
-      ["sudo", "-E", ...npmArgv(cli, [...browserArgs, "--install-deps"])],
+      elevatedPuppeteerArgv(cli, [...browserArgs, "--install-deps"], env),
       env,
       "Puppeteer could not install Chrome's Ubuntu dependencies",
     );

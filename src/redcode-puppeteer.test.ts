@@ -9,7 +9,7 @@ import { setupPlan } from "./firstrun.ts";
 import { providerFor, TOOLS } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
 import { exactGhReleaseUrl } from "./providers.ts";
-import { puppeteerCli } from "./puppeteer.ts";
+import { elevatedPuppeteerArgv, puppeteerCli } from "./puppeteer.ts";
 
 function platform(os: "linux" | "windows", arch: Platform["arch"] = "x64"): Platform {
   return {
@@ -89,5 +89,33 @@ describe("Puppeteer toolchain", () => {
     expect(puppeteerCli("C:/mise/node", platform("windows"))).toBe(
       "C:/mise/node/puppeteer.cmd",
     );
+  });
+
+  test("carries mise Node, corporate CAs and unattended apt settings across sudo", () => {
+    const argv = elevatedPuppeteerArgv(
+      "/home/dev/.local/share/mise/installs/node/24/bin/puppeteer",
+      ["browsers", "install", "chrome", "--install-deps"],
+      {
+        PATH: "/home/dev/.local/share/mise/installs/node/24/bin:/usr/bin",
+        PUPPETEER_CACHE_DIR: "/home/dev/.cache/puppeteer",
+        NODE_EXTRA_CA_CERTS: "/etc/ssl/certs/ca-certificates.crt",
+        DEBIAN_FRONTEND: "noninteractive",
+        GITHUB_TOKEN: "must-not-cross-sudo",
+      },
+    );
+
+    expect(argv.slice(0, 3)).toEqual(["sudo", "-E", "/usr/bin/env"]);
+    expect(argv).toContain("PATH=/home/dev/.local/share/mise/installs/node/24/bin:/usr/bin");
+    expect(argv).toContain("PUPPETEER_CACHE_DIR=/home/dev/.cache/puppeteer");
+    expect(argv).toContain("NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt");
+    expect(argv).toContain("DEBIAN_FRONTEND=noninteractive");
+    expect(argv).not.toContain("GITHUB_TOKEN=must-not-cross-sudo");
+    expect(argv.slice(-5)).toEqual([
+      "/home/dev/.local/share/mise/installs/node/24/bin/puppeteer",
+      "browsers",
+      "install",
+      "chrome",
+      "--install-deps",
+    ]);
   });
 });
