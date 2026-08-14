@@ -13,7 +13,7 @@
  *
  * ## Defer, for the tools that can
  *
- * bat, delta, opencode, herdr and btop all ship a setting meaning
+ * bat, delta, redcode, herdr and btop all ship a setting meaning
  * *render through the host terminal's own colours* — `base16`,
  * `"system"`, `"terminal"`, `TTY`. Those settings are kept, and that is
  * not a contradiction of "stop applying themes": they pick no colour.
@@ -145,7 +145,7 @@ async function clearZellijDir(dir: string): Promise<boolean> {
  * `TTY` is a builtin — btop.conf documents it beside `Default` — and it
  * renders through the terminal's sixteen ANSI slots rather than the
  * twenty-four-bit table `Default` carries. So it is the same answer bat
- * and opencode give, spelled in btop's vocabulary.
+ * and RedCode give, spelled in btop's vocabulary.
  *
  * Not simply deleting the `color_theme` line, which would leave btop on
  * `Default` and painting its own greens and blues over a terminal the
@@ -263,7 +263,7 @@ export async function applyDelta(): Promise<boolean> {
   return (await proc.exited) === 0;
 }
 
-// -------------------------------------------------- opencode, herdr
+// --------------------------------------------------- redcode, herdr
 
 const OPENCODE_INPUT = {
   input_newline: "shift+return,ctrl+return,alt+return,ctrl+j",
@@ -278,7 +278,7 @@ function sameJson(left: unknown, right: unknown): boolean {
 }
 
 /**
- * State the workstation's input contract in OpenCode's own keymap.
+ * State the workstation's input contract in the OpenCode-compatible keymap.
  *
  * These happen to be OpenCode's defaults today. Writing them is still useful:
  * the behavior becomes a red-dev invariant that can be diagnosed, and an
@@ -293,14 +293,14 @@ export async function convergeOpenCodeInput(path: string): Promise<OpenCodeInput
       if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error();
       cfg = parsed as Record<string, unknown>;
     } catch {
-      log.skip("opencode tui.json is not valid JSON — left alone");
+      log.skip("RedCode tui.json is not valid JSON — left alone");
       return { input_newline: "malformed", input_paste: "malformed" };
     }
   }
 
   const existing = cfg["keybinds"];
   if (existing !== undefined && (typeof existing !== "object" || existing === null || Array.isArray(existing))) {
-    log.skip("opencode tui.json keybinds is not an object — left alone");
+    log.skip("RedCode tui.json keybinds is not an object — left alone");
     return { input_newline: "malformed", input_paste: "malformed" };
   }
   const keybinds = { ...((existing ?? {}) as Record<string, unknown>) };
@@ -317,7 +317,7 @@ export async function convergeOpenCodeInput(path: string): Promise<OpenCodeInput
       result[key] = "already-set";
     } else {
       result[key] = "conflict";
-      log.skip(`opencode ${key} is already bound — left alone`);
+      log.skip(`RedCode ${key} is already bound — left alone`);
     }
   }
 
@@ -329,16 +329,16 @@ export async function convergeOpenCodeInput(path: string): Promise<OpenCodeInput
 }
 
 /**
- * opencode, following omarchy's lead.
+ * RedCode, following omarchy's OpenCode-compatible config contract.
  *
  * DHH sets `"theme": "system"` so the agent tracks whatever the terminal
  * is doing rather than pinning a palette that will drift. That was right
  * when the terminal had one fixed palette and it is more right now that
  * the terminal has the user's.
  */
-export async function applyOpencode(p: Platform): Promise<boolean> {
-  if (!Bun.which("opencode")) return false;
-  const dir = `${configHome(p, "opencode")}/opencode`;
+export async function applyRedcode(p: Platform): Promise<boolean> {
+  if (!Bun.which("redcode")) return false;
+  const dir = `${configHome(p, "redcode")}/redcode`;
   mkdirSync(dir, { recursive: true });
   const path = `${dir}/opencode.json`;
 
@@ -347,7 +347,7 @@ export async function applyOpencode(p: Platform): Promise<boolean> {
     try {
       cfg = JSON.parse(await Bun.file(path).text()) as Record<string, unknown>;
     } catch {
-      log.skip("opencode.json is not valid JSON — left alone");
+      log.skip("RedCode opencode.json is not valid JSON — left alone");
       return false;
     }
   }
@@ -431,7 +431,7 @@ export async function applyTerminalDefaults(p: Platform): Promise<TerminalSurfac
   const defers: [string, () => Promise<boolean>][] = [
     ["bat", () => applyBat(p)],
     ["delta", () => applyDelta()],
-    ["opencode", () => applyOpencode(p)],
+    ["redcode", () => applyRedcode(p)],
     ["herdr", () => applyHerdr(p)],
   ];
 

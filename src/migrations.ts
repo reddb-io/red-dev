@@ -264,6 +264,27 @@ return {}
       log.plain("       Neovim is yours again — LazyVim picks its own colorscheme");
     },
   },
+  {
+    id: "2026-08-14-opencode-to-redcode",
+    describe: "move the selected terminal agent from OpenCode to RedCode",
+    applies: async (p) => {
+      if ((await readPreferences(p)).agents?.includes("opencode") !== true) return false;
+      const { availableAgents } = await import("./agents.ts");
+      return availableAgents(p).some((agent) => agent.key === "redcode");
+    },
+    run: async (p) => {
+      const { availableAgents, currentAgentKeys, installAgent, isAgentReady } = await import(
+        "./agents.ts"
+      );
+      const prefs = await readPreferences(p);
+      const redcode = availableAgents(p).find((agent) => agent.key === "redcode");
+      if (!redcode) throw new Error(`RedCode has no release for ${p.os}/${p.arch}`);
+      if (!(await isAgentReady(redcode))) await installAgent(redcode, p);
+      const agents = currentAgentKeys(prefs.agents ?? []);
+      await writePreferences(p, { agents });
+      log.plain("       installed and selected RedCode; the existing OpenCode binary and config were left untouched");
+    },
+  },
 ];
 
 /**

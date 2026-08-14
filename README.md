@@ -253,7 +253,12 @@ that one is npm, while T3 Code went the other way, because npm's `t3code-cli` is
 a third-party wrapper and winget's `T3Tools.T3Code` is the publisher's own.
 Picking any CLI agent then offers
 [red-skills](https://github.com/reddb-io/red-skills), which registers its
-marketplace in Claude Code and Codex and generates plugin modules for OpenCode.
+marketplace in Claude Code and Codex and generates plugin modules for RedCode.
+RedCode comes from `reddb-io/redcode` release archives through GitHub's stable
+download redirect, so a clean machine does not need `gh` or an API request to
+discover it. Its published `SHA256SUMS` is verified before extraction. Existing
+OpenCode binaries and configuration are left untouched;
+an old recorded `opencode` selection migrates to `redcode` side-by-side.
 On native Windows, a WSL terminal choice makes the selection a workstation
 choice: compatible CLI agents and runtimes are installed on Windows **and** in
 the selected WSL 2 distro. Desktop applications remain on Windows. Choosing Git
@@ -282,7 +287,7 @@ rather than pinning the whole converge indefinitely.
 Convergence makes the input gestures a workstation contract rather than an
 agent-specific surprise. Shift+Enter is emitted as CSI-u by Alacritty and
 Windows Terminal, mapped to a newline in Claude Code, and stated explicitly in
-OpenCode's `tui.json`; Codex receives the same terminal sequence. Alt+V sends
+RedCode's OpenCode-compatible `tui.json`; Codex receives the same terminal sequence. Alt+V sends
 the raw image-paste gesture on Alacritty and Windows Terminal, while
 Ctrl+Shift+V remains text paste. Plain Shift+V cannot be used because it is the
 ordinary uppercase `V`. Every config merge is non-destructive: malformed JSON
@@ -292,7 +297,10 @@ and explicit conflicting bindings are left alone, and re-running is a no-op.
 
 **Optional**, never installed by a plain converge — `red-dev apps` offers them,
 and so does the interview: `just` · `duf` · `dust` · `hyperfine` · `glow` ·
-`gitui`, plus `powertoys` on Windows.
+`gitui` and `puppeteer`, plus `powertoys` on Windows. Puppeteer installs its
+global CLI, the matching Chrome for Testing and Ubuntu's browser libraries,
+then proves the browser can launch headless. Projects that import Puppeteer
+still declare `puppeteer` in their own package dependencies.
 
 **Runtimes** are mise's, not the distro's, so `node` resolves the same way in
 WSL, on the desktop, and in Git Bash. `red-dev lang` chooses which. A version
@@ -451,7 +459,7 @@ each can arrive later:
 | --- | --- | --- |
 | Claude Code | marketplace | `claude plugin marketplace list` |
 | Codex CLI | marketplace | `codex plugin marketplace list` |
-| OpenCode | generated plugins and skills | its uninstall manifest |
+| RedCode | generated plugins and skills | its uninstall manifest under `~/.config/redcode` |
 
 Installing Codex a week after Claude is enough to get the marketplace into it —
 one unwired host is reason enough to run the installer, which configures every
@@ -915,7 +923,7 @@ text = 'CellBackground'
 foreground are yours, in your own `alacritty.toml` or your Windows Terminal
 scheme, and nothing here will touch them.
 
-The tools that can defer still do: `bat` and `delta` on `base16`, `opencode` on
+The tools that can defer still do: `bat` and `delta` on `base16`, `redcode` on
 `system`, `herdr` on `terminal`, `btop` on `TTY`. Those settings pick no colour
 — they are what stops each program picking one, so removing them is how you get
 a purple pager inside a terminal you just chose the colours for.

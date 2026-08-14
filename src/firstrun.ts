@@ -93,7 +93,9 @@ export async function setupPlan(p: Platform, choices: SetupChoices): Promise<Set
 
   const runtimes = [...choices.runtimes];
   if (!runtimes.some((runtime) => runtime.startsWith("node"))) {
-    const needsNpm = chosen.some((agent) => agentInstallMethod(agent, p) === "npm");
+    const needsNpm =
+      chosen.some((agent) => agentInstallMethod(agent, p) === "npm") ||
+      choices.apps.includes("puppeteer");
     if (needsNpm) runtimes.unshift("node@24");
   }
   for (const runtime of chosen.flatMap((agent) => agent.runtimeNeeds ?? [])) {
@@ -196,7 +198,7 @@ export async function applySetupAnswers(
  * This lived inside cmdInstall's first-run branch and nowhere else, so
  * the fullscreen menu — the path the one-liner takes — asked which
  * agents you wanted and then installed none of them. You picked
- * claude-code, codex and opencode, the interview closed, the converge
+ * claude-code, codex and redcode, the interview closed, the converge
  * ran, and nothing had happened.
  *
  * red-skills runs once at the end rather than per agent, because its

@@ -9,7 +9,7 @@
  */
 
 import { removeTemp, tempDir, tempFile } from "./temp.ts";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { formatBytes, formatDuration, log, logIsCaptured, RedError } from "./log.ts";
 import { parseChecksums, pickChecksumAsset, sha256Hex, verifyChecksum } from "./checksum.ts";
 import type { Provider } from "./manifest.ts";
@@ -686,6 +686,86 @@ export async function ghInstall(
 }
 
 /**
+ * A stable release asset whose filename is known exactly.
+ *
+ * GitHub serves this redirect from github.com rather than the REST API, so a
+ * fresh machine cannot spend an anonymous API quota merely discovering a name
+ * already declared in our catalog. RedCode owns its asset contract, making an
+ * exact URL both cheaper and stricter than resolving a glob through /latest.
+ */
+export function exactGhReleaseUrl(repo: string, asset: string, tag = "latest"): string {
+  const release = tag === "latest" ? "latest/download" : `download/${tag}`;
+  return `https://github.com/${repo}/releases/${release}/${asset}`;
+}
+
+function findNamedFile(root: string, wanted: string): string | null {
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    const path = `${root}/${entry.name}`;
+    if (entry.isDirectory()) {
+      const nested = findNamedFile(path, wanted);
+      if (nested) return nested;
+    } else if (entry.name.toLowerCase() === wanted.toLowerCase()) {
+      return path;
+    }
+  }
+  return null;
+}
+
+/** Install one exact archive asset without consulting the GitHub API. */
+export async function ghInstallExactArchive(
+  repo: string,
+  asset: string,
+  bin: string,
+  p: Platform,
+  tag = "latest",
+  checksumAsset = "SHA256SUMS",
+): Promise<void> {
+  const url = exactGhReleaseUrl(repo, asset, tag);
+  const checksumUrl = exactGhReleaseUrl(repo, checksumAsset, tag);
+  const tmp = tempDir(`gh-exact-${Date.now()}`);
+  const downloaded = `${tmp}/${asset}`;
+  log.step(`github: ${repo} -> ${asset}`);
+  log.info(`${tag === "latest" ? "stable release redirect" : `release ${tag}`} — no GitHub API lookup`);
+  await downloadVerified(url, downloaded, { checksumUrl });
+
+  if (asset.endsWith(".tar.gz") || asset.endsWith(".tgz")) {
+    log.info(`extracting ${asset}`);
+    await run(["tar", "-xzf", downloaded, "-C", tmp]);
+  } else if (asset.endsWith(".zip") && p.os === "windows") {
+    log.info(`extracting ${asset} with Windows PowerShell`);
+    await run([
+      "powershell.exe",
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      "Expand-Archive -LiteralPath $args[0] -DestinationPath $args[1] -Force",
+      downloaded,
+      tmp,
+    ]);
+  } else if (asset.endsWith(".zip")) {
+    log.info(`extracting ${asset}`);
+    await run(["unzip", "-qo", downloaded, "-d", tmp]);
+  } else {
+    removeTemp(tmp);
+    throw new RedError(`exact GitHub asset must be an archive: ${asset}`);
+  }
+
+  const filename = p.os === "windows" ? `${bin}.exe` : bin;
+  const source = findNamedFile(tmp, filename);
+  if (!source) {
+    removeTemp(tmp);
+    throw new RedError(`${asset} did not contain ${filename}`);
+  }
+  const dir = p.os === "windows" ? windowsBinDir() : userBinDir();
+  const target = `${dir}/${filename}`;
+  mkdirSync(dir, { recursive: true });
+  copyFileSync(source, target);
+  if (p.os !== "windows") chmodSync(target, 0o755);
+  log.ok(`installed ${target}`);
+  removeTemp(tmp);
+}
+
+/**
  * The same release, onto Windows.
  *
  * Neither of the two RedDB tools is on winget, and every other `gh`
@@ -1172,6 +1252,7 @@ const BUILTIN_INTENT: Partial<Record<BuiltinName, string>> = {
   "codex-statusline": "writing project, branch, model, effort, context and quotas into the Codex statusline",
   "claude-keybindings": "writing the Claude Code keybindings",
   "redwall-schedule": "scheduling the wallpaper rotation",
+  puppeteer: "installing Puppeteer, its matching Chrome for Testing and browser dependencies",
   "ssh-server": "installing and enabling the SSH server",
 };
 
@@ -1301,6 +1382,11 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
         // printed one. Throwing is reserved for a machine that could
         // hold a schedule and refused to.
         await applyRedwallSchedule(ctx.platform);
+        return;
+      }
+      if (pr.name === "puppeteer") {
+        const { installPuppeteer } = await import("./puppeteer.ts");
+        await installPuppeteer(ctx.platform);
         return;
       }
       if (pr.name === "ssh-server") {
