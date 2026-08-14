@@ -26,6 +26,11 @@ red-dev **stays cross-platform** (Linux, Windows/WSL, and eventually macOS) and 
 
 Cross-cutting: MCP is **optional-with-fallback**: every required capability has a stable CLI path.
 
+**Amendment (2026-08-14):** RedCode replaces OpenCode in the six-host profile.
+The existing OpenCode installation is not removed; recorded selections migrate
+to RedCode and RedSkills writes the compatible surface independently under
+`~/.config/redcode/`.
+
 **Amendment (2026-08-03):** the incremental clean-machine E2E fleet originally decided here was dropped by maintainer decision before any lane was built (#17, #18 closed as not planned). red-dev is a development environment for developers; validation happens by provisioning real environments — converge followed by a second converge with zero planned changes, plus the readiness report — not by CI-hosted clean-VM lanes. A phase closes when its promised behaviors are true on real environments and covered by the unit/integration suite.
 
 ## Consequences
