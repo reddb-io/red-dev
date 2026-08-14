@@ -61,7 +61,7 @@ converged before this release would otherwise keep importing twenty values
 forever. `RETIRED_PARTS` in `src/alacritty.ts` exists so the import line goes
 with the file.
 
-**Decline to pick.** `bat` and `delta` on `base16`, `opencode` on `"system"`,
+**Decline to pick.** `bat` and `delta` on `base16`, `redcode` on `"system"`,
 `herdr` on `name = "terminal"`, `btop` on `TTY`. Every one of these means
 *render through the host terminal's own colours*. **They are kept**, and that is
 not a contradiction of this ADR: they pick no colour, they are the instruction
