@@ -256,7 +256,8 @@ Picking any CLI agent then offers
 marketplace in Claude Code and Codex and generates plugin modules for RedCode.
 RedCode comes from `reddb-io/redcode` release archives through GitHub's stable
 download redirect, so a clean machine does not need `gh` or an API request to
-discover it. Existing OpenCode binaries and configuration are left untouched;
+discover it. Its published `SHA256SUMS` is verified before extraction. Existing
+OpenCode binaries and configuration are left untouched;
 an old recorded `opencode` selection migrates to `redcode` side-by-side.
 On native Windows, a WSL terminal choice makes the selection a workstation
 choice: compatible CLI agents and runtimes are installed on Windows **and** in

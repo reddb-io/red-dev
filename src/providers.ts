@@ -718,13 +718,15 @@ export async function ghInstallExactArchive(
   bin: string,
   p: Platform,
   tag = "latest",
+  checksumAsset = "SHA256SUMS",
 ): Promise<void> {
   const url = exactGhReleaseUrl(repo, asset, tag);
+  const checksumUrl = exactGhReleaseUrl(repo, checksumAsset, tag);
   const tmp = tempDir(`gh-exact-${Date.now()}`);
   const downloaded = `${tmp}/${asset}`;
   log.step(`github: ${repo} -> ${asset}`);
   log.info(`${tag === "latest" ? "stable release redirect" : `release ${tag}`} — no GitHub API lookup`);
-  await downloadVerified(url, downloaded);
+  await downloadVerified(url, downloaded, { checksumUrl });
 
   if (asset.endsWith(".tar.gz") || asset.endsWith(".tgz")) {
     log.info(`extracting ${asset}`);

@@ -44,6 +44,9 @@ describe("RedCode", () => {
     expect(exactGhReleaseUrl("reddb-io/redcode", "redcode-linux-x64.tar.gz")).toBe(
       "https://github.com/reddb-io/redcode/releases/latest/download/redcode-linux-x64.tar.gz",
     );
+    expect(exactGhReleaseUrl("reddb-io/redcode", "SHA256SUMS")).toEndWith(
+      "/releases/latest/download/SHA256SUMS",
+    );
   });
 
   test("offers only architectures for which the release exists", () => {
