@@ -4,7 +4,7 @@
  * It ran in exactly two places: the first-run interview, and behind a
  * confirm inside `red-dev agents`. A plain `install core` — which is
  * what the install script runs, and what anyone re-running red-dev
- * gets — never touched it. This machine carried claude, codex, opencode
+ * gets — never touched it. This machine carried claude, codex, redcode
  * and herdr with no marketplace registered in any of them.
  *
  * The readiness check is the other half. `~/.red-skills` had existed for
@@ -120,7 +120,7 @@ describe("how it decides it is already done", () => {
     // Install Codex a week after Claude and the check says "wired",
     // skips, and Codex never gets a marketplace — which is the case
     // that prompted this and the reason the probe is a table.
-    expect(SKILL_HOSTS.map((h) => h.cmd).sort()).toEqual(["claude", "codex", "opencode"]);
+    expect(SKILL_HOSTS.map((h) => h.cmd).sort()).toEqual(["claude", "codex", "redcode"]);
   });
 
   test("every host is a real agent, so the two lists cannot drift", () => {
@@ -136,9 +136,9 @@ describe("how it decides it is already done", () => {
   });
 
   test("and reads the manifest where it cannot", () => {
-    // OpenCode has no marketplace to list. The installer records what
+    // RedCode has no marketplace to list. The installer records what
     // it generated in an uninstall manifest; the config directory
-    // existing means nothing, since opencode creates that itself.
+    // existing means nothing, since redcode creates that itself.
     expect(src).toContain("redskills-install-manifest.txt");
   });
 

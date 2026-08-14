@@ -139,7 +139,7 @@ export function questions(
       title: "Agents",
       description:
         "Picking any CLI agent also installs red-skills, which registers its " +
-        "marketplace in Claude Code and Codex and generates plugin modules for OpenCode.",
+        "marketplace in Claude Code and Codex and generates plugin modules for RedCode.",
       multi: true,
       choices: agents,
       preset: agents.map((agent) => agent.key),

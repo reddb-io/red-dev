@@ -963,7 +963,7 @@ async function cmdApps(p: Platform, inv: Invocation): Promise<number> {
   for (const name of names) {
     const tool = available.find((t) => t.name === name);
     if (!tool) continue;
-    if (isInstalled(tool)) {
+    if (isInstalled(tool) && !tool.managed) {
       log.skip(`${name} already present`);
       continue;
     }
@@ -1249,9 +1249,13 @@ async function cmdWsl(p: Platform): Promise<number> {
  * assumed.
  */
 async function cmdAgents(p: Platform, inv: Invocation): Promise<number> {
-  const { AGENTS, availableAgents, isAgentInstalled, isAgentReady, installAgent, installRedSkills } =
+  const { AGENTS, availableAgents, currentAgentKeys, isAgentInstalled, isAgentReady, installAgent, installRedSkills } =
     await import("./agents.ts");
   const available = availableAgents(p);
+
+  if (inv.agentKeys !== undefined) {
+    inv = { ...inv, agentKeys: currentAgentKeys(inv.agentKeys) };
+  }
 
   // This is the path the Windows side uses to reproduce the selection
   // inside WSL. It is deliberately prompt-free and accepts only keys

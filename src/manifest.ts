@@ -140,6 +140,7 @@ type ProviderSpec =
         | "codex-statusline"
         | "claude-keybindings"
         | "redwall-schedule"
+        | "puppeteer"
         | "ssh-server";
     }
   /** Not installed here, deliberately. The reason is required. */
@@ -340,6 +341,7 @@ const builtin = (
     | "codex-statusline"
     | "claude-keybindings"
     | "redwall-schedule"
+    | "puppeteer"
     | "ssh-server",
 ): Provider => ({ kind: "builtin", name });
 const skip = (reason: string): Provider => ({ kind: "skip", reason });
@@ -812,6 +814,15 @@ export const TOOLS: Tool[] = [
   // ------------------------------------------------------ optional
   // Chosen, never assumed. `red-dev apps` offers these; a plain
   // converge ignores them entirely.
+  {
+    name: "puppeteer",
+    about: "browser automation CLI + Chrome for Testing + Ubuntu libraries — about 280 MB",
+    cmd: ["puppeteer"],
+    scope: "optional",
+    managed: true,
+    u24: sudoProvider(builtin("puppeteer")),
+    win: builtin("puppeteer"),
+  },
   {
     // Microsoft's own, and the closest Windows gets to the desktop half
     // of omakub. FancyZones is the analogue of tactile — a keyboard-

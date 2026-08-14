@@ -8,7 +8,7 @@
  *
  * red-skills is the reason this is a group rather than loose entries:
  * it registers a marketplace in Claude Code and Codex CLI and generates
- * plugin modules for OpenCode, so it is only meaningful once at least
+ * plugin modules for RedCode, so it is only meaningful once at least
  * one agent exists. Installing it alone would configure nothing.
  */
 
@@ -51,6 +51,12 @@ export interface AgentSpec {
   msstore?: string;
   /** npm package, when neither of the above fits the platform. */
   npm?: string;
+  /** GitHub release archives whose stable filenames are part of our contract. */
+  release?: {
+    repo: string;
+    linux: Partial<Record<Platform["arch"], string>>;
+    windows: Partial<Record<Platform["arch"], string>>;
+  };
   /** Runtimes an npm lifecycle script needs in addition to Node itself. */
   runtimeNeeds?: string[];
   /** A command that must start successfully before presence counts as ready. */
@@ -79,13 +85,22 @@ export const AGENTS: AgentSpec[] = [
     npm: "@openai/codex",
   },
   {
-    key: "opencode",
-    label: "OpenCode",
-    about: "SST's terminal agent",
-    cmd: "opencode",
+    key: "redcode",
+    label: "RedCode",
+    about: "RedDB's OpenCode-compatible terminal agent",
+    cmd: "redcode",
     recommended: true,
-    installer: "https://opencode.ai/install",
-    winget: "SST.opencode",
+    release: {
+      repo: "reddb-io/redcode",
+      linux: {
+        x64: "redcode-linux-x64.tar.gz",
+        arm64: "redcode-linux-arm64.tar.gz",
+      },
+      windows: {
+        x64: "redcode-windows-x64.zip",
+        arm64: "redcode-windows-arm64.zip",
+      },
+    },
   },
   {
     // npm only, and that is not an oversight: winget's repository has no
@@ -207,6 +222,11 @@ export const AGENTS: AgentSpec[] = [
   },
 ];
 
+/** Translate the retired OpenCode selection without uninstalling OpenCode itself. */
+export function currentAgentKeys(keys: readonly string[]): string[] {
+  return [...new Set(keys.map((key) => key === "opencode" ? "redcode" : key))];
+}
+
 /** Which agents can be installed here. */
 export function availableAgents(p: Platform): AgentSpec[] {
   return AGENTS.filter((a) => {
@@ -216,8 +236,8 @@ export function availableAgents(p: Platform): AgentSpec[] {
       // installing onto a host this scope does not own.
       return p.os === "windows";
     }
-    if (p.os === "windows") return Boolean(a.winget ?? a.msstore ?? a.npm);
-    return Boolean(a.installer ?? a.npm);
+    if (p.os === "windows") return Boolean(a.release?.windows[p.arch] ?? a.winget ?? a.msstore ?? a.npm);
+    return Boolean(a.release?.linux[p.arch] ?? a.installer ?? a.npm);
   });
 }
 
@@ -391,7 +411,7 @@ async function runWinget(argv: string[], label: string): Promise<void> {
  * batch file directly — the same story as winget's reparse point, with
  * the same answer: cmd.exe interprets it.
  */
-function npmArgv(npm: string, args: string[]): string[] {
+export function npmArgv(npm: string, args: string[]): string[] {
   const lower = npm.toLowerCase();
   return lower.endsWith(".cmd") || lower.endsWith(".bat")
     ? ["cmd.exe", "/c", npm, ...args]
@@ -406,7 +426,7 @@ function npmArgv(npm: string, args: string[]): string[] {
  * still "not on PATH" in the very same run. runtimeTool asks mise,
  * whose answer does not depend on when this process was born.
  */
-async function resolveNpm(): Promise<string | null> {
+export async function resolveNpm(): Promise<string | null> {
   const { runtimeTool } = await import("./runtimes.ts");
   return await runtimeTool("npm");
 }
@@ -474,10 +494,12 @@ async function exposeWindowsAgentCommand(a: AgentSpec): Promise<void> {
   log.ok("Codex CLI command exposed as codex");
 }
 
-export type AgentInstallMethod = "msstore" | "winget" | "npm" | "installer";
+export type AgentInstallMethod = "msstore" | "winget" | "npm" | "installer" | "github-release";
 
 /** Choose a method that can run unattended on this target. */
 export function agentInstallMethod(a: AgentSpec, p: Platform): AgentInstallMethod | null {
+  const release = p.os === "windows" ? a.release?.windows[p.arch] : a.release?.linux[p.arch];
+  if (release) return "github-release";
   if (p.os === "windows" && a.msstore) return "msstore";
   if (p.os === "windows" && a.winget) return "winget";
   if (p.os === "windows" && a.npm) return "npm";
@@ -491,6 +513,14 @@ export function agentInstallMethod(a: AgentSpec, p: Platform): AgentInstallMetho
 
 export async function installAgent(a: AgentSpec, p: Platform): Promise<void> {
   const method = agentInstallMethod(a, p);
+
+  if (method === "github-release" && a.release) {
+    const asset = p.os === "windows" ? a.release.windows[p.arch] : a.release.linux[p.arch];
+    if (!asset) throw new RedError(`no ${p.os}/${p.arch} release asset for ${a.label}`);
+    const { ghInstallExactArchive } = await import("./providers.ts");
+    await ghInstallExactArchive(a.release.repo, asset, a.cmd, p);
+    return;
+  }
 
   if (method === "msstore" && a.msstore) {
     // --source msstore is load-bearing, not a detail: without it winget
@@ -586,7 +616,7 @@ export async function installRedSkills(): Promise<void> {
   const node = await runtimeTool("node");
   log.step("red-skills");
   log.plain("     Registers the RedSkills marketplace in Claude Code and Codex,");
-  log.plain("     and generates plugin modules for OpenCode. User-level, global.");
+  log.plain("     and generates plugin modules for RedCode/OpenCode. User-level, global.");
   const home = process.env["USERPROFILE"] ?? process.env["HOME"];
   if (home && repairCopiedRedSkillsCurrent(home)) {
     log.plain("       replacing Git Bash's copied current snapshot with the managed source");
@@ -680,7 +710,7 @@ export async function updateRedSkills(p: Platform): Promise<void> {
  *
  *   claude    `claude plugin marketplace list`  names red-skills
  *   codex     `codex plugin marketplace list`   names red-skills
- *   opencode  no such command — the installer leaves an uninstall
+ *   redcode   no such command — the installer leaves an uninstall
  *             manifest, which is the only artifact that means "we did
  *             this" rather than "a directory exists"
  */
@@ -860,14 +890,14 @@ export const SKILL_HOSTS: SkillHost[] = [
     wired: () => cliNamesRedSkills(["codex", "plugin", "marketplace", "list"]),
   },
   {
-    agent: "opencode",
-    cmd: "opencode",
-    // OpenCode has no marketplace to list: red-skills generates plugin
+    agent: "redcode",
+    cmd: "redcode",
+    // RedCode has no marketplace to list: red-skills generates plugin
     // and skill modules into its config directory and records them in an
     // uninstall manifest. That file is the claim; the directory existing
-    // is not, since opencode makes it itself.
+    // is not, since redcode makes it itself.
     wired: async () =>
-      existsSync(`${configHome()}/opencode/redskills-install-manifest.txt`),
+      existsSync(`${configHome()}/redcode/redskills-install-manifest.txt`),
   },
 ];
 
@@ -897,7 +927,6 @@ export async function unwiredSkillHosts(): Promise<SkillHost[]> {
  * and with no agent to configure it has nothing to do.
  */
 export async function convergeRedSkills(p: Platform): Promise<void> {
-  void p;
   const present = SKILL_HOSTS.filter((h) => Bun.which(h.cmd));
   if (present.length === 0) {
     log.skip("red-skills: no coding agent installed to configure");
@@ -922,4 +951,11 @@ export async function convergeRedSkills(p: Platform): Promise<void> {
 
   log.step(`red-skills: not wired into ${missing.map((h) => h.cmd).join(", ")}`);
   await installRedSkills();
+  // The RedSkills generator owns the provider/MCP portions of opencode.json;
+  // red-dev owns terminal-following theme/input defaults. Re-apply our small
+  // merge after generation so a first RedCode migration converges in one run.
+  if (Bun.which("redcode")) {
+    const { applyRedcode } = await import("./terminal-surfaces.ts");
+    await applyRedcode(p);
+  }
 }

@@ -63,7 +63,7 @@ describe("theme surfaces", () => {
   });
 
   test("no terminal program is a theme surface any more", () => {
-    const inTheTerminal = ["zellij", "btop", "neovim", "bat", "delta", "lazygit", "opencode", "herdr"];
+    const inTheTerminal = ["zellij", "btop", "neovim", "bat", "delta", "lazygit", "redcode", "herdr"];
     for (const p of [windows, wsl]) {
       for (const name of inTheTerminal) {
         expect(themeSurfaceNames(p, redwallOn)).not.toContain(name);
