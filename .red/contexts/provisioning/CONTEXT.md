@@ -18,6 +18,12 @@ The current resource and lifecycle posture of the machine: process and task coun
 
 Evidence-driven online recovery of process groups whose owner has disappeared. Rescue is distinct from Reclaim: it may run while Workers are alive, but it protects every registered Worker, active unit, terminal, daemon descendant, and the current command ancestry. Preview is the default. Apply requires multiple independent orphan signals, a private forensic snapshot, PID start-time revalidation, group-wide TERM/KILL, and a verification snapshot. There is deliberately no force mode.
 
+## Catalogue
+
+The list of items a person ticks rather than receives — `optional` tools, web apps, services — offered by `red-dev apps` and the interview. Ticking installs; **unticking an installed item removes it**, after naming what goes, so the place where a person looks at the list is also where they take something out. Whole-product removal stays `red-dev uninstall`; the manifest's `core`/`desktop`/`wsl` scopes are not catalogue and are never unticked (decision of 2026-08-15).
+
+_Avoid_: optional list, extras, pre-installs (Omarchy's word for the same tier)
+
 ## E2E lane
 
 A clean machine (VM) for one target platform that walks the full journey — install → second convergence with zero drift → theme/font switch → N-1 update → rollback → uninstall. Incremental definition of done: each phase only closes with lanes covering what it shipped; no item is ever declared ready by mere file existence.
