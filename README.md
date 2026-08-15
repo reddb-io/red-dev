@@ -307,6 +307,31 @@ WSL, on the desktop, and in Git Bash. `red-dev lang` chooses which. A version
 manager that manages nothing is how `pnpm` ends up working in one shell and not
 another on the same machine.
 
+**And so is almost everything else that is not a distro package.** On Linux the
+tools red-dev used to download release-by-release — `starship`, `atuin`,
+`carapace`, `yazi`, `lazygit`, `lazydocker`, `dust`, `glow`, `gitui`, the
+RedDB CLIs `red` and `tq`, the pinned `zellij` fork, **and red-dev itself** —
+are mise's too. The reason is not tidiness: a converge that finds a binary on
+PATH never asks how old it is, so a hand-downloaded release was installed once
+and then frozen for good. `red-dev update` now names each of them to `mise
+upgrade`, which is also what finally makes red-dev self-updating.
+
+mise picks the asset for the platform, verifies the publisher's checksum, and
+verifies GitHub build attestations where the release carries them — ours do.
+It also holds a release back for a short while after publication, which red-dev
+leaves alone: the tag cut minutes ago is the one nobody has run yet.
+
+Three deliberately stay behind. `tldr` ships a binary called `tealdeer` and
+mise will not rename it. `red-ui` ships a .deb whose desktop integration a bare
+binary would shadow, and `red-request` ships a Windows installer rather than a
+binary. On Windows nothing moved: `winget upgrade --all` is already an updater,
+and replacing a working one buys nothing.
+
+Anything mise owns lands on PATH through its shims, which — unlike `mise
+activate` — also work in a script, a systemd unit and over SSH. A machine
+upgrading from an older release hands its `~/.local/bin` copies over on the
+next converge, and never before mise can answer for them.
+
 ### The shell
 
 Aliases that normalise Debian's renames (`bat` → `batcat`, `fd` → `fdfind`), the
@@ -347,7 +372,7 @@ red-dev platform             # what red-dev thinks this machine is
 red-dev plan [scope]         # what would change, changes nothing
 red-dev install [scope]      # converge toward the manifest
 red-dev install --dry-run    # print the plan, touch nothing
-red-dev update               # upgrade what the package managers own
+red-dev update               # upgrade the package managers, mise's tools and red-dev itself
 red-dev theme [name]         # dark | light | obsidian | marble | cobalt | flare
 red-dev wallpaper [source]   # theme | Red artwork | absolute PNG path | HTTPS URL
 red-dev redwall              # redraw the wallpaper carrying this machine's state

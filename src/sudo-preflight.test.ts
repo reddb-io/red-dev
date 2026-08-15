@@ -26,9 +26,14 @@ describe("the sudo preflight plan", () => {
     const names = sudoItemsFor(ubuntu, ["core", "desktop"], () => "absent");
 
     expect(names).toContain("btop");
-    expect(names).toContain("carapace");
     expect(names).toContain("red-request");
     expect(names).toContain("dit");
+    // carapace used to be here. Its Linux column was a .deb, which is
+    // the reason it asked; mise hands over a plain binary instead, so
+    // the preflight has one fewer item to justify. Asserted rather than
+    // dropped, because a .deb quietly returning would return the prompt
+    // with it.
+    expect(names).not.toContain("carapace");
   });
 
   test("a converged machine and native Windows ask for nothing", () => {

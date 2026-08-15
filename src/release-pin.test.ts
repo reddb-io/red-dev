@@ -124,12 +124,19 @@ describe("the zellij pin", () => {
     expect(comment.toLowerCase()).toContain("osc");
   });
 
-  test("fetches the pinned fork tag rather than whatever is newest", () => {
+  test("resolves the pinned fork tag rather than whatever is newest", () => {
+    // The mechanism moved from a release download to mise; the pin did
+    // not. An exact selector is what makes `mise upgrade` a no-op for
+    // this one tool while it moves every other tool in the fragment.
     expect(zellij?.u24).toEqual({
-      kind: "gh",
-      repo: "reddb-io/zellij",
-      asset: "zellij-x86_64-unknown-linux-musl.tar.gz",
-      version: "v0.44.3-red.2",
+      kind: "mise",
+      spec: "github:reddb-io/zellij",
+      // The alias is load-bearing rather than cosmetic: mise answers to
+      // the binary name, so without it `mise which zellij` and
+      // `mise upgrade zellij` both miss the fork, and the registry's
+      // upstream zellij is what the name would resolve to.
+      alias: "zellij",
+      version: "0.44.3-red.2",
     });
   });
 
@@ -140,20 +147,25 @@ describe("the zellij pin", () => {
     // between them, so agreement is asserted through it; the fields
     // drift silently otherwise.
     const u24 = zellij!.u24!;
-    if (u24.kind !== "gh") throw new Error("zellij u24 must stay the pinned gh provider");
+    if (u24.kind !== "mise") throw new Error("zellij u24 must stay the pinned mise provider");
     expect(parseVersion(u24.version!)).toBe(zellij!.pinVersion ?? null);
   });
 
-  test("plan names the tag it will fetch", () => {
-    expect(describeProvider(zellij!.u24)).toContain("v0.44.3-red.2");
+  test("plan names the version it will resolve", () => {
+    expect(describeProvider(zellij!.u24)).toContain("0.44.3-red.2");
   });
 });
 
 describe("every other release provider", () => {
   test("is unpinned, so it still resolves latest exactly as before", () => {
-    const pinned = TOOLS.flatMap((t) => [t.u24, t.u26, t.win])
-      .filter((pr) => pr?.kind === "gh" && pr.version !== undefined)
-      .length;
+    // Both provider kinds can hold a version now, so both are counted:
+    // asking only about `gh` would have gone quietly to zero when
+    // zellij moved to mise, and stopped guarding anything.
+    const pinned = TOOLS.flatMap((t) => [t.u24, t.u26, t.win]).filter(
+      (pr) =>
+        (pr?.kind === "gh" && pr.version !== undefined) ||
+        (pr?.kind === "mise" && pr.version !== undefined && pr.version !== "latest"),
+    ).length;
     // One column, one tool. A second entry here means a pin arrived
     // without the comment that has to justify it.
     expect(pinned).toBe(1);

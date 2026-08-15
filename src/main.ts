@@ -92,6 +92,7 @@ async function cmdDoctor(p: Platform, inv: Invocation): Promise<number> {
   let missing = 0;
   let outdated = 0;
   let mismatched = 0;
+  let shadowedCount = 0;
   let hostProblems = 0;
   const livePids = new Set<number>();
 
@@ -250,6 +251,27 @@ async function cmdDoctor(p: Platform, inv: Invocation): Promise<number> {
     }
   }
 
+  // Presence on PATH is the easy half — and "present" is not the same
+  // as "the one that runs". A tool moved to mise was installed some
+  // other way first, and nothing removed that copy; whichever comes
+  // first on PATH wins, so an upgrade can succeed against a binary
+  // nobody executes.
+  {
+    const { describeShadowed, findShadowed, pathLookup } = await import("./shadowed.ts");
+    const { miseInstallRoot } = await import("./mise-config.ts");
+    const shadowed = findShadowed(
+      p,
+      (name) => pathLookup(name),
+      resolveScopes(p, inv.scope).flatMap((scope) => toolsInScope(scope)),
+      miseInstallRoot(),
+    );
+    for (const row of describeShadowed(shadowed)) {
+      log.warn(`${row.name} — ${row.detail}`);
+      if (row.fix) log.plain(`       fix: ${row.fix}`);
+      shadowedCount++;
+    }
+  }
+
   // Presence on PATH is the easy half. Everything that goes wrong after
   // a successful install is configuration, and it is silent.
   log.plain("\n[configuration]");
@@ -270,10 +292,19 @@ async function cmdDoctor(p: Platform, inv: Invocation): Promise<number> {
   }
 
   log.plain("");
-  if (missing > 0 || outdated > 0 || mismatched > 0 || drifted > 0 || hostProblems > 0) {
+  if (
+    missing > 0 || outdated > 0 || mismatched > 0 || drifted > 0 || hostProblems > 0 ||
+    shadowedCount > 0
+  ) {
     const parts = [`${missing} tool(s) missing`];
     if (outdated > 0) parts.push(`${outdated} outdated`);
     if (mismatched > 0) parts.push(`${mismatched} off the pinned version`);
+    // Counted, because the whole point is that this one is invisible
+    // otherwise: every other check passes while the command you run is
+    // not the command that was updated. It stays a warning rather than
+    // an error — the remedy is a person deciding which copy to delete,
+    // not a converge.
+    if (shadowedCount > 0) parts.push(`${shadowedCount} shadowed by another copy on PATH`);
     parts.push(`${drifted} config drift(s)`);
     if (hostProblems > 0) parts.push(`${hostProblems} host health problem(s)`);
     log.warn(parts.join(", "));
@@ -689,6 +720,25 @@ async function cmdUpdate(p: Platform, inv: Invocation): Promise<number> {
     } catch (err) {
       // Never fatal: the rest of the machine still has an update to do.
       log.warn(`red-skills: ${(err as Error).message}`);
+    }
+  }
+
+  // The reddb-io suite, which until now no update path reached at all.
+  //
+  // apt and winget own their packages and upgrade them above; the tools
+  // this organisation publishes were installed once by a release
+  // download or a vendor script and then stayed at that version until
+  // somebody re-ran the installer by hand. mise is what closes that,
+  // and one `mise upgrade` covers every tool the generated fragment
+  // declares rather than one call per tool.
+  if (!inv.dryRun) {
+    try {
+      const { miseUpgradeSuite } = await import("./providers.ts");
+      await miseUpgradeSuite(p);
+    } catch (err) {
+      // Same reasoning as red-skills above: an unreachable GitHub is not
+      // a reason to abandon the rest of the update.
+      log.warn(`mise: ${(err as Error).message}`);
     }
   }
 

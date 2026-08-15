@@ -32,6 +32,18 @@ function installDirs(): string[] {
   } catch {
     // No HOME is not a reason to fail a verification.
   }
+  // mise's shims, for the run that just installed one.
+  //
+  // config/bash/path.sh puts this directory on PATH, so by the next
+  // shell Bun.which finds these on its own. The run doing the
+  // installing is the exception: its PATH was inherited from a shell
+  // that started before the shim existed, so a converge would install a
+  // tool successfully and then report it missing on the very next line.
+  const home = process.env["HOME"] ?? process.env["USERPROFILE"];
+  if (home) {
+    const data = process.env["MISE_DATA_DIR"] ?? `${home}/.local/share/mise`;
+    dirs.push(`${data.replace(/\\/g, "/")}/shims`);
+  }
   if (process.platform === "win32") {
     try {
       dirs.push(windowsBinDir().replace(/\\/g, "/"));

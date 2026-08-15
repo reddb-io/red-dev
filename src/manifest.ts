@@ -38,6 +38,56 @@ type ProviderSpec =
   | { kind: "apt"; pkg: string }
   | { kind: "winget"; id: string }
   /**
+   * A tool mise owns end to end: version resolution, download, checksum
+   * and the shim that puts it on PATH.
+   *
+   * The provider that made this necessary is `gh` directly above it,
+   * which does the same job by hand — resolve a release, glob an asset,
+   * fetch it, place it. That is the right answer for a third party whose
+   * releases we only consume. It is the wrong one for our own suite,
+   * because it downloads a tool *once* and there is nothing left that
+   * knows how to move it forward; every reddb-io tool grew an install.sh
+   * and none of them grew an updater.
+   *
+   * mise's `github:` backend needs nothing from the repository being
+   * installed — it reads the release assets and scores them by OS,
+   * architecture, libc and format. What it gives back is the part `gh`
+   * never had: `mise outdated` and `mise upgrade` over the whole suite,
+   * plus attestation and SLSA verification where the publisher emits
+   * them, which ours do.
+   *
+   * That argument is not special to our own releases, and limiting the
+   * provider to them lasted exactly as long as it took to read the rest
+   * of the manifest: every `gh` tool had the same frozen-forever
+   * problem, because a converge that finds a binary on PATH never asks
+   * how old it is. So mise owns the Linux half of the third-party
+   * releases too, through its registry wherever the registry has them.
+   *
+   * `gh` stays where mise would be wrong rather than merely
+   * unnecessary: an asset that is an installer rather than a binary
+   * (red-request on Windows), and a release whose supported artifact is
+   * a .deb carrying desktop integration that a bare relocatable binary
+   * would shadow (red-ui).
+   *
+   * winget stays on Windows. `winget upgrade --all` already refreshes
+   * what it owns, so mise there would be replacing a working updater
+   * rather than supplying the missing one.
+   */
+  | {
+      kind: "mise";
+      /** Backend-qualified: "github:reddb-io/reddb". */
+      spec: string;
+      /**
+       * The name a person types, wired through [tool_alias].
+       *
+       * Nearly always required, because a repository name and the binary
+       * inside it are different facts: reddb-io/toon ships `tq`.
+       */
+      alias?: string;
+      /** A mise selector. Absent means "latest". */
+      version?: string;
+    }
+  /**
    * The vendor's own install script, fetched and run.
    *
    * Preferred over npm for the tools whose publisher treats this as the
@@ -282,19 +332,28 @@ const gh = (repo: string, asset: string, bin?: string): Provider => ({
   ...(bin ? { bin } : {}),
 });
 /**
- * The same release asset, held at one tag.
+ * A tool mise resolves, downloads and keeps current.
  *
- * A separate helper rather than a fourth positional argument to `gh`,
- * because the tag is the unusual thing on the line and burying it behind
- * an optional `bin` would let it read as noise. The reason for the pin
- * belongs in a comment above the tool; this only carries the tag.
+ * `spec` is either a registry name (`starship`) or a backend-qualified
+ * one (`github:reddb-io/toon`). The registry is preferred wherever it
+ * has the tool: its entries resolve through aqua, which carries the
+ * publisher's own checksums, and they are maintained by people who
+ * watch the release feeds. `github:` is the escape hatch for what the
+ * registry does not know — our repositories, and our forks.
+ *
+ * The options ride in an object rather than as positional arguments
+ * because `alias` and `version` are independent and mostly absent, and
+ * a call site reading mise("github:reddb-io/toon", "tq") gives no clue
+ * which of the two that string is.
  */
-const ghPinned = (repo: string, version: string, asset: string, bin?: string): Provider => ({
-  kind: "gh",
-  repo,
-  asset,
-  version,
-  ...(bin ? { bin } : {}),
+const mise = (
+  spec: string,
+  opts: { alias?: string; version?: string } = {},
+): Provider => ({
+  kind: "mise",
+  spec,
+  ...(opts.alias ? { alias: opts.alias } : {}),
+  ...(opts.version ? { version: opts.version } : {}),
 });
 /** A release asset that is an installer rather than a binary. */
 const ghInstaller = (repo: string, asset: string, ...silentArgs: string[]): Provider => ({
@@ -361,6 +420,56 @@ const HOST_PROVIDES = "the Windows host provides this instead";
 
 export const TOOLS: Tool[] = [
   // ---------------------------------------------------------- core
+  {
+    // First in the list, and that position is load-bearing rather than
+    // alphabetical. mise owns the language runtimes and now also every
+    // tool this organisation publishes, so a converge that reached `tq`
+    // or `red` before installing mise would fail on a machine where the
+    // only thing wrong was the order we wrote things down in.
+    //
+    // Nothing else in core depends on a peer, which is why this is the
+    // only entry that has to say so.
+    name: "mise",
+    scope: "core",
+    u24: aptrepo({
+      pkgs: ["mise"],
+      keyUrl: "https://mise.jdx.dev/gpg-key.pub",
+      keyring: "/etc/apt/keyrings/mise-archive-keyring.gpg",
+      entry:
+        "deb [signed-by=/etc/apt/keyrings/mise-archive-keyring.gpg arch=amd64] https://mise.jdx.dev/deb stable main",
+    }),
+    win: winget("jdx.mise"),
+  },
+  {
+    // red-dev itself, which until now had no way to move forward.
+    //
+    // boot.sh fetches a binary into ~/.local/bin and that was the end of
+    // the story: `red-dev update` upgraded apt, winget, the suite and
+    // the agents, and left the thing doing the upgrading frozen at
+    // whatever the last bootstrap fetched. Re-running the one-liner was
+    // the only path, which is a strange thing to ask of a tool whose
+    // entire subject is keeping a machine current.
+    //
+    // What blocked it was never the line below; it was that a machine
+    // which had run both boot.sh and mise would carry two copies with
+    // PATH order picking the winner, so `mise upgrade` could report
+    // success having updated the copy nobody runs. That ordering is now
+    // decided rather than left to chance: config/bash/path.sh puts
+    // mise's shims ahead of ~/.local/bin, and the 2026-08-15 migration
+    // removes the bootstrap copy once mise can answer for it.
+    //
+    // Deliberately left at mise's default release age rather than
+    // MISE_MINIMUM_RELEASE_AGE=0: a release published minutes ago is
+    // exactly the one nobody has run yet, and a short wait before the
+    // fleet takes it is the same argument Omarchy makes for a mirror
+    // that trails. It means `red-dev update` will not fetch a tag cut
+    // today, which is a trade rather than a bug.
+    name: "red-dev",
+    about: "this tool, kept current by the same mechanism as everything else",
+    scope: "core",
+    u24: mise("github:reddb-io/red-dev", { alias: "red-dev" }),
+    win: mise("github:reddb-io/red-dev", { alias: "red-dev" }),
+  },
   { name: "git", scope: "core", u24: apt("git"), win: winget("Git.Git") },
   { name: "curl", scope: "core", u24: apt("curl"), win: winget("cURL.cURL") },
   {
@@ -454,23 +563,26 @@ export const TOOLS: Tool[] = [
     // different format, and the reason it is core is that a data tool
     // you cannot rely on being present is one you stop reaching for.
     //
-    // The glob is anchored, which matters here more than for most: the
-    // release also publishes tq-linux-x86_64-static and
-    // tq-linux-x86_64.sha256, and a substring match would have picked
-    // whichever the API happened to list first.
+    // The repository is `toon` and the binary is `tq`, which is why the
+    // alias is not decoration: without it mise would expose this as
+    // `toon`, and `toon --version` answering "tq 0.28.2" is the kind of
+    // small wrongness nobody reports and everybody trips on.
     name: "tq",
     about: "query and convert TOON, the token-oriented notation",
     scope: "core",
-    u24: gh("reddb-io/toon", "tq-linux-x86_64", "tq"),
-    win: gh("reddb-io/toon", "tq-windows-x86_64.exe", "tq"),
+    u24: mise("github:reddb-io/toon", { alias: "tq" }),
+    win: mise("github:reddb-io/toon", { alias: "tq" }),
   },
   {
     // The database this whole organisation is named after, and the one
     // tool here whose absence would be strange. A CLI, so core: it is
     // the same binary on the desktop, in WSL and on Windows.
     //
-    // `red`, not `red_client` — the release publishes both and only the
-    // first is the command people run.
+    // `red`, not `red_client` — the release publishes both, plus a
+    // -static variant of each, and only the first is the command people
+    // run. mise picks it on its own: verified against the real 1.23.2
+    // release, which it resolved to red-linux-x86_64 with the build
+    // attestation checked.
     name: "red",
     about: "the RedDB CLI — embedded, server, cluster",
     // The name collides with GNU ed's restricted mode, which Ubuntu
@@ -478,8 +590,8 @@ export const TOOLS: Tool[] = [
     // called it present, and the RedDB CLI never installed at all.
     signature: /reddb/i,
     scope: "core",
-    u24: gh("reddb-io/reddb", "red-linux-x86_64", "red"),
-    win: gh("reddb-io/reddb", "red-windows-x86_64.exe", "red"),
+    u24: mise("github:reddb-io/reddb", { alias: "red" }),
+    win: mise("github:reddb-io/reddb", { alias: "red" }),
   },
 
   // The bash answer to what people actually want from oh-my-zsh.
@@ -488,19 +600,26 @@ export const TOOLS: Tool[] = [
   {
     name: "starship",
     scope: "core",
-    u24: gh("starship/starship", "starship-x86_64-unknown-linux-gnu.tar.gz"),
+    // Registry rather than github:, here and for the six below it. The
+    // registry entry resolves through aqua, which knows the upstream
+    // checksum file — the asset glob this carried before verified
+    // nothing beyond "a file with that name existed".
+    u24: mise("starship"),
     win: winget("Starship.Starship"),
   },
   {
     name: "atuin",
     scope: "core",
-    u24: gh("atuinsh/atuin", "atuin-x86_64-unknown-linux-musl.tar.gz"),
+    u24: mise("atuin"),
     win: winget("Atuinsh.Atuin"),
   },
   {
     name: "carapace",
     scope: "core",
-    u24: gh("carapace-sh/carapace-bin", "carapace-bin_*_linux_amd64.deb"),
+    // The .deb this replaces was the one asset here that needed root to
+    // unpack; the registry hands over a binary instead, so carapace
+    // stops being a reason for a converge to ask for sudo.
+    u24: mise("carapace"),
     win: winget("rsteube.Carapace"),
   },
   { name: "direnv", scope: "core", u24: apt("direnv"), win: winget("direnv.direnv") },
@@ -517,7 +636,7 @@ export const TOOLS: Tool[] = [
     // Not in the 24.04 archive; the release tarball is the only route.
     name: "yazi",
     scope: "core",
-    u24: gh("sxyazi/yazi", "yazi-x86_64-unknown-linux-gnu.zip"),
+    u24: mise("yazi"),
     win: winget("sxyazi.yazi"),
   },
   {
@@ -530,6 +649,13 @@ export const TOOLS: Tool[] = [
     name: "tldr",
     cmd: ["tldr"],
     scope: "core",
+    // The one tool here that stays on gh, and the reason is the third
+    // argument: the release ships a binary called `tealdeer` and the
+    // command people type is `tldr`. gh renames it on the way in. mise
+    // cannot — neither the github: backend nor ubi's `exe=` option
+    // renames the extracted file, both verified against the real 1.8.1
+    // release, and a shim called `tealdeer` is a `tldr` that does not
+    // exist. Revisit if the registry ever adopts it.
     u24: gh("dbrgn/tealdeer", "tealdeer-linux-x86_64-musl", "tldr"),
     win: winget("dbrgn.tealdeer"),
   },
@@ -556,13 +682,13 @@ export const TOOLS: Tool[] = [
   {
     name: "lazygit",
     scope: "core",
-    u24: gh("jesseduffield/lazygit", "lazygit_*_Linux_x86_64.tar.gz"),
+    u24: mise("lazygit"),
     win: winget("JesseDuffield.lazygit"),
   },
   {
     name: "lazydocker",
     scope: "core",
-    u24: gh("jesseduffield/lazydocker", "lazydocker_*_Linux_x86_64.tar.gz"),
+    u24: mise("lazydocker"),
     // Capital L. winget's --exact is case-sensitive, and the lowercase
     // form exits 20 ("no package found") -- which this reported as a
     // successful install for as long as non-zero was only a warning.
@@ -598,11 +724,16 @@ export const TOOLS: Tool[] = [
     name: "zellij",
     scope: "core",
     pinVersion: "0.44.3.2",
-    u24: ghPinned(
-      "reddb-io/zellij",
-      "v0.44.3-red.2",
-      "zellij-x86_64-unknown-linux-musl.tar.gz",
-    ),
+    // Pinned through mise rather than by hand. The fork is ours and the
+    // registry carries only upstream, so this is the github: backend —
+    // and the version here is the tag, `0.44.3-red.2`, while pinVersion
+    // above is what the binary answers to --version, `0.44.3.2`. They
+    // name the same release in the two vocabularies that ask.
+    //
+    // A pinned tool is the one case where `mise upgrade` must move
+    // nothing, and it moves nothing: the selector is exact, so upgrade
+    // resolves it to itself.
+    u24: mise("github:reddb-io/zellij", { alias: "zellij", version: "0.44.3-red.2" }),
     // winget installs upstream's newest — so on Windows the pin is a
     // report rather than a repair: the doctor names the machine as off
     // the pinned version and the swap is manual. The fork's release
@@ -610,18 +741,6 @@ export const TOOLS: Tool[] = [
     // Silence would be the alternative, and silence is how 0.44.3 got
     // onto a machine in the first place.
     win: winget("Zellij.Zellij"),
-  },
-  {
-    name: "mise",
-    scope: "core",
-    u24: aptrepo({
-      pkgs: ["mise"],
-      keyUrl: "https://mise.jdx.dev/gpg-key.pub",
-      keyring: "/etc/apt/keyrings/mise-archive-keyring.gpg",
-      entry:
-        "deb [signed-by=/etc/apt/keyrings/mise-archive-keyring.gpg arch=amd64] https://mise.jdx.dev/deb stable main",
-    }),
-    win: winget("jdx.mise"),
   },
   {
     name: "neovim",
@@ -748,6 +867,20 @@ export const TOOLS: Tool[] = [
     // in by hand would do. On Windows that same script says it "hands
     // the installer to you to open", so a converge cannot use it; the
     // release asset runs unattended instead.
+    // Deliberately not a mise tool, unlike the CLIs above.
+    //
+    // mise can install this — it resolves the release and picks the
+    // AppImage on its own. That is exactly the problem. The project
+    // ships a .deb *and* an AppImage and treats the .deb as the
+    // supported path, because it links the system WebKitGTK rather than
+    // bundling one; the installer even detects an AppImage sitting in
+    // ~/.local/bin and deletes it, because it shadows the .deb on PATH
+    // (red-request/install.sh:326). Pointing mise at this repo would
+    // reintroduce, on every converge, the exact state the vendor script
+    // exists to clean up — and lose the .desktop entry, the icon and
+    // the `rr` shortcut with it.
+    //
+    // Revisit if upstream ever publishes a plain relocatable binary.
     name: "red-request",
     about: "open-source API client, powered by recker",
     cmd: ["red-request", "rr"],
@@ -773,6 +906,9 @@ export const TOOLS: Tool[] = [
     // The glob carries a wildcard where the version goes:
     // red-ui_0.1.0_amd64.deb. Anchoring it to today's version is exactly
     // the 404-on-next-release bug documented on the provider.
+    // Not a mise tool, for the same reason as red-request directly
+    // above: the .deb carries the desktop integration and the `red`
+    // sidecar, and an AppImage on PATH shadows it (red-ui/install.sh:293).
     name: "red-ui",
     about: "universal client for reddb — embedded, server, docker, cluster",
     scope: "desktop",
@@ -800,6 +936,16 @@ export const TOOLS: Tool[] = [
     name: "dit",
     about: "push-to-toggle voice dictation, typed into the focused app",
     scope: "desktop",
+    // Split on purpose, and the split is the whole point of keeping two
+    // providers around.
+    //
+    // Linux stays on the vendor installer because the binary is the
+    // smaller half of what it does: dit reads the hotkey from
+    // /dev/input and types through /dev/uinput, so it also adds the
+    // user to the `input` group and writes the uinput udev rule
+    // (dit/install.sh:339-361). mise would deliver a binary that runs
+    // and never types — working software by every check we could make,
+    // and useless.
     u24: sudoProvider(
       installer(
         "https://raw.githubusercontent.com/reddb-io/dit/main/install.sh",
@@ -808,7 +954,10 @@ export const TOOLS: Tool[] = [
         "--no-service",
       ),
     ),
-    win: gh("reddb-io/dit", "dit-windows-x86_64.exe", "dit"),
+    // Windows has no such requirement — it was a plain release asset
+    // already, so here mise is a straight gain: the same download, plus
+    // an updater.
+    win: mise("github:reddb-io/dit", { alias: "dit" }),
   },
 
   // ------------------------------------------------------ optional
@@ -893,7 +1042,7 @@ export const TOOLS: Tool[] = [
     name: "dust",
     about: "du sorted by what is actually large",
     scope: "optional",
-    u24: gh("bootandy/dust", "dust-*-x86_64-unknown-linux-musl.tar.gz"),
+    u24: mise("dust"),
     win: winget("bootandy.dust"),
   },
   {
@@ -907,14 +1056,14 @@ export const TOOLS: Tool[] = [
     name: "glow",
     about: "render markdown in the terminal",
     scope: "optional",
-    u24: gh("charmbracelet/glow", "glow_*_Linux_x86_64.tar.gz"),
+    u24: mise("glow"),
     win: winget("charmbracelet.glow"),
   },
   {
     name: "gitui",
     about: "a lighter, keyboard-first alternative to lazygit",
     scope: "optional",
-    u24: gh("gitui-org/gitui", "gitui-linux-x86_64.tar.gz"),
+    u24: mise("gitui"),
     win: winget("StephanDilly.gitui"),
   },
 
@@ -1344,6 +1493,19 @@ export function describeProvider(pr: Provider): string {
       // looking for "which release": a plan that says only the repo
       // hides the whole point of a pinned column.
       return `gh:${pr.repo}${pr.version ? `@${pr.version}` : ""}:${pr.asset}`;
+    case "mise": {
+      // The alias, when there is one, is what the reader will type —
+      // and it is routinely not the repository name. A plan line saying
+      // only `mise:github:reddb-io/toon` hides that the command is `tq`.
+      //
+      // The version is named for the same reason the gh column names a
+      // tag: `latest` is the case that needs no words, and a pin is the
+      // whole point of the line it appears on. Omitting it would let a
+      // plan describe a held-back zellij exactly like a floating one.
+      const alias = pr.alias && pr.alias !== pr.spec ? ` (${pr.alias})` : "";
+      const version = pr.version && pr.version !== "latest" ? `@${pr.version}` : "";
+      return `mise:${pr.spec}${version}${alias}`;
+    }
     case "ppa":
       return `ppa:${pr.ppa}`;
     case "aptrepo":

@@ -241,15 +241,21 @@ export function availableAgents(p: Platform): AgentSpec[] {
   });
 }
 
+/** Resolve against PATH as it exists now, including tools exposed this run. */
+function commandPath(command: string): string | null {
+  const path = process.env["Path"] ?? process.env["PATH"] ?? "";
+  return Bun.which(command, { PATH: path });
+}
+
 export function isAgentInstalled(a: AgentSpec): boolean {
-  return a.cmd.length > 0 && Bun.which(a.cmd) !== null;
+  return a.cmd.length > 0 && commandPath(a.cmd) !== null;
 }
 
 /** Presence plus the runtime-backed health check declared by the agent. */
 export async function isAgentReady(a: AgentSpec): Promise<boolean> {
   if (!isAgentInstalled(a)) return false;
   if (!a.probeArgs) return true;
-  const executable = Bun.which(a.cmd);
+  const executable = commandPath(a.cmd);
   if (!executable) return false;
   try {
     const proc = Bun.spawn(npmArgv(executable, a.probeArgs), {
@@ -438,11 +444,13 @@ export function codexPortableExecutable(files: string[]): string | null {
   );
 }
 
-function prependProcessPath(dir: string): void {
+function prependProcessPath(dir: string, platform: string = process.platform): void {
   const current = process.env["Path"] ?? process.env["PATH"] ?? "";
-  const entries = current.split(";");
-  if (entries.some((entry) => entry.toLowerCase() === dir.toLowerCase())) return;
-  const path = `${dir};${current}`;
+  const separator = platform === "win32" ? ";" : ":";
+  const key = (value: string): string => platform === "win32" ? value.toLowerCase() : value;
+  const entries = current.split(separator);
+  if (entries.some((entry) => key(entry) === key(dir))) return;
+  const path = [dir, current].filter(Boolean).join(separator);
   process.env["Path"] = path;
   process.env["PATH"] = path;
 }
@@ -592,10 +600,20 @@ export async function installAgent(a: AgentSpec, p: Platform): Promise<void> {
   if (method === "npm" && a.npm) {
     const npm = await resolveNpm();
     if (!npm) throw new RedError("no npm anywhere — not on PATH, and mise has no node. Run `red-dev install core`");
+    const env = await agentRuntimeEnvironment(npm, a);
     await run(
       npmArgv(npm, ["install", "-g", a.npm]),
-      await agentRuntimeEnvironment(npm, a),
+      // Mise wraps npm global installs with an implicit `mise reshim` after
+      // npm has already succeeded. That second command has no deadline and
+      // can strand a WSL converge forever at "Reshimming mise 24...". A
+      // red-dev shell activates mise and therefore exposes the package from
+      // Node's bin directory without this extra global shim pass.
+      { ...env, MISE_SKIP_RESHIM: "1" },
     );
+    // npm places global command links beside itself under a mise-managed
+    // Node. Make them visible to the rest of this same converge; the next
+    // shell will get the same directory from `mise activate`.
+    prependProcessPath(npm.replace(/[\\/][^\\/]+$/, ""));
     return;
   }
 
@@ -903,7 +921,7 @@ export const SKILL_HOSTS: SkillHost[] = [
 
 /** Installed hosts that red-skills has not been wired into. */
 export async function unwiredSkillHosts(): Promise<SkillHost[]> {
-  const present = SKILL_HOSTS.filter((h) => Bun.which(h.cmd));
+  const present = SKILL_HOSTS.filter((h) => commandPath(h.cmd));
   const out: SkillHost[] = [];
   for (const h of present) {
     if (!(await h.wired())) out.push(h);
@@ -927,7 +945,7 @@ export async function unwiredSkillHosts(): Promise<SkillHost[]> {
  * and with no agent to configure it has nothing to do.
  */
 export async function convergeRedSkills(p: Platform): Promise<void> {
-  const present = SKILL_HOSTS.filter((h) => Bun.which(h.cmd));
+  const present = SKILL_HOSTS.filter((h) => commandPath(h.cmd));
   if (present.length === 0) {
     log.skip("red-skills: no coding agent installed to configure");
     return;
@@ -936,10 +954,10 @@ export async function convergeRedSkills(p: Platform): Promise<void> {
   // Before asking whether it is wired: a marketplace registered against
   // a local directory is wired and permanently stale, which no amount
   // of reinstalling the same installer will fix.
-  if (Bun.which("claude") && (await claudeMarketplaceIsGithub()) === false) {
+  if (commandPath("claude") && (await claudeMarketplaceIsGithub()) === false) {
     await repointClaudeMarketplace();
   }
-  if (Bun.which("codex") && (await codexMarketplaceIsGithub()) === false) {
+  if (commandPath("codex") && (await codexMarketplaceIsGithub()) === false) {
     await repointCodexMarketplace();
   }
 
@@ -954,7 +972,7 @@ export async function convergeRedSkills(p: Platform): Promise<void> {
   // The RedSkills generator owns the provider/MCP portions of opencode.json;
   // red-dev owns terminal-following theme/input defaults. Re-apply our small
   // merge after generation so a first RedCode migration converges in one run.
-  if (Bun.which("redcode")) {
+  if (commandPath("redcode")) {
     const { applyRedcode } = await import("./terminal-surfaces.ts");
     await applyRedcode(p);
   }
