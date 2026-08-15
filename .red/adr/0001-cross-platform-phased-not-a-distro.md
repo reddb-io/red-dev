@@ -31,6 +31,16 @@ The existing OpenCode installation is not removed; recorded selections migrate
 to RedCode and RedSkills writes the compatible surface independently under
 `~/.config/redcode/`.
 
+**Amendment (2026-08-15):** reaffirmed after Omarchy Quattro (v4.0.0,
+2026-08-14) shipped. Quattro's new shape — Omarchy as a system package with
+user overrides layered on top, Quickshell plugins with clone-to-override, a
+default agent with crash capture, an agent-usage bar panel, `mup` for
+out-of-band agent updates — changes *what* red-dev absorbs, not *how*: still
+contracts + adapters + profiles, still no distro, still no Hyprland-specific
+key map as the portable abstraction. The "do not copy" list gains one entry:
+Omarchy launches its default agent in bypass/auto-approve mode by default;
+red-dev's default agent (see `.red/contexts/agents/CONTEXT.md`) never does.
+
 **Amendment (2026-08-03):** the incremental clean-machine E2E fleet originally decided here was dropped by maintainer decision before any lane was built (#17, #18 closed as not planned). red-dev is a development environment for developers; validation happens by provisioning real environments — converge followed by a second converge with zero planned changes, plus the readiness report — not by CI-hosted clean-VM lanes. A phase closes when its promised behaviors are true on real environments and covered by the unit/integration suite.
 
 ## Consequences
