@@ -45,6 +45,14 @@ uncommitted work, and not a value an operator wrote into their own configuration
 The test is what losing it costs: if only time, it is Reclaim's to take; if work,
 it is not.
 
+**Amendment (2026-08-15):** the premise "red-dev schedules nothing today" no
+longer holds — since 2026-08-12 the Redwall repaint runs on a systemd user
+timer / Task Scheduler task (`src/redwall-schedule.ts`). That is a deliberate
+exception, not a reopening: a Redwall tick is derived and idempotent, touches
+nothing a person authored, and costs nothing when it surprises someone. The
+prohibition here is scoped to Reclaim and Rescue (ADR 0005) — acts that delete
+or interrupt — and stays in force for them.
+
 ## Consequences
 
 An operator with a full disk and no memory of this feature stays stuck. That is
