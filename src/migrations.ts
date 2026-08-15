@@ -22,10 +22,12 @@
  *    machine does not look like it silently did something.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { log } from "./log.ts";
+import { providerFor, TOOLS } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
 import { readPreferences, writePreferences } from "./preferences.ts";
+import { userBinDir } from "./providers.ts";
 
 export interface Migration {
   /** Sortable and unique. The date this was written, not when it runs. */
@@ -285,7 +287,110 @@ return {}
       log.plain("       installed and selected RedCode; the existing OpenCode binary and config were left untouched");
     },
   },
+  {
+    id: "2026-08-15-release-binaries-to-mise",
+    describe: "hand the tools that moved to mise over from ~/.local/bin",
+    /**
+     * Without this the move to mise is a no-op, silently.
+     *
+     * Every one of these tools was installed by the `gh` provider, which
+     * writes a plain binary into ~/.local/bin. A converge asks
+     * `installState` whether the tool is there, `installState` asks PATH,
+     * PATH answers with that binary, and the mise provider never runs —
+     * so the machine keeps the version it happened to fetch on install
+     * day, which is the exact problem the move was made to fix. Measured
+     * on the maintainer's host: tq 0.26.2 on PATH, 0.28.2 released.
+     *
+     * And if mise did install alongside, the result is worse rather than
+     * better: two copies, PATH order decides the winner, and `mise
+     * upgrade` reports success while updating the one nobody executes.
+     * That is the same argument mise-config.ts uses to keep red-dev
+     * itself out of the fragment; it applies here and had to be paid.
+     */
+    applies: (p) => staleReleaseBinaries(p).length > 0,
+    run: async (p) => {
+      const stale = staleReleaseBinaries(p);
+
+      // Install before removing, not after. A migration runs before the
+      // converge, so removing first would be fine on a good day and
+      // would leave a developer with no `red` and no `tq` on a day when
+      // GitHub is unreachable. Nothing is taken away until mise can
+      // answer for it.
+      const { miseInstallSuite } = await import("./providers.ts");
+      await miseInstallSuite(p);
+      const mise = Bun.which("mise");
+      if (!mise) throw new Error("mise is not installed yet — nothing to hand over to");
+
+      for (const { name, path } of stale) {
+        // Proof, per tool, that the replacement exists before the
+        // original goes. `mise which` resolves through the fragment, so
+        // a tool whose install quietly failed keeps its old binary and
+        // is reported rather than deleted.
+        //
+        // Asked by command name rather than by spec: mise answers to
+        // the binary, and `mise which github:reddb-io/zellij` is an
+        // error while `mise which zellij` is a path. Getting that
+        // backwards would have left every unaliased tool's stale copy
+        // in place while reporting that it had checked.
+        const which = Bun.spawnSync([mise, "which", name], { stdout: "pipe", stderr: "ignore" });
+        if (which.exitCode !== 0) {
+          log.warn(`       ${name}: mise has no copy yet, leaving ${path} in place`);
+          continue;
+        }
+        // Never delete the binary this process is running from. On
+        // Linux it would appear to work — the inode outlives the unlink
+        // — and on Windows it fails outright with the file locked. Both
+        // are the wrong thing to attempt while red-dev is updating
+        // red-dev. The shim already wins on PATH, so the next run
+        // executes the mise copy and this one sweeps the leftover.
+        if (samePath(path, process.execPath)) {
+          log.plain(`       ${name}: mise owns it now; ${path} goes on the next run`);
+          continue;
+        }
+        rmSync(path, { force: true });
+        log.plain(`       ${name}: removed ${path}; mise now owns it`);
+      }
+    },
+  },
 ];
+
+/**
+ * The ~/.local/bin binaries left behind by the release provider.
+ *
+ * Only ~/.local/bin, and only for tools this platform now gets from
+ * mise. A copy anywhere else was put there by something that is not
+ * red-dev — carapace's .deb under /usr/bin is the real example — and
+ * removing another package manager's file is not a repair. Those are
+ * shadowed instead: config/bash/path.sh puts mise's shims ahead of both.
+ */
+/** Two paths naming one file, on a platform where case may not matter. */
+function samePath(a: string, b: string): boolean {
+  const norm = (v: string) => {
+    const slashed = v.replace(/\\/g, "/");
+    return process.platform === "win32" ? slashed.toLowerCase() : slashed;
+  };
+  return norm(a) === norm(b);
+}
+
+export function staleReleaseBinaries(p: Platform): { name: string; path: string }[] {
+  let bin: string;
+  try {
+    bin = userBinDir();
+  } catch {
+    return [];
+  }
+  const out: { name: string; path: string }[] = [];
+  for (const tool of TOOLS) {
+    const pr = providerFor(tool, p);
+    if (pr.kind !== "mise") continue;
+    for (const cmd of tool.cmd ?? [tool.name]) {
+      for (const candidate of [`${bin}/${cmd}`, `${bin}/${cmd}.exe`]) {
+        if (existsSync(candidate)) out.push({ name: cmd, path: candidate });
+      }
+    }
+  }
+  return out;
+}
 
 /**
  * Run whatever has not run yet.

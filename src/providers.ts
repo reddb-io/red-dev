@@ -13,6 +13,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } f
 import { formatBytes, formatDuration, log, logIsCaptured, RedError } from "./log.ts";
 import { parseChecksums, pickChecksumAsset, sha256Hex, verifyChecksum } from "./checksum.ts";
 import type { Provider } from "./manifest.ts";
+import { convergeMiseConfig } from "./mise-config.ts";
 import type { Platform } from "./platform.ts";
 import { startProcessHeartbeat } from "./process-heartbeat.ts";
 import { missingRights } from "./rights.ts";
@@ -625,6 +626,105 @@ export async function resolveGhRelease(
       ? (assets.find((a) => a.name === checksum)?.browser_download_url ?? null)
       : null,
   };
+}
+
+/**
+ * Hand one tool to mise.
+ *
+ * Almost nothing happens here, and that is the point of the provider:
+ * resolving the release, choosing the asset for this OS and
+ * architecture, checking the attestation and putting a shim on PATH are
+ * all things mise does, and all things `ghInstall` below had to
+ * reimplement.
+ *
+ * The config fragment is converged first because the alias lives there.
+ * `mise install red` only means anything once [tool_alias] has said what
+ * `red` is, and doing it here rather than once per converge keeps the
+ * provider self-contained — a tool installed through `red-dev install
+ * red` on its own works exactly like one installed by a full run.
+ */
+async function miseInstall(
+  pr: Extract<Provider, { kind: "mise" }>,
+  platform: Platform,
+): Promise<void> {
+  const mise = Bun.which("mise");
+  if (!mise) {
+    throw new RedError(
+      "mise is not on PATH — it is the first tool in the manifest, so this means core has not converged yet. Run `red-dev install core`.",
+    );
+  }
+
+  convergeMiseConfig(platform);
+
+  const selector = `${pr.alias ?? pr.spec}@${pr.version ?? "latest"}`;
+  log.step(`mise: ${pr.spec}`);
+  log.info(`installing ${selector} — mise resolves the asset and verifies it`);
+
+  const code = await runMise([mise, "install", selector]);
+  if (code !== 0) {
+    throw new RedError(`mise could not install ${selector} (exit ${code})`);
+  }
+}
+
+/**
+ * Install everything the fragment declares, in one pass.
+ *
+ * Exported for the migration that hands the release-installed binaries
+ * over: it has to know the whole suite is in place before it removes
+ * anything, and running mise is this module's job rather than a second
+ * copy of the spawn, the heartbeat and the unattended environment.
+ */
+export async function miseInstallSuite(platform: Platform): Promise<void> {
+  const mise = Bun.which("mise");
+  if (!mise) throw new RedError("mise is not on PATH — run `red-dev install core` first");
+
+  const { entries } = convergeMiseConfig(platform);
+  if (entries === 0) return;
+
+  log.step(`mise: installing ${entries} tools`);
+  const code = await runMise([mise, "install"]);
+  if (code !== 0) throw new RedError(`mise could not install the suite (exit ${code})`);
+}
+
+/**
+ * Update every tool the fragment declares, in one pass — and nothing else.
+ *
+ * The tools are named rather than left to `mise upgrade`'s bare form.
+ * Bare, it upgrades everything outdated in the active config, and the
+ * active config is this fragment merged with the user's own: their Node
+ * and Python would move because red-dev was asked to update itself.
+ * A pinned entry is safe either way, since an exact selector resolves
+ * to itself, but the user's runtimes are not ours to bump.
+ */
+export async function miseUpgradeSuite(platform: Platform): Promise<void> {
+  const mise = Bun.which("mise");
+  if (!mise) return;
+
+  const { entries } = convergeMiseConfig(platform);
+  if (entries === 0) return;
+
+  const { miseToolNames } = await import("./mise-config.ts");
+  const names = miseToolNames(platform);
+  log.step(`mise: upgrading ${names.length} tools`);
+  const code = await runMise([mise, "upgrade", "--yes", ...names]);
+  if (code !== 0) log.err(`mise upgrade exited ${code}`);
+}
+
+async function runMise(cmd: string[]): Promise<number> {
+  const proc = Bun.spawn(cmd, {
+    stdout: "inherit",
+    stderr: "inherit",
+    stdin: "ignore",
+    // mise prompts before installing a tool it has not seen; a converge
+    // runs unattended and a prompt here is a hang, not a question.
+    env: unattendedEnvironment(process.env, { MISE_YES: "1" }),
+  });
+  const heartbeat = startProcessHeartbeat(cmd);
+  try {
+    return await proc.exited;
+  } finally {
+    heartbeat?.stop();
+  }
 }
 
 export async function ghInstall(
@@ -1278,6 +1378,9 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
       } else {
         await ghInstall(pr.repo, pr.asset, pr.bin, pr.version);
       }
+      return;
+    case "mise":
+      await miseInstall(pr, ctx.platform);
       return;
     case "ppa":
       await ppaInstall(pr.ppa, pr.pkgs);

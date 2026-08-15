@@ -60,6 +60,24 @@ fi
 
 _red_path_prepend "$HOME/.local/bin"
 
+# mise's shims, and the reason they are here rather than left to
+# `mise activate`.
+#
+# activate is what an interactive shell gets: it rewrites PATH on every
+# prompt with the real tool directories, which is faster and is why
+# init.sh still calls it. What it cannot do is reach anything that is
+# not an interactive shell — a script, a systemd unit, `ssh host 'tq
+# ...'`, an editor task. mise installs `red` and `tq`, and those are
+# core tools, which this project defines as present on every target.
+# Present only inside an activated bash is a narrower promise than the
+# one the manifest makes.
+#
+# Shims have neither problem: each is a small exec into mise, so they
+# work with no shell integration at all. Prepended before ~/.local/bin
+# so that on a machine still carrying a binary an older release left
+# there, the copy mise keeps current is the one that answers.
+_red_path_prepend "${MISE_DATA_DIR:-$HOME/.local/share/mise}/shims"
+
 # Project-local binstubs (./bin/rails and friends). This is upstream
 # omakub behaviour and it is a real trade-off: a relative PATH entry
 # means cd-ing into an untrusted repo puts its ./bin ahead of system
