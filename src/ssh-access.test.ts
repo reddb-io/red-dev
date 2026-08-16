@@ -37,6 +37,7 @@ import {
   type Fetcher,
   type PublicKey,
 } from "./ssh-access.ts";
+import { removableTools } from "./uninstall.ts";
 
 const ED25519 =
   "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEOV6pcgvZNZeqx7DivmPlLqwtwdNc/maLQRKQ3Bhy2L";
@@ -329,6 +330,16 @@ describe("the question never appears in the non-interactive install path", () =>
     // Unattended, and only when asked for in as many words.
     expect(parseArgs(buildCli(), ["ssh", "octocat", "--yes"]).yes).toBe(true);
     expect(inv.yes).toBe(false);
+
+    // Parsed and reachable. A command the CLI accepts and the switch
+    // does not handle is "unhandled command: ssh" at exit 1, which is a
+    // sentence only this test would ever read.
+    const main = readFileSync("src/main.ts", "utf8");
+    expect(main).toContain('case "ssh":');
+    // Without a terminal it refuses rather than defaulting to no:
+    // `confirm` answers false with nobody there, so the command would
+    // print two fingerprints and exit 0 having authorized nothing.
+    expect(main).toContain("if (!inv.yes && !interactive()) {");
   });
 });
 
@@ -432,6 +443,15 @@ describe("removal reverts authorized keys, firewall rule and service together", 
 
     await removal.run();
     expect(readFileSync(authorizedKeysPath(home), "utf8")).not.toContain("ssh-rsa");
+  });
+
+  test("and `red-dev uninstall` offers it, which the manifest alone would not", () => {
+    // The wiring, not the shape. `ssh-server` is a managed builtin, so
+    // nothing probes for it and `removalFor` has no package to name —
+    // it would be absent from the list a person picks from, and the
+    // three-clause revert above would be code nobody could reach.
+    const offered = removableTools(platform()).find((c) => c.tool.name === "ssh-server");
+    expect(offered?.removal.how).toContain("authorized keys");
   });
 
   test("a machine that was never authorized reverts to itself", async () => {
