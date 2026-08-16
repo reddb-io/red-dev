@@ -304,6 +304,14 @@ validated against what is installed on every read and never healed: a host that
 has been uninstalled is reported by name in `doctor` rather than quietly
 replaced by whichever host is still there.
 
+`red-dev agents run` starts it. What it runs is the plain invocation — the same
+command line you would have typed — and the suite enumerates every host's launch
+argv to keep it that way, over a fixture host carrying `--yolo` so the check can
+be seen failing. Arguments after `--` are yours and are passed through exactly
+as typed, `red-dev agents run -- --dangerously-skip-permissions` included: the
+promise is that red-dev never adds one, not that it stops you from making that
+call yourself.
+
 RedCode comes from `reddb-io/redcode` release archives through GitHub's stable
 download redirect, so a clean machine does not need `gh` or an API request to
 discover it. Its published `SHA256SUMS` is verified before extraction. Existing
