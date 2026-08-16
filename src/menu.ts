@@ -256,7 +256,7 @@ export function menuEntries(p: Platform): [string, ...string[]] {
     "Wallpaper — Red artwork",
     "Font — family and size",
     "Redwall — machine state on the wallpaper",
-    "Apps — optional tools",
+    "Apps — optional tools and web apps",
     "Keys — every action, its chord, and what is bound here",
     "Languages — runtimes mise manages",
     ...(wslish ? ["Shell — where a terminal lands"] : []),
