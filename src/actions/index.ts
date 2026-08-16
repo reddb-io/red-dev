@@ -20,6 +20,17 @@ import type { SemanticAction } from "./types.ts";
 
 export type { Chord, SemanticAction } from "./types.ts";
 export { chordText, parseChord } from "./types.ts";
+// The gestures written inside terminals and agent hosts. A separate
+// list, not a separate registry: they answer the same question and ADR
+// 0006 governs only the half of it that claims a host chord.
+export type { InputBinding, InputLayers } from "./input.ts";
+export {
+  escapedSequence,
+  IMAGE_PASTE_INPUT,
+  INPUT_BINDINGS,
+  inputBindingById,
+  NEWLINE_INPUT,
+} from "./input.ts";
 export type { ActionProblem } from "./validate.ts";
 export { validateActions } from "./validate.ts";
 export { GNOME_RESERVED, WINDOWS_RESERVED } from "./reserved.ts";
