@@ -180,7 +180,7 @@ export function buildCli(): CLI {
         description: "regenerate the wallpaper that carries this machine's state",
       },
       apps: {
-        description: "choose optional tools and web apps; untick an installed web app to remove it",
+        description: "choose optional tools and web apps; untick an installed one to remove it",
       },
       keys: {
         // No positional and no flags. What it lists comes from the
