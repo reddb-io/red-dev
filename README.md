@@ -370,7 +370,16 @@ Ctrl+Shift+V remains text paste. Plain Shift+V cannot be used because it is the
 ordinary uppercase `V`. Every config merge is non-destructive: malformed JSON
 and explicit conflicting bindings are left alone, and re-running is a no-op.
 
-**Web apps** — a page in its own window, its own icon and its own alt-tab entry, the way omakub's `web2app` does it. Desktop sessions only: a `.desktop` file needs a menu to appear in.
+**Web apps** — a page in its own window, its own icon and its own alt-tab entry,
+the way omakub's `web2app` does it, offered by `red-dev apps` alongside the
+optional tools. ChatGPT, Claude and GitHub arrive ticked; Google Photos, Google
+Contacts and Tailscale are one space bar away in the same list, and any URL can
+be typed in. Ticking installs, unticking an installed one removes it — the
+launcher and the icon it fetched. On a Linux desktop that is a `.desktop` entry
+launching whichever Chromium-family browser is installed with `--app=`; on
+native Windows it is a Start Menu shortcut carrying the same argument. Under WSL
+it is skipped and says why: there is no freedesktop menu there for the entry to
+appear in, so install those from the Windows side.
 
 **Optional**, never installed by a plain converge — `red-dev apps` offers them,
 and so does the interview: `just` · `duf` · `dust` · `hyperfine` · `glow` ·
@@ -432,13 +441,15 @@ with no error from either. `red-dev doctor` reports which daemon answers.
 | `atuin`, `carapace`, `direnv` | binaries nothing is bound to |
 
 `ble.sh` — autosuggestions and syntax highlighting, the two things people most
-often miss from zsh — is installed but **not enabled**. It replaces bash's line
-editor rather than sitting beside it, and atuin, fzf and carapace all bind into
-what it replaces. Whether they survive is an empirical question that needs a
-real terminal, so turning it on is deliberate:
+often miss from zsh — is installed and **enabled by default**. It shipped off,
+because it replaces bash's line editor rather than sitting beside it and atuin,
+fzf and carapace all bind into what it replaces; whether they survived was an
+empirical question that needed a real terminal. The trial answered it: atuin's
+Ctrl-R opens its TUI under an attached ble.sh, and carapace needed its
+`bash-ble` integration selected, which it now is. Opting out is one variable:
 
 ```bash
-export RED_BLE=1
+export RED_BLE=0
 ```
 
 ## Usage
@@ -453,7 +464,7 @@ red-dev update               # package managers, RedSkills, mise's tools, the ag
 red-dev theme [name]         # dark | light | obsidian | marble | cobalt | flare
 red-dev wallpaper [source]   # theme | Red artwork | absolute PNG path | HTTPS URL
 red-dev redwall              # redraw the wallpaper carrying this machine's state
-red-dev apps                 # choose optional tools
+red-dev apps                 # choose optional tools and web apps; untick one to remove it
 red-dev keys                 # search every action and its chord, and run one
 red-dev learn                # the README by anchor, RedSkills, and the keys viewer
 red-dev lang                 # choose runtimes for mise to manage
@@ -544,7 +555,7 @@ deliberately:
 | `red-dev` | the fullscreen interface, then whatever you pick — a line-based menu below 60 columns, and `--help` with no terminal at all |
 | `red-dev theme` | which theme, when given no name |
 | `red-dev wallpaper` | which bundled Red artwork, a custom PNG path/HTTPS URL, or whether to follow the theme |
-| `red-dev apps` | which optional tools — all ticked; untick to opt out |
+| `red-dev apps` | which optional tools — all ticked; untick to opt out — and which web apps, where ChatGPT, Claude and GitHub arrive ticked, unticking an installed one removes it, and the last line takes a URL |
 | `red-dev lang` | which runtimes mise should manage, then recommended or latest versions — Java, Ruby and Go start off; the rest are opt-out |
 | `red-dev shell` | whether a terminal lands in WSL or Git Bash |
 | `red-dev agents` | which coding agents — all ticked; untick to opt out, then offers red-skills |
