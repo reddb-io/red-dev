@@ -183,7 +183,8 @@ export function buildCli(): CLI {
         description: "choose optional tools to install",
       },
       agents: {
-        description: "choose coding agents, and wire red-skills into them",
+        description:
+          "choose coding agents, wire red-skills into them, or `update` each by its publisher's mechanism",
         // Two positionals of its own, for the reason `share adopt
         // <tool>` has two: a comma-separated selection and a
         // subcommand's single argument are different shapes, and one
@@ -193,7 +194,7 @@ export function buildCli(): CLI {
           {
             name: "agent_selection",
             description:
-              "comma-separated agent keys for an unattended install, or `default`, or `run`",
+              "comma-separated agent keys for an unattended install, or `default`, `run`, `update`",
             required: false,
           },
           {
@@ -292,6 +293,8 @@ export interface Invocation {
   agentDefaultKey: string | undefined;
   /** `agents run` — start the Default agent. */
   agentRun: boolean;
+  /** `agents update` — refresh every installed host, each its own way. */
+  agentUpdate: boolean;
   /**
    * Everything after `--`: arguments for the program red-dev starts,
    * not for red-dev. Kept verbatim, including flags red-dev would never
@@ -361,12 +364,14 @@ export function parseArgs(cli: CLI, argv: string[]): Invocation {
   const rawWallpaper = pos["wallpaper_name"] ??
     (literalWallpaper && !literalWallpaper.startsWith("-") ? literalWallpaper : undefined);
 
-  // `default` and `run` in the selection slot are subcommands, not
-  // agent keys — no agent is called either, and reading one as a key
-  // would try to install it and fail with a list of the real names.
+  // `default`, `run` and `update` in the selection slot are
+  // subcommands, not agent keys — no agent is called any of them
+  // either, and reading one as a key would try to install it and fail
+  // with a list of the real names.
   const rawAgents = pos["agent_selection"];
   const agentDefault = rawAgents === "default";
   const agentRun = rawAgents === "run";
+  const agentUpdate = rawAgents === "update";
   return {
     command: r.command[0] ?? null,
     // `theme <name>` and `plan <scope>` both land in the positional map
@@ -374,13 +379,14 @@ export function parseArgs(cli: CLI, argv: string[]): Invocation {
     scope: scope ?? (typeof rawName === "string" ? rawName : undefined),
     logsWhich: typeof pos["which"] === "string" ? pos["which"] : undefined,
     agentKeys:
-      typeof rawAgents === "string" && !agentDefault && !agentRun
+      typeof rawAgents === "string" && !agentDefault && !agentRun && !agentUpdate
         ? rawAgents.split(",").map((value) => value.trim()).filter(Boolean)
         : undefined,
     agentDefault,
     agentDefaultKey:
       agentDefault && typeof pos["agent_key"] === "string" ? pos["agent_key"] : undefined,
     agentRun,
+    agentUpdate,
     passthrough,
     runtimeIds:
       typeof pos["runtime_selection"] === "string"

@@ -304,6 +304,16 @@ validated against what is installed on every read and never healed: a host that
 has been uninstalled is reported by name in `doctor` rather than quietly
 replaced by whichever host is still there.
 
+`red-dev agents update` refreshes the hosts, each one by its own publisher's
+mechanism rather than through a single path red-dev invented: an npm global
+reinstall, a GitHub release re-resolved and checksum-verified, a `winget
+upgrade`, or the vendor's own self-update where the vendor ships one. A host
+that is already current is a skip carrying the reason — not a reinstall, and
+not a failure, since winget reports exactly that state with a non-zero exit. A
+host that fails is named and the others still run. `red-dev update` runs it as
+one stage of updating the machine: system packages, RedSkills, mise's tools,
+the agents, then the converge.
+
 `red-dev agents run` starts it. What it runs is the plain invocation — the same
 command line you would have typed — and the suite enumerates every host's launch
 argv to keep it that way, over a fixture host carrying `--yolo` so the check can
@@ -430,7 +440,7 @@ red-dev platform             # what red-dev thinks this machine is
 red-dev plan [scope]         # what would change, changes nothing
 red-dev install [scope]      # converge toward the manifest
 red-dev install --dry-run    # print the plan, touch nothing
-red-dev update               # upgrade the package managers, mise's tools and red-dev itself
+red-dev update               # package managers, RedSkills, mise's tools, the agents, then converge
 red-dev theme [name]         # dark | light | obsidian | marble | cobalt | flare
 red-dev wallpaper [source]   # theme | Red artwork | absolute PNG path | HTTPS URL
 red-dev redwall              # redraw the wallpaper carrying this machine's state
@@ -443,6 +453,8 @@ red-dev agents               # choose coding agents, wire in red-skills
 red-dev agents claude-code,codex # unattended agent selection
 red-dev agents default       # which host red-dev hands work to
 red-dev agents default codex # change it
+red-dev agents run           # start the Default agent
+red-dev agents update        # refresh each host by its publisher's mechanism
 red-dev share [path]         # one directory both WSL and Windows read
 red-dev share adopt <tool>   # move that tool's configuration into it
 red-dev uninstall            # remove tools, or red-dev's own config

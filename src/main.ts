@@ -25,6 +25,7 @@ import { applyContextForEntry, type ApplyContextEntryPath } from "./preferences.
 import { themeFor, themeNames } from "./themes.ts";
 import { transcriptDir } from "./transcript.ts";
 import { interactive, select, text } from "./ui.ts";
+import type { UpdateStage } from "./update-order.ts";
 
 function resolveScopes(p: Platform, arg?: string): Scope[] {
   return arg ? [arg as Scope] : applicableScopes(p);
@@ -703,48 +704,67 @@ async function cmdPrivileged(p: Platform, inv: Invocation): Promise<number> {
   return code;
 }
 
+/**
+ * Update the machine: the package managers, then everything they do not
+ * own, then the converge that checks the result against the manifest.
+ *
+ * The order is declared in src/update-order.ts rather than written out
+ * as a run of statements here, because it is the part of this that is
+ * load-bearing and the part a reader has to be able to see whole. This
+ * function is what each stage *is*; that file is what order they come
+ * in and which of them may fail without ending the run.
+ */
 async function cmdUpdate(p: Platform, inv: Invocation): Promise<number> {
-  try {
-    await systemUpdate(p);
-  } catch (err) {
-    log.err((err as Error).message);
-    return 1;
-  }
-  // Before the converge, because the converge builds out of this tree:
-  // convergeRedSkills stops at "already wired", which is correct for
-  // install and leaves the checkout frozen forever under update.
-  if (!inv.dryRun) {
-    try {
+  const { runUpdate } = await import("./update-order.ts");
+
+  const stages: Record<UpdateStage, () => Promise<number | void>> = {
+    system: () => systemUpdate(p),
+
+    // Before the converge, because the converge builds out of this tree:
+    // convergeRedSkills stops at "already wired", which is correct for
+    // install and leaves the checkout frozen forever under update.
+    "red-skills": async () => {
+      if (inv.dryRun) return;
       const { updateRedSkills } = await import("./agents.ts");
       await updateRedSkills(p);
-    } catch (err) {
-      // Never fatal: the rest of the machine still has an update to do.
-      log.warn(`red-skills: ${(err as Error).message}`);
-    }
-  }
+    },
 
-  // The reddb-io suite, which until now no update path reached at all.
-  //
-  // apt and winget own their packages and upgrade them above; the tools
-  // this organisation publishes were installed once by a release
-  // download or a vendor script and then stayed at that version until
-  // somebody re-ran the installer by hand. mise is what closes that,
-  // and one `mise upgrade` covers every tool the generated fragment
-  // declares rather than one call per tool.
-  if (!inv.dryRun) {
-    try {
+    // The reddb-io suite, which until now no update path reached at all.
+    //
+    // apt and winget own their packages and upgrade them above; the
+    // tools this organisation publishes were installed once by a release
+    // download or a vendor script and then stayed at that version until
+    // somebody re-ran the installer by hand. mise is what closes that,
+    // and one `mise upgrade` covers every tool the generated fragment
+    // declares rather than one call per tool.
+    suite: async () => {
+      if (inv.dryRun) return;
       const { miseUpgradeSuite } = await import("./providers.ts");
       await miseUpgradeSuite(p);
-    } catch (err) {
-      // Same reasoning as red-skills above: an unreachable GitHub is not
-      // a reason to abandon the rest of the update.
-      log.warn(`mise: ${(err as Error).message}`);
-    }
-  }
+    },
 
-  // Upgrading can leave the manifest unsatisfied (a package removed, a
-  // binary replaced), so always re-converge afterwards.
-  return await cmdInstall(p, inv, "update");
+    // The agent hosts, which mise does not own either — and which are
+    // deliberately not handed to it. Each publisher updates its own.
+    agents: async () => {
+      if (inv.dryRun) return;
+      await cmdAgentsUpdate(p);
+    },
+
+    // Upgrading can leave the manifest unsatisfied (a package removed, a
+    // binary replaced), so always re-converge afterwards.
+    converge: () => cmdInstall(p, inv, "update"),
+  };
+
+  const run = await runUpdate(
+    (stage) => stages[stage](),
+    (stage, message, fatal) => {
+      // A stage that may be walked past is a warning; one that ends the
+      // update is the error that ended it.
+      if (fatal) log.err(message);
+      else log.warn(`${stage}: ${message}`);
+    },
+  );
+  return run.code;
 }
 
 async function cmdTheme(p: Platform, inv: Invocation, name?: string): Promise<number> {
@@ -1305,6 +1325,7 @@ async function cmdAgents(p: Platform, inv: Invocation): Promise<number> {
 
   if (inv.agentDefault) return await cmdAgentsDefault(p, inv.agentDefaultKey);
   if (inv.agentRun) return await cmdAgentsRun(p, inv.passthrough);
+  if (inv.agentUpdate) return await cmdAgentsUpdate(p);
 
   if (inv.agentKeys !== undefined) {
     inv = { ...inv, agentKeys: currentAgentKeys(inv.agentKeys) };
@@ -1545,6 +1566,36 @@ async function cmdAgentsRun(p: Platform, passthrough: string[]): Promise<number>
     log.err(`${decision.target.label} could not be started: ${decision.target.executable}`);
     return 1;
   }
+}
+
+/**
+ * `red-dev agents update` — every installed host, by its own
+ * publisher's mechanism.
+ *
+ * Deliberately not routed through the runtime manager's package
+ * backend, and deliberately not one uniform path: see the header of
+ * src/agent-update.ts. This surface is the reporting half of it — the
+ * decisions all live there, so `red-dev update` running the same thing
+ * as a stage cannot report it differently.
+ */
+async function cmdAgentsUpdate(p: Platform): Promise<number> {
+  const { availableAgents } = await import("./agents.ts");
+  const { reportAgentUpdate, updateAgents } = await import("./agent-update.ts");
+
+  const hosts = availableAgents(p);
+  log.step(`agents: updating ${hosts.length} known hosts, each by its publisher`);
+  const outcomes = await updateAgents(hosts, p, { report: reportAgentUpdate });
+
+  const failed = outcomes.filter((outcome) => outcome.state === "failed");
+  const updated = outcomes.filter((outcome) => outcome.state === "updated").length;
+  // Counted rather than narrated: a machine where nothing moved is the
+  // ordinary result of running this twice, and it should read like one.
+  if (failed.length === 0) {
+    log.ok(updated === 0 ? "every agent host was already current" : `${updated} agent host(s) updated`);
+    return 0;
+  }
+  log.err(`${failed.length} agent host(s) failed: ${failed.map((f) => f.key).join(", ")}`);
+  return 1;
 }
 
 /** Choose which language runtimes mise manages. */

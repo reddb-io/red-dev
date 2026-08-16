@@ -36,6 +36,19 @@ describe("command parsing", () => {
       passthrough: [],
       errors: [],
     });
+    expect(parse(["agents", "update"])).toMatchObject({
+      agentUpdate: true,
+      agentRun: false,
+      agentDefault: false,
+      agentKeys: undefined,
+      errors: [],
+    });
+  });
+
+  test("`agents update` is a command a person can find without being told", () => {
+    // A subcommand that parses and appears nowhere in --help exists only
+    // for whoever already knew about it.
+    expect(buildCli().help(["agents"])).toContain("update");
   });
 
   test("keeps what follows `--` for the program red-dev starts", () => {
