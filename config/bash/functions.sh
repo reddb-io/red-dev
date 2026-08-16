@@ -1,10 +1,10 @@
 # Shell functions.
 #
 # Omakub keeps these in defaults/bash/functions, written for a GNOME
-# desktop. Roughly half of them only make sense there: web2app builds a
-# .desktop launcher, app2folder pokes gsettings, iso2sd writes to a
-# block device. Sourcing those unconditionally under WSL or on a server
-# puts commands in your shell that cannot work, so they are guarded.
+# desktop. Roughly half of them only make sense there: app2folder pokes
+# gsettings, iso2sd writes to a block device. Sourcing those
+# unconditionally under WSL or on a server puts commands in your shell
+# that cannot work, so they are guarded.
 
 # ------------------------------------------------------ everywhere
 
@@ -66,42 +66,22 @@ if [ "${RED_ENV:-}" = "desktop" ]; then
       sudo eject "$2"
     fi
   }
-
-  # Create a desktop launcher that opens a URL as its own windowed app.
-  web2app() {
-    if [ "$#" -ne 3 ]; then
-      echo "Usage: web2app <AppName> <AppURL> <IconURL>   (icon must be PNG)"
-      return 1
-    fi
-    local APP_NAME="$1" APP_URL="$2" ICON_URL="$3"
-    local ICON_DIR="$HOME/.local/share/applications/icons"
-    local DESKTOP_FILE="$HOME/.local/share/applications/${APP_NAME}.desktop"
-    local ICON_PATH="${ICON_DIR}/${APP_NAME}.png"
-
-    mkdir -p "$ICON_DIR"
-    curl -sL -o "$ICON_PATH" "$ICON_URL" || { echo "icon download failed"; return 1; }
-
-    cat >"$DESKTOP_FILE" <<EOF
-[Desktop Entry]
-Version=1.0
-Name=$APP_NAME
-Comment=$APP_NAME
-Exec=google-chrome --app="$APP_URL" --name="$APP_NAME" --class="$APP_NAME"
-Terminal=false
-Type=Application
-Icon=$ICON_PATH
-Categories=GTK;
-StartupNotify=true
-EOF
-    chmod +x "$DESKTOP_FILE"
-  }
-
-  web2app-remove() {
-    [ "$#" -eq 1 ] || { echo "Usage: web2app-remove <AppName>"; return 1; }
-    rm -f "$HOME/.local/share/applications/${1}.desktop"
-    rm -f "$HOME/.local/share/applications/icons/${1}.png"
-  }
 fi
+
+# web2app and web2app-remove used to live here, ported from omakub.
+#
+# They are gone rather than kept beside the real thing. The function
+# hard-coded google-chrome, so on a machine with chromium and nothing
+# else it wrote a launcher that opens nothing; it existed only under
+# RED_ENV=desktop, so the same page could not be asked for on the
+# Windows half of the same setup; and its remove derived the icon path
+# from the app name a second time, which took the wrong file whenever
+# the two spellings disagreed.
+#
+# `red-dev apps` offers the same pages and any URL you type, resolves
+# whichever Chromium-family browser is actually installed, writes a
+# Start Menu shortcut on native Windows, and states the reason under
+# WSL instead of writing a .desktop file nothing there reads.
 
 # --------------------------------------------------------- wsl only
 
