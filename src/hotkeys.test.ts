@@ -12,6 +12,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { actionById } from "./actions/index.ts";
 import { resolveScript, WINDOWS_HOTKEYS } from "./hotkeys.ts";
 
 const claimed = WINDOWS_HOTKEYS.filter((h) => h.combo !== null).map((h) => h.combo);
@@ -57,6 +58,41 @@ describe("the shortcuts written", () => {
     // The elevated one spent a version as a Start Menu entry with no
     // binding. It has Ctrl+Alt+Shift+T now.
     expect(WINDOWS_HOTKEYS.every((h) => h.combo !== null)).toBe(true);
+  });
+});
+
+describe("the two keys come from the action registry", () => {
+  // The migration this pins: the combos used to be literals in
+  // hotkeys.ts and are now read from the registry. Behaviour is
+  // unchanged, which is exactly the thing worth pinning — the values
+  // above are what shipped, and they have to survive the move.
+  test("each Start Menu entry names the action it registers", () => {
+    expect(WINDOWS_HOTKEYS.map((h) => h.id)).toEqual(["terminal.new", "terminal.elevated"]);
+  });
+
+  test("and carries that action's chord, spelled the way Windows is given it", () => {
+    expect(actionById("terminal.new")?.chord).toBe("Ctrl+Alt+T");
+    expect(actionById("terminal.elevated")?.chord).toBe("Ctrl+Alt+Shift+T");
+    const by = (id: string) => WINDOWS_HOTKEYS.find((h) => h.id === id)?.combo;
+    expect(by("terminal.new")).toBe("CTRL+ALT+T");
+    expect(by("terminal.elevated")).toBe("CTRL+ALT+SHIFT+T");
+  });
+
+  test("the .lnk names stay Windows' own, because machines already have them", () => {
+    // The registry calls the elevated one "Elevated shell"; renaming the
+    // shortcut would leave the old .lnk — and its key — behind.
+    expect(actionById("terminal.elevated")?.label).toBe("Elevated shell");
+    expect(WINDOWS_HOTKEYS.find((h) => h.id === "terminal.elevated")?.label)
+      .toBe("PowerShell (Administrator)");
+  });
+
+  test("and the written script carries those chords, not its own copy", () => {
+    const script = resolveScript(null);
+    expect(script).toContain("New-Hot 'Terminal' 'CTRL+ALT+T'");
+    expect(script).toContain("New-Hot 'PowerShell (Administrator)' 'CTRL+ALT+SHIFT+T'");
+    // The post-write probe asks about the terminal chord: MOD_CONTROL |
+    // MOD_ALT is 3, and 0x54 is T.
+    expect(script).toContain("RegisterHotKey([IntPtr]::Zero, 9004, 3, 0x54)");
   });
 });
 
