@@ -22,8 +22,15 @@
  * Assigning an empty HotKey to an existing .lnk clears its binding,
  * verified on Windows — which is what lets a converge correct a machine
  * that still carries an old one.
+ *
+ * Which two keys they are is no longer decided here. This module is the
+ * Windows adapter for two entries in the semantic action registry: it
+ * owns how a chord is registered — a .lnk in the Start Menu, byte 21 for
+ * elevation — and reads which chord it is from the registry, per ADR
+ * 0006. The keys are the same ones it always wrote.
  */
 
+import { actionById, chordText, parseChord } from "./actions/index.ts";
 import type { DriftStatus } from "./drift.ts";
 import { log, RedError } from "./log.ts";
 import type { Platform } from "./platform.ts";
@@ -36,16 +43,55 @@ import type { Platform } from "./platform.ts";
  * happens on the Windows side; this is the contract.
  */
 export interface Hotkey {
+  /** The semantic action this shortcut registers. */
+  id: string;
   label: string;
   /** null for a Start Menu entry that deliberately has no key. */
   combo: string | null;
   note: string;
 }
 
-export const WINDOWS_HOTKEYS: Hotkey[] = [
-  { label: "Terminal", combo: "CTRL+ALT+T", note: "bash inside WSL, through Alacritty when it is there" },
-  { label: "PowerShell (Administrator)", combo: "CTRL+ALT+SHIFT+T", note: "elevated" },
+/**
+ * The Windows half of two registry actions.
+ *
+ * What the entry is called belongs to Windows and stays here:
+ * `PowerShell (Administrator)` is the name of a .lnk that already exists
+ * on people's machines, not the name of the act — the registry calls
+ * that one "Elevated shell". Which key it carries belongs to the
+ * registry, and is read from it rather than repeated here. That is the
+ * migration: the values are identical, the source of truth moved.
+ */
+const START_MENU: readonly { id: string; label: string; note: string }[] = [
+  { id: "terminal.new", label: "Terminal", note: "bash inside WSL, through Alacritty when it is there" },
+  { id: "terminal.elevated", label: "PowerShell (Administrator)", note: "elevated" },
 ];
+
+/** An action's chord, spelled the way Windows has always been given it. */
+function comboFromRegistry(id: string): string | null {
+  const action = actionById(id);
+  if (!action) return null;
+  const chord = parseChord(action.chord);
+  return chord ? chordText(chord) : null;
+}
+
+export const WINDOWS_HOTKEYS: Hotkey[] = START_MENU.flatMap((entry) => {
+  const combo = comboFromRegistry(entry.id);
+  // A Start Menu entry written with no key *clears* the binding on
+  // every machine that already had one, so an action that went missing
+  // from the registry drops its shortcut rather than unbinding it. The
+  // registry test is what keeps that unreachable; this is what it would
+  // cost if it ever were not.
+  return combo === null ? [] : [{ id: entry.id, label: entry.label, combo, note: entry.note }];
+});
+
+/** The entry for an action, or a loud failure rather than a silent unbind. */
+function hotkeyFor(id: string): Hotkey & { combo: string } {
+  const found = WINDOWS_HOTKEYS.find((h) => h.id === id);
+  if (!found || found.combo === null) {
+    throw new RedError(`the action registry no longer carries ${id}, so its shortcut cannot be written`);
+  }
+  return { ...found, combo: found.combo };
+}
 
 export type HotkeyState = "held" | "free" | "unknown";
 
@@ -105,6 +151,14 @@ export function hotkeyVerdict(shortcutExists: boolean, state: HotkeyState): Drif
  */
 export function resolveScript(distro: string | null): string {
   const d = distro ? `-d ${distro} ` : "";
+  const terminal = hotkeyFor("terminal.new");
+  const elevated = hotkeyFor("terminal.elevated");
+  // The post-write probe asks Windows about the terminal key itself, so
+  // its modifiers and virtual key come from the same chord the shortcut
+  // was written with rather than from a 0x54 nobody would think to
+  // change if the chord ever did.
+  const probe = hotkeyArgs(terminal.combo);
+  if (!probe) throw new RedError(`${terminal.combo} is not a chord Windows can register`);
   return `
 $ErrorActionPreference = 'Stop'
 $dir = Join-Path $env:APPDATA 'Microsoft\\Windows\\Start Menu\\Programs\\red-dev'
@@ -167,12 +221,12 @@ function New-Hot($name, $combo, $target, $argv, $admin) {
 }
 
 if ($alacritty) {
-  New-Hot 'Terminal' 'CTRL+ALT+T' $alacritty '' $false
+  New-Hot '${terminal.label}' '${terminal.combo}' $alacritty '' $false
 } else {
-  New-Hot 'Terminal' 'CTRL+ALT+T' (Join-Path $env:SystemRoot 'System32\\wsl.exe') '${d}--cd ~' $false
+  New-Hot '${terminal.label}' '${terminal.combo}' (Join-Path $env:SystemRoot 'System32\\wsl.exe') '${d}--cd ~' $false
 }
 
-New-Hot 'PowerShell (Administrator)' 'CTRL+ALT+SHIFT+T' (Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\powershell.exe') '-NoLogo' $true
+New-Hot '${elevated.label}' '${elevated.combo}' (Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\powershell.exe') '-NoLogo' $true
 
 # When something was rewritten, make sure the key came back.
 #
@@ -189,7 +243,7 @@ if ($script:wrote) {
   $sig = 'using System; using System.Runtime.InteropServices; public class RedHK { [DllImport("user32.dll", SetLastError=true)] public static extern bool RegisterHotKey(IntPtr h, int id, uint fs, uint vk); [DllImport("user32.dll")] public static extern bool UnregisterHotKey(IntPtr h, int id); }'
   Add-Type -TypeDefinition $sig
   Start-Sleep -Milliseconds 500
-  $free = [RedHK]::RegisterHotKey([IntPtr]::Zero, 9004, 3, 0x54)
+  $free = [RedHK]::RegisterHotKey([IntPtr]::Zero, 9004, ${probe.mods}, 0x${probe.vk.toString(16).toUpperCase()})
   if ($free) {
     [RedHK]::UnregisterHotKey([IntPtr]::Zero, 9004) | Out-Null
     Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
