@@ -15,7 +15,7 @@
  * command with no undo.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { describe, expect, test } from "bun:test";
 import type { Platform } from "./platform.ts";
@@ -171,6 +171,24 @@ describe("uninstalling red-dev's configuration", () => {
       expect(removed).toContain(managed);
       expect(existsSync(managed)).toBe(false);
       expect(existsSync(original)).toBe(true);
+    });
+  });
+
+  test("withdraws the host hook from the operator's RedSkills policy", async () => {
+    await onFreshMachine(async (home) => {
+      const path = `${home}/.red/config.yaml`;
+      const { applyRedwallHook } = await import("./redwall-hook.ts");
+      await applyRedwallHook(desktop, { enabled: async () => true, binary: "/bin/red-dev" });
+      expect(readFileSync(path, "utf8")).toContain("worker-birth:");
+
+      const removed = await removeConfiguration(desktop);
+
+      // The declaration is the one thing this feature leaves outside
+      // red-dev's own directories, in a file that belongs to somebody
+      // else. Left behind, it would have the daemon exec a path with no
+      // binary at it on every Worker birth for the life of the machine.
+      expect(removed).toContain(path);
+      expect(existsSync(path)).toBe(false);
     });
   });
 

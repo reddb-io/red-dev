@@ -53,6 +53,13 @@ nothing a person authored, and costs nothing when it surprises someone. The
 prohibition here is scoped to Reclaim and Rescue (ADR 0005) — acts that delete
 or interrupt — and stays in force for them.
 
+**Amendment 2 (2026-08-16):** the premise holds again. ADR 0009 replaced that
+timer with the RedSkills host hook and `src/redwall-schedule.ts` is gone, so
+red-dev installs no periodic job of any kind on any target. The exception above
+is retired rather than reversed — it was correct while it stood, and the reason
+it no longer applies is that the repaint found a trigger, not that repainting
+on a timer became wrong.
+
 ## Consequences
 
 An operator with a full disk and no memory of this feature stays stuck. That is

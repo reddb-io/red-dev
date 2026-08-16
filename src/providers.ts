@@ -1351,7 +1351,7 @@ const BUILTIN_INTENT: Partial<Record<BuiltinName, string>> = {
   "wsl-sync": "syncing the WSL distro settings with the host",
   "codex-statusline": "writing project, branch, model, effort, context and quotas into the Codex statusline",
   "claude-keybindings": "writing the Claude Code keybindings",
-  "redwall-schedule": "scheduling the wallpaper rotation",
+  "redwall-hook": "declaring the RedSkills host hook that repaints the Redwall",
   puppeteer: "installing Puppeteer, its matching Chrome for Testing and browser dependencies",
   "ssh-server": "installing and enabling the SSH server",
 };
@@ -1478,13 +1478,13 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
         await configureCodexStatusline();
         return;
       }
-      if (pr.name === "redwall-schedule") {
-        const { applyRedwallSchedule } = await import("./redwall-schedule.ts");
+      if (pr.name === "redwall-hook") {
+        const { applyRedwallHook } = await import("./redwall-hook.ts");
         // The outcome is dropped on purpose: every branch of it is a
         // converged machine, and the ones worth a line have already
-        // printed one. Throwing is reserved for a machine that could
-        // hold a schedule and refused to.
-        await applyRedwallSchedule(ctx.platform);
+        // printed one — including the refusal, which is the operator's
+        // own declaration standing where red-dev would have put its.
+        await applyRedwallHook(ctx.platform);
         return;
       }
       if (pr.name === "puppeteer") {

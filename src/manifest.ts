@@ -189,7 +189,7 @@ type ProviderSpec =
         | "wsl-sync"
         | "codex-statusline"
         | "claude-keybindings"
-        | "redwall-schedule"
+        | "redwall-hook"
         | "puppeteer"
         | "ssh-server";
     }
@@ -399,7 +399,7 @@ const builtin = (
     | "blender"
     | "codex-statusline"
     | "claude-keybindings"
-    | "redwall-schedule"
+    | "redwall-hook"
     | "puppeteer"
     | "ssh-server",
 ): Provider => ({ kind: "builtin", name });
@@ -1137,20 +1137,19 @@ export const TOOLS: Tool[] = [
     // Core, like hotkeys and for the same reason: the three targets that
     // can display a Redwall are a desktop, a WSL distro whose images the
     // Windows host shows, and native Windows — and no other scope spans
-    // all three. The builtin skips itself on a server and on a distro
-    // with no systemd, which is where the scope is wider than the
-    // feature.
+    // all three. The builtin skips itself on a server, which is where
+    // the scope is wider than the feature.
     //
-    // Last in core, after the binary itself is in place: the schedule
-    // names an absolute path to red-dev, and a timer installed before
-    // there is anything at that path fires into nothing every two
-    // minutes until the next converge.
-    name: "redwall-schedule",
-    about: "keeps the Redwall current, through systemd or Task Scheduler",
+    // Last in core, after the binary itself is in place: the declaration
+    // names an absolute path to red-dev, and a hook declared before
+    // there is anything at that path has the daemon exec nothing on
+    // every Worker birth until the next converge.
+    name: "redwall-hook",
+    about: "keeps the Redwall current, through the RedSkills host hook",
     scope: "core",
     managed: true,
-    u24: builtin("redwall-schedule"),
-    win: builtin("redwall-schedule"),
+    u24: builtin("redwall-hook"),
+    win: builtin("redwall-hook"),
   },
   {
     name: "wsl-interop",
