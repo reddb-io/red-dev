@@ -3,10 +3,10 @@
  * red-dev — one dev environment across Ubuntu 24, Ubuntu 26, WSL and Windows.
  */
 
-import { appendFileSync, mkdirSync } from "node:fs";
 import { buildCli, parseArgs, VERSION, type Invocation } from "./cli.ts";
 import type { VerdictItem } from "./completion.ts";
 import type { StepOutcome } from "./converge.ts";
+import { recordCrash } from "./crash.ts";
 import { log } from "./log.ts";
 import {
   applicableScopes,
@@ -23,7 +23,6 @@ import { administratorNotice } from "./plan.ts";
 import { applyProvider, systemUpdate, type ApplyContext } from "./providers.ts";
 import { applyContextForEntry, type ApplyContextEntryPath } from "./preferences.ts";
 import { themeFor, themeNames } from "./themes.ts";
-import { transcriptDir } from "./transcript.ts";
 import { interactive, select, text } from "./ui.ts";
 import type { UpdateStage } from "./update-order.ts";
 
@@ -1876,42 +1875,37 @@ async function cmdMenu(p: Platform, inv: Invocation, cliHelp: string): Promise<n
 process.env.NODE_ENV = "production";
 
 /**
- * Leave a trace when the process dies.
+ * Write the crash down, then offer it to the Default agent.
  *
- * A fullscreen app that crashes on Windows takes the console with it,
- * so the stack scrolls past inside a window that is already closing and
- * there is nothing left to report but "it crashed". Writing it to a file
- * first turns that into something diagnosable — and the file is the only
- * copy that survives the window.
+ * The capture is synchronous and comes first, because it is the half
+ * that has to survive: an async write loses the race with process death
+ * on Windows, where the window closing is the whole reason the file
+ * exists. Everything after it is a courtesy — a machine with no Default
+ * agent, or one whose owner declined the offer, exits here exactly as
+ * it did before crash-handoff.ts existed.
  *
- * Deliberately synchronous: an async write loses the race with process
- * death, which is the one case this exists for.
+ * The exit is deferred until the offer settles, and only until then. A
+ * handed-off crash means the person is now inside the agent, and the
+ * process that crashed is waiting to release the terminal back to them.
  */
-function recordCrash(kind: string, err: unknown): void {
-  const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
-  const dir = transcriptDir();
-  const path = `${dir}/crash.log`;
-  const entry = `\n=== ${new Date().toISOString()} ${kind} red-dev ${VERSION} ${process.platform} ===\n${detail}\n`;
+async function endWithCrash(kind: string, err: unknown): Promise<never> {
+  const capture = recordCrash(kind, err, { version: VERSION });
   try {
-    mkdirSync(dir, { recursive: true });
-    appendFileSync(path, entry);
+    const { handOffCrash } = await import("./crash-handoff.ts");
+    await handOffCrash(capture, VERSION);
   } catch {
-    // Nothing useful to do if even this fails; the console copy below
-    // is the fallback.
+    // A failure while offering must not replace the crash that is
+    // already on disk with one about the offer.
   }
-  // stderr as well as the file: on a terminal that survives, the user
-  // should not have to know a log file exists.
-  process.stderr.write(`\x1b[?1049l${entry}\nrecorded to ${path}\n`);
+  process.exit(70);
 }
 
 if (process.argv[2] !== "statusline") {
   process.on("uncaughtException", (err) => {
-    recordCrash("uncaughtException", err);
-    process.exit(70);
+    void endWithCrash("uncaughtException", err);
   });
   process.on("unhandledRejection", (err) => {
-    recordCrash("unhandledRejection", err);
-    process.exit(70);
+    void endWithCrash("unhandledRejection", err);
   });
 }
 

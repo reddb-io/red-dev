@@ -68,6 +68,17 @@ export interface Preferences {
    * is a state red-dev reports rather than fills in.
    */
   defaultAgent?: string;
+  /**
+   * Whether a captured crash may be offered to the Default agent — see
+   * src/crash-handoff.ts.
+   *
+   * Absent means the offer is made. Boolean false is the durable
+   * decline: an offer that came back after every crash would be a nag,
+   * so `no` is recorded here and honoured from then on. Nothing writes
+   * true — accepting one offer is not a standing instruction about the
+   * next crash.
+   */
+  crashHandoff?: boolean;
   /** mise runtime ids chosen for this workstation. */
   runtimes?: string[];
   /** Ids of one-off repairs already applied; see src/migrations.ts. */
