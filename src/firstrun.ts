@@ -75,6 +75,12 @@ export function preferencesFromAnswers(answers: SetupAnswers): Preferences {
     redwall: answers.redwall,
     agents: answers.agents,
     runtimes: answers.runtimes,
+    // Conditional, and that is the whole of how the choice survives a
+    // converge: writePreferences merges, but a key present and
+    // undefined overwrites the stored value with nothing. An interview
+    // that settled on no Default agent must leave the recorded one
+    // alone rather than erase it.
+    ...(answers.defaultAgent ? { defaultAgent: answers.defaultAgent } : {}),
     ...(answers.terminalShell ? { terminalShell: answers.terminalShell } : {}),
     ...(answers.terminalShell === "wsl" && process.env["WSL_DISTRO_NAME"]
       ? { distro: process.env["WSL_DISTRO_NAME"] }

@@ -292,6 +292,18 @@ a third-party wrapper and winget's `T3Tools.T3Code` is the publisher's own.
 Picking any CLI agent then offers
 [red-skills](https://github.com/reddb-io/red-skills), which registers its
 marketplace in Claude Code and Codex and generates plugin modules for RedCode.
+**The Default agent** is the one installed host red-dev hands work to — a crash
+to diagnose, a launch shortcut, a profile's required host. It is asked
+immediately after the hosts and only when the answer is a real choice: tick one
+CLI agent and that one is it, with no question, because a question with one
+answer is not a question. red-dev never starts it with a permission bypass or
+auto-approve flag — unattended is a decision made at the moment someone types
+it, not one shipped as a default. Change it later with `red-dev agents default
+<key>`, and run that with no key to see what is recorded. The record is
+validated against what is installed on every read and never healed: a host that
+has been uninstalled is reported by name in `doctor` rather than quietly
+replaced by whichever host is still there.
+
 RedCode comes from `reddb-io/redcode` release archives through GitHub's stable
 download redirect, so a clean machine does not need `gh` or an API request to
 discover it. Its published `SHA256SUMS` is verified before extraction. Existing
@@ -421,6 +433,8 @@ red-dev lang --latest node,python # newest release of each
 red-dev shell                # Windows + WSL: where a terminal lands
 red-dev agents               # choose coding agents, wire in red-skills
 red-dev agents claude-code,codex # unattended agent selection
+red-dev agents default       # which host red-dev hands work to
+red-dev agents default codex # change it
 red-dev share [path]         # one directory both WSL and Windows read
 red-dev share adopt <tool>   # move that tool's configuration into it
 red-dev uninstall            # remove tools, or red-dev's own config
@@ -503,6 +517,7 @@ deliberately:
 | `red-dev lang` | which runtimes mise should manage, then recommended or latest versions — Java, Ruby and Go start off; the rest are opt-out |
 | `red-dev shell` | whether a terminal lands in WSL or Git Bash |
 | `red-dev agents` | which coding agents — all ticked; untick to opt out, then offers red-skills |
+| `red-dev agents` | which of them is the Default agent, asked only when more than one CLI host is selected |
 | `red-dev uninstall` | what to remove — and confirms before removing it |
 | `red-dev wsl` | whether to set WSL up on a fresh Windows machine |
 | `red-dev rescue --apply` | whether to end the exact proven-orphan groups in the preview |

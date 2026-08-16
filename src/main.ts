@@ -1303,6 +1303,8 @@ async function cmdAgents(p: Platform, inv: Invocation): Promise<number> {
     await import("./agents.ts");
   const available = availableAgents(p);
 
+  if (inv.agentDefault) return await cmdAgentsDefault(p, inv.agentDefaultKey);
+
   if (inv.agentKeys !== undefined) {
     inv = { ...inv, agentKeys: currentAgentKeys(inv.agentKeys) };
   }
@@ -1345,6 +1347,10 @@ async function cmdAgents(p: Platform, inv: Invocation): Promise<number> {
     if (p.os === "windows") {
       const { writePreferences } = await import("./preferences.ts");
       await writePreferences(p, { agents: inv.agentKeys });
+      // ask: false — this branch is the bridge into WSL and is
+      // deliberately prompt-free, so a selection with a real choice in
+      // it stays unanswered rather than being answered by a machine.
+      await settleDefaultAgent(p, inv.agentKeys, false);
       const { syncSelectedTooling } = await import("./wsl-sync.ts");
       failures += await syncSelectedTooling(p);
     }
@@ -1377,6 +1383,7 @@ async function cmdAgents(p: Platform, inv: Invocation): Promise<number> {
 
   const { writePreferences } = await import("./preferences.ts");
   await writePreferences(p, { agents: keys });
+  await settleDefaultAgent(p, keys, true);
 
   for (const key of keys) {
     const agent = available.find((a) => a.key === key);
@@ -1417,6 +1424,95 @@ async function cmdAgents(p: Platform, inv: Invocation): Promise<number> {
   }
 
   return failures > 0 ? 1 : 0;
+}
+
+/**
+ * Settle the Default agent for a selection that was just recorded.
+ *
+ * Silent when the selection holds one CLI host, because there is
+ * nothing to decide. A question when it holds several — unless the
+ * recorded answer is still one of them, in which case re-running
+ * `red-dev agents` would be asking someone to repeat themselves.
+ */
+async function settleDefaultAgent(p: Platform, keys: string[], ask: boolean): Promise<void> {
+  const { defaultAgentCandidates, impliedDefaultAgent } = await import("./default-agent.ts");
+  const { readPreferences, writePreferences } = await import("./preferences.ts");
+
+  const implied = impliedDefaultAgent(keys);
+  if (implied) {
+    await writePreferences(p, { defaultAgent: implied });
+    return;
+  }
+
+  const candidates = defaultAgentCandidates(keys);
+  if (candidates.length === 0) return;
+  const recorded = (await readPreferences(p)).defaultAgent;
+  if (candidates.some((agent) => agent.key === recorded)) return;
+
+  if (!ask || !interactive()) {
+    log.skip("more than one agent host — name the default: red-dev agents default <key>");
+    return;
+  }
+
+  const { select } = await import("./ui.ts");
+  const labels = candidates.map((agent) => `${agent.key} — ${agent.label}`);
+  const picked = await select(
+    "Which one does red-dev hand work to?",
+    labels as [string, ...string[]],
+    labels[0]!,
+  );
+  await writePreferences(p, { defaultAgent: picked.split(" ")[0]! });
+}
+
+/**
+ * `red-dev agents default [key]` — report the recorded host, or record
+ * a different one.
+ *
+ * Naming a host that is not installed is allowed and warned about
+ * rather than refused: someone setting a machine up in the order they
+ * choose is not making a mistake, and `doctor` says the same thing
+ * afterwards until the host arrives.
+ */
+async function cmdAgentsDefault(p: Platform, key: string | undefined): Promise<number> {
+  const { AGENTS, availableAgents, currentAgentKeys, isAgentInstalled } = await import(
+    "./agents.ts"
+  );
+  const { isDefaultAgentCandidate, readDefaultAgent, reportDefaultAgent } = await import(
+    "./default-agent.ts"
+  );
+  const { readPreferences, writePreferences } = await import("./preferences.ts");
+  const offered = availableAgents(p).filter(isDefaultAgentCandidate);
+
+  if (key === undefined) {
+    const prefs = await readPreferences(p);
+    const report = reportDefaultAgent(
+      readDefaultAgent(prefs.defaultAgent, isAgentInstalled),
+      prefs.agents ?? [],
+    );
+    if (report.status === "ok") log.ok(report.detail);
+    else if (report.status === "n/a") log.skip(report.detail);
+    else log.err(report.detail);
+    if (report.fix) log.plain(`       fix: ${report.fix}`);
+    log.plain(`     hosts here: ${offered.map((agent) => agent.key).join(", ")}`);
+    return report.status === "drift" ? 1 : 0;
+  }
+
+  const resolved = currentAgentKeys([key])[0];
+  const spec = AGENTS.find((agent) => agent.key === resolved);
+  if (!spec || !isDefaultAgentCandidate(spec)) {
+    log.err(`'${key}' is not a host red-dev can hand work to`);
+    log.plain(`     hosts here: ${offered.map((agent) => agent.key).join(", ")}`);
+    return 1;
+  }
+  if (!offered.some((agent) => agent.key === spec.key)) {
+    log.err(`${spec.label} has no installer for this side`);
+    return 1;
+  }
+
+  await writePreferences(p, { defaultAgent: spec.key });
+  log.ok(`default agent: ${spec.label}`);
+  if (!isAgentInstalled(spec)) log.warn(`not installed yet — red-dev agents ${spec.key}`);
+  return 0;
 }
 
 /** Choose which language runtimes mise manages. */
