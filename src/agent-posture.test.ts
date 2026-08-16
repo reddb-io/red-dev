@@ -125,6 +125,15 @@ describe("agent freshness", () => {
     expect(rows.some((candidate) => candidate.name === "Gemini CLI")).toBe(false);
   });
 
+  test("says today rather than nought days for a host installed this morning", () => {
+    const found = row(
+      posture({ locate: locates("claude-code"), modifiedAtMs: written(0) }),
+      "Claude Code",
+    );
+    expect(found.status).toBe("ok");
+    expect(found.detail).toBe("the copy on PATH changed today");
+  });
+
   test("is drift once a host that moves weekly has stopped moving", () => {
     const found = row(
       posture({ locate: locates("claude-code"), modifiedAtMs: written(AGENT_STALE_DAYS + 5) }),
