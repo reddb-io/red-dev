@@ -30,6 +30,7 @@
  * the log says what happened rather than reporting a silent `ok`.
  */
 
+import { existsSync, readFileSync } from "node:fs";
 import type { PrivilegedState } from "./drift.ts";
 import { log, RedError } from "./log.ts";
 import type { Platform } from "./platform.ts";
@@ -68,10 +69,17 @@ async function run(cmd: string[], live = false): Promise<Ran> {
  * Asked rather than assumed: `systemctl enable ssh` on a machine that
  * calls it sshd fails with "unit not found", which reads like a broken
  * install rather than a naming difference.
+ *
+ * Exported, and the runner is an argument, because removal has to reach
+ * the same unit this enabled. A second copy of the two names in
+ * ssh-access.ts would be a machine that starts `ssh` and disables `sshd`
+ * the day one of them changes.
  */
-async function linuxUnit(): Promise<string | null> {
+export async function linuxUnit(
+  exec: (cmd: string[]) => Promise<{ ok: boolean }> = run,
+): Promise<string | null> {
   for (const unit of ["ssh", "sshd"]) {
-    const { ok } = await run(["systemctl", "list-unit-files", `${unit}.service`]);
+    const { ok } = await exec(["systemctl", "list-unit-files", `${unit}.service`]);
     if (ok) return unit;
   }
   return null;
@@ -135,6 +143,32 @@ export async function installSshServerLinux(p: Platform): Promise<void> {
     return;
   }
   log.ok(`sshd listening, ${unit}.service enabled at boot`);
+
+  // The half a converge cannot finish, said out loud rather than left
+  // for the first refused connection to explain. A converge never asks —
+  // it runs in CI, in a pipe and over a non-interactive SSH — so what it
+  // can do is name the command that does. See src/ssh-access.ts.
+  if (!anyAuthorizedKey()) {
+    log.plain("       no key is authorized yet — `red-dev ssh <github-user>` fetches and adds one");
+  }
+}
+
+/**
+ * Whether this machine authorizes anybody at all.
+ *
+ * Read here rather than asked of ssh-access.ts, which imports this
+ * module for the unit name and the revert script below: the cycle would
+ * buy one path literal, and the comment costs less than the import
+ * order it would leave someone to reason about.
+ */
+function anyAuthorizedKey(): boolean {
+  const home = process.env["HOME"] ?? process.env["USERPROFILE"];
+  if (!home) return false;
+  const path = `${home}/.ssh/authorized_keys`;
+  if (!existsSync(path)) return false;
+  return readFileSync(path, "utf8")
+    .split("\n")
+    .some((line) => line.trim() !== "" && !line.trim().startsWith("#"));
 }
 
 // ---------------------------------------------------------- windows
@@ -195,6 +229,50 @@ if (-not $cap) {
   } else {
     'firewall rule already present'
   }
+}
+`.trim();
+
+/**
+ * The same three steps, undone, and undone together.
+ *
+ * Beside the script it reverts rather than in the module that calls it,
+ * because these two texts have to keep agreeing about one string: the
+ * rule is deleted by the name it was added under, and a rename in either
+ * copy alone leaves a converged machine holding an open port nothing
+ * knows how to close.
+ *
+ * The capability stays. Removing it is a reboot-scale operation on a
+ * component Windows itself ships, and the deliverable here is that
+ * nothing reaches the machine — a disabled, stopped service behind no
+ * firewall rule does not, whether or not its files are on disk.
+ *
+ * Guarded the same way the install is, so a machine that was never
+ * converged reverts to itself rather than failing: no service and no
+ * rule are two no-ops, not two errors. It needs administrator exactly as
+ * the install does; `red-dev uninstall` is typed at a shell rather than
+ * collected into the consent batch, so a refusal arrives as a note
+ * saying the service is unchanged.
+ */
+export const windowsSshRevertScript = `
+$ErrorActionPreference = 'Stop'
+
+$svc = Get-Service sshd -ErrorAction SilentlyContinue
+if ($svc) {
+  if ($svc.Status -eq 'Running') {
+    Stop-Service sshd
+    'sshd stopped'
+  }
+  Set-Service -Name sshd -StartupType Disabled
+  'sshd disabled'
+} else {
+  'no sshd service'
+}
+
+if (Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue) {
+  Remove-NetFirewallRule -Name 'OpenSSH-Server-In-TCP'
+  'firewall rule for TCP 22 removed'
+} else {
+  'no firewall rule of ours'
 }
 `.trim();
 

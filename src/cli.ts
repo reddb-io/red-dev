@@ -236,6 +236,28 @@ export function buildCli(): CLI {
       shell: {
         description: "choose whether the terminal opens WSL or Git Bash",
       },
+      ssh: {
+        description: "authorize a GitHub account's published public keys on this machine",
+        positional: [
+          {
+            name: "github_user",
+            description: "the GitHub account whose keys to fetch, show and authorize",
+            required: false,
+          },
+        ],
+        options: {
+          // The keys are still fetched and still printed; what this
+          // skips is the question, which is the only part a pipeline
+          // cannot answer. Declared here rather than borrowed from
+          // `install`, because an option that exists on every command is
+          // an option nobody reads before typing.
+          yes: {
+            type: "boolean",
+            description: "authorize without asking — the keys are printed either way",
+            default: false,
+          },
+        },
+      },
       share: {
         description: "one directory both WSL and Windows read configuration from",
         // Two positionals with names of their own, and both halves of
@@ -318,6 +340,12 @@ export interface Invocation {
   latest: boolean;
   /** `wallpaper [theme|slug|absolute-path|https-url]` — absent opens the picker. */
   wallpaperName: string | undefined;
+  /**
+   * `ssh [github-user]` — its own positional, because the account name
+   * is neither a scope nor a theme and reusing either would reject it
+   * with a list of the wrong words.
+   */
+  sshUser: string | undefined;
   /**
    * Parse and validation failures. Strict mode means an unrecognised
    * command lands here too, with the list of real ones — so there is no
@@ -406,6 +434,7 @@ export function parseArgs(cli: CLI, argv: string[]): Invocation {
         : undefined,
     latest: opts["latest"] === true,
     wallpaperName: typeof rawWallpaper === "string" ? rawWallpaper : undefined,
+    sshUser: typeof pos["github_user"] === "string" ? pos["github_user"] : undefined,
     themeName: typeof opts["theme"] === "string" ? opts["theme"] : DEFAULT_THEME,
     font: typeof opts["font"] === "string" ? opts["font"] : "firacode",
     opacity: clampOpacity(opts["opacity"], errors),
