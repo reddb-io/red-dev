@@ -314,6 +314,15 @@ host that fails is named and the others still run. `red-dev update` runs it as
 one stage of updating the machine: system packages, RedSkills, mise's tools,
 the agents, then the converge.
 
+`doctor` has an `[agents]` section holding the whole posture: which host is the
+Default agent, how long ago each installed host's copy on PATH last changed, and
+per-provider usage with the reset times the Redwall's one compact line has no
+room for. It reports and does nothing else — no vendor is asked what the newest
+version is, no host is started to interrogate it, and the usage numbers are read
+from the snapshot some other run wrote or reported unknown. A host whose copy
+has sat unchanged for 30 days is drift pointing at `red-dev agents update`;
+one whose copy cannot be read is unknown rather than stale.
+
 `red-dev agents run` starts it. What it runs is the plain invocation — the same
 command line you would have typed — and the suite enumerates every host's launch
 argv to keep it that way, over a fixture host carrying `--yolo` so the check can

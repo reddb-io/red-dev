@@ -292,10 +292,30 @@ async function cmdDoctor(p: Platform, inv: Invocation): Promise<number> {
     }
   }
 
+  // The machine's agent posture, in the one place that already answers
+  // "is this machine ready": which host red-dev hands work to, how old
+  // each installed host's copy is, and the per-provider allowance detail
+  // the Redwall's single line has no room for. Every row is read from
+  // what some other run wrote down — nothing here probes a provider,
+  // starts a host or writes a preference.
+  log.plain("\n[agents]");
+  const { agentPostureFor } = await import("./agent-posture.ts");
+  let agentProblems = 0;
+  for (const row of await agentPostureFor(p)) {
+    const detail = `${row.name} — ${row.detail}`;
+    if (row.status === "ok") log.ok(detail);
+    else if (row.status === "n/a") log.skip(detail);
+    else {
+      log.err(detail);
+      agentProblems++;
+    }
+    if (row.fix) log.plain(`       fix: ${row.fix}`);
+  }
+
   log.plain("");
   if (
     missing > 0 || outdated > 0 || mismatched > 0 || drifted > 0 || hostProblems > 0 ||
-    shadowedCount > 0
+    shadowedCount > 0 || agentProblems > 0
   ) {
     const parts = [`${missing} tool(s) missing`];
     if (outdated > 0) parts.push(`${outdated} outdated`);
@@ -308,6 +328,7 @@ async function cmdDoctor(p: Platform, inv: Invocation): Promise<number> {
     if (shadowedCount > 0) parts.push(`${shadowedCount} shadowed by another copy on PATH`);
     parts.push(`${drifted} config drift(s)`);
     if (hostProblems > 0) parts.push(`${hostProblems} host health problem(s)`);
+    if (agentProblems > 0) parts.push(`${agentProblems} agent posture problem(s)`);
     log.warn(parts.join(", "));
     return 1;
   }

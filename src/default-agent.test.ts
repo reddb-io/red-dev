@@ -20,7 +20,7 @@ import {
   readDefaultAgent,
   reportDefaultAgent,
 } from "./default-agent.ts";
-import { checkDefaultAgent } from "./drift.ts";
+import { agentPostureFor, type AgentPostureRow } from "./agent-posture.ts";
 import { preferencesFromAnswers } from "./firstrun.ts";
 import type { Platform } from "./platform.ts";
 import { readPreferences, writePreferences } from "./preferences.ts";
@@ -83,6 +83,22 @@ function answers(overrides: Partial<SetupAnswers> = {}): SetupAnswers {
 }
 
 const installed = (...keys: string[]) => (agent: AgentSpec): boolean => keys.includes(agent.key);
+
+/** The same machine seen the way `doctor` sees it: through PATH. */
+const onPath = (...keys: string[]) => (cmd: string): string | null =>
+  AGENTS.some((agent) => keys.includes(agent.key) && agent.cmd === cmd) ? `/opt/agents/${cmd}` : null;
+
+/** The Default agent line of doctor's agent section. */
+async function doctorDefaultAgent(...keys: string[]): Promise<AgentPostureRow> {
+  const rows = await agentPostureFor(LINUX, {
+    locate: onPath(...keys),
+    modifiedAtMs: () => null,
+    usage: () => null,
+  });
+  const found = rows.find((row) => row.name === "default agent");
+  if (!found) throw new Error("doctor reported no Default agent");
+  return found;
+}
 
 describe("one CLI host", () => {
   test("is the Default agent without being asked about", () => {
@@ -168,7 +184,7 @@ describe("a stored Default agent that is no longer installed", () => {
         agents: ["claude-code", "codex"],
         defaultAgent: "claude-code",
       });
-      const check = await checkDefaultAgent(LINUX, installed("codex"));
+      const check = await doctorDefaultAgent("codex");
       expect(check.status).toBe("drift");
       expect(check.detail).toContain("Claude Code");
       expect(check.fix).toContain("red-dev agents claude-code");
@@ -211,7 +227,7 @@ describe("the recorded choice", () => {
       );
 
       expect((await readPreferences(LINUX)).defaultAgent).toBe("codex");
-      const check = await checkDefaultAgent(LINUX, installed("claude-code", "codex"));
+      const check = await doctorDefaultAgent("claude-code", "codex");
       expect(check.status).toBe("ok");
       expect(check.detail).toContain("Codex CLI");
       expect(check.detail).toContain("codex");
