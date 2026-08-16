@@ -23,6 +23,7 @@ import {
   unlinkSync,
 } from "node:fs";
 import { log, RedError } from "./log.ts";
+import type { Tool } from "./manifest.ts";
 import { tlsTrustFailure, unattendedEnvironment } from "./unattended.ts";
 import type { Platform } from "./platform.ts";
 
@@ -880,6 +881,28 @@ export async function codexMarketplaceIsGithub(): Promise<boolean | null> {
 }
 
 /**
+ * What a marketplace repair needs from outside itself.
+ *
+ * Both fields have real defaults and exist for the tests: a repair is a
+ * sequence of commands issued to a CLI that may not be installed, and
+ * the thing worth pinning is *which* commands, against *which* declared
+ * plugin set. Injecting the runner is what lets that be asserted without
+ * an agent, a marketplace or a network in the loop.
+ */
+export interface MarketplaceRepair {
+  /** Runs one argv and answers its exit code. Defaults to spawnLogged. */
+  run?: (cmd: string[]) => Promise<number>;
+  /** The manifest to derive the plugin set from. Defaults to TOOLS. */
+  tools?: readonly Tool[];
+}
+
+async function repairRunner(opts: MarketplaceRepair): Promise<(cmd: string[]) => Promise<number>> {
+  if (opts.run) return opts.run;
+  const { spawnLogged } = await import("./providers.ts");
+  return (cmd: string[]) => spawnLogged(cmd);
+}
+
+/**
  * Repoint Claude's marketplace from the frozen directory to GitHub.
  *
  * Remove, re-add by repo, reinstall the plugins — the same five steps
@@ -887,23 +910,32 @@ export async function codexMarketplaceIsGithub(): Promise<boolean | null> {
  * set-source`. The plugins have to be reinstalled: they were installed
  * from a marketplace that no longer exists under that name.
  *
+ * Which plugins is the manifest's answer, not this function's. A machine
+ * that opted `brain` out has no entry for it, so a repair that named it
+ * here would reinstall precisely what the operator removed.
+ *
  * Not destructive in any way that matters. Everything removed here is
  * re-created from the origin in the same run, and the source cache under
  * ~/.red-skills is left alone.
  */
-export async function repointClaudeMarketplace(): Promise<void> {
-  const { spawnLogged } = await import("./providers.ts");
+export async function repointClaudeMarketplace(
+  p: Platform,
+  opts: MarketplaceRepair = {},
+): Promise<void> {
+  const run = await repairRunner(opts);
+  const { redSkillsPluginNames } = await import("./red-skills-plugins.ts");
+
   log.step("red-skills: marketplace points at a local directory — repointing at GitHub");
   log.plain("     A directory source cannot receive updates. Claude re-reads the");
   log.plain("     same snapshot and records a new timestamp, so a stuck machine");
   log.plain("     reports itself as current.");
 
-  await spawnLogged(["claude", "plugin", "marketplace", "remove", "red-skills"]);
-  if ((await spawnLogged(["claude", "plugin", "marketplace", "add", "reddb-io/red-skills"])) !== 0) {
+  await run(["claude", "plugin", "marketplace", "remove", "red-skills"]);
+  if ((await run(["claude", "plugin", "marketplace", "add", "reddb-io/red-skills"])) !== 0) {
     throw new RedError("could not add the red-skills marketplace from GitHub");
   }
-  for (const plugin of ["dev", "memory", "brain"]) {
-    await spawnLogged(["claude", "plugin", "install", `${plugin}@red-skills`]);
+  for (const plugin of redSkillsPluginNames(p, opts.tools)) {
+    await run(["claude", "plugin", "install", `${plugin}@red-skills`]);
   }
   log.ok("red-skills marketplace now tracks reddb-io/red-skills");
 }
@@ -912,23 +944,30 @@ export async function repointClaudeMarketplace(): Promise<void> {
  * Repoint Codex's marketplace from a local snapshot to GitHub.
  *
  * Codex keeps plugin enablement when a marketplace is removed, but the
- * explicit add calls refresh the cache for the three RedSkills plugins
- * that contribute skills, hooks, and MCP servers.
+ * explicit add calls refresh the cache for whichever RedSkills plugins
+ * this machine declares — they are what contribute skills, hooks and MCP
+ * servers, and the set comes from the manifest for the same reason it
+ * does above.
  */
-export async function repointCodexMarketplace(): Promise<void> {
-  const { spawnLogged } = await import("./providers.ts");
+export async function repointCodexMarketplace(
+  p: Platform,
+  opts: MarketplaceRepair = {},
+): Promise<void> {
+  const run = await repairRunner(opts);
+  const { redSkillsPluginNames } = await import("./red-skills-plugins.ts");
+
   log.step("red-skills: Codex marketplace points at a local directory — repointing at GitHub");
   log.plain("     A local Codex marketplace can leave MCP launchers looking");
   log.plain("     for a Git marketplace checkout that does not exist.");
 
-  if ((await spawnLogged(["codex", "plugin", "marketplace", "remove", "red-skills"])) !== 0) {
+  if ((await run(["codex", "plugin", "marketplace", "remove", "red-skills"])) !== 0) {
     throw new RedError("could not remove the local red-skills marketplace from Codex");
   }
-  if ((await spawnLogged(["codex", "plugin", "marketplace", "add", "reddb-io/red-skills"])) !== 0) {
+  if ((await run(["codex", "plugin", "marketplace", "add", "reddb-io/red-skills"])) !== 0) {
     throw new RedError("could not add the red-skills marketplace to Codex from GitHub");
   }
-  for (const plugin of ["dev", "memory", "brain"]) {
-    if ((await spawnLogged(["codex", "plugin", "add", `${plugin}@red-skills`])) !== 0) {
+  for (const plugin of redSkillsPluginNames(p, opts.tools)) {
+    if ((await run(["codex", "plugin", "add", `${plugin}@red-skills`])) !== 0) {
       throw new RedError(`could not install ${plugin}@red-skills into Codex`);
     }
   }
@@ -1006,10 +1045,10 @@ export async function convergeRedSkills(p: Platform): Promise<void> {
   // a local directory is wired and permanently stale, which no amount
   // of reinstalling the same installer will fix.
   if (commandPath("claude") && (await claudeMarketplaceIsGithub()) === false) {
-    await repointClaudeMarketplace();
+    await repointClaudeMarketplace(p);
   }
   if (commandPath("codex") && (await codexMarketplaceIsGithub()) === false) {
-    await repointCodexMarketplace();
+    await repointCodexMarketplace(p);
   }
 
   const missing = await unwiredSkillHosts();
