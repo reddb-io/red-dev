@@ -36,8 +36,10 @@ describe("an update", () => {
     expect(ran.indexOf("agents")).toBeLessThan(ran.indexOf("converge"));
     // The whole sequence, so the mise-managed suite cannot be moved
     // after the agents that may be installed on top of it without this
-    // saying so.
-    expect(ran).toEqual(["system", "red-skills", "suite", "agents", "converge"]);
+    // saying so — and so the prune stays after everything that
+    // installs, which is what makes it collect versions rather than the
+    // ones this run was about to put down.
+    expect(ran).toEqual(["system", "red-skills", "suite", "agents", "converge", "prune"]);
     expect(updateStageOrder()).toEqual(ran);
   });
 
@@ -60,7 +62,7 @@ describe("an update", () => {
     // that already succeeded. A machine that stops updating the moment
     // one vendor is down never finishes updating.
     const { ran, failures } = await walk({ "red-skills": "GitHub API 503", agents: "codex failed" });
-    expect(ran).toEqual(["system", "red-skills", "suite", "agents", "converge"]);
+    expect(ran).toEqual(["system", "red-skills", "suite", "agents", "converge", "prune"]);
     expect(failures).toEqual(["red-skills: GitHub API 503", "agents: codex failed"]);
   });
 

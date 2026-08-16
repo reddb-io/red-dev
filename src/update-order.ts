@@ -16,14 +16,18 @@
  *             reached at all until one asked it to
  *   agents    each host by its own publisher's mechanism, after the
  *             runtimes it may need have been advanced above it
- *   converge  last, always: upgrading can leave the manifest unsatisfied
- *             — a package removed, a binary replaced — and the converge
- *             is what notices
+ *   converge  upgrading can leave the manifest unsatisfied — a package
+ *             removed, a binary replaced — and the converge is what
+ *             notices
+ *   prune     after everything is installed and converged, never
+ *             before: mise collects the versions no config still names,
+ *             and the config is not final until the converge has had
+ *             its say
  *
  * — so it is declared once, in one place, and executed by walking it.
  */
 
-export type UpdateStage = "system" | "red-skills" | "suite" | "agents" | "converge";
+export type UpdateStage = "system" | "red-skills" | "suite" | "agents" | "converge" | "prune";
 
 export interface UpdateStageSpec {
   stage: UpdateStage;
@@ -42,6 +46,10 @@ export const UPDATE_STAGES: readonly UpdateStageSpec[] = [
   { stage: "suite" },
   { stage: "agents" },
   { stage: "converge", fatal: true },
+  // Not fatal, and last: retention is the one stage whose failure costs
+  // disk rather than correctness. An update that could not prune is
+  // still an update, and the exit code stays the converge's.
+  { stage: "prune" },
 ];
 
 /** The stages in order, for a caller that only wants the sequence. */
