@@ -268,19 +268,21 @@ describe("a marketplace that reports updates it cannot receive", () => {
   test("the repair reinstalls the plugins it removed", () => {
     // They came from a marketplace that no longer exists under that
     // name, so re-adding the source is not enough on its own.
+    //
+    // Which plugins is no longer written here: the set is the manifest's,
+    // and src/red-skills-plugins.test.ts asserts the commands a repair
+    // actually issues against it. What is left to pin at this level is
+    // that the reinstall step still exists at all.
     const repair = src.slice(src.indexOf("export async function repointClaudeMarketplace"));
-    for (const plugin of ["dev", "memory", "brain"]) {
-      expect(repair).toContain(plugin);
-    }
+    expect(repair).toContain("redSkillsPluginNames");
+    expect(repair).toContain("@red-skills");
   });
 
   test("the Codex repair refreshes the plugins that provide MCPs", () => {
     const repair = src.slice(src.indexOf("export async function repointCodexMarketplace"));
     expect(repair).toContain("plugin");
     expect(repair).toContain("marketplace");
-    for (const plugin of ["dev", "memory", "brain"]) {
-      expect(repair).toContain(plugin);
-    }
+    expect(repair).toContain("redSkillsPluginNames");
   });
 
   test("castle has the repo-local fallback Codex already searches", () => {
