@@ -20,8 +20,10 @@
 import { describe, expect, test } from "bun:test";
 import { contrast } from "./brand.ts";
 import { decodePng, encodePng, type Raster } from "./png.ts";
+import { REDWALL_CHARSET } from "./redwall-charset.ts";
 import { REDWALL_SUBSET } from "./redwall-font.ts";
 import {
+  AGENT_WINDOW_KINDS,
   redwallBox,
   redwallInk,
   redwallLines,
@@ -331,6 +333,97 @@ describe("the lines", () => {
       "github pat api 98% · gql 85%",
       "192.168.1.42",
     ]);
+  });
+
+  test("draw the agent allowance beside the GitHub budgets, remaining-first", () => {
+    // Percent remaining, like the two lines above it. The fixture is a
+    // reading, not a snapshot: taking one is `agent-usage.ts`'s job and
+    // reading one is this module's, and the split is what keeps a
+    // repaint incapable of collecting.
+    expect(redwallLines({
+      ...running,
+      github: { pat: { api: 95, graphql: 90 }, app: null },
+      agent: {
+        provider: "claude",
+        updatedAtMs: 1_760_000_000_000,
+        windows: [
+          { kind: "five_hour", usedPercent: 42, remainingPercent: 58, resetsAtMs: null },
+          { kind: "seven_day", usedPercent: 18, remainingPercent: 82, resetsAtMs: null },
+          { kind: "seven_day_opus", usedPercent: 9, remainingPercent: 91, resetsAtMs: null },
+        ],
+      },
+    })).toEqual([
+      "redskilled at work",
+      "3 workers",
+      "github pat api 95% · gql 90%",
+      "agent claude 5h 58% · 7d 82% · 7d opus 91%",
+      "192.168.1.42",
+    ]);
+  });
+
+  test("say so when the allowance is unknown, rather than blanking the card", () => {
+    // An absent snapshot arrives here as null, and the rest of the card
+    // has to survive it. Nothing about a machine's Workers or address
+    // stopped being true because a provider could not be read.
+    expect(redwallLines({ ...running, agent: null })).toEqual([
+      "redskilled at work",
+      "3 workers",
+      "agent unknown",
+      "192.168.1.42",
+    ]);
+    expect(redwallLines({ workers: null, address: null, agent: null })).toEqual([
+      "redskilled unavailable",
+      "agent unknown",
+    ]);
+    // A window under a name this face was never cut for is another way
+    // of not knowing, and it lands in the same place. The alternative is
+    // an underscore the subset has no glyph for taking every line with it.
+    expect(redwallLines({
+      ...running,
+      agent: {
+        provider: "claude",
+        updatedAtMs: 1_760_000_000_000,
+        windows: [{ kind: "monthly", usedPercent: 5, remainingPercent: 95, resetsAtMs: null }],
+      },
+    })).toEqual(["redskilled at work", "3 workers", "agent unknown", "192.168.1.42"]);
+    // And a provider naming itself in characters the face lacks costs
+    // its own line and no other.
+    expect(redwallLines({
+      ...running,
+      agent: {
+        provider: "zed",
+        updatedAtMs: 1_760_000_000_000,
+        windows: [{ kind: "five_hour", usedPercent: 42, remainingPercent: 58, resetsAtMs: null }],
+      },
+    })).toEqual(["redskilled at work", "3 workers", "agent unknown", "192.168.1.42"]);
+  });
+
+  test("draw no agent line at all when nobody asked for one", () => {
+    // Absent is not unknown. Every caller written before this existed
+    // renders exactly what it did.
+    expect(redwallLines(running)).toEqual([
+      "redskilled at work",
+      "3 workers",
+      "192.168.1.42",
+    ]);
+  });
+
+  test("and every agent line the overlay can produce is one the face can set", () => {
+    const drawable = (line: string): boolean =>
+      [...line].every((ch) => REDWALL_CHARSET.includes(ch));
+    const windows = [...AGENT_WINDOW_KINDS].map((kind) => ({
+      kind,
+      usedPercent: 7,
+      remainingPercent: 93,
+      resetsAtMs: null,
+    }));
+    for (const line of redwallLines({ ...running, agent: null })) expect(drawable(line), line).toBe(true);
+    for (
+      const line of redwallLines({
+        ...running,
+        agent: { provider: "claude", updatedAtMs: 1_760_000_000_000, windows },
+      })
+    ) expect(drawable(line), line).toBe(true);
   });
 
   test("distinguishes standing by, capacity, attention and unavailable", () => {
