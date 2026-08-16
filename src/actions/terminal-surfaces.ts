@@ -44,6 +44,6 @@ export const TERMINAL_SURFACE_ACTIONS: readonly SemanticAction[] = [
     // are, because ADR 0006 keeps red-dev out of the Super family and
     // taking Ctrl+. would fight GTK for a key it uses inside text
     // fields.
-    chord: "Ctrl+Alt+E",
+    chord: "Ctrl+Alt+Shift+E",
   },
 ];

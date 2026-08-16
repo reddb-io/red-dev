@@ -463,10 +463,12 @@ describe("the plain list, for a terminal that cannot draw the picker", () => {
 });
 
 describe("how the picker is reached", () => {
-  test("it is a semantic action, with one chord in the Ctrl+Alt family", () => {
+  test("it is a semantic action, in the half the chord decision reserved", () => {
     const action = ACTIONS.find((a) => a.id === "emoji.pick");
     expect(action?.label).toBe("Emoji picker");
-    expect(action?.chord).toBe("Ctrl+Alt+E");
+    // Ctrl+Alt+E until the #138 decision was applied, which is the bug
+    // this assertion now guards: plain Ctrl+Alt is left to editors.
+    expect(action?.chord).toBe("Ctrl+Alt+Shift+E");
     // Opening it reads a table and writes nothing; the clipboard belongs
     // to the signed-in session.
     expect(action?.mutates).toBe(false);

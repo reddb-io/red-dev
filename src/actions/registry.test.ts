@@ -53,6 +53,43 @@ describe("the registry itself", () => {
     ]);
   });
 
+  test("carries the exact chord the maintainer chose for each action", () => {
+    // Pinned per id rather than as a family property, because a family
+    // assertion is what let this drift in the first place: `Ctrl+Alt+N`
+    // and `Ctrl+Alt+Shift+N` both satisfy "ctrl and alt and not win",
+    // so the four panel and emoji chords shipped in the half the
+    // maintainer had explicitly rejected and every test stayed green.
+    //
+    // The decision is #138: everything red-dev adds lives in the
+    // Ctrl+Alt+Shift half, leaving plain Ctrl+Alt+<letter> to editors —
+    // JetBrains spends it on refactorings and a global hotkey wins over
+    // the focused application. The two terminal chords predate it.
+    expect(Object.fromEntries(ACTIONS.map((a) => [a.id, a.chord]))).toEqual({
+      "terminal.new": "Ctrl+Alt+T",
+      "terminal.elevated": "Ctrl+Alt+Shift+T",
+      "emoji.pick": "Ctrl+Alt+Shift+E",
+      "panel.network": "Ctrl+Alt+Shift+N",
+      "panel.audio": "Ctrl+Alt+Shift+A",
+      "panel.power": "Ctrl+Alt+Shift+P",
+    });
+  });
+
+  test("leaves the plain Ctrl+Alt half to editors, except where it predates the decision", () => {
+    const predating = new Set(["terminal.new"]);
+    for (const action of ACTIONS) {
+      if (predating.has(action.id)) continue;
+      expect(parseChord(action.chord)?.shift).toBe(true);
+    }
+  });
+
+  test("refuses a chord GNOME answers to in the Shift half", () => {
+    // Added with the decision: the guard carried Ctrl+Alt+Tab and
+    // Ctrl+Alt+Esc but not their Shift variants, which are
+    // switch-panels-backward and cycle-panels-backward.
+    expect(problems(fixture({ chord: "Ctrl+Alt+Shift+Tab" }))).not.toEqual([]);
+    expect(problems(fixture({ chord: "Ctrl+Alt+Shift+Esc" }))).not.toEqual([]);
+  });
+
   test("gives every action exactly one chord, in the Ctrl+Alt family", () => {
     for (const action of ACTIONS) {
       const chord = parseChord(action.chord);
