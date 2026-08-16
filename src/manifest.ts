@@ -1131,6 +1131,47 @@ export const TOOLS: Tool[] = [
     u24: mise("npm:@reddb-io/red-skills", { alias: "red-skills" }),
     win: mise("npm:@reddb-io/red-skills", { alias: "red-skills" }),
   },
+  // The plugins, one row each, and that is the point of them being here.
+  //
+  // They used to be a literal — ["dev", "memory", "brain"] — written out
+  // in two loops in agents.ts, so every machine carried all three
+  // whether or not anybody used them, and a fourth plugin was an edit in
+  // two places that could disagree. A row is the opt-out this product
+  // already has for everything else: delete it and nothing installs, no
+  // entry is projected into the fragment, and the loops that reinstall
+  // plugins after a marketplace repair have nothing to reinstall.
+  //
+  // In dependency order, which the loops preserve: memory declares dev.
+  //
+  // Rows rather than one row with a list, because a list would inherit
+  // nothing. Each of these is a mise entry, so `mise upgrade` advances
+  // it and `mise prune` reclaims the versions it leaves behind, which is
+  // the whole argument for spending an entry per plugin. src/red-skills-
+  // plugins.ts derives the set back out of this.
+  {
+    name: "red-skills-dev",
+    about: "RedSkills dev plugin — engineering skills for coding agents",
+    scope: "core",
+    managed: true,
+    u24: mise("npm:@reddb-io/red-skills-dev", { alias: "red-skills-dev" }),
+    win: mise("npm:@reddb-io/red-skills-dev", { alias: "red-skills-dev" }),
+  },
+  {
+    name: "red-skills-memory",
+    about: "RedSkills memory plugin — governed operational memory, on top of dev",
+    scope: "core",
+    managed: true,
+    u24: mise("npm:@reddb-io/red-skills-memory", { alias: "red-skills-memory" }),
+    win: mise("npm:@reddb-io/red-skills-memory", { alias: "red-skills-memory" }),
+  },
+  {
+    name: "red-skills-brain",
+    about: "RedSkills brain plugin — a project-local knowledge repository",
+    scope: "core",
+    managed: true,
+    u24: mise("npm:@reddb-io/red-skills-brain", { alias: "red-skills-brain" }),
+    win: mise("npm:@reddb-io/red-skills-brain", { alias: "red-skills-brain" }),
+  },
   {
     // After the agents, never before: the installer detects which CLIs
     // exist and wires each one, so running it on a machine with none
