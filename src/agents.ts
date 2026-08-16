@@ -733,6 +733,14 @@ export function repairCopiedRedSkillsCurrent(
  * where it now points.
  */
 export async function updateRedSkills(p: Platform): Promise<void> {
+  // Before the early return below, not after it. The Product skill is
+  // red-dev's own and does not come out of the red-skills tarball, so a
+  // machine with agents and no marketplace still has product knowledge
+  // to refresh — and refreshing it here is what stops it freezing at
+  // whatever the install-day converge wrote.
+  const { refreshProductSkill } = await import("./product-skill.ts");
+  await refreshProductSkill(p);
+
   const { sourceRoot, refreshRedSkillsExtensions } = await import("./red-skills-ext.ts");
   if (!sourceRoot()) {
     log.skip("red-skills: not installed, nothing to advance");
@@ -986,6 +994,13 @@ export async function convergeRedSkills(p: Platform): Promise<void> {
     log.skip("red-skills: no coding agent installed to configure");
     return;
   }
+
+  // Ahead of every early return under it. red-dev owns this file, so it
+  // is current whenever red-dev has run — including on the ordinary
+  // converge where red-skills itself is already wired and there is
+  // nothing else to do here.
+  const { refreshProductSkill } = await import("./product-skill.ts");
+  await refreshProductSkill(p);
 
   // Before asking whether it is wired: a marketplace registered against
   // a local directory is wired and permanently stale, which no amount
