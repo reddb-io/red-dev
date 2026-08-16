@@ -1498,8 +1498,17 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
         return;
       }
       if (pr.name === "hotkeys") {
-        const { installWindowsHotkeys } = await import("./hotkeys.ts");
-        await installWindowsHotkeys(ctx.platform);
+        // One provider, one adapter per host. Which chords they register
+        // is the same list on both — src/actions/, per ADR 0006 — and
+        // only how they register differs: a Start Menu .lnk on Windows,
+        // a GNOME custom keybinding on a desktop.
+        if (ctx.platform.env === "windows" || ctx.platform.env === "wsl") {
+          const { installWindowsHotkeys } = await import("./hotkeys.ts");
+          await installWindowsHotkeys(ctx.platform);
+          return;
+        }
+        const { installGnomeKeys } = await import("./gnome-keys.ts");
+        await installGnomeKeys(ctx.platform);
         return;
       }
       if (pr.name === "wsl-sync") {

@@ -839,6 +839,39 @@ that depend on it, rather than trusting the copy to have taken.
 > This target is **implemented and unproven** — no bare-metal Ubuntu has run it.
 > Start with `red-dev install --dry-run`.
 
+#### The chords, as GNOME custom keybindings
+
+The same nine keys the Start Menu carries on Windows, registered here as GNOME
+custom keybindings — one dconf entry each, name, command and accelerator:
+
+| Key | Opens |
+| --- | --- |
+| `Ctrl+Alt+T` | the terminal red-dev installed, not the session's default handler |
+| `Ctrl+Alt+Shift+M` | the red-dev menu |
+| `Ctrl+Alt+Shift+K` | the keys viewer — searchable, and a launcher |
+| `Ctrl+Alt+Shift+E` | the emoji picker |
+| `Ctrl+Alt+Shift+N` | the network panel |
+| `Ctrl+Alt+Shift+A` | the audio panel |
+| `Ctrl+Alt+Shift+P` | the power panel |
+| `Ctrl+Alt+Shift+G` | the Default agent |
+| `Ctrl+Alt+Shift+H` | the agent multiplexer, where herdr is installed |
+
+They live at `/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/red-dev-<action>/`
+rather than at GNOME's own `custom0`, `custom1`, …, so a converge adds, updates
+and withdraws its own entries and never touches a shortcut you set yourself —
+yours keep their place in the list. A converge that finds them already right
+writes nothing.
+
+GNOME's own `Ctrl+Alt+T` is cleared while red-dev holds that key, because two
+owners for one accelerator is undefined and GNOME's opens whatever
+`x-terminal-emulator` resolves to rather than the terminal red-dev installed.
+`gsettings reset` puts GNOME's default back the moment red-dev stops claiming it.
+
+`Ctrl+Alt+Shift+T` — the elevated shell — is the one action with no keybinding
+here. It is a Windows act; on Linux, `sudo` in the terminal you already have
+does it, so `red-dev keys` reports it unbound **with that reason** rather than
+choosing a second chord for it (ADR 0006).
+
 ### WSL — Ubuntu 24.04 or 26.04 under Windows
 
 ```bash
@@ -1136,7 +1169,7 @@ places to look — in this order.
 
 | Target | What does not work, and why |
 | --- | --- |
-| **Ubuntu desktop** | The `desktop` scope is implemented and **has never run on real hardware**. GNOME hotkeys, extensions and dock settings are not ported at all. |
+| **Ubuntu desktop** | The `desktop` scope is implemented and **has never run on real hardware** — the GNOME keybindings included. GNOME extensions and dock settings are not ported at all. |
 | **Ubuntu 26.04** | The `u26` manifest column exists and **no 26.04 machine has exercised it**. Package-name drift is undiscovered. |
 | **WSL** | Windows interop cannot work under `sudo -u <other-user>`: `WSL_INTEROP` points at a per-session socket that sudo drops. Real invocations run as you, so this affects test harnesses only. |
 | **Native Windows** | No switching to a *numbered* virtual desktop — Windows offers only sequential navigation, and reaching a specific one means an interface that changes between builds. No zellij session persistence across reboots. No `ble.sh`-style line editor. |

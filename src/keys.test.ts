@@ -11,14 +11,15 @@
  *
  * Every platform here is a fixture. The interesting cases are the
  * targets this test process is not running on — a Windows host binds
- * both terminal actions, a Linux desktop binds neither because no GNOME
- * adapter exists yet, and a server has no display to press a key on —
- * and none of those is answerable by asking the machine underneath.
+ * through the Start Menu, a GNOME desktop through custom keybindings,
+ * and a server has no display to press a key on — and none of those is
+ * answerable by asking the machine underneath.
  */
 
 import { describe, expect, test } from "bun:test";
 import { ACTIONS } from "./actions/index.ts";
 import type { SemanticAction } from "./actions/index.ts";
+import { GNOME_ACTIONS } from "./gnome-keys.ts";
 import { START_MENU_ACTIONS } from "./hotkeys.ts";
 import {
   fireEntry,
@@ -131,6 +132,40 @@ describe("the list", () => {
     ]);
   });
 
+  test("on a GNOME desktop, every action the keybindings adapter registers is bound", () => {
+    // The acceptance criterion, read off the same list the adapter
+    // writes from. Until it landed this row read `unsupported` for all
+    // ten actions on the target red-dev was born for: the chords were
+    // printed, the ADR promised they were the same everywhere, and not
+    // one of them fired.
+    for (const id of GNOME_ACTIONS) {
+      const entry = keyEntries(desktop).find((e) => e.id === id);
+      expect(entry?.state).toBe("bound");
+      expect(entry?.reason).toBe("");
+    }
+    // Named as well as derived, so the loop cannot pass by being empty
+    // and so the set is a decision somebody has to change on purpose.
+    expect([...GNOME_ACTIONS]).toEqual([
+      "terminal.new",
+      "menu.open",
+      "keys.viewer",
+      "emoji.pick",
+      "panel.network",
+      "panel.audio",
+      "panel.power",
+      "agent.launch",
+      "agent.multiplex",
+    ]);
+  });
+
+  test("and the one it will not bind is the only unbound row there", () => {
+    // herdr's chord is bound here and not on Windows, which is the
+    // mirror image of the Start Menu's one gap — the same registry, two
+    // adapters, each honest about what its host can do.
+    const unbound = keyEntries(desktop).filter((e) => e.state !== "bound");
+    expect(unbound.map((e) => e.id)).toEqual(["terminal.elevated"]);
+  });
+
   test("an action the Windows adapter has never carried says so, and is not called broken", () => {
     // The distinction that matters, and the one widening the claimed set
     // must not blur: the Start Menu adapter registers the entries it
@@ -155,14 +190,15 @@ describe("the list", () => {
 
 describe("an action this target does not bind", () => {
   test("is listed, not hidden, and the reason says the target has no adapter", () => {
-    // Ubuntu desktop today: terminal.new applies here — GNOME ships the
-    // same chord for the same act — and nothing red-dev owns registers
-    // it, because the GNOME adapter is not written. Reporting that is
-    // the ADR's rule; dropping the row would make the viewer agree with
-    // a machine that is missing a feature.
-    const entry = keyEntries(desktop).find((e) => e.id === "terminal.new");
+    // A target with no adapter at all, which is the sentence Ubuntu
+    // desktop printed for every row until the GNOME adapter landed. It
+    // takes a fixture to reach now: the three targets that can press a
+    // key all have an adapter, so the only way to a machine without one
+    // is an action that applies where no adapter does. Kept, because
+    // that is the state every new target starts in.
+    const [entry] = keyEntries(server, only({ id: "terminal.new", platforms: ["server"] }));
     expect(entry?.state).toBe("unsupported");
-    expect(entry?.reason).toContain("no bindings adapter for desktop");
+    expect(entry?.reason).toContain("no bindings adapter for server");
   });
 
   test("that does not apply here at all says so, and names where it does", () => {
@@ -288,13 +324,14 @@ describe("what Enter runs", () => {
   });
 
   test("an unbound action still runs — that is what the viewer is for", async () => {
-    // Ubuntu desktop binds no chord today. Someone who opened the viewer
-    // to reach the terminal gets the terminal, rather than a row telling
-    // them the chord they came here to find does not work.
-    const [terminal] = keyEntries(desktop);
+    // A machine whose chord nothing registers still opens the thing.
+    // Someone who reached the viewer to find the terminal gets the
+    // terminal, rather than a row telling them the chord they came here
+    // to find does not work.
+    const [terminal] = keyEntries(server, only({ id: "terminal.new", platforms: ["server"] }));
     expect(terminal?.state).toBe("unsupported");
     const started: string[][] = [];
-    const outcome = await fireEntry(terminal!, desktop, (argv) => started.push(argv), anything);
+    const outcome = await fireEntry(terminal!, server, (argv) => started.push(argv), anything);
     expect(outcome.fired).toBe(true);
     expect(started[0]).toEqual(["alacritty"]);
   });
