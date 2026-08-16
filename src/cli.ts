@@ -191,6 +191,14 @@ export function buildCli(): CLI {
         // chord you cannot name yet.
         description: "search every action and its chord, and run one",
       },
+      emoji: {
+        // No positional and no flags, for the reason `keys` has none:
+        // the search is typed into the picker, not onto the command
+        // line, because the point of the thing is to find a character
+        // you cannot name yet. What it copies through comes from what
+        // this machine is.
+        description: "search the bundled emoji table and copy one to the clipboard",
+      },
       learn: {
         description: "the README by anchor, RedSkills, and the keys viewer",
       },
