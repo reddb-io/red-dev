@@ -57,6 +57,17 @@ export interface AgentSpec {
     linux: Partial<Record<Platform["arch"], string>>;
     windows: Partial<Record<Platform["arch"], string>>;
   };
+  /**
+   * The publisher's own update command, appended to this host's binary.
+   *
+   * Only for a host that manages its own installation — Claude Code's
+   * install.sh puts a self-updating binary on the machine, so `claude
+   * update` is the door its publisher built for exactly this, and
+   * re-running the install script would be red-dev going around it.
+   * A host whose package manager owns the version (npm, winget, a
+   * release archive) leaves this unset: see src/agent-update.ts.
+   */
+  selfUpdate?: string[];
   /** Runtimes an npm lifecycle script needs in addition to Node itself. */
   runtimeNeeds?: string[];
   /** A command that must start successfully before presence counts as ready. */
@@ -92,6 +103,7 @@ export const AGENTS: AgentSpec[] = [
     recommended: true,
     installer: "https://claude.ai/install.sh",
     winget: "Anthropic.ClaudeCode",
+    selfUpdate: ["update"],
   },
   {
     key: "codex",
@@ -372,7 +384,12 @@ export function npmEnvironment(
   return executableEnvironment(npm, platform, current);
 }
 
-async function agentRuntimeEnvironment(
+/**
+ * Exported for the update path, which spawns the same npm against the
+ * same host and must not grow a second answer to "what does this child
+ * need on its PATH" — see src/agent-update.ts.
+ */
+export async function agentRuntimeEnvironment(
   executable: string,
   agent: AgentSpec,
 ): Promise<Record<string, string | undefined>> {
