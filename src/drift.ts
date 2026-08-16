@@ -13,7 +13,6 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import type { AgentSpec } from "./agents.ts";
 import type { Platform } from "./platform.ts";
 import { missingRights } from "./rights.ts";
 
@@ -536,39 +535,6 @@ async function checkRedSkillsSource(): Promise<DriftCheck> {
   }
 }
 
-/**
- * Which host red-dev hands work to, and whether it is still there.
- *
- * The recorded choice is validated against the installed set on every
- * read and never healed: an agent that has been uninstalled is reported
- * under its own name. Substituting whichever host remains would make
- * the report agree with the machine by changing the answer, which is
- * the one outcome a recorded decision exists to prevent.
- *
- * The installed test is a parameter so a caller that has already
- * probed does not probe again — and so this is answerable without an
- * agent on PATH.
- */
-export async function checkDefaultAgent(
-  p: Platform,
-  installed?: (a: AgentSpec) => boolean,
-): Promise<DriftCheck> {
-  const [{ readPreferences }, { readDefaultAgent, reportDefaultAgent }, agents] = await Promise.all([
-    import("./preferences.ts"),
-    import("./default-agent.ts"),
-    import("./agents.ts"),
-  ]);
-  const prefs = await readPreferences(p);
-  const reading = readDefaultAgent(prefs.defaultAgent, installed ?? agents.isAgentInstalled);
-  const report = reportDefaultAgent(reading, prefs.agents ?? []);
-  return {
-    name: "default agent",
-    status: report.status,
-    detail: report.detail,
-    ...(report.fix ? { fix: report.fix } : {}),
-  };
-}
-
 export async function collectDrift(p: Platform): Promise<DriftCheck[]> {
   const checks: DriftCheck[] = [];
   checks.push(await checkDotfiles());
@@ -580,7 +546,12 @@ export async function collectDrift(p: Platform): Promise<DriftCheck[]> {
   checks.push(await checkFont(p));
   checks.push(await checkWslDistro(p));
   checks.push(await checkRedSkillsSource());
-  checks.push(await checkDefaultAgent(p));
+  // The Default agent is deliberately not here. It is one of three
+  // things doctor says about this machine's agent posture, and the other
+  // two — host freshness, per-provider usage — have no home in
+  // configuration drift; reporting the choice twice under two headings
+  // is how a reader ends up wondering which line is the real one. See
+  // src/agent-posture.ts.
   checks.push(await checkDelta());
   checks.push(await checkRuntimes());
   checks.push(await checkDocker(p));
