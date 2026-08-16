@@ -61,6 +61,17 @@ export interface AgentSpec {
   runtimeNeeds?: string[];
   /** A command that must start successfully before presence counts as ready. */
   probeArgs?: string[];
+  /**
+   * Arguments red-dev adds when it starts this host.
+   *
+   * Empty for every host today, which is the point: what a person gets
+   * from `red-dev agents run` is the command line they would have typed
+   * themselves. It exists as a field so that a host which one day needs
+   * one — a profile, a config path — declares it here, where the
+   * permission-bypass guard in src/agent-launch.ts reads it, rather
+   * than having it spliced in at a call site no guard looks at.
+   */
+  launchArgs?: string[];
   /** Desktop applications have no CLI and only exist on some targets. */
   desktopOnly?: boolean;
   /**
@@ -250,7 +261,7 @@ export function availableAgents(p: Platform): AgentSpec[] {
 }
 
 /** Resolve against PATH as it exists now, including tools exposed this run. */
-function commandPath(command: string): string | null {
+export function commandPath(command: string): string | null {
   const path = process.env["Path"] ?? process.env["PATH"] ?? "";
   return Bun.which(command, { PATH: path });
 }
