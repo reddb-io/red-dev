@@ -192,7 +192,8 @@ export function buildCli(): CLI {
         positional: [
           {
             name: "agent_selection",
-            description: "comma-separated agent keys for an unattended install, or `default`",
+            description:
+              "comma-separated agent keys for an unattended install, or `default`, or `run`",
             required: false,
           },
           {
@@ -289,6 +290,14 @@ export interface Invocation {
    */
   agentDefault: boolean;
   agentDefaultKey: string | undefined;
+  /** `agents run` — start the Default agent. */
+  agentRun: boolean;
+  /**
+   * Everything after `--`: arguments for the program red-dev starts,
+   * not for red-dev. Kept verbatim, including flags red-dev would never
+   * add itself — see src/agent-launch.ts.
+   */
+  passthrough: string[];
   runtimeIds: string[] | undefined;
   /** `lang --latest`: rewrite every selected runtime selector to `latest`. */
   latest: boolean;
@@ -317,7 +326,13 @@ function clampOpacity(raw: unknown, errors: string[]): number {
 }
 
 export function parseArgs(cli: CLI, argv: string[]): Invocation {
-  const r = cli.parse(argv);
+  // `--` ends red-dev's own arguments. What follows belongs to the
+  // program red-dev is about to start, and must never reach the schema
+  // — strict mode would reject `--dangerously-skip-permissions` as an
+  // unknown option, when it is not an option of ours at all.
+  const separator = argv.indexOf("--");
+  const passthrough = separator >= 0 ? argv.slice(separator + 1) : [];
+  const r = cli.parse(separator >= 0 ? argv.slice(0, separator) : argv);
   const opts = r.options as Record<string, unknown>;
   const pos = r.positional as Record<string, unknown>;
   const errors = [...(r.errors ?? [])];
@@ -346,11 +361,12 @@ export function parseArgs(cli: CLI, argv: string[]): Invocation {
   const rawWallpaper = pos["wallpaper_name"] ??
     (literalWallpaper && !literalWallpaper.startsWith("-") ? literalWallpaper : undefined);
 
-  // `default` in the selection slot is the subcommand, not an agent key
-  // — no agent is called that, and reading it as one would try to
-  // install it and fail with a list of the real names.
+  // `default` and `run` in the selection slot are subcommands, not
+  // agent keys — no agent is called either, and reading one as a key
+  // would try to install it and fail with a list of the real names.
   const rawAgents = pos["agent_selection"];
   const agentDefault = rawAgents === "default";
+  const agentRun = rawAgents === "run";
   return {
     command: r.command[0] ?? null,
     // `theme <name>` and `plan <scope>` both land in the positional map
@@ -358,12 +374,14 @@ export function parseArgs(cli: CLI, argv: string[]): Invocation {
     scope: scope ?? (typeof rawName === "string" ? rawName : undefined),
     logsWhich: typeof pos["which"] === "string" ? pos["which"] : undefined,
     agentKeys:
-      typeof rawAgents === "string" && !agentDefault
+      typeof rawAgents === "string" && !agentDefault && !agentRun
         ? rawAgents.split(",").map((value) => value.trim()).filter(Boolean)
         : undefined,
     agentDefault,
     agentDefaultKey:
       agentDefault && typeof pos["agent_key"] === "string" ? pos["agent_key"] : undefined,
+    agentRun,
+    passthrough,
     runtimeIds:
       typeof pos["runtime_selection"] === "string"
         ? pos["runtime_selection"].split(",").map((value) => value.trim()).filter(Boolean)
