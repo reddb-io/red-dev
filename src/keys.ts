@@ -347,6 +347,31 @@ export function firePlan(
       };
     }
 
+    case "emoji.pick": {
+      // A terminal of its own, exactly as a Panel gets one and for the
+      // same reason: the viewer is already drawing in this one, and two
+      // full-screen surfaces on one frame is what firing it in place
+      // would produce.
+      if (onWindowsHost(p)) {
+        return {
+          ok: true,
+          id,
+          argv: ["cmd.exe", "/c", "start", "", "red-dev.exe", "emoji"],
+          note: "the emoji picker in a new window",
+        };
+      }
+      const found = LINUX_TERMINALS.find((cmd) => locate(cmd) !== null);
+      if (!found) {
+        return { ok: false, id, detail: "no terminal emulator on PATH — run `red-dev emoji` here instead" };
+      }
+      return {
+        ok: true,
+        id,
+        argv: [found, TERMINAL_EXEC[found] ?? "-e", "red-dev", "emoji"],
+        note: `the emoji picker in ${found}`,
+      };
+    }
+
     case "panel.network":
     case "panel.audio":
     case "panel.power": {

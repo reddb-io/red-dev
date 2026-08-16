@@ -215,9 +215,11 @@ describe("searching", () => {
 
   test("the state is searchable, so 'unbound work' is one query", () => {
     expect(searchKeys(keyEntries(server), "unsupported")).toHaveLength(ACTIONS.length);
-    // On Windows the terminal pair is bound and the Panels are not, so
-    // the query answers with exactly what this machine does not register.
+    // On Windows the terminal pair is bound and the other surfaces are
+    // not, so the query answers with exactly what this machine does not
+    // register.
     expect(searchKeys(entries, "unsupported").map((e) => e.id)).toEqual([
+      "emoji.pick",
       "panel.network",
       "panel.audio",
       "panel.power",

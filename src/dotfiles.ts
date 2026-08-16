@@ -325,15 +325,27 @@ const SHIPPED_ZELLIJ_CONFIGS = new Set([
  * iconv + clip.exe completes in tens of milliseconds. clip.exe accepts
  * redirected UTF-16LE without a BOM, preserving accents and supplementary
  * Unicode characters in the Windows clipboard.
+ *
+ * The argv is the primitive and the string is derived from it, not the
+ * other way round. zellij wants one line of shell; a red-dev surface that
+ * copies something — the Emoji picker is the first — wants a program and
+ * its arguments, and deriving the string means the second one cannot
+ * drift into a second bridge with its own encoding bug. `join(" ")`
+ * reproduces the exact line this function has always returned, which is
+ * what keeps the SHIPPED_ZELLIJ_CONFIGS upgrade path intact.
  */
+export function wslClipboardArgv(): readonly string[] {
+  return ["bash", `${home()}/.local/share/red-dev/config/bash/windows-clipboard.sh`];
+}
+
 export function wslClipboardCommand(): string {
-  return `bash ${home()}/.local/share/red-dev/config/bash/windows-clipboard.sh`;
+  return wslClipboardArgv().join(" ");
 }
 
 /** Native Windows fallback. WSL uses the faster helper above because Zellij
  * terminates commands after one second; PowerShell startup inside WSL can
  * exceed that deadline. */
-export function windowsClipboardCommand(): string {
+export function windowsClipboardArgv(): readonly string[] {
   const script =
     "$ProgressPreference='SilentlyContinue';" +
     "$s=[Console]::OpenStandardInput();" +
@@ -341,7 +353,40 @@ export function windowsClipboardCommand(): string {
     "$s.CopyTo($m);" +
     "Set-Clipboard -Value ([Text.Encoding]::UTF8.GetString($m.ToArray()))";
   const encoded = Buffer.from(script, "utf16le").toString("base64");
-  return `powershell.exe -NoProfile -EncodedCommand ${encoded}`;
+  return ["powershell.exe", "-NoProfile", "-EncodedCommand", encoded];
+}
+
+export function windowsClipboardCommand(): string {
+  return windowsClipboardArgv().join(" ");
+}
+
+/**
+ * The three routes, and the one target that has none.
+ *
+ * This is the whole clipboard layer of the product, in one function: the
+ * WSL bridge, the native Windows bridge, and `wl-copy` on a Linux
+ * desktop. A server gets null, because a copy_command naming a program
+ * that is not installed is the same silent failure as no clipboard at
+ * all, pointed the other way — and there is no display there to have a
+ * clipboard on.
+ *
+ * The order is not alphabetical and cannot be reordered. A WSL distro is
+ * `os: "linux"` and `env: "wsl"`, so asking about the OS first would send
+ * it to a `wl-copy` that is not there; and native Windows is `env:
+ * "windows"`, not `"desktop"`, so the desktop branch has to come last.
+ *
+ * Exported so every surface that copies asks the same question. zellij's
+ * `copy_command` was the first caller and the Emoji picker is the second;
+ * a third one that wrote its own ternary is how one target quietly gets a
+ * clipboard the others do not have.
+ */
+export function clipboardArgvFor(p: Platform): readonly string[] | null {
+  if (p.env === "wsl") return wslClipboardArgv();
+  if (p.os === "windows") return windowsClipboardArgv();
+  // wl-copy, not xclip: the desktop targets are Wayland sessions, and
+  // wl-copy takes UTF-8 on stdin with no encoding step in between.
+  if (p.env === "desktop") return ["wl-copy"];
+  return null;
 }
 
 /**
@@ -362,16 +407,9 @@ export function windowsClipboardCommand(): string {
  * other way.
  */
 export function zellijConfigFor(p: Platform): string {
-  const command =
-    p.env === "wsl"
-      ? wslClipboardCommand()
-      : p.os === "windows"
-        ? windowsClipboardCommand()
-        : p.env === "desktop"
-          ? "wl-copy"
-          : null;
-
-  if (!command) return zellijBase;
+  const argv = clipboardArgvFor(p);
+  if (!argv) return zellijBase;
+  const command = argv.join(" ");
 
   return `${zellijBase}
 // Generated for this target by red-dev.

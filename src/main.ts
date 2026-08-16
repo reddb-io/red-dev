@@ -1230,6 +1230,30 @@ async function cmdKeys(p: Platform): Promise<number> {
 }
 
 /**
+ * `red-dev emoji` — the bundled table, searchable, with Enter on the
+ * clipboard.
+ *
+ * Two shapes, and the plain one is not a degraded mode — the same rule
+ * `red-dev keys` follows. A terminal that cannot draw the picker still
+ * gets the whole table with the name, the group and the keywords on
+ * every row, which is the form a script greps and the form that proves
+ * the table ships with the binary rather than coming from the machine.
+ * The picker adds the search and the copy, not the information.
+ */
+async function cmdEmoji(p: Platform): Promise<number> {
+  const { emojiLines } = await import("./emoji.ts");
+
+  if (!interactive()) {
+    for (const line of emojiLines()) log.plain(line);
+    return 0;
+  }
+
+  const { runEmojiPicker } = await import("./emoji-view.ts");
+  await runEmojiPicker(p);
+  return 0;
+}
+
+/**
  * `red-dev ssh [github-user]` — the way in that is not a first run.
  *
  * The interview asks this once, on a machine that is new. Everything
@@ -1536,10 +1560,12 @@ async function cmdUi(p: Platform, inv: Invocation): Promise<number> {
     case "apps":
       return await cmdApps(p, inv);
     case "keys":
-      // Both of these draw their own interface, so they run after this
-      // one has released the screen — the same reason `apps` is here
-      // rather than in the actions handed into the render.
+      // All three of these draw their own interface, so they run after
+      // this one has released the screen — the same reason `apps` is
+      // here rather than in the actions handed into the render.
       return await cmdKeys(p);
+    case "emoji":
+      return await cmdEmoji(p);
     case "learn":
       return await cmdLearn(p);
     default:
@@ -2002,6 +2028,7 @@ async function cmdMenu(p: Platform, inv: Invocation, cliHelp: string): Promise<n
     platform: () => cmdPlatform(p),
     apps: () => cmdApps(p, inv),
     keys: () => cmdKeys(p),
+    emoji: () => cmdEmoji(p),
     learn: () => cmdLearn(p),
     lang: () => cmdLang(p, inv),
     shell: () => cmdShell(p, inv),
@@ -2160,6 +2187,8 @@ async function main(): Promise<number> {
       return await cmdApps(p, inv);
     case "keys":
       return await cmdKeys(p);
+    case "emoji":
+      return await cmdEmoji(p);
     case "ssh":
       return await cmdSsh(p, inv);
     case "learn":

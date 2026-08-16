@@ -170,6 +170,18 @@ export const SECTIONS: MenuSection[] = [
     ],
   },
   {
+    key: "emoji",
+    label: "Emoji",
+    notes: [
+      "A table that ships inside this binary,",
+      "not one read from the fonts installed",
+      "here — so the same search finds the",
+      "same character on every target. Enter",
+      "copies it through the clipboard the",
+      "terminal layer already uses.",
+    ],
+  },
+  {
     key: "learn",
     label: "Learn",
     notes: [

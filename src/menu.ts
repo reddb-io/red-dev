@@ -51,6 +51,7 @@ type Handlers = {
   platform: () => number;
   apps: () => Promise<number>;
   keys: () => Promise<number>;
+  emoji: () => Promise<number>;
   learn: () => Promise<number>;
   lang: () => Promise<number>;
   shell: () => Promise<number>;
@@ -258,6 +259,7 @@ export function menuEntries(p: Platform): [string, ...string[]] {
     "Redwall — machine state on the wallpaper",
     "Apps — optional tools and web apps",
     "Keys — every action, its chord, and what is bound here",
+    "Emoji — search the bundled table, copy one to the clipboard",
     "Languages — runtimes mise manages",
     ...(wslish ? ["Shell — where a terminal lands"] : []),
     "Update — upgrade, then converge",
@@ -311,6 +313,9 @@ export async function runMenu(
         break;
       case "Keys":
         last = await h.keys();
+        break;
+      case "Emoji":
+        last = await h.emoji();
         break;
       case "Learn":
         last = await h.learn();

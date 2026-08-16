@@ -466,6 +466,7 @@ red-dev wallpaper [source]   # theme | Red artwork | absolute PNG path | HTTPS U
 red-dev redwall              # redraw the wallpaper carrying this machine's state
 red-dev apps                 # choose optional tools and web apps; untick one to remove it
 red-dev keys                 # search every action and its chord, and run one
+red-dev emoji                # search the bundled emoji table, copy one to the clipboard
 red-dev learn                # the README by anchor, RedSkills, and the keys viewer
 red-dev lang                 # choose runtimes for mise to manage
 red-dev lang node@24,bun@1.3 # unattended, independently selected versions

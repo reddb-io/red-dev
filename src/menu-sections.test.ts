@@ -37,17 +37,19 @@ function machine(over: Partial<Platform>): Platform {
 }
 
 describe("the fullscreen menu", () => {
-  test("carries a Keys section and a Learn section", () => {
+  test("carries a Keys section, an Emoji section and a Learn section", () => {
     const keys = SECTIONS.find((s) => s.key === "keys");
+    const emoji = SECTIONS.find((s) => s.key === "emoji");
     const learn = SECTIONS.find((s) => s.key === "learn");
     expect(keys?.label).toBe("Keys");
+    expect(emoji?.label).toBe("Emoji");
     expect(learn?.label).toBe("Learn");
   });
 
-  test("and both say what they are for while highlighted", () => {
+  test("and each says what it is for while highlighted", () => {
     // The right-hand panel is the only explanation a section gets; one
     // with no notes is a word on a list.
-    for (const key of ["keys", "learn"]) {
+    for (const key of ["keys", "emoji", "learn"]) {
       expect(SECTIONS.find((s) => s.key === key)?.notes.length).toBeGreaterThan(0);
     }
   });
@@ -77,7 +79,7 @@ describe("choosing one opens something", () => {
     return main.slice(from, main.indexOf("\nasync function", from + 1));
   })();
 
-  for (const key of ["keys", "learn"]) {
+  for (const key of ["keys", "emoji", "learn"]) {
     test(`the ${key} section is answered after the render exits`, () => {
       expect(cmdUi).toContain(`case "${key}":`);
     });
@@ -86,9 +88,10 @@ describe("choosing one opens something", () => {
 
 describe("the narrow-terminal menu", () => {
   for (const p of [machine({}), machine({ os: "windows", env: "windows" })]) {
-    test(`offers Keys and Learn on ${p.env} too`, () => {
+    test(`offers Keys, Emoji and Learn on ${p.env} too`, () => {
       const verbs = menuEntries(p).map((entry) => entry.split(" ")[0]);
       expect(verbs).toContain("Keys");
+      expect(verbs).toContain("Emoji");
       expect(verbs).toContain("Learn");
     });
   }
@@ -105,6 +108,7 @@ describe("the narrow-terminal menu", () => {
       "Redwall",
       "Apps",
       "Keys",
+      "Emoji",
       "Languages",
       "Shell",
       "Update",
