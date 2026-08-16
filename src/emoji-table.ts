@@ -1,0 +1,450 @@
+/**
+ * The emoji table, shipped inside the binary.
+ *
+ * Not read from a system font, not fetched, not shelled out to. That is
+ * the whole reason this file exists rather than a lookup: the picker has
+ * to return the same rows on Ubuntu 24, Ubuntu 26, WSL, native Windows
+ * and a headless server, and every alternative source varies by target.
+ * A font query answers with what the machine happens to have installed,
+ * which is a different list on a fresh Windows than on an Ubuntu with
+ * Noto Color Emoji; a service answers differently on the day it is
+ * unreachable. A table compiled into the binary cannot do either.
+ *
+ * What is *drawn* still varies — a terminal with no emoji font shows
+ * boxes — and that is the terminal's business, not red-dev's. What goes
+ * on the clipboard is these code points, and those are identical
+ * everywhere.
+ *
+ * ## What is in it, and what is not
+ *
+ * A curated set rather than all ~3,800 of Unicode's. The picker exists
+ * to be typed into, and the rows that matter are the ones somebody
+ * reaches for: the faces, the hands, the check marks and crosses, the
+ * things a commit message or a chat reply is made of. The long tail —
+ * every flag, every skin-tone and gender variant, the full clock face
+ * series — makes the search noisier without making it more useful, and
+ * the variants in particular would bury their own base emoji.
+ *
+ * Skin-tone modifiers are deliberately absent for a second reason: a
+ * picker that offers six versions of every hand offers a choice about
+ * somebody's body that a tool converging a dev environment has no
+ * business putting in a list.
+ *
+ * ## The shape of a row
+ *
+ * `name` is the CLDR short name, lowercased — it is what a person half
+ * remembers, and it is what the search ranks on first. `keywords` are
+ * the words that are *not* in the name and that somebody would type
+ * anyway: `lol` for 😂, `deploy` for 🚀, `config` for ⚙️. Putting a word
+ * already in the name into the keywords does nothing, so none do.
+ */
+
+export interface Emoji {
+  /** The code points that go on the clipboard. */
+  char: string;
+  /** The CLDR short name, lowercased. */
+  name: string;
+  /** Which of the eight groups it belongs to. */
+  group: string;
+  /** Words a person would type that are not already in the name. */
+  keywords: readonly string[];
+}
+
+// Short local names, because the group is repeated on every row and a
+// literal per row is 200 chances to typo one of eight strings.
+const SMILEY = "Smileys & Emotion";
+const PEOPLE = "People & Body";
+const NATURE = "Animals & Nature";
+const FOOD = "Food & Drink";
+const TRAVEL = "Travel & Places";
+const ACTIVITY = "Activities";
+const OBJECT = "Objects";
+const SYMBOL = "Symbols";
+
+/**
+ * Every group, in the order the table lists them.
+ *
+ * Exported so a caller can say what the picker holds without walking the
+ * table, and so the ordering is one decision rather than an emergent
+ * property of where somebody pasted their new row.
+ */
+export const EMOJI_GROUPS: readonly string[] = [
+  SMILEY,
+  PEOPLE,
+  NATURE,
+  FOOD,
+  TRAVEL,
+  ACTIVITY,
+  OBJECT,
+  SYMBOL,
+];
+
+export const EMOJI: readonly Emoji[] = [
+  // ------------------------------------------------ Smileys & Emotion
+  { char: "😀", name: "grinning face", group: SMILEY, keywords: ["smile", "happy"] },
+  { char: "😃", name: "grinning face with big eyes", group: SMILEY, keywords: ["smile", "happy"] },
+  { char: "😄", name: "grinning face with smiling eyes", group: SMILEY, keywords: ["joy"] },
+  { char: "😁", name: "beaming face with smiling eyes", group: SMILEY, keywords: ["grin"] },
+  { char: "😆", name: "grinning squinting face", group: SMILEY, keywords: ["laugh", "haha"] },
+  { char: "😅", name: "grinning face with sweat", group: SMILEY, keywords: ["laugh", "relief"] },
+  { char: "🤣", name: "rolling on the floor laughing", group: SMILEY, keywords: ["rofl", "lol"] },
+  { char: "😂", name: "face with tears of joy", group: SMILEY, keywords: ["lol", "laugh", "cry"] },
+  { char: "🙂", name: "slightly smiling face", group: SMILEY, keywords: ["smile"] },
+  { char: "🙃", name: "upside-down face", group: SMILEY, keywords: ["irony", "sarcasm"] },
+  { char: "😉", name: "winking face", group: SMILEY, keywords: ["wink", "flirt"] },
+  { char: "😊", name: "smiling face with smiling eyes", group: SMILEY, keywords: ["blush", "happy"] },
+  { char: "😇", name: "smiling face with halo", group: SMILEY, keywords: ["angel", "innocent"] },
+  { char: "😍", name: "smiling face with heart-eyes", group: SMILEY, keywords: ["love", "crush"] },
+  { char: "🤩", name: "star-struck", group: SMILEY, keywords: ["wow", "amazed"] },
+  { char: "😘", name: "face blowing a kiss", group: SMILEY, keywords: ["love"] },
+  { char: "😋", name: "face savoring food", group: SMILEY, keywords: ["yum", "tasty"] },
+  { char: "😛", name: "face with tongue", group: SMILEY, keywords: ["cheeky"] },
+  { char: "🤪", name: "zany face", group: SMILEY, keywords: ["silly", "goofy"] },
+  { char: "🤨", name: "face with raised eyebrow", group: SMILEY, keywords: ["skeptical", "suspicious"] },
+  { char: "🧐", name: "face with monocle", group: SMILEY, keywords: ["inspect", "scrutiny"] },
+  { char: "🤓", name: "nerd face", group: SMILEY, keywords: ["geek", "glasses"] },
+  { char: "😎", name: "smiling face with sunglasses", group: SMILEY, keywords: ["cool"] },
+  { char: "🥳", name: "partying face", group: SMILEY, keywords: ["celebrate", "party"] },
+  { char: "😏", name: "smirking face", group: SMILEY, keywords: ["smug", "sly"] },
+  { char: "😒", name: "unamused face", group: SMILEY, keywords: ["meh", "unimpressed"] },
+  { char: "😔", name: "pensive face", group: SMILEY, keywords: ["sad", "thoughtful"] },
+  { char: "😕", name: "confused face", group: SMILEY, keywords: ["puzzled"] },
+  { char: "😣", name: "persevering face", group: SMILEY, keywords: ["struggle"] },
+  { char: "😫", name: "tired face", group: SMILEY, keywords: ["exhausted"] },
+  { char: "🥺", name: "pleading face", group: SMILEY, keywords: ["beg", "puppy eyes"] },
+  { char: "😢", name: "crying face", group: SMILEY, keywords: ["sad", "tear"] },
+  { char: "😭", name: "loudly crying face", group: SMILEY, keywords: ["sob", "bawl"] },
+  { char: "😤", name: "face with steam from nose", group: SMILEY, keywords: ["triumph", "frustrated"] },
+  { char: "😠", name: "angry face", group: SMILEY, keywords: ["mad"] },
+  { char: "😡", name: "enraged face", group: SMILEY, keywords: ["rage", "furious"] },
+  { char: "🤬", name: "face with symbols on mouth", group: SMILEY, keywords: ["swearing", "cursing"] },
+  { char: "🤯", name: "exploding head", group: SMILEY, keywords: ["mind blown", "shocked"] },
+  { char: "😳", name: "flushed face", group: SMILEY, keywords: ["embarrassed", "blush"] },
+  { char: "🥵", name: "hot face", group: SMILEY, keywords: ["heat", "sweating"] },
+  { char: "🥶", name: "cold face", group: SMILEY, keywords: ["freezing"] },
+  { char: "😱", name: "face screaming in fear", group: SMILEY, keywords: ["scream", "shock"] },
+  { char: "😨", name: "fearful face", group: SMILEY, keywords: ["scared"] },
+  { char: "😰", name: "anxious face with sweat", group: SMILEY, keywords: ["nervous"] },
+  { char: "🤗", name: "smiling face with open hands", group: SMILEY, keywords: ["hug"] },
+  { char: "🤔", name: "thinking face", group: SMILEY, keywords: ["think", "ponder", "hmm"] },
+  { char: "🤭", name: "face with hand over mouth", group: SMILEY, keywords: ["oops", "giggle"] },
+  { char: "🤫", name: "shushing face", group: SMILEY, keywords: ["quiet", "secret"] },
+  { char: "🤥", name: "lying face", group: SMILEY, keywords: ["pinocchio", "liar"] },
+  { char: "😶", name: "face without mouth", group: SMILEY, keywords: ["speechless"] },
+  { char: "😐", name: "neutral face", group: SMILEY, keywords: ["deadpan"] },
+  { char: "😑", name: "expressionless face", group: SMILEY, keywords: ["blank"] },
+  { char: "😬", name: "grimacing face", group: SMILEY, keywords: ["awkward", "cringe"] },
+  { char: "🙄", name: "face with rolling eyes", group: SMILEY, keywords: ["eyeroll", "annoyed"] },
+  { char: "😴", name: "sleeping face", group: SMILEY, keywords: ["zzz", "asleep"] },
+  { char: "😷", name: "face with medical mask", group: SMILEY, keywords: ["sick"] },
+  { char: "🤒", name: "face with thermometer", group: SMILEY, keywords: ["fever", "ill"] },
+  { char: "🤢", name: "nauseated face", group: SMILEY, keywords: ["sick", "gross"] },
+  { char: "🤮", name: "face vomiting", group: SMILEY, keywords: ["puke", "sick"] },
+  { char: "🥱", name: "yawning face", group: SMILEY, keywords: ["bored", "sleepy"] },
+  { char: "🤠", name: "cowboy hat face", group: SMILEY, keywords: ["yeehaw"] },
+  { char: "🥸", name: "disguised face", group: SMILEY, keywords: ["incognito"] },
+  { char: "😈", name: "smiling face with horns", group: SMILEY, keywords: ["devil", "mischief"] },
+  { char: "💀", name: "skull", group: SMILEY, keywords: ["dead", "danger"] },
+  { char: "☠️", name: "skull and crossbones", group: SMILEY, keywords: ["poison", "danger"] },
+  { char: "👻", name: "ghost", group: SMILEY, keywords: ["halloween", "boo"] },
+  { char: "👽", name: "alien", group: SMILEY, keywords: ["ufo", "extraterrestrial"] },
+  { char: "🤖", name: "robot", group: SMILEY, keywords: ["bot", "agent", "ai"] },
+  { char: "💩", name: "pile of poo", group: SMILEY, keywords: ["poop", "crap"] },
+  { char: "❤️", name: "red heart", group: SMILEY, keywords: ["love"] },
+  { char: "🧡", name: "orange heart", group: SMILEY, keywords: ["love"] },
+  { char: "💛", name: "yellow heart", group: SMILEY, keywords: ["love"] },
+  { char: "💚", name: "green heart", group: SMILEY, keywords: ["love"] },
+  { char: "💙", name: "blue heart", group: SMILEY, keywords: ["love"] },
+  { char: "💜", name: "purple heart", group: SMILEY, keywords: ["love"] },
+  { char: "🖤", name: "black heart", group: SMILEY, keywords: ["love"] },
+  { char: "💔", name: "broken heart", group: SMILEY, keywords: ["heartbreak"] },
+  { char: "💕", name: "two hearts", group: SMILEY, keywords: ["love"] },
+  { char: "💖", name: "sparkling heart", group: SMILEY, keywords: ["love"] },
+  { char: "💯", name: "hundred points", group: SMILEY, keywords: ["perfect", "score", "100"] },
+  { char: "💥", name: "collision", group: SMILEY, keywords: ["boom", "explosion"] },
+  { char: "💫", name: "dizzy", group: SMILEY, keywords: ["stars"] },
+  { char: "💦", name: "sweat droplets", group: SMILEY, keywords: ["water"] },
+  { char: "💤", name: "zzz", group: SMILEY, keywords: ["sleep", "snore"] },
+
+  // ---------------------------------------------------- People & Body
+  { char: "👋", name: "waving hand", group: PEOPLE, keywords: ["wave", "hello", "bye"] },
+  { char: "✋", name: "raised hand", group: PEOPLE, keywords: ["stop", "high five"] },
+  { char: "🖖", name: "vulcan salute", group: PEOPLE, keywords: ["spock", "star trek"] },
+  { char: "👌", name: "ok hand", group: PEOPLE, keywords: ["okay", "perfect"] },
+  { char: "🤏", name: "pinching hand", group: PEOPLE, keywords: ["small", "tiny"] },
+  { char: "✌️", name: "victory hand", group: PEOPLE, keywords: ["peace"] },
+  { char: "🤞", name: "crossed fingers", group: PEOPLE, keywords: ["luck", "hope"] },
+  { char: "🤟", name: "love-you gesture", group: PEOPLE, keywords: ["ily"] },
+  { char: "🤘", name: "sign of the horns", group: PEOPLE, keywords: ["rock"] },
+  { char: "🤙", name: "call me hand", group: PEOPLE, keywords: ["shaka", "hang loose"] },
+  { char: "👈", name: "backhand index pointing left", group: PEOPLE, keywords: ["point"] },
+  { char: "👉", name: "backhand index pointing right", group: PEOPLE, keywords: ["point"] },
+  { char: "👆", name: "backhand index pointing up", group: PEOPLE, keywords: ["point", "this"] },
+  { char: "👇", name: "backhand index pointing down", group: PEOPLE, keywords: ["point", "below"] },
+  { char: "👍", name: "thumbs up", group: PEOPLE, keywords: ["yes", "approve", "like", "lgtm"] },
+  { char: "👎", name: "thumbs down", group: PEOPLE, keywords: ["no", "disapprove", "dislike"] },
+  { char: "✊", name: "raised fist", group: PEOPLE, keywords: ["solidarity"] },
+  { char: "👊", name: "oncoming fist", group: PEOPLE, keywords: ["punch", "bump"] },
+  { char: "👏", name: "clapping hands", group: PEOPLE, keywords: ["applause", "bravo"] },
+  { char: "🙌", name: "raising hands", group: PEOPLE, keywords: ["celebrate", "praise"] },
+  { char: "🤝", name: "handshake", group: PEOPLE, keywords: ["deal", "agreement"] },
+  { char: "🙏", name: "folded hands", group: PEOPLE, keywords: ["please", "thanks", "pray"] },
+  { char: "✍️", name: "writing hand", group: PEOPLE, keywords: ["write", "sign"] },
+  { char: "💪", name: "flexed biceps", group: PEOPLE, keywords: ["strong", "muscle"] },
+  { char: "🧠", name: "brain", group: PEOPLE, keywords: ["mind", "smart", "think"] },
+  { char: "👀", name: "eyes", group: PEOPLE, keywords: ["look", "watching"] },
+  { char: "👁️", name: "eye", group: PEOPLE, keywords: ["see", "watch"] },
+  { char: "🫡", name: "saluting face", group: PEOPLE, keywords: ["salute", "yes sir"] },
+  { char: "🧑‍💻", name: "technologist", group: PEOPLE, keywords: ["developer", "coder", "programmer"] },
+  { char: "🕵️", name: "detective", group: PEOPLE, keywords: ["investigate", "spy", "debug"] },
+  { char: "🦸", name: "superhero", group: PEOPLE, keywords: ["hero"] },
+  { char: "🧙", name: "mage", group: PEOPLE, keywords: ["wizard", "magic"] },
+  { char: "🧑‍🚀", name: "astronaut", group: PEOPLE, keywords: ["space"] },
+
+  // -------------------------------------------------- Animals & Nature
+  { char: "🐶", name: "dog face", group: NATURE, keywords: ["puppy"] },
+  { char: "🐱", name: "cat face", group: NATURE, keywords: ["kitten"] },
+  { char: "🐭", name: "mouse face", group: NATURE, keywords: [] },
+  { char: "🐰", name: "rabbit face", group: NATURE, keywords: ["bunny"] },
+  { char: "🦊", name: "fox", group: NATURE, keywords: ["firefox"] },
+  { char: "🐻", name: "bear", group: NATURE, keywords: [] },
+  { char: "🐼", name: "panda", group: NATURE, keywords: [] },
+  { char: "🐨", name: "koala", group: NATURE, keywords: [] },
+  { char: "🐯", name: "tiger face", group: NATURE, keywords: [] },
+  { char: "🦁", name: "lion", group: NATURE, keywords: [] },
+  { char: "🐷", name: "pig face", group: NATURE, keywords: [] },
+  { char: "🐸", name: "frog", group: NATURE, keywords: [] },
+  { char: "🐵", name: "monkey face", group: NATURE, keywords: [] },
+  { char: "🙈", name: "see-no-evil monkey", group: NATURE, keywords: ["oops"] },
+  { char: "🐧", name: "penguin", group: NATURE, keywords: ["linux", "tux"] },
+  { char: "🦉", name: "owl", group: NATURE, keywords: ["night"] },
+  { char: "🐝", name: "honeybee", group: NATURE, keywords: ["bee"] },
+  { char: "🐛", name: "bug", group: NATURE, keywords: ["insect", "defect", "issue"] },
+  { char: "🦋", name: "butterfly", group: NATURE, keywords: [] },
+  { char: "🐌", name: "snail", group: NATURE, keywords: ["slow"] },
+  { char: "🐢", name: "turtle", group: NATURE, keywords: ["slow"] },
+  { char: "🐍", name: "snake", group: NATURE, keywords: ["python"] },
+  { char: "🐙", name: "octopus", group: NATURE, keywords: ["github"] },
+  { char: "🐳", name: "spouting whale", group: NATURE, keywords: ["docker"] },
+  { char: "🐬", name: "dolphin", group: NATURE, keywords: [] },
+  { char: "🦈", name: "shark", group: NATURE, keywords: [] },
+  { char: "🦄", name: "unicorn", group: NATURE, keywords: ["magic", "rare"] },
+  { char: "🐴", name: "horse face", group: NATURE, keywords: [] },
+  { char: "🌵", name: "cactus", group: NATURE, keywords: ["desert"] },
+  { char: "🌲", name: "evergreen tree", group: NATURE, keywords: ["forest", "pine"] },
+  { char: "🌴", name: "palm tree", group: NATURE, keywords: ["beach", "holiday"] },
+  { char: "🍀", name: "four leaf clover", group: NATURE, keywords: ["luck"] },
+  { char: "🍁", name: "maple leaf", group: NATURE, keywords: ["autumn", "canada"] },
+  { char: "🌸", name: "cherry blossom", group: NATURE, keywords: ["sakura", "spring"] },
+  { char: "🌻", name: "sunflower", group: NATURE, keywords: [] },
+  { char: "🌹", name: "rose", group: NATURE, keywords: ["flower"] },
+  { char: "🌈", name: "rainbow", group: NATURE, keywords: ["pride"] },
+  { char: "⭐", name: "star", group: NATURE, keywords: ["favourite", "favorite"] },
+  { char: "🌟", name: "glowing star", group: NATURE, keywords: ["sparkle", "shine"] },
+  { char: "✨", name: "sparkles", group: NATURE, keywords: ["magic", "shiny", "new"] },
+  { char: "⚡", name: "high voltage", group: NATURE, keywords: ["lightning", "fast", "power"] },
+  { char: "🔥", name: "fire", group: NATURE, keywords: ["hot", "lit", "flame", "burn"] },
+  { char: "💧", name: "droplet", group: NATURE, keywords: ["water"] },
+  { char: "🌊", name: "water wave", group: NATURE, keywords: ["ocean", "sea"] },
+  { char: "❄️", name: "snowflake", group: NATURE, keywords: ["cold", "snow", "winter"] },
+  { char: "☀️", name: "sun", group: NATURE, keywords: ["sunny", "clear"] },
+  { char: "🌙", name: "crescent moon", group: NATURE, keywords: ["night"] },
+  { char: "☁️", name: "cloud", group: NATURE, keywords: ["overcast"] },
+  { char: "🌧️", name: "cloud with rain", group: NATURE, keywords: ["wet"] },
+  { char: "🌍", name: "globe showing europe-africa", group: NATURE, keywords: ["earth", "world"] },
+
+  // -------------------------------------------------------- Food & Drink
+  { char: "🍎", name: "red apple", group: FOOD, keywords: ["fruit"] },
+  { char: "🍌", name: "banana", group: FOOD, keywords: ["fruit"] },
+  { char: "🍇", name: "grapes", group: FOOD, keywords: ["fruit"] },
+  { char: "🍓", name: "strawberry", group: FOOD, keywords: ["fruit"] },
+  { char: "🍉", name: "watermelon", group: FOOD, keywords: ["fruit"] },
+  { char: "🍒", name: "cherries", group: FOOD, keywords: ["fruit"] },
+  { char: "🥑", name: "avocado", group: FOOD, keywords: [] },
+  { char: "🍅", name: "tomato", group: FOOD, keywords: [] },
+  { char: "🥕", name: "carrot", group: FOOD, keywords: [] },
+  { char: "🌶️", name: "hot pepper", group: FOOD, keywords: ["spicy", "chilli"] },
+  { char: "🍞", name: "bread", group: FOOD, keywords: ["loaf"] },
+  { char: "🧀", name: "cheese wedge", group: FOOD, keywords: [] },
+  { char: "🥐", name: "croissant", group: FOOD, keywords: ["bakery"] },
+  { char: "🍕", name: "pizza", group: FOOD, keywords: ["slice"] },
+  { char: "🍔", name: "hamburger", group: FOOD, keywords: ["burger"] },
+  { char: "🌮", name: "taco", group: FOOD, keywords: ["mexican"] },
+  { char: "🍟", name: "french fries", group: FOOD, keywords: ["chips"] },
+  { char: "🍣", name: "sushi", group: FOOD, keywords: ["japanese"] },
+  { char: "🍜", name: "steaming bowl", group: FOOD, keywords: ["ramen", "noodles"] },
+  { char: "🍩", name: "doughnut", group: FOOD, keywords: ["donut"] },
+  { char: "🍪", name: "cookie", group: FOOD, keywords: ["biscuit"] },
+  { char: "🎂", name: "birthday cake", group: FOOD, keywords: [] },
+  { char: "🍰", name: "shortcake", group: FOOD, keywords: ["cake", "slice"] },
+  { char: "🍫", name: "chocolate bar", group: FOOD, keywords: [] },
+  { char: "🍿", name: "popcorn", group: FOOD, keywords: ["cinema", "drama"] },
+  { char: "☕", name: "hot beverage", group: FOOD, keywords: ["coffee", "tea", "espresso"] },
+  { char: "🍵", name: "teacup without handle", group: FOOD, keywords: ["tea", "matcha"] },
+  { char: "🍺", name: "beer mug", group: FOOD, keywords: ["pint"] },
+  { char: "🍻", name: "clinking beer mugs", group: FOOD, keywords: ["cheers"] },
+  { char: "🥂", name: "clinking glasses", group: FOOD, keywords: ["cheers", "champagne", "toast"] },
+  { char: "🍷", name: "wine glass", group: FOOD, keywords: [] },
+  { char: "🧉", name: "mate", group: FOOD, keywords: ["chimarrão", "erva"] },
+  { char: "🍽️", name: "fork and knife with plate", group: FOOD, keywords: ["dinner", "eat", "meal"] },
+
+  // ------------------------------------------------------ Travel & Places
+  { char: "🚗", name: "automobile", group: TRAVEL, keywords: ["car", "drive"] },
+  { char: "🚕", name: "taxi", group: TRAVEL, keywords: ["cab"] },
+  { char: "🚌", name: "bus", group: TRAVEL, keywords: [] },
+  { char: "🚑", name: "ambulance", group: TRAVEL, keywords: ["emergency"] },
+  { char: "🚓", name: "police car", group: TRAVEL, keywords: [] },
+  { char: "🚲", name: "bicycle", group: TRAVEL, keywords: ["bike", "cycle"] },
+  { char: "🏍️", name: "motorcycle", group: TRAVEL, keywords: ["motorbike"] },
+  { char: "✈️", name: "airplane", group: TRAVEL, keywords: ["flight", "travel", "plane"] },
+  { char: "🚀", name: "rocket", group: TRAVEL, keywords: ["launch", "ship", "deploy", "release"] },
+  { char: "🛸", name: "flying saucer", group: TRAVEL, keywords: ["ufo"] },
+  { char: "🚁", name: "helicopter", group: TRAVEL, keywords: [] },
+  { char: "🚂", name: "locomotive", group: TRAVEL, keywords: ["train", "steam"] },
+  { char: "🚢", name: "ship", group: TRAVEL, keywords: ["boat", "cargo"] },
+  { char: "⛵", name: "sailboat", group: TRAVEL, keywords: ["sailing"] },
+  { char: "🏠", name: "house", group: TRAVEL, keywords: ["home"] },
+  { char: "🏢", name: "office building", group: TRAVEL, keywords: ["work", "company"] },
+  { char: "🏥", name: "hospital", group: TRAVEL, keywords: ["clinic"] },
+  { char: "🏦", name: "bank", group: TRAVEL, keywords: ["money"] },
+  { char: "🗽", name: "statue of liberty", group: TRAVEL, keywords: ["new york", "usa"] },
+  { char: "🏔️", name: "snow-capped mountain", group: TRAVEL, keywords: ["peak", "alps"] },
+  { char: "🏝️", name: "desert island", group: TRAVEL, keywords: ["beach", "holiday"] },
+  { char: "🏕️", name: "camping", group: TRAVEL, keywords: ["tent", "outdoors"] },
+  { char: "🌆", name: "cityscape at dusk", group: TRAVEL, keywords: ["city", "skyline"] },
+
+  // ----------------------------------------------------------- Activities
+  { char: "⚽", name: "soccer ball", group: ACTIVITY, keywords: ["football"] },
+  { char: "🏀", name: "basketball", group: ACTIVITY, keywords: [] },
+  { char: "🏈", name: "american football", group: ACTIVITY, keywords: ["nfl"] },
+  { char: "⚾", name: "baseball", group: ACTIVITY, keywords: [] },
+  { char: "🎾", name: "tennis", group: ACTIVITY, keywords: [] },
+  { char: "🏐", name: "volleyball", group: ACTIVITY, keywords: [] },
+  { char: "🏓", name: "ping pong", group: ACTIVITY, keywords: ["table tennis"] },
+  { char: "🎯", name: "bullseye", group: ACTIVITY, keywords: ["target", "goal", "dart", "aim"] },
+  { char: "🎮", name: "video game", group: ACTIVITY, keywords: ["gaming", "controller"] },
+  { char: "🕹️", name: "joystick", group: ACTIVITY, keywords: ["arcade", "retro"] },
+  { char: "🎲", name: "game die", group: ACTIVITY, keywords: ["dice", "random", "chance"] },
+  { char: "🧩", name: "puzzle piece", group: ACTIVITY, keywords: ["plugin", "fit"] },
+  { char: "🎨", name: "artist palette", group: ACTIVITY, keywords: ["art", "paint", "design", "theme"] },
+  { char: "🎬", name: "clapper board", group: ACTIVITY, keywords: ["film", "movie", "action"] },
+  { char: "🎤", name: "microphone", group: ACTIVITY, keywords: ["mic", "sing", "podcast"] },
+  { char: "🎧", name: "headphone", group: ACTIVITY, keywords: ["music", "listen", "audio"] },
+  { char: "🎸", name: "guitar", group: ACTIVITY, keywords: ["rock", "music"] },
+  { char: "🎹", name: "musical keyboard", group: ACTIVITY, keywords: ["piano", "music"] },
+  { char: "🥁", name: "drum", group: ACTIVITY, keywords: ["music", "beat"] },
+  { char: "🏆", name: "trophy", group: ACTIVITY, keywords: ["win", "champion", "award"] },
+  { char: "🥇", name: "1st place medal", group: ACTIVITY, keywords: ["gold", "first", "winner"] },
+  { char: "🎉", name: "party popper", group: ACTIVITY, keywords: ["celebrate", "congrats", "tada"] },
+  { char: "🎊", name: "confetti ball", group: ACTIVITY, keywords: ["celebrate", "party"] },
+  { char: "🎁", name: "wrapped gift", group: ACTIVITY, keywords: ["present", "birthday"] },
+  { char: "🎈", name: "balloon", group: ACTIVITY, keywords: ["party"] },
+  { char: "🎃", name: "jack-o-lantern", group: ACTIVITY, keywords: ["halloween", "pumpkin"] },
+
+  // -------------------------------------------------------------- Objects
+  { char: "💻", name: "laptop", group: OBJECT, keywords: ["computer", "machine", "dev"] },
+  { char: "🖥️", name: "desktop computer", group: OBJECT, keywords: ["monitor", "screen"] },
+  { char: "⌨️", name: "keyboard", group: OBJECT, keywords: ["typing", "keys", "chord"] },
+  { char: "🖱️", name: "computer mouse", group: OBJECT, keywords: ["pointer"] },
+  { char: "🖨️", name: "printer", group: OBJECT, keywords: ["print"] },
+  { char: "💾", name: "floppy disk", group: OBJECT, keywords: ["save"] },
+  { char: "💿", name: "optical disk", group: OBJECT, keywords: ["cd", "iso"] },
+  { char: "🔌", name: "electric plug", group: OBJECT, keywords: ["power", "socket"] },
+  { char: "🔋", name: "battery", group: OBJECT, keywords: ["charge", "power"] },
+  { char: "📱", name: "mobile phone", group: OBJECT, keywords: ["smartphone"] },
+  { char: "📞", name: "telephone receiver", group: OBJECT, keywords: ["call", "ring"] },
+  { char: "📷", name: "camera", group: OBJECT, keywords: ["photo", "picture"] },
+  { char: "📺", name: "television", group: OBJECT, keywords: ["tv", "screen"] },
+  { char: "⏰", name: "alarm clock", group: OBJECT, keywords: ["time", "wake", "schedule"] },
+  { char: "⌛", name: "hourglass done", group: OBJECT, keywords: ["time", "wait", "timeout"] },
+  { char: "⏱️", name: "stopwatch", group: OBJECT, keywords: ["timer", "benchmark", "elapsed"] },
+  { char: "📅", name: "calendar", group: OBJECT, keywords: ["date", "schedule"] },
+  { char: "📌", name: "pushpin", group: OBJECT, keywords: ["pin", "location"] },
+  { char: "📎", name: "paperclip", group: OBJECT, keywords: ["attach", "attachment"] },
+  { char: "✂️", name: "scissors", group: OBJECT, keywords: ["cut", "snip"] },
+  { char: "📏", name: "straight ruler", group: OBJECT, keywords: ["measure", "size"] },
+  { char: "🔍", name: "magnifying glass tilted left", group: OBJECT, keywords: ["search", "find", "zoom", "inspect"] },
+  { char: "🔒", name: "locked", group: OBJECT, keywords: ["lock", "secure", "private"] },
+  { char: "🔓", name: "unlocked", group: OBJECT, keywords: ["unlock", "open", "public"] },
+  { char: "🔑", name: "key", group: OBJECT, keywords: ["password", "access", "secret"] },
+  { char: "🔨", name: "hammer", group: OBJECT, keywords: ["build", "fix", "nail"] },
+  { char: "🔧", name: "wrench", group: OBJECT, keywords: ["tool", "fix", "spanner"] },
+  { char: "⚙️", name: "gear", group: OBJECT, keywords: ["settings", "config", "cog", "options"] },
+  { char: "🛠️", name: "hammer and wrench", group: OBJECT, keywords: ["tools", "build", "maintenance"] },
+  { char: "🧰", name: "toolbox", group: OBJECT, keywords: ["tools", "kit"] },
+  { char: "🧲", name: "magnet", group: OBJECT, keywords: ["attract"] },
+  { char: "🧪", name: "test tube", group: OBJECT, keywords: ["lab", "experiment"] },
+  { char: "🔬", name: "microscope", group: OBJECT, keywords: ["science", "research", "detail"] },
+  { char: "🔭", name: "telescope", group: OBJECT, keywords: ["observe", "astronomy", "far"] },
+  { char: "💡", name: "light bulb", group: OBJECT, keywords: ["idea", "insight", "tip"] },
+  { char: "🔦", name: "flashlight", group: OBJECT, keywords: ["torch", "light"] },
+  { char: "🕯️", name: "candle", group: OBJECT, keywords: ["light", "wax"] },
+  { char: "📦", name: "package", group: OBJECT, keywords: ["box", "shipping", "release", "npm"] },
+  { char: "✉️", name: "envelope", group: OBJECT, keywords: ["email", "mail", "letter"] },
+  { char: "📝", name: "memo", group: OBJECT, keywords: ["note", "write", "edit", "changelog"] },
+  { char: "📄", name: "page facing up", group: OBJECT, keywords: ["document", "file"] },
+  { char: "📁", name: "file folder", group: OBJECT, keywords: ["directory"] },
+  { char: "📊", name: "bar chart", group: OBJECT, keywords: ["stats", "metrics"] },
+  { char: "📈", name: "chart increasing", group: OBJECT, keywords: ["growth", "up", "trending"] },
+  { char: "📉", name: "chart decreasing", group: OBJECT, keywords: ["loss", "down", "regression"] },
+  { char: "📋", name: "clipboard", group: OBJECT, keywords: ["copy", "paste", "list"] },
+  { char: "📚", name: "books", group: OBJECT, keywords: ["library", "docs", "reading"] },
+  { char: "📖", name: "open book", group: OBJECT, keywords: ["read", "docs", "manual"] },
+  { char: "🔖", name: "bookmark", group: OBJECT, keywords: ["save", "mark"] },
+  { char: "🏷️", name: "label", group: OBJECT, keywords: ["tag", "version"] },
+  { char: "💰", name: "money bag", group: OBJECT, keywords: ["cost", "budget"] },
+  { char: "💳", name: "credit card", group: OBJECT, keywords: ["payment", "billing"] },
+  { char: "🛒", name: "shopping cart", group: OBJECT, keywords: ["buy", "checkout"] },
+  { char: "💊", name: "pill", group: OBJECT, keywords: ["medicine", "drug"] },
+  { char: "🩹", name: "adhesive bandage", group: OBJECT, keywords: ["bandaid", "patch", "hotfix"] },
+  { char: "🧹", name: "broom", group: OBJECT, keywords: ["clean", "sweep", "cleanup"] },
+  { char: "🗑️", name: "wastebasket", group: OBJECT, keywords: ["trash", "delete", "bin", "remove"] },
+  { char: "🛡️", name: "shield", group: OBJECT, keywords: ["security", "protect", "defend"] },
+  { char: "⚔️", name: "crossed swords", group: OBJECT, keywords: ["battle", "fight", "conflict"] },
+  { char: "🪄", name: "magic wand", group: OBJECT, keywords: ["auto"] },
+  { char: "🧭", name: "compass", group: OBJECT, keywords: ["navigate", "direction", "north"] },
+  { char: "🗺️", name: "world map", group: OBJECT, keywords: ["atlas"] },
+  { char: "🚩", name: "triangular flag", group: OBJECT, keywords: ["marker", "feature flag"] },
+  { char: "🏁", name: "chequered flag", group: OBJECT, keywords: ["finish", "race", "done"] },
+
+  // -------------------------------------------------------------- Symbols
+  { char: "✅", name: "check mark button", group: SYMBOL, keywords: ["done", "yes", "pass", "ok"] },
+  { char: "☑️", name: "check box with check", group: SYMBOL, keywords: ["ticked", "todo", "selected"] },
+  { char: "✔️", name: "check mark", group: SYMBOL, keywords: ["tick", "done"] },
+  { char: "❌", name: "cross mark", group: SYMBOL, keywords: ["no", "fail", "wrong", "error"] },
+  { char: "⭕", name: "hollow red circle", group: SYMBOL, keywords: ["ring"] },
+  { char: "🚫", name: "prohibited", group: SYMBOL, keywords: ["forbidden", "banned", "no", "denied"] },
+  { char: "⚠️", name: "warning", group: SYMBOL, keywords: ["caution", "alert", "careful"] },
+  { char: "🛑", name: "stop sign", group: SYMBOL, keywords: ["halt"] },
+  { char: "❗", name: "exclamation mark", group: SYMBOL, keywords: ["important", "attention"] },
+  { char: "❓", name: "question mark", group: SYMBOL, keywords: ["help", "unknown"] },
+  { char: "💬", name: "speech balloon", group: SYMBOL, keywords: ["comment", "chat", "message"] },
+  { char: "💭", name: "thought balloon", group: SYMBOL, keywords: ["thinking", "idea"] },
+  { char: "🔔", name: "bell", group: SYMBOL, keywords: ["notification", "alert", "ring"] },
+  { char: "🔕", name: "bell with slash", group: SYMBOL, keywords: ["mute", "silent", "snooze"] },
+  { char: "🔊", name: "speaker high volume", group: SYMBOL, keywords: ["loud", "sound", "audio"] },
+  { char: "🔇", name: "muted speaker", group: SYMBOL, keywords: ["mute", "silence"] },
+  { char: "📢", name: "loudspeaker", group: SYMBOL, keywords: ["announce", "broadcast"] },
+  { char: "♻️", name: "recycling symbol", group: SYMBOL, keywords: ["recycle", "reuse", "refactor"] },
+  { char: "🔄", name: "counterclockwise arrows button", group: SYMBOL, keywords: ["refresh", "retry", "sync", "reload"] },
+  { char: "🔁", name: "repeat button", group: SYMBOL, keywords: ["loop", "again"] },
+  { char: "▶️", name: "play button", group: SYMBOL, keywords: ["start", "run"] },
+  { char: "⏸️", name: "pause button", group: SYMBOL, keywords: ["hold"] },
+  { char: "⏭️", name: "next track button", group: SYMBOL, keywords: ["skip", "forward"] },
+  { char: "⬆️", name: "up arrow", group: SYMBOL, keywords: ["increase"] },
+  { char: "⬇️", name: "down arrow", group: SYMBOL, keywords: ["decrease"] },
+  { char: "➡️", name: "right arrow", group: SYMBOL, keywords: ["next", "forward"] },
+  { char: "⬅️", name: "left arrow", group: SYMBOL, keywords: ["back", "previous"] },
+  { char: "↩️", name: "right arrow curving left", group: SYMBOL, keywords: ["reply", "return", "undo"] },
+  { char: "🔗", name: "link", group: SYMBOL, keywords: ["url", "chain", "href"] },
+  { char: "➕", name: "plus", group: SYMBOL, keywords: ["add", "more", "new"] },
+  { char: "➖", name: "minus", group: SYMBOL, keywords: ["remove", "subtract", "less"] },
+  { char: "♾️", name: "infinity", group: SYMBOL, keywords: ["endless", "forever"] },
+  { char: "🆕", name: "new button", group: SYMBOL, keywords: ["fresh"] },
+  { char: "🔴", name: "red circle", group: SYMBOL, keywords: ["record", "stop", "failing"] },
+  { char: "🟢", name: "green circle", group: SYMBOL, keywords: ["go", "healthy", "passing"] },
+  { char: "🟡", name: "yellow circle", group: SYMBOL, keywords: ["warning", "pending"] },
+  { char: "🔵", name: "blue circle", group: SYMBOL, keywords: ["info"] },
+  { char: "⚫", name: "black circle", group: SYMBOL, keywords: ["dot"] },
+  { char: "⚪", name: "white circle", group: SYMBOL, keywords: ["empty", "unset"] },
+];
