@@ -174,6 +174,42 @@ export async function checkTheme(p: Platform): Promise<DriftCheck[]> {
             fix: `delete ${zellijConfig} and re-run \`red-dev install core\``,
           },
     );
+
+    // The user layer, which zellij cannot include and red-dev therefore
+    // composes into the file above. Only asked when the layer says
+    // something: a machine that never touched it composes to red-dev's
+    // base byte for byte, and reporting on a file of comments would be
+    // reporting on nothing.
+    const { ZELLIJ_LAYER_FILE, composeZellijConfig, isComposedZellijConfig } = await import(
+      "./zellij-layer.ts"
+    );
+    const { zellijConfigFor } = await import("./dotfiles.ts");
+    const layerPath = `${zellijDir}/${ZELLIJ_LAYER_FILE}`;
+    const base = zellijConfigFor(p);
+    const composed = composeZellijConfig(base, await readIfExists(layerPath));
+    if (composed !== base) {
+      // Not "config.kdl differs from what red-dev ships" — after a layer
+      // it always does, and that is the point. What is worth reporting
+      // is a config.kdl the layer has not reached: either it predates
+      // the last edit to the layer, which a converge fixes, or it is a
+      // file the person wrote themselves, which a converge deliberately
+      // will not touch.
+      const regenerable = kdl === base || isComposedZellijConfig(kdl);
+      checks.push(
+        kdl === composed
+          ? { name: "zellij layer", status: "ok", detail: `composed from ${ZELLIJ_LAYER_FILE}` }
+          : {
+              name: "zellij layer",
+              status: "drift",
+              detail: regenerable
+                ? `config.kdl was written before ${ZELLIJ_LAYER_FILE} last changed`
+                : `config.kdl is yours, so ${ZELLIJ_LAYER_FILE} is not composed into it`,
+              fix: regenerable
+                ? "red-dev install core"
+                : `move your edits into ${layerPath}, delete ${zellijConfig}, then re-run \`red-dev install core\``,
+            },
+      );
+    }
   }
 
   return checks;

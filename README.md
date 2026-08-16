@@ -203,6 +203,44 @@ key. Inside a mouse-capturing TUI such as herdr, normal drag selection belongs
 to herdr and is copied automatically; hold `Shift` while dragging to select in
 Alacritty instead, or use herdr's copy mode (`Ctrl+B`, then `[`).
 
+### Your half of every file red-dev owns
+
+A converge may replace everything red-dev wrote. It never writes the layer
+beside it, which is where your half lives — so an edit you make there survives
+every upgrade, and regenerating an owned file stops being something to be
+careful about.
+
+| Surface | red-dev writes | you write |
+| --- | --- | --- |
+| **bash** | `~/.local/share/red-dev/config/bash/*` | `~/.config/red-dev/env.sh` |
+| **Alacritty** | `keys.toml`, `font.toml`, `cursor.toml` | `alacritty.toml` |
+| **zellij** | `config.kdl` | `config.user.kdl`, beside it |
+
+bash and Alacritty read their layer themselves: it is sourced or imported last,
+so it wins. zellij has neither an include mechanism nor a config red-dev leaves
+alone, so red-dev composes instead — `config.kdl` is red-dev's base plus your
+`config.user.kdl`, and anything the layer declares replaces red-dev's version of
+it. Name only what you want to change; a mode you name keeps every binding
+red-dev put in it except the keys you rebind.
+
+```kdl
+// ~/.config/zellij/config.user.kdl
+keybinds {
+    shared_except "locked" {
+        bind "Ctrl y" { Quit; }
+    }
+}
+
+scroll_buffer_size 100000
+```
+
+`red-dev install core` composes it in and `red-dev doctor` reports a `config.kdl`
+older than the layer. On a machine with a shared root the layer sits in the share
+beside the config, so both sides of a WSL boundary read the same one. A
+`config.kdl` you wrote yourself is still yours: red-dev will not overwrite it,
+and says so rather than composing over it. See
+[ADR 0007](.red/adr/0007-the-user-layer.md).
+
 ### The tools
 
 `git` · `curl` · `ripgrep` · `fd` · `bat` · `eza` · `zoxide` · `fzf` · `btop` ·

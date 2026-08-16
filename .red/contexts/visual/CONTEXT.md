@@ -18,6 +18,6 @@ Every configuration file touched by an adapter declares a mode: `owned` (red-dev
 
 ## User layer
 
-For every `owned` file, a companion the person authors that red-dev loads after its own and never writes: what `alacritty.toml` already is to the regenerated `keys.toml`, and what `~/.config/red-dev/env.sh` is to the shipped bash. Where the program has no include mechanism (zellij), red-dev composes base + user layer into the file it owns rather than asking the person to edit the generated one. It is Omarchy's clone-to-override without a plugin system: a converge may replace everything red-dev wrote and must leave the layer untouched (decision of 2026-08-15).
+For every `owned` file, a companion the person authors that red-dev loads after its own and never writes: what `alacritty.toml` already is to the regenerated `keys.toml`, and what `~/.config/red-dev/env.sh` is to the shipped bash. Where the program has no include mechanism (zellij), red-dev composes base + user layer into the file it owns rather than asking the person to edit the generated one. It is Omarchy's clone-to-override without a plugin system: a converge may replace everything red-dev wrote and must leave the layer untouched (decision of 2026-08-15). Each owned surface names its layer: bash's is `~/.config/red-dev/env.sh`, Alacritty's is `alacritty.toml`, and zellij's is `config.user.kdl` beside the `config.kdl` red-dev composes it into.
 
 _Avoid_: override file, local config, dotfile (too broad), plugin
