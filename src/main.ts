@@ -1528,7 +1528,7 @@ async function cmdAgentsDefault(p: Platform, key: string | undefined): Promise<n
  */
 async function cmdAgentsRun(p: Platform, passthrough: string[]): Promise<number> {
   const { commandPath } = await import("./agents.ts");
-  const { resolveLaunch } = await import("./agent-launch.ts");
+  const { resolveLaunch, runLaunchTarget } = await import("./agent-launch.ts");
   const { readPreferences } = await import("./preferences.ts");
 
   const prefs = await readPreferences(p);
@@ -1540,15 +1540,7 @@ async function cmdAgentsRun(p: Platform, passthrough: string[]): Promise<number>
   }
 
   try {
-    // The environment as it is, not the unattended one: this child is
-    // the person's session, and UNATTENDED_ENV exists to tell package
-    // managers nobody is watching. Here somebody is.
-    const child = Bun.spawn(decision.target.argv, {
-      stdin: "inherit",
-      stdout: "inherit",
-      stderr: "inherit",
-    });
-    return await child.exited;
+    return await runLaunchTarget(decision.target);
   } catch {
     log.err(`${decision.target.label} could not be started: ${decision.target.executable}`);
     return 1;
