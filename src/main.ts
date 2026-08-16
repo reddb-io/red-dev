@@ -1071,6 +1071,67 @@ async function cmdApps(p: Platform, inv: Invocation): Promise<number> {
 }
 
 /**
+ * `red-dev keys` — every action, its chord, and whether this machine
+ * binds it.
+ *
+ * Two shapes, and the plain one is not a degraded mode. A terminal that
+ * cannot draw the viewer still gets the whole list with the reason on
+ * every unbound row, which is the form a bug report pastes and a script
+ * greps — and the form that proves nothing was hidden. The viewer adds
+ * the search and the Enter key, not the information.
+ */
+async function cmdKeys(p: Platform): Promise<number> {
+  const { keyEntries, keyLines } = await import("./keys.ts");
+  const entries = keyEntries(p);
+
+  if (!interactive()) {
+    for (const line of keyLines(entries)) log.plain(line);
+    return 0;
+  }
+
+  const { runKeysViewer } = await import("./keys-view.ts");
+  await runKeysViewer(p, entries);
+  return 0;
+}
+
+/**
+ * `red-dev learn` — the documentation, from inside the program.
+ *
+ * Picking a README section opens it at its heading where the machine
+ * has something to open a link with, and prints the URL where it does
+ * not: a headless server cannot browse, and a spawn that quietly fails
+ * there would be worse than the address it could have copied.
+ */
+async function cmdLearn(p: Platform): Promise<number> {
+  const { browseArgv, LEARN, learnLines } = await import("./learn.ts");
+
+  if (!interactive()) {
+    for (const line of learnLines()) log.plain(line);
+    return 0;
+  }
+
+  const labels = LEARN.map((entry) => `${entry.label} — ${entry.detail}`);
+  const picked = await select("Learn what?", labels as [string, ...string[]], labels[0]!);
+  const entry = LEARN[labels.indexOf(picked)];
+  if (!entry) return 0;
+
+  // The one entry that is a surface rather than a link, and the reason
+  // Learn is worth having beside the README: it answers "which key does
+  // that" for the machine in front of you.
+  if (entry.url === null) return await cmdKeys(p);
+
+  const argv = browseArgv(entry.url, p, (cmd) => Bun.which(cmd));
+  if (!argv) {
+    log.plain(entry.url);
+    return 0;
+  }
+  const { detach } = await import("./keys.ts");
+  detach(argv);
+  log.ok(entry.url);
+  return 0;
+}
+
+/**
  * Choose where a terminal lands on a machine that has both Windows and
  * WSL.
  *
@@ -1292,6 +1353,13 @@ async function cmdUi(p: Platform, inv: Invocation): Promise<number> {
       return await cmdDoctor(p, inv);
     case "apps":
       return await cmdApps(p, inv);
+    case "keys":
+      // Both of these draw their own interface, so they run after this
+      // one has released the screen — the same reason `apps` is here
+      // rather than in the actions handed into the render.
+      return await cmdKeys(p);
+    case "learn":
+      return await cmdLearn(p);
     default:
       return 0;
   }
@@ -1751,6 +1819,8 @@ async function cmdMenu(p: Platform, inv: Invocation, cliHelp: string): Promise<n
     plan: () => cmdPlan(p, inv),
     platform: () => cmdPlatform(p),
     apps: () => cmdApps(p, inv),
+    keys: () => cmdKeys(p),
+    learn: () => cmdLearn(p),
     lang: () => cmdLang(p, inv),
     shell: () => cmdShell(p, inv),
     uninstall: () => cmdUninstall(p),
@@ -1911,6 +1981,10 @@ async function main(): Promise<number> {
       return await cmdRedwall(p);
     case "apps":
       return await cmdApps(p, inv);
+    case "keys":
+      return await cmdKeys(p);
+    case "learn":
+      return await cmdLearn(p);
     case "agents":
       return await cmdAgents(p, inv);
     case "lang":

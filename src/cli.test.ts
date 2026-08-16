@@ -51,6 +51,23 @@ describe("command parsing", () => {
     expect(buildCli().help(["agents"])).toContain("update");
   });
 
+  test("the keys viewer and Learn are commands, and findable in --help", () => {
+    // Reachable non-interactively, like everything else the menu
+    // offers: a section that exists only inside the interface is a
+    // section nobody can put in a script, a bug report or a remedy.
+    expect(parse(["keys"])).toMatchObject({ command: "keys", errors: [] });
+    expect(parse(["learn"])).toMatchObject({ command: "learn", errors: [] });
+    const help = buildCli().help();
+    expect(help).toContain("keys");
+    expect(help).toContain("learn");
+  });
+
+  test("the keys viewer takes no arguments, and says so rather than ignoring them", () => {
+    // The search is typed into the viewer. A query silently swallowed
+    // here would look like a viewer that cannot search.
+    expect(parse(["keys", "--query", "terminal"]).errors.length).toBeGreaterThan(0);
+  });
+
   test("keeps what follows `--` for the program red-dev starts", () => {
     // Strict mode would otherwise reject these as unknown options of
     // ours. They are the person's arguments to their own agent — up to

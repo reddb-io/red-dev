@@ -72,6 +72,13 @@ const EXEMPT: Record<string, string> = {
   "privileged.ts":
     "The shared batch. This is the one prompt: every declared privileged item of a " +
     "run is composed into a single script and elevated once, at the end.",
+  "keys.ts":
+    "The elevated-shell action, fired from the keys viewer. Here the prompt is the " +
+    "act rather than an interruption of one: somebody read `Elevated shell` on a " +
+    "list and pressed enter, and the consent they get is the same one the " +
+    "Ctrl+Alt+Shift+T shortcut raises through byte 21 of its .lnk. Nothing is being " +
+    "converged, so there is no batch to defer it into — deferring it would mean " +
+    "answering a request for a shell by scheduling one.",
   "wsl.ts":
     "The machine-wide font repair, which predates the guarantee and is the one " +
     "second prompt still in the tree. It fires only on a machine where the per-user " +
