@@ -44,6 +44,7 @@
  * and a continuous progress bar, all derived from the local civil day.
  */
 
+import type { AgentUsageReading } from "./agent-usage.ts";
 import { rgb } from "./brand.ts";
 import type { HostStateAttention } from "./host-state.ts";
 import { decodePng, encodePng, type Raster } from "./png.ts";
@@ -73,6 +74,18 @@ export interface RedwallState {
     readonly pat: { readonly api: number; readonly graphql: number } | null;
     readonly app: { readonly api: number; readonly graphql: number } | null;
   } | null;
+  /**
+   * The agent allowance, as a reading already taken from a snapshot.
+   *
+   * Three states, not two, and the third is why this is optional rather
+   * than nullable. Absent means nobody asked and no line is drawn — which
+   * is what keeps every caller written before this existed rendering
+   * exactly what it did. `null` means somebody asked and the answer was
+   * unknown, and that is a line: a machine whose allowance we cannot
+   * vouch for should say so, not quietly look identical to one whose
+   * budget is untouched.
+   */
+  readonly agent?: AgentUsageReading | null;
   /** The address this machine answers on, as a dotted quad. */
   readonly address: string | null;
 }
@@ -195,8 +208,10 @@ export function redwallLines(state: RedwallState): string[] {
     ? state.address
     : null;
   const github = githubLines(state.github);
+  const agent = agentLines(state.agent);
   if (state.workers === null) {
-    return ["redskilled unavailable", ...github, address].filter((line): line is string => line !== null);
+    return ["redskilled unavailable", ...github, ...agent, address]
+      .filter((line): line is string => line !== null);
   }
   if (!Number.isSafeInteger(state.workers) || state.workers < 0) return [];
 
@@ -223,9 +238,59 @@ export function redwallLines(state: RedwallState): string[] {
   }
 
   const lines = [headline, detail];
-  lines.push(...github);
+  lines.push(...github, ...agent);
   if (address !== null) lines.push(address);
   return lines.every(drawable) ? lines : [];
+}
+
+/**
+ * The provider windows this surface has a short name for.
+ *
+ * A window is drawn only when it appears here, and the reason is the
+ * charset: a provider's own spelling is `five_hour`, the embedded face
+ * has no underscore, and a line the face cannot set drops every other
+ * line on the card with it. Short names are also the only way three
+ * allowance windows fit on one line beside the GitHub budgets.
+ */
+const AGENT_WINDOWS: ReadonlyMap<string, string> = new Map([
+  ["five_hour", "5h"],
+  ["seven_day", "7d"],
+  ["seven_day_opus", "7d opus"],
+]);
+
+/**
+ * The same names as a list, so a test can cover every one of them.
+ *
+ * Derived rather than transcribed: a short name added above and missed
+ * here would be a line nobody ever checked the face could set.
+ */
+export const AGENT_WINDOW_KINDS: readonly string[] = [...AGENT_WINDOWS.keys()];
+
+/** What a reading says, in the shape the GitHub budgets already use. */
+const AGENT_UNKNOWN = "agent unknown";
+
+/**
+ * One line for the agent allowance, or none when nobody asked.
+ *
+ * Percent remaining rather than percent spent, because the budgets above
+ * it are remaining: two numbers on one card that count in opposite
+ * directions is a card that gets misread exactly when it matters. Every
+ * way of not knowing — no snapshot, a stale one, windows under names
+ * this face cannot set — lands on the same honest line, and none of them
+ * lands on a number.
+ */
+function agentLines(value: RedwallState["agent"]): string[] {
+  if (value === undefined) return [];
+  if (value === null) return [AGENT_UNKNOWN];
+  const windows = value.windows
+    .filter((window) => AGENT_WINDOWS.has(window.kind) && validPercent(window.remainingPercent))
+    .map((window) => `${AGENT_WINDOWS.get(window.kind)} ${window.remainingPercent}%`);
+  if (windows.length === 0) return [AGENT_UNKNOWN];
+  const line = `agent ${value.provider} ${windows.join(" · ")}`;
+  // The provider names itself in the snapshot, so it is the one part of
+  // this line the renderer did not choose. Undrawable, it reads as
+  // unknown rather than taking the whole card down with it.
+  return [drawable(line) ? line : AGENT_UNKNOWN];
 }
 
 function githubLines(value: RedwallState["github"]): string[] {
