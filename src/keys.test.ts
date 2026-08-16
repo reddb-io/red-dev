@@ -19,6 +19,7 @@
 import { describe, expect, test } from "bun:test";
 import { ACTIONS } from "./actions/index.ts";
 import type { SemanticAction } from "./actions/index.ts";
+import { START_MENU_ACTIONS } from "./hotkeys.ts";
 import {
   fireEntry,
   firePlan,
@@ -103,27 +104,52 @@ describe("the list", () => {
     expect(terminal?.label).toBe("Terminal");
   });
 
-  test("on Windows, the two terminal actions are bound and carry no reason", () => {
-    // Named rather than "every row", which is what this used to assert.
-    // The Start Menu adapter carries these two; an action it has never
-    // carried is a different sentence, and the test below is the one
-    // that holds it.
-    for (const id of ["terminal.new", "terminal.elevated"]) {
+  test("on Windows, every action the Start Menu adapter claims is bound", () => {
+    // The acceptance criterion, read off the same list the adapter
+    // writes from: a chord printed here is a chord the .lnk carries.
+    // This is the row that used to hold the two terminal actions alone,
+    // while the other seven printed a chord a person could press to no
+    // effect — the viewer promising something the machine did not do.
+    for (const id of START_MENU_ACTIONS) {
       const entry = keyEntries(windows).find((e) => e.id === id);
       expect(entry?.state).toBe("bound");
       expect(entry?.reason).toBe("");
     }
+    // Named as well as derived, so the loop above cannot pass by being
+    // empty and so the set itself is a decision somebody has to change
+    // on purpose.
+    expect([...START_MENU_ACTIONS]).toEqual([
+      "terminal.new",
+      "terminal.elevated",
+      "menu.open",
+      "keys.viewer",
+      "emoji.pick",
+      "panel.network",
+      "panel.audio",
+      "panel.power",
+      "agent.launch",
+    ]);
   });
 
   test("an action the Windows adapter has never carried says so, and is not called broken", () => {
-    // The distinction that matters: the Start Menu adapter registers the
-    // entries it has, and the network Panel is not one of them yet.
+    // The distinction that matters, and the one widening the claimed set
+    // must not blur: the Start Menu adapter registers the entries it
+    // has, and `agent.multiplex` is deliberately not one — herdr has no
+    // Windows build, and it runs inside WSL, where a Start Menu .lnk
+    // written on every host cannot follow it.
+    //
     // Reporting that as "broken" would send whoever reads it looking for
-    // a shortcut nobody ever wrote — and reporting it as bound would be
-    // a chord that does nothing on the machine in front of them.
-    const panel = keyEntries(windows).find((e) => e.id === "panel.network");
-    expect(panel?.state).toBe("unsupported");
-    expect(panel?.reason).toContain("no shortcut for it yet");
+    // a shortcut nobody ever wrote. It is only visible from inside WSL:
+    // on a native Windows host the row is answered a step earlier, by
+    // the action not applying to `windows` at all.
+    const wsl = machine({ env: "wsl" });
+    const herdr = keyEntries(wsl).find((e) => e.id === "agent.multiplex");
+    expect(herdr?.state).toBe("unsupported");
+    expect(herdr?.reason).toContain("Windows Start Menu");
+    expect(herdr?.reason).toContain("no shortcut for it yet");
+    // Not the registry-failure sentence, which is the other silence and
+    // the one that means somebody has to fix a shortcut.
+    expect(herdr?.reason).not.toContain("no chord came back");
   });
 });
 
@@ -215,22 +241,12 @@ describe("searching", () => {
 
   test("the state is searchable, so 'unbound work' is one query", () => {
     expect(searchKeys(keyEntries(server), "unsupported")).toHaveLength(ACTIONS.length);
-    // On Windows the terminal pair is bound and the other surfaces are
-    // not, so the query answers with exactly what this machine does not
-    // register.
-    expect(searchKeys(entries, "unsupported").map((e) => e.id)).toEqual([
-      "menu.open",
-      "keys.viewer",
-      "emoji.pick",
-      "panel.network",
-      "panel.audio",
-      "panel.power",
-      "agent.launch",
-      // Unsupported here for the other of the two reasons the word
-      // covers: herdr has no Windows build, so this row's sentence is
-      // about the platform rather than about a missing shortcut.
-      "agent.multiplex",
-    ]);
+    // On Windows the adapter now claims everything that applies, so the
+    // query answers with the one row that does not: herdr, which has no
+    // Windows build. That is the platform sentence rather than the
+    // missing-shortcut one, and it is the whole of what this machine
+    // leaves unregistered.
+    expect(searchKeys(entries, "unsupported").map((e) => e.id)).toEqual(["agent.multiplex"]);
   });
 });
 

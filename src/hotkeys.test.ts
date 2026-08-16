@@ -7,19 +7,37 @@
  * browser, in VS Code and in Windows Terminal itself, and installing
  * red-dev quietly removed that from the whole machine.
  *
- * Two combos, both anchored on Alt, which nothing else in a terminal
+ * Every combo is anchored on Alt, which nothing else in a terminal
  * workflow wants.
+ *
+ * The adapter carries every action that applies to Windows. It was
+ * migrated with two, and the seven the chord decision added read in
+ * `red-dev keys` as chords a person could press to no effect — which is
+ * the failure the tests below are written against, in both directions:
+ * the claimed set has to be complete, and the one action deliberately
+ * left out of it has to stay recognisable as never-claimed rather than
+ * as a shortcut that broke.
  */
 
 import { describe, expect, test } from "bun:test";
-import { actionById } from "./actions/index.ts";
-import { resolveScript, WINDOWS_HOTKEYS } from "./hotkeys.ts";
+import { ACTIONS, actionById, chordText, parseChord } from "./actions/index.ts";
+import { resolveScript, START_MENU_ACTIONS, WINDOWS_HOTKEYS } from "./hotkeys.ts";
 
 const claimed = WINDOWS_HOTKEYS.filter((h) => h.combo !== null).map((h) => h.combo);
 
 describe("the keys taken from the machine", () => {
-  test("are exactly the two that were agreed", () => {
-    expect(claimed).toEqual(["CTRL+ALT+T", "CTRL+ALT+SHIFT+T"]);
+  test("are exactly the ones the registry gives this target", () => {
+    expect(claimed).toEqual([
+      "CTRL+ALT+T",
+      "CTRL+ALT+SHIFT+T",
+      "CTRL+ALT+SHIFT+M",
+      "CTRL+ALT+SHIFT+K",
+      "CTRL+ALT+SHIFT+E",
+      "CTRL+ALT+SHIFT+N",
+      "CTRL+ALT+SHIFT+A",
+      "CTRL+ALT+SHIFT+P",
+      "CTRL+ALT+SHIFT+G",
+    ]);
   });
 
   test("Ctrl+Alt+T is the terminal and Ctrl+Alt+Shift+T is the elevated one", () => {
@@ -48,10 +66,12 @@ describe("the keys taken from the machine", () => {
 });
 
 describe("the shortcuts written", () => {
-  test("are two, and no more", () => {
+  test("are nine, and no more", () => {
     // Every global binding is taken from the whole machine, so the list
-    // growing is a decision rather than a detail.
-    expect(WINDOWS_HOTKEYS).toHaveLength(2);
+    // growing is a decision rather than a detail. Nine is what the
+    // 2026-08-15 chord decision named minus herdr, which has no Windows
+    // build to bind a key to.
+    expect(WINDOWS_HOTKEYS).toHaveLength(9);
   });
 
   test("all of them carry a key", () => {
@@ -61,13 +81,45 @@ describe("the shortcuts written", () => {
   });
 });
 
-describe("the two keys come from the action registry", () => {
+describe("the adapter carries every action that applies to Windows", () => {
+  /** What the registry says belongs on this target. */
+  const applicable = ACTIONS.filter((a) => a.platforms.includes("windows")).map((a) => a.id);
+
+  test("so nothing applicable is left without a Start Menu entry", () => {
+    // The criterion in one line, and derived from the registry rather
+    // than from a list repeated here: an action added to `src/actions/`
+    // with `windows` among its platforms fails this until somebody
+    // decides, out loud, what its shortcut opens.
+    expect([...START_MENU_ACTIONS].sort()).toEqual([...applicable].sort());
+  });
+
+  test("and the one action deliberately left out is one that does not apply here", () => {
+    // The boundary this widening must not blur. herdr has no stable
+    // Windows build, so `agent.multiplex` never claimed `windows` — and
+    // the adapter writing it a key anyway would put a chord in the Start
+    // Menu that opens nothing on a native Windows host.
+    expect(START_MENU_ACTIONS).not.toContain("agent.multiplex");
+    expect(actionById("agent.multiplex")?.platforms).not.toContain("windows");
+  });
+});
+
+describe("the keys come from the action registry", () => {
   // The migration this pins: the combos used to be literals in
   // hotkeys.ts and are now read from the registry. Behaviour is
   // unchanged, which is exactly the thing worth pinning — the values
   // above are what shipped, and they have to survive the move.
   test("each Start Menu entry names the action it registers", () => {
-    expect(WINDOWS_HOTKEYS.map((h) => h.id)).toEqual(["terminal.new", "terminal.elevated"]);
+    expect(WINDOWS_HOTKEYS.map((h) => h.id)).toEqual([
+      "terminal.new",
+      "terminal.elevated",
+      "menu.open",
+      "keys.viewer",
+      "emoji.pick",
+      "panel.network",
+      "panel.audio",
+      "panel.power",
+      "agent.launch",
+    ]);
   });
 
   test("and carries that action's chord, spelled the way Windows is given it", () => {
@@ -78,12 +130,36 @@ describe("the two keys come from the action registry", () => {
     expect(by("terminal.elevated")).toBe("CTRL+ALT+SHIFT+T");
   });
 
+  test("every entry does, and none of them keeps a second copy of the chord", () => {
+    // The generalisation of the test above, now that there are nine:
+    // whatever the registry says is what the .lnk gets, folded to the
+    // one spelling Windows is given. A hard-coded combo anywhere in this
+    // adapter fails here the moment the registry changes underneath it.
+    for (const hotkey of WINDOWS_HOTKEYS) {
+      const chord = actionById(hotkey.id)?.chord;
+      expect(chord).toBeDefined();
+      expect(hotkey.combo).toBe(chordText(parseChord(chord as string) as never));
+    }
+  });
+
   test("the .lnk names stay Windows' own, because machines already have them", () => {
     // The registry calls the elevated one "Elevated shell"; renaming the
     // shortcut would leave the old .lnk — and its key — behind.
     expect(actionById("terminal.elevated")?.label).toBe("Elevated shell");
     expect(WINDOWS_HOTKEYS.find((h) => h.id === "terminal.elevated")?.label)
       .toBe("PowerShell (Administrator)");
+  });
+
+  test("and every name nobody's machine carries yet is the registry's own", () => {
+    // The other half of the rule above. A Windows name is worth keeping
+    // when Windows already has one; inventing a second name for a .lnk
+    // this adapter is the first to write would just be a third spelling
+    // of the same act for the keys viewer to disagree with.
+    const windowsOwns = new Set(["terminal.new", "terminal.elevated"]);
+    for (const hotkey of WINDOWS_HOTKEYS) {
+      if (windowsOwns.has(hotkey.id)) continue;
+      expect(hotkey.label).toBe(actionById(hotkey.id)?.label as string);
+    }
   });
 
   test("and the written script carries those chords, not its own copy", () => {
@@ -93,6 +169,68 @@ describe("the two keys come from the action registry", () => {
     // The post-write probe asks about the terminal chord: MOD_CONTROL |
     // MOD_ALT is 3, and 0x54 is T.
     expect(script).toContain("RegisterHotKey([IntPtr]::Zero, 9004, 3, 0x54)");
+  });
+});
+
+describe("the shortcut written for each surface red-dev draws itself", () => {
+  const script = resolveScript(null);
+
+  test("names the .lnk, its hotkey and the subcommand it opens", () => {
+    // The whole line per shortcut, hotkey field included, because that
+    // field is the only part of a .lnk anybody presses: a shortcut
+    // written with the right target and the wrong HotKey is a Start Menu
+    // entry nobody will ever find, and one written with the right HotKey
+    // and the wrong subcommand opens the neighbouring surface.
+    for (const [label, combo, argv] of [
+      ["red-dev menu", "CTRL+ALT+SHIFT+M", "menu"],
+      ["Keys viewer", "CTRL+ALT+SHIFT+K", "keys"],
+      ["Emoji picker", "CTRL+ALT+SHIFT+E", "emoji"],
+      ["Network panel", "CTRL+ALT+SHIFT+N", "panel network"],
+      ["Audio panel", "CTRL+ALT+SHIFT+A", "panel audio"],
+      ["Power panel", "CTRL+ALT+SHIFT+P", "panel power"],
+      ["Default agent", "CTRL+ALT+SHIFT+G", "agents run"],
+    ]) {
+      expect(script).toContain(
+        `New-Hot '${label}' '${combo}' $surface ($surfaceArgs + '${argv}') $false`,
+      );
+    }
+  });
+
+  test("and none of them is written as the elevated one", () => {
+    // Byte 21 is the elevation flag, and the fifth argument is what sets
+    // it. Exactly one shortcut asks for consent; a copy-paste that
+    // spread `$true` across the surfaces would put a UAC prompt in front
+    // of the emoji picker.
+    const elevated = script.split("\n").filter((l) => l.includes("New-Hot") && l.includes("$true"));
+    expect(elevated).toHaveLength(1);
+    expect(elevated[0]).toContain("PowerShell (Administrator)");
+  });
+
+  test("through one binary, resolved on the Windows side like everything else", () => {
+    // Under WSL this process is Linux: it cannot stat %LOCALAPPDATA%,
+    // which is the mistake that once failed the whole step with "APPDATA
+    // is not set". PowerShell answers where red-dev lives, honouring the
+    // same RED_DEV_BIN_DIR both installers read.
+    expect(script).toContain("$env:RED_DEV_BIN_DIR");
+    expect(script).toContain("Join-Path $env:LOCALAPPDATA 'red-dev\\bin'");
+    expect(script).toContain("Get-Command 'red-dev.exe'");
+  });
+
+  test("and is skipped, out loud, when there is no red-dev.exe to name", () => {
+    // A .lnk with an empty target is a key that fails silently on a
+    // machine somebody was told it works on.
+    expect(script).toContain("if ($surface) {");
+    expect(script).toContain("(skipped) no red-dev.exe on this host");
+  });
+
+  test("reached through the distro when the host has no red-dev of its own", () => {
+    // Only from inside WSL, where there is a distro to name. On a native
+    // Windows host `wsl.exe -- red-dev` would be a guess at a distro
+    // nobody chose, so the fallback is not written at all.
+    expect(resolveScript("Ubuntu-24.04")).toContain(
+      "$surfaceArgs = '-d Ubuntu-24.04 -- red-dev '",
+    );
+    expect(script).not.toContain("-- red-dev ");
   });
 });
 

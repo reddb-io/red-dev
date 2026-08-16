@@ -931,15 +931,32 @@ either way.
 
 #### Global hotkeys
 
-Two keys, both anchored on Alt, written as Start Menu shortcuts — which is where
-they have to be for the key to fire. No AutoHotkey, no PowerToys: a `.lnk`
-carries a hotkey natively, and byte 21 of the file format carries the elevation
-flag.
+Every action that applies to Windows, anchored on Alt and written as Start Menu
+shortcuts — which is where they have to be for the key to fire. No AutoHotkey,
+no PowerToys: a `.lnk` carries a hotkey natively, and byte 21 of the file format
+carries the elevation flag.
 
 | Key | Opens |
 | --- | --- |
 | `Ctrl+Alt+T` | the terminal — bash inside WSL, through Alacritty when it is installed |
 | `Ctrl+Alt+Shift+T` | PowerShell, elevated — it will prompt for consent |
+| `Ctrl+Alt+Shift+M` | the red-dev menu |
+| `Ctrl+Alt+Shift+K` | the keys viewer — this table, searchable, and a launcher |
+| `Ctrl+Alt+Shift+E` | the emoji picker |
+| `Ctrl+Alt+Shift+N` | the network panel |
+| `Ctrl+Alt+Shift+A` | the audio panel |
+| `Ctrl+Alt+Shift+P` | the power panel |
+| `Ctrl+Alt+Shift+G` | the Default agent |
+
+The chords are decided once, in the action registry, and identical on every
+target — the adapter owns how a chord is registered, never which chord it is
+(ADR 0006). The seven below the terminal pair open `red-dev` itself, so they are
+written only where the binary can be found: `%LOCALAPPDATA%\red-dev\bin` or
+`RED_DEV_BIN_DIR`, and from inside WSL the distro's own through `wsl.exe`.
+
+`Ctrl+Alt+Shift+H` — the agent multiplexer — is the one action with no shortcut
+here. herdr has no stable Windows build, so `red-dev keys` reports it unbound
+rather than binding a key that opens nothing.
 
 `Ctrl+Shift+T` is deliberately not among them. It is reopen-closed-tab in every
 browser, in VS Code and in Windows Terminal itself, and a global hotkey beats the
@@ -1310,7 +1327,8 @@ Then, in order:
    already running, and this is the single most common "it did not install".
 2. `red-dev` — the interface. **Install** asks its questions first; nothing
    converges until you answer.
-3. Try `Ctrl+Alt+T` and `Ctrl+Alt+Shift+T`.
+3. Try `Ctrl+Alt+T` and `Ctrl+Alt+Shift+K`; the second is the viewer, and it
+   lists the rest.
 4. `red-dev theme flare`, then look at a title bar. Windows applies the accent
    to windows opened *after* the switch.
 5. `red-dev doctor` — it should report no drift.
