@@ -966,9 +966,16 @@ async function cmdWallpaper(p: Platform, inv: Invocation, name?: string): Promis
  * Regenerate this machine's Redwall.
  *
  * A command of its own rather than another thing `red-dev theme` does,
- * because it is fired by something outside the program — a state change
- * the RedSkills daemon reports — and a command that runs on its own
- * schedule must not be reachable only through one a person types.
+ * because it is fired by something outside the program — the RedSkills
+ * daemon's host hook, on a Worker birth or death — and a command that
+ * runs on somebody else's trigger must not be reachable only through one
+ * a person types.
+ *
+ * The same command serves both callers, and `runRedwallHook` is what
+ * tells them apart. Fired for a kind red-dev never declared, this
+ * repaints nothing: the daemon fires only what the policy names, but
+ * that policy is a file an operator edits, and a 4K compose on every
+ * `worker-metrics` sample is a cadence nobody chose.
  *
  * Zero when the preference is off, and zero when there is no desktop
  * here. The trigger should not have to know which machine it is on or
@@ -978,23 +985,45 @@ async function cmdWallpaper(p: Platform, inv: Invocation, name?: string): Promis
 async function cmdRedwall(p: Platform): Promise<number> {
   const { applyRedwall } = await import("./redwall.ts");
   const { resolveWallpaperSlug } = await import("./preferences.ts");
+  const { runRedwallHook } = await import("./redwall-hook.ts");
 
-  // Generate AND repaint. This command exists so a schedule or a hook
-  // can keep the desktop current with no arguments and no knowledge of
-  // the configuration — and a schedule that only manufactures PNGs
-  // while the desktop stays pointed at last week's is the bug this
-  // command shipped with. The resolved wallpaper is the right canvas
-  // here: it may follow the theme or be independently pinned.
-  let outcome: Awaited<ReturnType<typeof applyRedwall>>;
-  try {
-    const slug = await resolveWallpaperSlug(p);
-    outcome = await applyRedwall(p, slug);
-  } catch (err) {
-    // Composing failed, which is a real fault rather than a state: the
-    // art, the face and the arithmetic all ship in this binary.
-    log.err(`redwall: ${(err as Error).message}`);
+  // Generate AND repaint. This command exists so the hook can keep the
+  // desktop current with no arguments and no knowledge of the
+  // configuration — and a trigger that only manufactures PNGs while the
+  // desktop stays pointed at last week's is the bug this command shipped
+  // with. The resolved wallpaper is the right canvas here: it may follow
+  // the theme or be independently pinned.
+  let failure: Error | null = null;
+  const run = await runRedwallHook(async () => {
+    try {
+      return await applyRedwall(p, await resolveWallpaperSlug(p));
+    } catch (err) {
+      // Composing failed, which is a real fault rather than a state: the
+      // art, the face and the arithmetic all ship in this binary.
+      failure = err as Error;
+      return null;
+    }
+  });
+
+  if (run.reason === "foreign-kind") {
+    log.skip(`redwall: ${run.kind} is not a kind red-dev declared, so nothing was repainted`);
+    return 0;
+  }
+  if (run.payload === "unrecognised") {
+    // Said rather than swallowed. The repaint happened either way — the
+    // state it draws is asked for after the event, never read off the
+    // record — but a daemon speaking a host-state version this build
+    // cannot read is why the image says the daemon is unavailable.
+    log.warn(
+      "redwall: the daemon's host-state document is a version this red-dev does not read — " +
+        "repainting with what it can resolve for itself",
+    );
+  }
+  if (failure !== null) {
+    log.err(`redwall: ${(failure as Error).message}`);
     return 1;
   }
+  const outcome = run.result!;
 
   if (outcome.skipped === "off") {
     log.skip("redwall is off — `red-dev menu` turns it on");
