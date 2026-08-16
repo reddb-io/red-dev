@@ -23,6 +23,30 @@ describe("command parsing", () => {
     });
   });
 
+  test("reads the agents subcommands as subcommands, not as agent keys", () => {
+    expect(parse(["agents", "default", "codex"])).toMatchObject({
+      agentDefault: true,
+      agentDefaultKey: "codex",
+      agentKeys: undefined,
+      errors: [],
+    });
+    expect(parse(["agents", "run"])).toMatchObject({
+      agentRun: true,
+      agentKeys: undefined,
+      passthrough: [],
+      errors: [],
+    });
+  });
+
+  test("keeps what follows `--` for the program red-dev starts", () => {
+    // Strict mode would otherwise reject these as unknown options of
+    // ours. They are the person's arguments to their own agent — up to
+    // and including the one red-dev will never add itself.
+    const inv = parse(["agents", "run", "--", "--dangerously-skip-permissions", "-p", "hi"]);
+    expect(inv).toMatchObject({ command: "agents", agentRun: true, errors: [] });
+    expect(inv.passthrough).toEqual(["--dangerously-skip-permissions", "-p", "hi"]);
+  });
+
   test("reads a wallpaper independently from the theme", () => {
     expect(parse(["wallpaper", "flare"])).toMatchObject({
       command: "wallpaper",
