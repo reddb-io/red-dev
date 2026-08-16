@@ -42,14 +42,24 @@ describe("the registry itself", () => {
 
   test("carries the actions the areas have so far", () => {
     // Empty areas are aggregated too, so this is the whole list and not
-    // just the module that happens to be filled.
+    // just the module that happens to be filled — `apps` and `capture`
+    // are still empty and still imported, which is the arrangement that
+    // let this slice add four actions to two modules without touching
+    // the aggregate at all.
+    //
+    // Ten is the count the 2026-08-15 chord decision named, and it is
+    // the number `red-dev keys` prints.
     expect(ACTIONS.map((a) => a.id)).toEqual([
       "terminal.new",
       "terminal.elevated",
+      "menu.open",
+      "keys.viewer",
       "emoji.pick",
       "panel.network",
       "panel.audio",
       "panel.power",
+      "agent.launch",
+      "agent.multiplex",
     ]);
   });
 
@@ -67,10 +77,14 @@ describe("the registry itself", () => {
     expect(Object.fromEntries(ACTIONS.map((a) => [a.id, a.chord]))).toEqual({
       "terminal.new": "Ctrl+Alt+T",
       "terminal.elevated": "Ctrl+Alt+Shift+T",
+      "menu.open": "Ctrl+Alt+Shift+M",
+      "keys.viewer": "Ctrl+Alt+Shift+K",
       "emoji.pick": "Ctrl+Alt+Shift+E",
       "panel.network": "Ctrl+Alt+Shift+N",
       "panel.audio": "Ctrl+Alt+Shift+A",
       "panel.power": "Ctrl+Alt+Shift+P",
+      "agent.launch": "Ctrl+Alt+Shift+G",
+      "agent.multiplex": "Ctrl+Alt+Shift+H",
     });
   });
 

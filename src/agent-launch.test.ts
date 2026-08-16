@@ -12,9 +12,17 @@
  * The second half pins the other way this goes wrong: launching the
  * host that happens to be installed rather than the host that was
  * chosen. The recorded answer decides, or nothing launches.
+ *
+ * Between them sits the path a *chord* takes, which is the one the
+ * enumeration used not to reach. `agent.launch` is a semantic action
+ * with a key on it, and an action that assembled a host command line of
+ * its own would be a second launcher — outside the guard, outside the
+ * record, and pressed far more often than `red-dev agents run` is
+ * typed.
  */
 
 import { describe, expect, test } from "bun:test";
+import { ACTIONS } from "./actions/index.ts";
 import { AGENTS, type AgentSpec } from "./agents.ts";
 import {
   hostLaunchArgv,
@@ -23,6 +31,8 @@ import {
   resolveLaunch,
 } from "./agent-launch.ts";
 import { isDefaultAgentCandidate } from "./default-agent.ts";
+import { firePlan } from "./keys.ts";
+import type { Platform } from "./platform.ts";
 
 /** Every host red-dev can hand work to, and therefore can start. */
 const LAUNCHABLE = AGENTS.filter(isDefaultAgentCandidate);
@@ -88,6 +98,86 @@ describe("the launch argv of every agent host", () => {
     // This catches the same entry on the machine of whoever ships it
     // anyway, which is the difference between a test and a guard.
     expect(() => launchTarget(BYPASSING_HOST, "/usr/bin/fixture")).toThrow(/--yolo/);
+  });
+});
+
+/** A target for a fire plan, since a chord needs a machine to be pressed on. */
+function machine(over: Partial<Platform>): Platform {
+  return {
+    os: "linux",
+    distro: "ubuntu",
+    version: "24.04",
+    codename: "noble",
+    env: "desktop",
+    arch: "x64",
+    caps: { apt: true, gui: true, systemd: true, winget: false, flatpak: true },
+    ...over,
+  };
+}
+
+/** Every target a chord can be pressed on, plus the one that has no keyboard. */
+const TARGETS: readonly Platform[] = [
+  machine({}),
+  machine({ env: "wsl" }),
+  machine({ os: "windows", env: "windows", distro: null, version: null, codename: null }),
+  machine({ env: "server", caps: { apt: true, gui: false, systemd: true, winget: false, flatpak: false } }),
+];
+
+/** Everything is on PATH, so a plan is refused for its own reasons and not for PATH's. */
+const anything = (command: string): string => `/usr/bin/${command}`;
+
+describe("the chord that starts the Default agent", () => {
+  test("fires `red-dev agents run`, and names no host of its own", () => {
+    // The whole reason the action delegates. `red-dev agents run` is the
+    // single place that reads the recorded choice — resolveLaunch, in
+    // the describe below — and the single place launchTarget's guard
+    // stands. An action that assembled `claude …` here would be right
+    // on most machines, silently wrong on the ones where somebody
+    // chose, and outside both.
+    const plan = firePlan("agent.launch", machine({}), anything);
+    expect(plan.ok && plan.argv).toEqual(["alacritty", "-e", "red-dev", "agents", "run"]);
+
+    const argv = plan.ok ? plan.argv : [];
+    const named = AGENTS.filter((host) => host.cmd !== "" && argv.includes(host.cmd));
+    expect(named.map((host) => host.key)).toEqual([]);
+  });
+
+  test("and what that command then starts is the recorded host, plainly", () => {
+    // The far end of the same path, so the chord's promise is pinned end
+    // to end rather than at the handover: the person's recorded answer
+    // decides, and red-dev contributes nothing to the command line.
+    const decision = resolveLaunch(
+      { agents: ["claude-code", "codex"], defaultAgent: "codex" },
+      found("claude", "codex"),
+    );
+    expect(decision.ok).toBe(true);
+    if (!decision.ok) return;
+    expect(decision.target.key).toBe("codex");
+    expect(decision.target.added).toEqual([]);
+    expect(permissionBypassFlags(decision.target.argv)).toEqual([]);
+  });
+
+  test("and no action's fire plan carries a bypass flag, on any target", () => {
+    // The enumeration, widened from the host catalog to the action path.
+    // A chord is a command line red-dev assembles, which is exactly the
+    // thing ADR 0001's amendment is about, and until this ran the guard
+    // could only see the half of it that a person types.
+    const checked: string[] = [];
+    const offenders: string[] = [];
+    for (const p of TARGETS) {
+      for (const action of ACTIONS) {
+        const plan = firePlan(action.id, p, anything);
+        if (!plan.ok) continue;
+        checked.push(`${action.id} on ${p.env}`);
+        if (permissionBypassFlags(plan.argv).length > 0) {
+          offenders.push(`${action.id} on ${p.env}`);
+        }
+      }
+    }
+    // Guards against the enumeration passing because it enumerated
+    // nothing — the same way the host enumeration above guards itself.
+    expect(checked.length).toBeGreaterThan(ACTIONS.length);
+    expect(offenders).toEqual([]);
   });
 });
 
