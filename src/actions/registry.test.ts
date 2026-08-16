@@ -46,6 +46,7 @@ describe("the registry itself", () => {
     expect(ACTIONS.map((a) => a.id)).toEqual([
       "terminal.new",
       "terminal.elevated",
+      "emoji.pick",
       "panel.network",
       "panel.audio",
       "panel.power",
