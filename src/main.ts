@@ -542,6 +542,17 @@ async function cmdInstall(
         // only here, so the fullscreen menu asked which agents you wanted
         // and installed none of them.
         await carryOutChoices(p, choices);
+
+        // Whose keys, asked here and nowhere the converge can reach. The
+        // converge below installs the SSH server and opens the port on
+        // every machine; until this question existed it authorized
+        // nobody, so the port was open and the machine unreachable. The
+        // file is written before sshd exists, which is the right order —
+        // it reads it when it starts, and `red-dev ssh <github-user>` is
+        // the way in for every run that is not a first one. See
+        // src/ssh-access.ts.
+        const { offerGithubKeys } = await import("./ssh-access.ts");
+        await offerGithubKeys(p);
       }
     }
   }
@@ -1091,6 +1102,53 @@ async function cmdKeys(p: Platform): Promise<number> {
   const { runKeysViewer } = await import("./keys-view.ts");
   await runKeysViewer(p, entries);
   return 0;
+}
+
+/**
+ * `red-dev ssh [github-user]` — the way in that is not a first run.
+ *
+ * The interview asks this once, on a machine that is new. Everything
+ * after that arrives here: a second person's keys, a machine converged
+ * by `--yes`, a laptop where somebody answered no the first time. The
+ * account name is a positional rather than a prompt so the command can
+ * be typed in full, and asked for when it is missing.
+ *
+ * A terminal is required unless `--yes` says so in as many words. Every
+ * ui.ts primitive answers with its fallback when there is nobody there,
+ * so without this the command would print two fingerprints, silently
+ * take the default no, and exit 0 having authorized nothing — which is
+ * the failure this whole file exists to stop.
+ */
+async function cmdSsh(p: Platform, inv: Invocation): Promise<number> {
+  const { askGithubUser, authorizeGithubKeys, reportAuthorization } = await import(
+    "./ssh-access.ts"
+  );
+
+  if (!inv.yes && !interactive()) {
+    log.err("no terminal to confirm on — `red-dev ssh <github-user> --yes` authorizes unattended");
+    return 1;
+  }
+
+  let user = inv.sshUser?.trim() ?? "";
+  if (user === "") {
+    user = await askGithubUser();
+    if (user === "") {
+      log.skip("nothing authorized");
+      return 0;
+    }
+  }
+
+  try {
+    // `--yes` skips the question and nothing else: the keys are fetched
+    // and their fingerprints printed either way, so an unattended run
+    // still leaves a record of what it authorized.
+    const result = await authorizeGithubKeys(user, inv.yes ? { confirm: async () => true } : {});
+    reportAuthorization(p, result);
+    return 0;
+  } catch (err) {
+    log.err(`ssh keys: ${(err as Error).message}`);
+    return 1;
+  }
 }
 
 /**
@@ -1977,6 +2035,8 @@ async function main(): Promise<number> {
       return await cmdApps(p, inv);
     case "keys":
       return await cmdKeys(p);
+    case "ssh":
+      return await cmdSsh(p, inv);
     case "learn":
       return await cmdLearn(p);
     case "agents":

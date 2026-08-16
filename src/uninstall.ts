@@ -21,6 +21,11 @@ import { existsSync } from "node:fs";
 import { log, RedError } from "./log.ts";
 import { providerFor, toolsInScope, isPresent, type Tool } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
+// The one removal this file does not write itself, because the three
+// things it undoes are one act. ssh-access.ts imports the `Removal` type
+// back from here, which is type-only and erased — there is no cycle at
+// run time.
+import { sshAccessRemoval } from "./ssh-access.ts";
 
 export interface Removal {
   tool: string;
@@ -135,6 +140,21 @@ export function removableTools(p: Platform): { tool: Tool; removal: Removal }[] 
       if (removal) out.push({ tool, removal });
     }
   }
+
+  // The SSH server, which the loop above cannot reach: it is `managed`,
+  // so nothing probes for it, and its provider is a builtin, so
+  // `removalFor` has no package to name. It is also the one item here
+  // whose removal has three clauses instead of one — the service, the
+  // firewall rule and the authorized keys go together, because reverting
+  // two of the three leaves a machine still listening for a key that is
+  // gone, or still holding a key for a service that is.
+  //
+  // Offered unconditionally, unlike everything above it: every converge
+  // opens this port, so there is no machine red-dev has touched where
+  // the question does not apply, and the revert is a no-op on one it has
+  // not. See src/ssh-access.ts.
+  const ssh = toolsInScope("core").find((tool) => tool.name === "ssh-server");
+  if (ssh) out.push({ tool: ssh, removal: sshAccessRemoval(p) });
   return out;
 }
 
