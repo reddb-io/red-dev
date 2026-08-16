@@ -1304,6 +1304,7 @@ async function cmdAgents(p: Platform, inv: Invocation): Promise<number> {
   const available = availableAgents(p);
 
   if (inv.agentDefault) return await cmdAgentsDefault(p, inv.agentDefaultKey);
+  if (inv.agentRun) return await cmdAgentsRun(p, inv.passthrough);
 
   if (inv.agentKeys !== undefined) {
     inv = { ...inv, agentKeys: currentAgentKeys(inv.agentKeys) };
@@ -1513,6 +1514,37 @@ async function cmdAgentsDefault(p: Platform, key: string | undefined): Promise<n
   log.ok(`default agent: ${spec.label}`);
   if (!isAgentInstalled(spec)) log.warn(`not installed yet — red-dev agents ${spec.key}`);
   return 0;
+}
+
+/**
+ * `red-dev agents run [-- args]` — start the Default agent.
+ *
+ * The terminal is handed over whole and nothing is printed on the way
+ * in: the host draws its own interface, and a red-dev line above it
+ * would be the last thing anyone wanted there. What it starts is the
+ * plain invocation, built and checked in src/agent-launch.ts — the
+ * command the person would have typed, plus whatever they typed after
+ * `--`, and nothing else.
+ */
+async function cmdAgentsRun(p: Platform, passthrough: string[]): Promise<number> {
+  const { commandPath } = await import("./agents.ts");
+  const { resolveLaunch, runLaunchTarget } = await import("./agent-launch.ts");
+  const { readPreferences } = await import("./preferences.ts");
+
+  const prefs = await readPreferences(p);
+  const decision = resolveLaunch(prefs, commandPath, passthrough);
+  if (!decision.ok) {
+    log.err(decision.detail);
+    if (decision.fix) log.plain(`       fix: ${decision.fix}`);
+    return 1;
+  }
+
+  try {
+    return await runLaunchTarget(decision.target);
+  } catch {
+    log.err(`${decision.target.label} could not be started: ${decision.target.executable}`);
+    return 1;
+  }
 }
 
 /** Choose which language runtimes mise manages. */
@@ -1744,18 +1776,23 @@ if (process.argv[2] !== "statusline") {
 async function main(): Promise<number> {
   const cli = buildCli();
   const argv = process.argv.slice(2);
+  // Everything after `--` is meant for the program red-dev starts, so
+  // it is not scanned for red-dev's own flags either: `agents run --
+  // --help` asks the agent for its help, not red-dev for ours.
+  const separator = argv.indexOf("--");
+  const ours = separator >= 0 ? argv.slice(0, separator) : argv;
 
   // Handled before parsing: the schema runs in strict mode, so an
   // undeclared --help would be rejected as an unknown option before we
   // ever got the chance to honour it. Declaring them as real options
   // would instead make them appear in every command's option list,
   // which is noise.
-  if (argv.includes("--version") || argv.includes("-V")) {
+  if (ours.includes("--version") || ours.includes("-V")) {
     log.plain(VERSION);
     return 0;
   }
-  if (argv.includes("--help") || argv.includes("-h")) {
-    const verb = argv.find((a) => !a.startsWith("-"));
+  if (ours.includes("--help") || ours.includes("-h")) {
+    const verb = ours.find((a) => !a.startsWith("-"));
     log.plain(cli.help(verb ? [verb] : undefined));
     return 0;
   }
