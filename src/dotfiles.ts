@@ -15,6 +15,13 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { log } from "./log.ts";
 import type { Platform } from "./platform.ts";
+import {
+  composeZellijConfig,
+  isComposedZellijConfig,
+  readZellijLayer,
+  seedZellijLayer,
+  ZELLIJ_LAYER_FILE,
+} from "./zellij-layer.ts";
 
 import rcSh from "../config/bash/rc.sh" with { type: "text" };
 import pathSh from "../config/bash/path.sh" with { type: "text" };
@@ -380,6 +387,34 @@ copy_command "${command}"
 export type ZellijConfigAction = "write" | "upgrade" | "keep";
 
 /**
+ * The same question, asked of a machine that has a user layer.
+ *
+ * A composed config.kdl is not a fixed set of bytes — it changes every
+ * time the layer does — so the hash list above cannot recognise one, and
+ * without this the first edit to a layer would be the last that ever
+ * landed: the file would stop matching anything red-dev shipped and be
+ * kept forever as the user's.
+ *
+ * Two files are red-dev's to rewrite. One carries the marker red-dev
+ * writes at the top of every composition. The other is exactly what this
+ * binary would write with no layer at all, which is what sits on a
+ * machine that converged yesterday and wrote its first layer today.
+ * Anything else falls through to the rule that has always applied: it is
+ * the user's file, and the most a converge may do to it is say so.
+ */
+export function zellijLayerAction(
+  current: string | null,
+  base: string,
+  composed: string,
+): ZellijConfigAction {
+  if (current === composed) return "keep";
+  if (current !== null && (current === base || isComposedZellijConfig(current))) {
+    return "upgrade";
+  }
+  return zellijConfigAction(current, composed);
+}
+
+/**
  * A config.kdl that holds nothing but the generated theme pointer.
  *
  * This is what a fresh machine actually got, and it was not a shipped
@@ -423,15 +458,21 @@ export function zellijConfigAction(
 }
 
 /**
- * Written once and then the user's — except when it is still ours.
+ * Composed from red-dev's base and the person's layer.
  *
- * The theme file next to it is regenerated on every switch; keybindings
- * and layout are not, because someone may have changed them. The
- * exception is a file that is byte-for-byte a version red-dev shipped,
- * which nobody has changed by definition, and which after 0.11.0 would
- * otherwise leave zellij holding keys the shell needs.
+ * zellij has no include mechanism, so the layer cannot be a file zellij
+ * reads: red-dev writes the whole of config.kdl from its own base plus
+ * config.user.kdl beside it, and the layer wins wherever both speak. A
+ * converge may replace everything red-dev wrote and never touches the
+ * layer — see .red/adr/0007.
+ *
+ * On a machine with no layer this is exactly what it always was: written
+ * once and then the user's, with the one exception of a file that is
+ * byte-for-byte a version red-dev shipped, which nobody has changed by
+ * definition and which after 0.11.0 would otherwise leave zellij holding
+ * keys the shell needs.
  */
-async function installZellijConfig(p: Platform): Promise<void> {
+export async function installZellijConfig(p: Platform): Promise<void> {
   // configHome, not home().
   //
   // These two steps disagreed, and the disagreement was invisible: the
@@ -453,11 +494,25 @@ async function installZellijConfig(p: Platform): Promise<void> {
   // file already sitting there and left it alone, and the result was two
   // lines where the config should have been. Nothing was missing, so
   // re-running install never fixed it.
-  const shipped = zellijConfigFor(p);
+
+  // The layer before the config it composes into, and created once: a
+  // file someone can find beside config.kdl is the only version of "your
+  // edits go here" that survives being forgotten. Every converge after
+  // this one reads it and writes nothing to it.
+  if (await seedZellijLayer(p)) {
+    log.ok(`zellij user layer created at ${dir}/${ZELLIJ_LAYER_FILE} — yours to edit`);
+  }
+
+  const base = zellijConfigFor(p);
+  const layer = await readZellijLayer(p);
+  const shipped = composeZellijConfig(base, layer);
+  const layered = shipped !== base;
   const current = existsSync(path) ? await Bun.file(path).text() : null;
-  switch (zellijConfigAction(current, shipped)) {
+  switch (zellijLayerAction(current, base, shipped)) {
     case "keep":
-      log.skip("zellij config exists — left alone");
+      log.skip(
+        layered ? "zellij config already carries your layer" : "zellij config exists — left alone",
+      );
       // Saying nothing here is how someone ends up with a terminal that
       // swallows Ctrl-p and no idea why.
       if (current && !/default_mode\s+"locked"/.test(current)) {
@@ -467,10 +522,25 @@ async function installZellijConfig(p: Platform): Promise<void> {
             "Ctrl-o and Ctrl-s. Delete it to take red-dev's, or set RED_ZELLIJ=0.",
         );
       }
+      // A layer nothing composes is worse than no layer: the person
+      // edited the file they were told to edit and the terminal did not
+      // change. It happens on a machine whose config.kdl was written by
+      // hand before the layer existed, which is precisely the file a
+      // converge must not overwrite — so it is said rather than fixed.
+      if (layered && current !== shipped) {
+        log.warn(
+          `your config.kdl is your own, so ${ZELLIJ_LAYER_FILE} is not composed into it. ` +
+            `Move what you want to keep into ${ZELLIJ_LAYER_FILE} and delete ${path} to hand the file back.`,
+        );
+      }
       break;
     case "upgrade":
       await Bun.write(path, shipped);
-      log.ok("zellij config upgraded — the one on disk was red-dev's own");
+      log.ok(
+        layered
+          ? "zellij config regenerated — your layer is in it"
+          : "zellij config upgraded — the one on disk was red-dev's own",
+      );
       break;
     case "write":
       await Bun.write(path, shipped);
