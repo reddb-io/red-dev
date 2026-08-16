@@ -184,10 +184,20 @@ export function buildCli(): CLI {
       },
       agents: {
         description: "choose coding agents, and wire red-skills into them",
+        // Two positionals of its own, for the reason `share adopt
+        // <tool>` has two: a comma-separated selection and a
+        // subcommand's single argument are different shapes, and one
+        // positional would swallow only the first word of
+        // `agents default claude-code`.
         positional: [
           {
             name: "agent_selection",
-            description: "comma-separated agent keys for an unattended install",
+            description: "comma-separated agent keys for an unattended install, or `default`",
+            required: false,
+          },
+          {
+            name: "agent_key",
+            description: "with `default`: the one host red-dev hands work to",
             required: false,
           },
         ],
@@ -272,6 +282,13 @@ export interface Invocation {
   logsWhich: string | undefined;
   /** Explicit selections make agents/lang safe to invoke across WSL unattended. */
   agentKeys: string[] | undefined;
+  /**
+   * `agents default [key]` — naming the subcommand and naming a host
+   * are separate facts, because with no key the command reports the
+   * recorded choice rather than changing it.
+   */
+  agentDefault: boolean;
+  agentDefaultKey: string | undefined;
   runtimeIds: string[] | undefined;
   /** `lang --latest`: rewrite every selected runtime selector to `latest`. */
   latest: boolean;
@@ -328,6 +345,12 @@ export function parseArgs(cli: CLI, argv: string[]): Invocation {
   const literalWallpaper = wallpaperCommand >= 0 ? argv[wallpaperCommand + 1] : undefined;
   const rawWallpaper = pos["wallpaper_name"] ??
     (literalWallpaper && !literalWallpaper.startsWith("-") ? literalWallpaper : undefined);
+
+  // `default` in the selection slot is the subcommand, not an agent key
+  // — no agent is called that, and reading it as one would try to
+  // install it and fail with a list of the real names.
+  const rawAgents = pos["agent_selection"];
+  const agentDefault = rawAgents === "default";
   return {
     command: r.command[0] ?? null,
     // `theme <name>` and `plan <scope>` both land in the positional map
@@ -335,9 +358,12 @@ export function parseArgs(cli: CLI, argv: string[]): Invocation {
     scope: scope ?? (typeof rawName === "string" ? rawName : undefined),
     logsWhich: typeof pos["which"] === "string" ? pos["which"] : undefined,
     agentKeys:
-      typeof pos["agent_selection"] === "string"
-        ? pos["agent_selection"].split(",").map((value) => value.trim()).filter(Boolean)
+      typeof rawAgents === "string" && !agentDefault
+        ? rawAgents.split(",").map((value) => value.trim()).filter(Boolean)
         : undefined,
+    agentDefault,
+    agentDefaultKey:
+      agentDefault && typeof pos["agent_key"] === "string" ? pos["agent_key"] : undefined,
     runtimeIds:
       typeof pos["runtime_selection"] === "string"
         ? pos["runtime_selection"].split(",").map((value) => value.trim()).filter(Boolean)

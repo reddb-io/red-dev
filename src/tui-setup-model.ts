@@ -26,6 +26,11 @@ import {
 import { createWizard } from "tuiuiu.js/hooks";
 import type { Platform } from "./platform.ts";
 import { summary } from "./platform.ts";
+import {
+  defaultAgentCandidates,
+  defaultAgentFrom,
+  needsDefaultAgentChoice,
+} from "./default-agent.ts";
 import { CenteredScreen, centeredFrame, Surface } from "./tui-chrome.ts";
 import { muted, ui } from "./tui-theme.ts";
 import { DEFAULT_THEME, swatches, THEMES, themeNames } from "./themes.ts";
@@ -46,6 +51,8 @@ export interface SetupAnswers {
   apps: string[];
   runtimes: string[];
   agents: string[];
+  /** The one host red-dev hands work to. Absent when nothing was chosen. */
+  defaultAgent?: string;
   blesh: boolean;
   /** Whether the wallpaper carries live machine state. On unless opted out. */
   redwall: boolean;
@@ -62,6 +69,9 @@ export interface Choice {
   note: string;
 }
 
+/** How a step reads the answers given so far. */
+export type Picked = (id: string) => string[];
+
 /** One step: a question, its choices, and how many may be picked. */
 export interface Question {
   id: string;
@@ -69,10 +79,33 @@ export interface Question {
   description: string;
   multi: boolean;
   choices: Choice[];
+  /**
+   * Choices that depend on an earlier answer, used instead of `choices`
+   * when present — the Default agent is one of the hosts the Agents
+   * step selected, and that list is not known when the steps are built.
+   */
+  choicesFrom?: (picked: Picked) => Choice[];
   /** Pre-selected keys. */
   preset: string[];
   /** Hidden when this returns false — the WSL steps on a Linux desktop. */
   applies: (p: Platform) => boolean;
+  /**
+   * Hidden when an earlier answer left nothing to decide, as distinct
+   * from `applies`, which is settled before the interview starts. The
+   * Default agent step disappears the moment the selection narrows to
+   * one CLI host, because a question with one answer is not a question.
+   */
+  available?: (picked: Picked) => boolean;
+}
+
+/** The choices a step is offering right now. */
+export function stepChoices(q: Question, picked: Picked): Choice[] {
+  return q.choicesFrom ? q.choicesFrom(picked) : q.choices;
+}
+
+/** Whether a step has anything to ask, given the answers so far. */
+export function stepAvailable(q: Question, picked: Picked): boolean {
+  return q.available?.(picked) ?? true;
 }
 
 const FONTS: Choice[] = [
@@ -88,7 +121,10 @@ export function questions(
   apps: Choice[],
   runtimes: Choice[],
 ): Question[] {
-  return [
+  // Annotated rather than inferred: the return type does not reach
+  // through `.filter` to type a step's callbacks, so `choicesFrom` and
+  // `available` would arrive with implicit `any` parameters.
+  const all: Question[] = [
     {
       // First, and before anything that writes a file.
       //
@@ -144,6 +180,33 @@ export function questions(
       choices: agents,
       preset: agents.map((agent) => agent.key),
       applies: () => true,
+    },
+    {
+      // Immediately after the hosts, because it is a question about the
+      // answer just given and about nothing else.
+      //
+      // Shown only when the selection left a real choice. Tick one CLI
+      // host and this step is never drawn — that host is the Default
+      // agent and there was nothing to ask. See src/default-agent.ts.
+      id: "default-agent",
+      title: "Default",
+      description:
+        "The one host red-dev hands work to: a crash to diagnose, a launch shortcut, " +
+        "a profile's required host. red-dev never starts it with a permission bypass " +
+        "— unattended is a decision you make when you type it, not one shipped as a " +
+        "default. Change it later with `red-dev agents default <key>`.",
+      multi: false,
+      choices: [],
+      // From the hosts on the previous screen rather than the catalog,
+      // so a host reads the same on both — including whether it is
+      // already installed.
+      choicesFrom: (picked) => {
+        const keys = defaultAgentCandidates(picked("agents")).map((agent) => agent.key);
+        return agents.filter((agent) => keys.includes(agent.key));
+      },
+      preset: [],
+      applies: () => true,
+      available: (picked) => needsDefaultAgentChoice(picked("agents")),
     },
     {
       id: "runtimes",
@@ -264,7 +327,8 @@ export function questions(
       preset: ["yes"],
       applies: () => true,
     },
-  ].filter((q) => q.applies(p));
+  ];
+  return all.filter((q) => q.applies(p));
 }
 
 
@@ -311,6 +375,23 @@ export function useSetupModel(steps: Question[], wizard: ReturnType<typeof creat
   const step = (): Question => steps[stepIndex()]!;
   const selection = (): string[] => picked()[step().id] ?? [];
   const get = (id: string): string[] => picked()[id] ?? [];
+  const choices = (): Choice[] => stepChoices(step(), get);
+
+  /**
+   * The next step in a direction that still has something to ask, or
+   * null when there is none.
+   *
+   * Takes the answers explicitly rather than reading the signal,
+   * because the step being left may have just changed them — and
+   * whether the following step applies can depend on exactly that.
+   */
+  const adjacent = (from: number, dir: 1 | -1, state: Record<string, string[]>): number | null => {
+    const at = (id: string): string[] => state[id] ?? [];
+    for (let i = from + dir; i >= 0 && i < steps.length; i += dir) {
+      if (stepAvailable(steps[i]!, at)) return i;
+    }
+    return null;
+  };
 
   return {
     steps,
@@ -319,24 +400,33 @@ export function useSetupModel(steps: Question[], wizard: ReturnType<typeof creat
     selection,
     pickedFor: get,
     wizard,
-    answers: () => ({
-      theme: get("theme")[0] ?? DEFAULT_THEME,
-      ...(get("wallpaper")[0] && get("wallpaper")[0] !== "theme"
-        ? { wallpaper: get("wallpaper")[0] as ThemeSlug }
-        : {}),
-      font: get("font")[0] ?? "firacode",
-      apps: get("apps"),
-      runtimes: get("runtimes"),
-      agents: get("agents"),
-      blesh: get("plugins").includes("blesh"),
-      redwall: get("redwall")[0] === "yes",
-      share: get("share")[0] === "yes",
-      ...(get("shell")[0] ? { terminalShell: get("shell")[0] as "wsl" | "gitbash" } : {}),
-      completed: true,
-    }),
+    answers: () => {
+      // Resolved rather than read straight out of the step, because the
+      // step may never have been drawn: one CLI host answers this
+      // question by existing, and someone who narrowed the selection
+      // after answering it leaves a key here that is no longer chosen.
+      const defaultAgent = defaultAgentFrom(get("agents"), get("default-agent")[0]);
+      return {
+        theme: get("theme")[0] ?? DEFAULT_THEME,
+        ...(get("wallpaper")[0] && get("wallpaper")[0] !== "theme"
+          ? { wallpaper: get("wallpaper")[0] as ThemeSlug }
+          : {}),
+        font: get("font")[0] ?? "firacode",
+        apps: get("apps"),
+        runtimes: get("runtimes"),
+        agents: get("agents"),
+        ...(defaultAgent ? { defaultAgent } : {}),
+        blesh: get("plugins").includes("blesh"),
+        redwall: get("redwall")[0] === "yes",
+        share: get("share")[0] === "yes",
+        ...(get("shell")[0] ? { terminalShell: get("shell")[0] as "wsl" | "gitbash" } : {}),
+        completed: true,
+      };
+    },
     handleKey: (input, key) => {
       const q = step();
-      const max = q.choices.length - 1;
+      const options = choices();
+      const max = options.length - 1;
 
       if (key.upArrow || input === "k") {
         setCursor(Math.max(0, cursor() - 1));
@@ -347,7 +437,7 @@ export function useSetupModel(steps: Question[], wizard: ReturnType<typeof creat
         return "handled";
       }
       if (q.id === "runtimes" && (key.leftArrow || key.rightArrow || input === "h" || input === "l")) {
-        const choice = q.choices[cursor()];
+        const choice = options[cursor()];
         if (choice) {
           setPicked({
             ...picked(),
@@ -361,7 +451,7 @@ export function useSetupModel(steps: Question[], wizard: ReturnType<typeof creat
         return "handled";
       }
       if (input === " " && q.multi) {
-        const k = q.choices[cursor()]!.key;
+        const k = options[cursor()]!.key;
         const cur = selection();
         setPicked({
           ...picked(),
@@ -372,21 +462,30 @@ export function useSetupModel(steps: Question[], wizard: ReturnType<typeof creat
         return "handled";
       }
       if (key.return) {
+        const from = stepIndex();
         // Single-choice steps take whatever the cursor is on, so there is
         // no separate "select then confirm" for a one-of-N answer.
-        if (!q.multi) setPicked({ ...picked(), [q.id]: [q.choices[cursor()]!.key] });
-        wizard.markCompleted(stepIndex());
-        if (stepIndex() >= steps.length - 1) return "done";
-        setStepIndex(stepIndex() + 1);
+        const answered = q.multi || !options[cursor()]
+          ? picked()
+          : { ...picked(), [q.id]: [options[cursor()]!.key] };
+        if (answered !== picked()) setPicked(answered);
+        wizard.markCompleted(from);
+        const next = adjacent(from, 1, answered);
+        if (next === null) return "done";
+        setStepIndex(next);
         setCursor(0);
-        wizard.next();
+        // Once per step crossed, so the wizard's own position keeps up
+        // with a jump over a question that had nothing to ask.
+        for (let i = from; i < next; i++) wizard.next();
         return "handled";
       }
       if ((key.leftArrow && q.id !== "runtimes") || key.escape) {
-        if (stepIndex() > 0) {
-          setStepIndex(stepIndex() - 1);
+        const from = stepIndex();
+        const back = adjacent(from, -1, picked());
+        if (back !== null) {
+          setStepIndex(back);
           setCursor(0);
-          wizard.prev();
+          for (let i = back; i < from; i++) wizard.prev();
         }
         return "handled";
       }
@@ -426,7 +525,15 @@ export function SetupLayout(m: SetupModel, p: Platform, width: number, height: n
   const rightWidth = twoColumn ? frame.width - leftWidth - 3 : frame.width;
   const isTheme = q.id === "theme";
   const isRuntimes = q.id === "runtimes";
-  const activeKey = q.choices[m.cursor()]?.key ?? "";
+  const options = stepChoices(q, m.pickedFor);
+  const activeKey = options[m.cursor()]?.key ?? "";
+  // A step the answers have ruled out is not a step someone is going to
+  // reach, so it does not belong in the timeline or in the count of how
+  // much is left.
+  const timeline = m.steps
+    .map((s, i) => ({ step: s, index: i }))
+    .filter(({ step }) => stepAvailable(step, m.pickedFor));
+  const position = timeline.findIndex(({ index }) => index === m.stepIndex());
 
   return CenteredScreen(
     width,
@@ -443,8 +550,8 @@ export function SetupLayout(m: SetupModel, p: Platform, width: number, height: n
     Box(
       { marginTop: 1, marginBottom: 1 },
       ProgressBar({
-        value: m.stepIndex(),
-        max: m.steps.length,
+        value: Math.max(0, position),
+        max: timeline.length,
         width: Math.min(frame.width - 8, 48),
         style: "block",
         color: ui.accent,
@@ -459,13 +566,13 @@ export function SetupLayout(m: SetupModel, p: Platform, width: number, height: n
             Box(
               { flexDirection: "column", width: leftWidth },
               Text({ color: muted, bold: true }, "Steps"),
-              ...m.steps.map((s, i) =>
+              ...timeline.map(({ step, index }) =>
                 ListItem({
-                  primary: s.title,
-                  selected: i === m.stepIndex(),
-                  status: m.wizard.isCompleted(i)
+                  primary: step.title,
+                  selected: index === m.stepIndex(),
+                  status: m.wizard.isCompleted(index)
                     ? "success"
-                    : i === m.stepIndex()
+                    : index === m.stepIndex()
                       ? "running"
                       : "pending",
                 }),
@@ -483,7 +590,7 @@ export function SetupLayout(m: SetupModel, p: Platform, width: number, height: n
           Text({}, ""),
           Text({ color: muted }, q.description),
           Text({}, ""),
-          ...q.choices.map((c, i) => {
+          ...options.map((c, i) => {
             const runtimeId = selectedRuntimeId(m.selection(), c.key);
             const checked = isRuntimes
               ? m.selection().includes(runtimeId)
@@ -520,7 +627,7 @@ export function SetupLayout(m: SetupModel, p: Platform, width: number, height: n
           ...(isRuntimes ? [{ shortcut: "left/right", action: "version" }] : []),
           {
             shortcut: "enter",
-            action: m.stepIndex() === m.steps.length - 1 ? "install" : "next",
+            action: position === timeline.length - 1 ? "install" : "next",
           },
           ...(m.stepIndex() > 0 && !isRuntimes ? [{ shortcut: "left", action: "back" }] : []),
           ...(m.stepIndex() > 0 && isRuntimes ? [{ shortcut: "esc", action: "back" }] : []),

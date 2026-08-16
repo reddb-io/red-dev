@@ -63,6 +63,13 @@ export interface AgentSpec {
   probeArgs?: string[];
   /** Desktop applications have no CLI and only exist on some targets. */
   desktopOnly?: boolean;
+  /**
+   * Runs agents rather than being one, so it is never the Default agent
+   * — see src/default-agent.ts. It belongs in this list because it is
+   * installed and offered alongside them; it just cannot answer a
+   * prompt.
+   */
+  multiplexer?: boolean;
 }
 
 export const AGENTS: AgentSpec[] = [
@@ -153,6 +160,7 @@ export const AGENTS: AgentSpec[] = [
     cmd: "herdr",
     recommended: false,
     installer: "https://herdr.dev/install.sh",
+    multiplexer: true,
   },
   {
     key: "openclaw",

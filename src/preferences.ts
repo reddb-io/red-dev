@@ -59,6 +59,15 @@ export interface Preferences {
   redwallInterface?: string;
   /** Agent keys chosen for this workstation, mirrored into WSL when selected. */
   agents?: string[];
+  /**
+   * The one host red-dev hands work to — see src/default-agent.ts.
+   *
+   * Recorded here beside the selection it comes from rather than
+   * derived from it on every read, because "which of these did you
+   * choose" is not answerable from the list. Absent is unset, and unset
+   * is a state red-dev reports rather than fills in.
+   */
+  defaultAgent?: string;
   /** mise runtime ids chosen for this workstation. */
   runtimes?: string[];
   /** Ids of one-off repairs already applied; see src/migrations.ts. */
