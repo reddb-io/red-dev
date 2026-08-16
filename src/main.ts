@@ -25,6 +25,7 @@ import { applyContextForEntry, type ApplyContextEntryPath } from "./preferences.
 import { themeFor, themeNames } from "./themes.ts";
 import { interactive, select, text } from "./ui.ts";
 import type { UpdateStage } from "./update-order.ts";
+import type { WebApp } from "./webapps.ts";
 
 function resolveScopes(p: Platform, arg?: string): Scope[] {
   return arg ? [arg as Scope] : applicableScopes(p);
@@ -1018,66 +1019,222 @@ async function cmdRedwall(p: Platform): Promise<number> {
   return 0;
 }
 
+/** What one line of the Catalogue stands for, once a label comes back. */
+type CatalogueRow =
+  | { kind: "tool"; name: string }
+  | { kind: "web"; app: WebApp; installed: boolean }
+  | { kind: "add" };
+
+const ADD_A_WEB_APP = "+ Add a web app by URL…";
+
 /**
- * Choose optional tools.
+ * The Catalogue — the list a person ticks rather than receives.
+ *
+ * Optional tools and web apps in one list, because they are the same
+ * kind of thing to the person looking at it: something none of them gets
+ * by converging, and all of them get by asking. A web app is the one
+ * half whose entry can also be typed, so the list ends with a line that
+ * asks for a URL.
  *
  * `install` stays silent on purpose — it runs in CI and in scripts,
  * where a prompt is a hang. Everything that wants an answer lives
  * behind a command you invoke deliberately, which is also why this can
  * be re-run whenever the answer changes.
+ *
+ * Unticking is what makes this a list rather than a form. An installed
+ * web app arrives ticked, so leaving the list alone changes nothing, and
+ * taking the tick off one is how it goes — after being named, because
+ * the one thing a checkbox must never do is delete something quietly.
+ * Optional tools do not remove from here yet; `red-dev uninstall` is
+ * still their way out, and the list says so rather than implying
+ * otherwise.
  */
 async function cmdApps(p: Platform, inv: Invocation): Promise<number> {
-  const { checkbox } = await import("./ui.ts");
+  const { checkbox, confirm } = await import("./ui.ts");
+  const {
+    installedWebApps,
+    installWebApp,
+    removeWebApp,
+    validateWebApp,
+    webAppCatalogue,
+    webAppSupport,
+  } = await import("./webapps.ts");
+
   const available = toolsInScope("optional").filter(
     (t) => providerFor(t, p).kind !== "skip",
   );
 
-  if (available.length === 0) {
-    log.skip("no optional tools apply to this target");
+  // A page is offered only where a launcher has something to live in.
+  // Under WSL that is nothing, and the reason is printed rather than the
+  // section silently disappearing.
+  const support = webAppSupport(p);
+  const webRows = support.ok ? webAppCatalogue(installedWebApps(p)) : [];
+  if (!support.ok) log.skip(`web apps: ${support.reason}`);
+
+  if (available.length === 0 && webRows.length === 0) {
+    log.skip("nothing on this target is optional");
     return 0;
   }
 
   const already = available.filter(isInstalled).map((t) => t.name);
-  const labels = available.map((t) =>
-    `${t.name}${t.about ? ` — ${t.about}` : ""}${already.includes(t.name) ? "  (installed)" : ""}`,
-  );
+  const rows = new Map<string, CatalogueRow>();
+  const labels: string[] = [];
+  const ticked: string[] = [];
+
+  for (const t of available) {
+    const label = `${t.name}${t.about ? ` — ${t.about}` : ""}${already.includes(t.name) ? "  (installed)" : ""}`;
+    rows.set(label, { kind: "tool", name: t.name });
+    labels.push(label);
+    // Every tool starts on: a curated list is an opt-out, and unticking
+    // a tool here does not remove it, so a tick left alone is harmless.
+    ticked.push(label);
+  }
+
+  // Kept rather than rebuilt: the label is the identity a checkbox
+  // answers with, and a second construction of it that drifts by one
+  // space is a removal that silently never happens.
+  const webLabels = new Map<string, string>();
+  for (const row of webRows) {
+    const label = `${row.app.name} — ${row.app.url || "web app"}${row.installed ? "  (installed)" : ""}`;
+    rows.set(label, { kind: "web", app: row.app, installed: row.installed });
+    webLabels.set(row.app.name, label);
+    labels.push(label);
+    if (row.ticked) ticked.push(label);
+  }
+
+  if (support.ok) {
+    rows.set(ADD_A_WEB_APP, { kind: "add" });
+    labels.push(ADD_A_WEB_APP);
+  }
 
   // Every install choice is opt-out, but a fallback must never install
   // the whole catalog when there is no terminal to show that choice.
   if (!interactive()) {
-    log.err("choosing optional tools needs a terminal");
+    log.err("choosing what to install needs a terminal");
     log.plain("     Run `red-dev apps` interactively and untick what you do not want.");
     return 1;
   }
 
-  const picked = await checkbox("Which optional tools?", labels as [string, ...string[]], labels);
-  if (picked.length === 0) {
-    log.skip("nothing selected");
-    return 0;
-  }
+  const picked = await checkbox(
+    "What should this machine have?",
+    labels as [string, ...string[]],
+    ticked,
+  );
+  const chosen = new Set(picked);
 
-  // Map the decorated labels back to tool names.
-  const names = picked.map((l) => l.split(" ")[0]!.trim());
-  const ctx = await contextFor(p, inv, "install");
+  // Named first and taken out first, so the list a person confirms is
+  // the list they were looking at rather than one an install has already
+  // changed underneath them.
+  const going = webRows.filter(
+    (row) => row.installed && !chosen.has(webLabels.get(row.app.name) ?? ""),
+  );
   let failures = 0;
 
-  for (const name of names) {
-    const tool = available.find((t) => t.name === name);
-    if (!tool) continue;
-    if (isInstalled(tool) && !tool.managed) {
-      log.skip(`${name} already present`);
+  if (going.length > 0) {
+    log.plain("     Unticked, so these go:");
+    for (const row of going) log.plain(`       ${row.app.name} — its launcher and its icon`);
+    if (await confirm("Remove them?", true)) {
+      for (const row of going) {
+        try {
+          const removed = removeWebApp(p, row.app.name);
+          log.ok(`${row.app.name} removed (${removed.length} file(s))`);
+        } catch (err) {
+          log.err(`${row.app.name}: ${(err as Error).message}`);
+          failures++;
+        }
+      }
+    } else {
+      log.skip("nothing removed");
+    }
+  }
+
+  if (picked.length === 0) {
+    if (going.length === 0) log.skip("nothing selected");
+    return failures > 0 ? 1 : 0;
+  }
+
+  // Built on demand: an apply context prepares things a run of nothing
+  // but web apps has no use for, and a person who ticked one page should
+  // not pay for the install path they did not take.
+  let context: ApplyContext | null = null;
+  const installContext = async (): Promise<ApplyContext> =>
+    (context ??= await contextFor(p, inv, "install"));
+
+  for (const label of picked) {
+    const row = rows.get(label);
+    if (!row) continue;
+
+    if (row.kind === "tool") {
+      const tool = available.find((t) => t.name === row.name);
+      if (!tool) continue;
+      if (isInstalled(tool) && !tool.managed) {
+        log.skip(`${tool.name} already present`);
+        continue;
+      }
+      try {
+        await applyProvider(providerFor(tool, p), await installContext());
+        log.ok(tool.name);
+      } catch (err) {
+        log.err(`${tool.name}: ${(err as Error).message}`);
+        failures++;
+      }
+      continue;
+    }
+
+    if (row.kind === "web") {
+      // A URL added on Windows comes back from the Start Menu without
+      // one, because a .lnk cannot say. Re-installing it would need a
+      // URL we do not have, and it is already there.
+      if (row.installed && row.app.url === "") continue;
+      try {
+        log.ok(`${row.app.name} — ${await installWebApp(p, row.app)}`);
+      } catch (err) {
+        log.err(`${row.app.name}: ${(err as Error).message}`);
+        failures++;
+      }
+      continue;
+    }
+
+    const app = await askForWebApp(validateWebApp);
+    if (!app) {
+      log.skip("no URL given");
       continue;
     }
     try {
-      await applyProvider(providerFor(tool, p), ctx);
-      log.ok(name);
+      log.ok(`${app.name} — ${await installWebApp(p, app)}`);
     } catch (err) {
-      log.err(`${name}: ${(err as Error).message}`);
+      log.err(`${app.name}: ${(err as Error).message}`);
       failures++;
     }
   }
 
   return failures > 0 ? 1 : 0;
+}
+
+/**
+ * The typed half of the web-app catalogue.
+ *
+ * Validated here rather than at the writer, so a typo is a question
+ * asked again instead of a stack trace — and the icon is optional
+ * because an internal page usually has no PNG anybody can name, and a
+ * launcher wearing the generic icon still works.
+ */
+async function askForWebApp(
+  check: (app: WebApp) => string | null,
+): Promise<WebApp | null> {
+  const url = (await text("URL? (https://…)")).trim();
+  if (url === "") return null;
+  const name = (await text("Name it?")).trim();
+  if (name === "") return null;
+  const iconUrl = (await text("PNG icon URL? (blank for none)")).trim();
+
+  const app: WebApp = iconUrl === "" ? { name, url } : { name, url, icon: iconUrl };
+  const problem = check(app);
+  if (problem) {
+    log.err(problem);
+    return null;
+  }
+  return app;
 }
 
 /**

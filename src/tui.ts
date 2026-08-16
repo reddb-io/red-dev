@@ -150,8 +150,10 @@ export const SECTIONS: MenuSection[] = [
     key: "apps",
     label: "Apps",
     notes: [
-      "Optional tools, never installed by a",
-      "plain converge. Chosen, not assumed.",
+      "Optional tools and web apps, never",
+      "installed by a plain converge. Chosen,",
+      "not assumed — and unticking an",
+      "installed web app takes it back off.",
     ],
   },
   {
