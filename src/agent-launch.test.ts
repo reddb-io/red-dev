@@ -67,6 +67,15 @@ describe("the launch argv of every agent host", () => {
     expect(offenders.map((host) => host.key)).toEqual([]);
   });
 
+  test("and neither does the other command line red-dev builds for a host", () => {
+    // The readiness probe is the only other argv red-dev assembles from
+    // a catalog entry. It asks a host for its version, and a host that
+    // needed a bypass to answer that would be telling us something.
+    for (const host of AGENTS) {
+      expect(permissionBypassFlags(host.probeArgs ?? [])).toEqual([]);
+    }
+  });
+
   test("and the same enumeration fails a host that carries one", () => {
     const offenders = [...LAUNCHABLE, BYPASSING_HOST].filter(
       (host) => permissionBypassFlags(hostLaunchArgv(host, `/usr/bin/${host.cmd}`)).length > 0,
