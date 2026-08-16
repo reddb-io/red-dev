@@ -10,7 +10,7 @@ An agent client program that consumes RedSkills on a provisioned machine. Decide
 
 The one agent host a person has chosen as the target when red-dev hands work to an agent — a crash to diagnose, a launch shortcut, a profile's required host. It is a choice recorded once, not an inference from what happens to be installed, and red-dev never starts it with a permission bypass or auto-approve flag: unattended mode is the person's decision at the moment they type it, never a default red-dev ships (decision of 2026-08-15, contrasting Omarchy's `omarchy-agent`, which launches its default agent in bypass mode).
 
-It is chosen in the interview right after the agent hosts and changed with `red-dev agents default <key>`; when exactly one CLI host is selected it is that one, without a question. Its update path is part of `red-dev update` (system, red-skills, agents, converge) and also stands alone as `red-dev agents update`, each host by its publisher's own mechanism (decision of 2026-08-15).
+It is started with `red-dev agents run`, which builds the host's plain invocation — the command line the person would have typed, plus whatever they typed after `--` — and is guarded by an enumeration of every host's launch argv, so the promise above is checked rather than described (decision of 2026-08-15). It is chosen in the interview right after the agent hosts and changed with `red-dev agents default <key>`; when exactly one CLI host is selected it is that one, without a question. Its update path is part of `red-dev update` (system, red-skills, agents, converge) and also stands alone as `red-dev agents update`, each host by its publisher's own mechanism (decision of 2026-08-15).
 
 _Avoid_: primary agent, main agent, "the agent"
 
