@@ -36,7 +36,7 @@ export const PANEL_ACTIONS: readonly SemanticAction[] = [
     // the arrows on workspaces and takes L, Tab, Esc and Delete;
     // Windows takes Delete, Tab and the arrows. Omarchy binds its
     // network panel to Super+Ctrl+W, which ADR 0006 leaves to the host.
-    chord: "Ctrl+Alt+N",
+    chord: "Ctrl+Alt+Shift+N",
   },
   {
     id: "panel.audio",
@@ -49,7 +49,7 @@ export const PANEL_ACTIONS: readonly SemanticAction[] = [
     mutates: false,
     privileged: false,
     // A for audio, and free in the family on both hosts.
-    chord: "Ctrl+Alt+A",
+    chord: "Ctrl+Alt+Shift+A",
   },
   {
     id: "panel.power",
@@ -59,6 +59,6 @@ export const PANEL_ACTIONS: readonly SemanticAction[] = [
     privileged: false,
     // P for power. Neither host claims it, and the one thing that might
     // — GNOME's print-screen family — lives on Print, not on P.
-    chord: "Ctrl+Alt+P",
+    chord: "Ctrl+Alt+Shift+P",
   },
 ];

@@ -46,6 +46,13 @@ export const GNOME_RESERVED: ReadonlySet<string> = new Set([
   "CTRL+ALT+SHIFT+RIGHT",
   "CTRL+ALT+SHIFT+UP",
   "CTRL+ALT+SHIFT+DOWN",
+  // cycle-panels-backward and switch-panels-backward, measured from the
+  // GNOME schemas. They were harmless while nothing red-dev owned lived
+  // in the Shift half; the 2026-08-15 chord decision put every new
+  // action there, so a guard missing them would now pass a chord GNOME
+  // already answers to.
+  "CTRL+ALT+SHIFT+ESC",
+  "CTRL+ALT+SHIFT+TAB",
   "CTRL+ALT+DELETE",
   "CTRL+ALT+L",
   "CTRL+ALT+TAB",
