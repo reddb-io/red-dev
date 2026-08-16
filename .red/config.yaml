@@ -11,6 +11,21 @@
 plugins:
   dev:
     afk:
+      # A standing drain, so the queue keeps moving across a daemon restart.
+      #
+      # The daemon is host-scoped and supervised (Restart=always), but a
+      # project's registration is not: it is renewed by whoever registered it,
+      # and when the daemon died on 2026-08-16 at 06:35 the registration
+      # lapsed with it and both in-flight Workers went too. Nothing was lost —
+      # the claims were released rather than stranded — but the backlog simply
+      # stopped, silently, until a human noticed and registered again.
+      #
+      # Declaring both keys marks the registration as standing, so the daemon
+      # keeps the intent recoverable while a counted backlog remains instead
+      # of forgetting this project the moment its registrar goes away.
+      standing:
+        runner: claude
+        target: 2
       validation:
         # Handed to the inner agent while it writes, so it stays the fast
         # half: the type checker runs at the two moments below, where a
