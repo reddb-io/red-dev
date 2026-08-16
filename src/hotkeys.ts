@@ -66,6 +66,20 @@ const START_MENU: readonly { id: string; label: string; note: string }[] = [
   { id: "terminal.elevated", label: "PowerShell (Administrator)", note: "elevated" },
 ];
 
+/**
+ * The actions this adapter carries an entry for, whether or not one came
+ * back with a chord.
+ *
+ * Exported because the keys viewer has to tell two silences apart, and
+ * WINDOWS_HOTKEYS cannot: an action that is missing from the list below
+ * is one this adapter has never claimed, while an action that is in it
+ * and produced no combo is the registry having lost something — the
+ * failure `hotkeyFor` throws over. The first is news about a feature
+ * that has not landed; the second is a bug. Merging them would report
+ * either one as the other.
+ */
+export const START_MENU_ACTIONS: readonly string[] = START_MENU.map((entry) => entry.id);
+
 /** An action's chord, spelled the way Windows has always been given it. */
 function comboFromRegistry(id: string): string | null {
   const action = actionById(id);

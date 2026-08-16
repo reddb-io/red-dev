@@ -104,10 +104,26 @@ describe("the list", () => {
   });
 
   test("on Windows, the two terminal actions are bound and carry no reason", () => {
-    for (const entry of keyEntries(windows)) {
-      expect(entry.state).toBe("bound");
-      expect(entry.reason).toBe("");
+    // Named rather than "every row", which is what this used to assert.
+    // The Start Menu adapter carries these two; an action it has never
+    // carried is a different sentence, and the test below is the one
+    // that holds it.
+    for (const id of ["terminal.new", "terminal.elevated"]) {
+      const entry = keyEntries(windows).find((e) => e.id === id);
+      expect(entry?.state).toBe("bound");
+      expect(entry?.reason).toBe("");
     }
+  });
+
+  test("an action the Windows adapter has never carried says so, and is not called broken", () => {
+    // The distinction that matters: the Start Menu adapter registers the
+    // entries it has, and the network Panel is not one of them yet.
+    // Reporting that as "broken" would send whoever reads it looking for
+    // a shortcut nobody ever wrote — and reporting it as bound would be
+    // a chord that does nothing on the machine in front of them.
+    const panel = keyEntries(windows).find((e) => e.id === "panel.network");
+    expect(panel?.state).toBe("unsupported");
+    expect(panel?.reason).toContain("no shortcut for it yet");
   });
 });
 
@@ -156,12 +172,17 @@ describe("broken and not-supported are different news", () => {
     expect(entry?.reason).toBe('chord "Ctrl+Alt+J+K" is not one readable chord');
   });
 
-  test("an action the adapter should register and does not is broken too", () => {
+  test("an action the adapter has never carried names the adapter, not a fault", () => {
     // Applies to Windows, the Windows adapter exists, and it carries no
-    // entry for it: a gap, not a platform limit.
+    // entry for it. That used to be reported as broken, which read as
+    // "somebody has to fix this shortcut" about a shortcut nobody ever
+    // wrote — and it is the state every action lands in between joining
+    // the registry and its adapter half landing. `broken` is kept for
+    // the adapter carrying an entry that yields no chord.
     const [entry] = keyEntries(windows, only({}));
-    expect(entry?.state).toBe("broken");
+    expect(entry?.state).toBe("unsupported");
     expect(entry?.reason).toContain("Windows Start Menu");
+    expect(entry?.reason).toContain("no shortcut for it yet");
   });
 
   test("and a broken chord is reported even where the action does not apply", () => {
@@ -194,7 +215,9 @@ describe("searching", () => {
 
   test("the state is searchable, so 'unbound work' is one query", () => {
     expect(searchKeys(keyEntries(server), "unsupported")).toHaveLength(ACTIONS.length);
-    expect(searchKeys(entries, "unsupported")).toEqual([]);
+    // On Windows the terminal pair is bound and the Panel is not, so the
+    // query answers with exactly what this machine does not register.
+    expect(searchKeys(entries, "unsupported").map((e) => e.id)).toEqual(["panel.network"]);
   });
 });
 
@@ -260,6 +283,39 @@ describe("what Enter runs", () => {
     const plan = firePlan("terminal.new", desktop, nothing);
     expect(plan.ok).toBe(false);
     expect(plan.ok === false && plan.detail).toContain("alacritty");
+  });
+
+  test("the network Panel opens in a terminal of its own, not inside the viewer", () => {
+    // Two full-screen surfaces on one frame is what firing it in place
+    // would produce. On Windows that means `start` with the empty title
+    // slot, the same idiom the terminal action uses to avoid handing the
+    // new window the console red-dev is drawing in.
+    const onWindows = firePlan("panel.network", windows, anything);
+    expect(onWindows.ok && onWindows.argv).toEqual([
+      "cmd.exe", "/c", "start", "", "red-dev.exe", "panel", "network",
+    ]);
+
+    const onUbuntu = firePlan("panel.network", desktop, anything);
+    expect(onUbuntu.ok && onUbuntu.argv).toEqual([
+      "alacritty", "-e", "red-dev", "panel", "network",
+    ]);
+  });
+
+  test("and gnome-terminal is told with `--`, because its -e was deprecated years ago", () => {
+    // A wrong flag here opens a terminal with a shell in it and no sign
+    // that the command was dropped.
+    const plan = firePlan("panel.network", desktop, (cmd) =>
+      cmd === "gnome-terminal" ? "/usr/bin/gnome-terminal" : null,
+    );
+    expect(plan.ok && plan.argv).toEqual([
+      "gnome-terminal", "--", "red-dev", "panel", "network",
+    ]);
+  });
+
+  test("a machine with no terminal emulator is told the command to run instead", () => {
+    const plan = firePlan("panel.network", desktop, nothing);
+    expect(plan.ok).toBe(false);
+    expect(plan.ok === false && plan.detail).toContain("red-dev panel network");
   });
 
   test("an action nothing can run yet is named rather than shrugged at", () => {
