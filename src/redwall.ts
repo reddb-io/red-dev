@@ -61,6 +61,7 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { agentUsageReading, agentUsageSnapshot, type AgentUsageReading } from "./agent-usage.ts";
 import {
   githubRatePercent,
   mergeGithubCredentialRates,
@@ -179,6 +180,39 @@ export interface RedwallSeams {
 }
 
 /**
+ * The provider whose allowance a Redwall draws.
+ *
+ * One, and it is the one `agent-usage.ts` has a cheap read path for. A
+ * second provider here would be a second unknown line on every desktop
+ * that does not use it, which is noise rather than a reading.
+ */
+const AGENT_USAGE_PROVIDER = "claude";
+
+/**
+ * The agent allowance, read and never collected.
+ *
+ * This is the whole of what a repaint may do about agent usage: open a
+ * file that some other run wrote, or find none. It does not authenticate,
+ * does not reach the network, does not take the collector's lock and
+ * never starts a process — a wallpaper regenerates every two minutes on a
+ * timer, and a repaint that could collect would be a probe on that
+ * cadence forever. An absent, malformed or aged-out snapshot is `null`,
+ * which the overlay draws as unknown.
+ *
+ * The path is injectable so a test can hand it a fixture without writing
+ * into the operator's own state directory.
+ */
+export function redwallAgentUsage(
+  options: { readonly path?: string; readonly nowMs?: number } = {},
+): AgentUsageReading | null {
+  const snapshot = agentUsageSnapshot({
+    provider: AGENT_USAGE_PROVIDER,
+    ...(options.path === undefined ? {} : { path: options.path }),
+  });
+  return agentUsageReading(snapshot, options.nowMs ?? Date.now());
+}
+
+/**
  * What this machine currently says about itself.
  *
  * Daemon state and address are asked at once and neither can withhold the
@@ -213,6 +247,10 @@ export async function redwallState(p: Platform): Promise<RedwallState> {
         pat: redskilledGithub?.pat ?? fallbackPat,
         app: redskilledGithub?.app ?? null,
       },
+    // Always present, so the card carries the reading or says it has
+    // none. Omitting it on a machine with no snapshot would be a Redwall
+    // that looks the same whether the allowance is untouched or unknown.
+    agent: redwallAgentUsage(),
     address,
   };
 }
