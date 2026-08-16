@@ -157,7 +157,11 @@ export function reportAgentFreshness(
   return {
     name: host.label,
     status: "ok",
-    detail: `the copy on PATH changed ${days} day(s) ago`,
+    // A host installed this morning is not "0 day(s) ago", which reads
+    // like a number that failed to be computed.
+    detail: days === 0
+      ? "the copy on PATH changed today"
+      : `the copy on PATH changed ${days} day(s) ago`,
   };
 }
 
