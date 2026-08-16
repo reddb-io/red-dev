@@ -13,6 +13,7 @@
  * take the whole program down over a typo in a key name.
  */
 
+import { GNOME_RESERVED, WINDOWS_RESERVED } from "./reserved.ts";
 import type { SemanticAction } from "./types.ts";
 import { chordText, parseChord } from "./types.ts";
 
@@ -65,6 +66,14 @@ export function validateActions(actions: readonly SemanticAction[]): ActionProbl
     } else if (!chord.ctrl || !chord.alt) {
       problems.push({ id, problem: `chord ${text} is outside the Ctrl+Alt family` });
     }
+
+    // Both hosts, always, whichever platforms the action names. A chord
+    // is the same on every target by decision, so a collision anywhere
+    // is a collision — an action that applies to Windows alone still
+    // cannot take a key GNOME holds, because tomorrow it applies to
+    // both and nobody re-runs this thought.
+    if (GNOME_RESERVED.has(text)) problems.push({ id, problem: `chord ${text} is reserved by GNOME` });
+    if (WINDOWS_RESERVED.has(text)) problems.push({ id, problem: `chord ${text} is reserved by Windows` });
 
     const owner = chords.get(text);
     if (owner !== undefined) problems.push({ id, problem: `chord ${text} already belongs to ${owner}` });
