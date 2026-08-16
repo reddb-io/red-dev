@@ -219,10 +219,17 @@ describe("searching", () => {
     // not, so the query answers with exactly what this machine does not
     // register.
     expect(searchKeys(entries, "unsupported").map((e) => e.id)).toEqual([
+      "menu.open",
+      "keys.viewer",
       "emoji.pick",
       "panel.network",
       "panel.audio",
       "panel.power",
+      "agent.launch",
+      // Unsupported here for the other of the two reasons the word
+      // covers: herdr has no Windows build, so this row's sentence is
+      // about the platform rather than about a missing shortcut.
+      "agent.multiplex",
     ]);
   });
 });
@@ -349,6 +356,97 @@ describe("what Enter runs", () => {
   test("an action nothing can run yet is named rather than shrugged at", () => {
     const plan = firePlan("terminal.gone", windows, anything);
     expect(plan.ok === false && plan.detail).toContain("terminal.gone");
+  });
+});
+
+describe("the four actions the chord decision named", () => {
+  test("`red-dev keys` lists ten of them, on every target", () => {
+    // Ten is the count the 2026-08-15 decision named, and this holds it
+    // on the plain output rather than on the registry: that is the form
+    // a bug report pastes, and the form that would shrink first if a
+    // target ever started dropping what it cannot bind.
+    for (const p of [desktop, server, windows]) {
+      expect(keyLines(keyEntries(p))).toHaveLength(10);
+    }
+  });
+
+  test("the menu and the keys viewer open in a terminal of their own", () => {
+    // The same rule the emoji picker and the Panels follow, and the
+    // reason all five share one path now: the viewer is already drawing
+    // in this terminal, so firing one of them in place would put two
+    // full-screen surfaces on the same frame.
+    expect(firePlan("menu.open", desktop, anything)).toMatchObject({
+      argv: ["alacritty", "-e", "red-dev", "menu"],
+    });
+    expect(firePlan("keys.viewer", desktop, anything)).toMatchObject({
+      argv: ["alacritty", "-e", "red-dev", "keys"],
+    });
+    expect(firePlan("menu.open", windows, anything)).toMatchObject({
+      argv: ["cmd.exe", "/c", "start", "", "red-dev.exe", "menu"],
+    });
+    expect(firePlan("keys.viewer", windows, anything)).toMatchObject({
+      argv: ["cmd.exe", "/c", "start", "", "red-dev.exe", "keys"],
+    });
+  });
+
+  test("and a machine with no terminal emulator is told the command instead", () => {
+    for (const [id, command] of [["menu.open", "red-dev menu"], ["keys.viewer", "red-dev keys"], ["agent.launch", "red-dev agents run"]] as const) {
+      const plan = firePlan(id, desktop, nothing);
+      expect(plan.ok).toBe(false);
+      expect(plan.ok === false && plan.detail).toContain(command);
+    }
+  });
+
+  test("the Default agent is started through `red-dev agents run`, never a host by name", () => {
+    // Which host that resolves to is decided by the recorded choice, in
+    // src/agent-launch.ts, and pinned end to end in
+    // src/agent-launch.test.ts — including that the argv this builds
+    // carries no bypass flag, on any target.
+    expect(firePlan("agent.launch", desktop, anything)).toMatchObject({
+      argv: ["alacritty", "-e", "red-dev", "agents", "run"],
+    });
+    expect(firePlan("agent.launch", windows, anything)).toMatchObject({
+      argv: ["cmd.exe", "/c", "start", "", "red-dev.exe", "agents", "run"],
+    });
+  });
+
+  test("the multiplexer reports itself absent, with a reason, where herdr is not installed", () => {
+    const plan = firePlan("agent.multiplex", desktop, nothing);
+    expect(plan.ok).toBe(false);
+    expect(plan.ok === false && plan.detail).toContain("herdr is not installed");
+    // And the sentence is about herdr rather than about the terminal
+    // emulator this fixture machine is also missing. Nothing is on PATH
+    // here, so a check in the other order would answer a question
+    // nobody asked and send somebody to install Alacritty.
+    expect(plan.ok === false && plan.detail).not.toContain("terminal emulator");
+  });
+
+  test("and starts it where it is installed", () => {
+    const plan = firePlan("agent.multiplex", desktop, (cmd) =>
+      cmd === "herdr" || cmd === "alacritty" ? `/usr/bin/${cmd}` : null,
+    );
+    expect(plan.ok && plan.argv).toEqual(["alacritty", "-e", "herdr"]);
+  });
+
+  test("inside WSL it starts the distro's herdr, in a window belonging to the host", () => {
+    // red-dev is inside the distro here, so the herdr it found on PATH
+    // is the one wsl.exe will start — and the window it needs is the
+    // Windows host's, exactly as terminal.new's fallback opens one.
+    const wsl = machine({ env: "wsl" });
+    expect(firePlan("agent.multiplex", wsl, anything)).toMatchObject({
+      argv: ["cmd.exe", "/c", "start", "", "wsl.exe", "--", "herdr"],
+    });
+  });
+
+  test("and on a Windows host it is refused by name, without leaving the list", () => {
+    const plan = firePlan("agent.multiplex", windows, anything);
+    expect(plan.ok).toBe(false);
+    expect(plan.ok === false && plan.detail).toContain("no stable Windows build");
+    // Still listed there, which is ADR 0006's rule for a target that
+    // cannot honour an action: report it, do not delete it.
+    const entry = keyEntries(windows).find((e) => e.id === "agent.multiplex");
+    expect(entry?.state).toBe("unsupported");
+    expect(entry?.reason).toContain("does not apply to windows");
   });
 });
 

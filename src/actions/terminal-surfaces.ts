@@ -8,6 +8,12 @@
  * queueing behind one another over the same list. An empty area is a
  * declaration of where its actions will go; this is the first one
  * arriving.
+ *
+ * All three are the same act with a different subcommand behind it —
+ * red-dev drawing one of its own full-screen surfaces — which is why
+ * `firePlan` opens them through one shared path rather than three.
+ * Listed in the order the header names them, so the module reads the
+ * way its own first sentence does.
  */
 
 import type { SemanticAction } from "./types.ts";
@@ -26,6 +32,36 @@ import type { SemanticAction } from "./types.ts";
 const WITH_A_DISPLAY = ["desktop", "wsl", "windows"] as const;
 
 export const TERMINAL_SURFACE_ACTIONS: readonly SemanticAction[] = [
+  {
+    id: "menu.open",
+    label: "red-dev menu",
+    platforms: WITH_A_DISPLAY,
+    // The menu is a way in, not a change: everything it can go on to do
+    // — converge, install, set a Default agent — asks for itself at the
+    // moment it is chosen. The same reading the Panels are given.
+    mutates: false,
+    privileged: false,
+    // M for menu. Free in the family on both hosts: GNOME's Ctrl+Alt
+    // spends the arrows on workspaces and takes L, Tab, Esc, Delete and
+    // the virtual terminals, and Windows takes Delete, Tab and the
+    // display drivers' arrows. Neither claims M.
+    chord: "Ctrl+Alt+Shift+M",
+  },
+  {
+    id: "keys.viewer",
+    label: "Keys viewer",
+    platforms: WITH_A_DISPLAY,
+    // It reads the registry and this machine's bindings. Enter inside it
+    // starts things, and each of those answers for itself.
+    mutates: false,
+    privileged: false,
+    // K for keys, and free in the family on both hosts. Worth saying
+    // plainly: this is the one chord whose whole job is to rescue the
+    // others — ADR 0006 calls the viewer the remedy for a chord nobody
+    // can remember, and a remedy reachable only by remembering where
+    // `red-dev keys` lives is half a remedy.
+    chord: "Ctrl+Alt+Shift+K",
+  },
   {
     id: "emoji.pick",
     label: "Emoji picker",

@@ -285,6 +285,58 @@ function onWindowsHost(p: Platform): boolean {
   return p.env === "windows" || p.env === "wsl";
 }
 
+/**
+ * One of red-dev's own surfaces, in a terminal of its own.
+ *
+ * The menu, the keys viewer, the emoji picker, every Panel and the
+ * Default agent are the same act with a different subcommand behind it,
+ * and all of them need a terminal that is not this one: the viewer is
+ * already drawing here, and running any of them in place would put two
+ * full-screen surfaces on the same frame. One helper rather than a
+ * block per action, because six copies of it is how the seventh arrives
+ * with the gnome-terminal flag wrong — the failure the Panels' shared
+ * case was already written to avoid.
+ *
+ * `tail` is the red-dev command line, and it doubles as the remedy
+ * printed on a machine with no terminal emulator: somebody working over
+ * SSH can run it where they already are, and being told so is more use
+ * than a window that could not be opened.
+ */
+function ownSurface(
+  id: string,
+  p: Platform,
+  locate: (cmd: string) => string | null,
+  tail: readonly string[],
+  description: string,
+): FirePlan {
+  if (onWindowsHost(p)) {
+    // `start` with the empty title slot, exactly as terminal.new uses
+    // it and for the same reason: this process is a console process, and
+    // spawning from it would hand the new surface the console red-dev is
+    // drawing in. red-dev.exe is on the PATH both installers write.
+    return {
+      ok: true,
+      id,
+      argv: ["cmd.exe", "/c", "start", "", "red-dev.exe", ...tail],
+      note: `${description} in a new window`,
+    };
+  }
+  const found = LINUX_TERMINALS.find((cmd) => locate(cmd) !== null);
+  if (!found) {
+    return {
+      ok: false,
+      id,
+      detail: `no terminal emulator on PATH — run \`red-dev ${tail.join(" ")}\` here instead`,
+    };
+  }
+  return {
+    ok: true,
+    id,
+    argv: [found, TERMINAL_EXEC[found] ?? "-e", "red-dev", ...tail],
+    note: `${description} in ${found}`,
+  };
+}
+
 export function firePlan(
   id: string,
   p: Platform,
@@ -347,74 +399,87 @@ export function firePlan(
       };
     }
 
-    case "emoji.pick": {
-      // A terminal of its own, exactly as a Panel gets one and for the
-      // same reason: the viewer is already drawing in this one, and two
-      // full-screen surfaces on one frame is what firing it in place
-      // would produce.
-      if (onWindowsHost(p)) {
-        return {
-          ok: true,
-          id,
-          argv: ["cmd.exe", "/c", "start", "", "red-dev.exe", "emoji"],
-          note: "the emoji picker in a new window",
-        };
-      }
-      const found = LINUX_TERMINALS.find((cmd) => locate(cmd) !== null);
-      if (!found) {
-        return { ok: false, id, detail: "no terminal emulator on PATH — run `red-dev emoji` here instead" };
-      }
-      return {
-        ok: true,
-        id,
-        argv: [found, TERMINAL_EXEC[found] ?? "-e", "red-dev", "emoji"],
-        note: `the emoji picker in ${found}`,
-      };
-    }
+    case "menu.open":
+      return ownSurface(id, p, locate, ["menu"], "the red-dev menu");
+
+    case "keys.viewer":
+      // The viewer opening the viewer is not a loop worth refusing: the
+      // chord exists so it can be pressed anywhere, and firing the row
+      // from inside the viewer is the least likely way anybody reaches
+      // it. What it must not do is draw a second one on this frame,
+      // which is exactly what the shared path prevents.
+      return ownSurface(id, p, locate, ["keys"], "the keys viewer");
+
+    case "emoji.pick":
+      return ownSurface(id, p, locate, ["emoji"], "the emoji picker");
 
     case "panel.network":
     case "panel.audio":
     case "panel.power": {
-      // A Panel is a TUI, so firing one means giving it a terminal of
-      // its own. The viewer is already drawing in this one, and running
-      // the Panel inside it would put two full-screen surfaces on the
-      // same frame.
-      //
-      // One case for all of them, and the subsystem taken off the id
-      // rather than written out per Panel: every Panel is opened exactly
-      // the same way, and three copies of this block is how the fourth
-      // one arrives with the gnome-terminal flag wrong.
+      // The subsystem is taken off the id rather than written out per
+      // Panel: every Panel is opened exactly the same way, and a copy
+      // each is how the next one arrives spelled differently.
       const name = id.slice("panel.".length);
+      return ownSurface(id, p, locate, ["panel", name], `the ${name} panel`);
+    }
+
+    case "agent.launch":
+      // `red-dev agents run`, never a host's own executable. That
+      // command is the single place that reads the recorded Default
+      // agent — `resolveLaunch` in src/agent-launch.ts — and the single
+      // place the bypass guard stands, so a plan that named `claude`
+      // here would walk around both: it would be right on most machines
+      // and silently wrong on the ones where somebody chose, and it
+      // would put red-dev in the business of assembling a host's command
+      // line from a surface that never reads the ADR.
+      return ownSurface(id, p, locate, ["agents", "run"], "the Default agent");
+
+    case "agent.multiplex": {
+      if (p.env === "windows") {
+        // Refused rather than approximated, the same way terminal.new's
+        // elevated sibling is refused on Linux. The action is still on
+        // the list here — ADR 0006 does not let a target delete what it
+        // cannot honour — and this is the sentence that says why.
+        return {
+          ok: false,
+          id,
+          detail:
+            "herdr has no stable Windows build — it runs inside WSL, which is where this chord starts it",
+        };
+      }
+      // Absence is answered before anything else is looked at, so a
+      // machine without herdr says so rather than reporting whichever
+      // other thing is also missing. That ordering is the acceptance
+      // criterion: "reported absent where it is not installed" is worth
+      // nothing if the sentence that comes back is about terminals.
+      if (locate("herdr") === null) {
+        return {
+          ok: false,
+          id,
+          detail:
+            "herdr is not installed here — it multiplexes several agents into one terminal, and lives at herdr.dev",
+        };
+      }
       if (onWindowsHost(p)) {
-        // `start` with the empty title slot, exactly as terminal.new
-        // uses it, and for the same reason: this process is a console
-        // process, and spawning from it would hand the Panel the console
-        // red-dev is drawing in. red-dev.exe is on the PATH both
-        // installers write.
+        // `env` is `wsl` by elimination: this red-dev is inside the
+        // distro, so the herdr just found on PATH is the one wsl.exe
+        // will start, and the window it needs belongs to the host.
         return {
           ok: true,
           id,
-          argv: ["cmd.exe", "/c", "start", "", "red-dev.exe", "panel", name],
-          note: `the ${name} panel in a new window`,
+          argv: ["cmd.exe", "/c", "start", "", "wsl.exe", "--", "herdr"],
+          note: "herdr in a new window",
         };
       }
       const found = LINUX_TERMINALS.find((cmd) => locate(cmd) !== null);
       if (!found) {
-        // The refusal names the command, because that is the whole
-        // remedy: a person on a headless machine can run it where they
-        // already are, and telling them so is more use than a terminal
-        // that could not be opened.
-        return {
-          ok: false,
-          id,
-          detail: `no terminal emulator on PATH — run \`red-dev panel ${name}\` here instead`,
-        };
+        return { ok: false, id, detail: "no terminal emulator on PATH — run `herdr` here instead" };
       }
       return {
         ok: true,
         id,
-        argv: [found, TERMINAL_EXEC[found] ?? "-e", "red-dev", "panel", name],
-        note: `the ${name} panel in ${found}`,
+        argv: [found, TERMINAL_EXEC[found] ?? "-e", "herdr"],
+        note: `herdr in ${found}`,
       };
     }
 
