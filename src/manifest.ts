@@ -1106,6 +1106,32 @@ export const TOOLS: Tool[] = [
     win: builtin("hotkeys"),
   },
   {
+    // The RedSkills payload, which used to arrive as a curled
+    // install.sh and therefore never moved again. It is an npm package,
+    // so mise resolves it through the `npm:` backend and `red-dev
+    // update` carries it forward with the rest of the suite.
+    //
+    // Deliberately not `github:`. That backend scores release assets to
+    // put one executable on PATH; what is published here is a tree of
+    // bundles and bin shims, which is what npm is for.
+    //
+    // Half a migration on its own: mise installs into its own tree and
+    // every consumer on the machine resolves through
+    // ~/.red-skills/current. src/red-skills-core.ts is the other half,
+    // and runs straight after this entry does.
+    //
+    // Before the marketplace row below rather than after it: the row
+    // below wires agents against the payload, and wiring against a
+    // payload that is not there yet is the ordering bug that costs a
+    // whole converge.
+    name: "red-skills-core",
+    about: "the RedSkills runtime bundles, resolved and kept current by mise",
+    scope: "core",
+    managed: true,
+    u24: mise("npm:@reddb-io/red-skills", { alias: "red-skills" }),
+    win: mise("npm:@reddb-io/red-skills", { alias: "red-skills" }),
+  },
+  {
     // After the agents, never before: the installer detects which CLIs
     // exist and wires each one, so running it on a machine with none
     // configures nothing and reports success. It sits at the end of

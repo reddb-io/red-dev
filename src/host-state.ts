@@ -260,7 +260,15 @@ export function resolveRedskilledBin(home = homedir()): string | null {
   const cached = latestResidentBundle(`${root}/.cache/red-skills/bundles`);
   if (cached) return cached;
   const packaged = `${root}/.red-skills/current/packaging/npm/bin/red-skills-redskilled.mjs`;
-  return existsSync(packaged) ? packaged : null;
+  if (existsSync(packaged)) return packaged;
+  // The same client, one directory up, when the core came from mise.
+  // The published npm package *is* packaging/npm — that is the
+  // repository.directory it declares — so a `current` that names the
+  // package rather than a source checkout carries bin/ at its root.
+  // Checked after the checkout path rather than before it: a machine
+  // with both should prefer the tree it can also build from.
+  const packagedCore = `${root}/.red-skills/current/bin/red-skills-redskilled.mjs`;
+  return existsSync(packagedCore) ? packagedCore : null;
 }
 
 /** Derive the resident socket without creating its directory or starting a daemon. */
@@ -366,6 +374,9 @@ export async function readHostState(
 const WSL_HOST_STATE_PROGRAM = [
   'b=$(ls -1 "$HOME"/.red/redskilled/bundles/redskilled-*.bundle.min.mjs "$HOME"/.cache/red-skills/bundles/redskilled-*.bundle.min.mjs 2>/dev/null | sort -V | tail -1)',
   '[ -n "$b" ] || b="$HOME/.red-skills/current/packaging/npm/bin/red-skills-redskilled.mjs"',
+  // The mise-installed core is the published packaging/npm package, so
+  // its bin/ sits at the root of `current` instead of under it.
+  '[ -f "$b" ] || b="$HOME/.red-skills/current/bin/red-skills-redskilled.mjs"',
   '[ -f "$b" ] || exit 3',
   'n=$(command -v node 2>/dev/null || ls -1 /usr/local/bin/node /usr/bin/node "$HOME"/.local/share/mise/installs/node/*/bin/node "$HOME"/.volta/bin/node "$HOME"/.asdf/shims/node "$HOME"/.nodenv/shims/node "$HOME"/.nvm/versions/node/*/bin/node "$HOME"/.local/share/fnm/node-versions/*/installation/bin/node 2>/dev/null | sort -V | tail -1)',
   '[ -n "$n" ] || exit 3',

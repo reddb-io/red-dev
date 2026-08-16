@@ -684,6 +684,8 @@ export async function miseInstallSuite(platform: Platform): Promise<void> {
   log.step(`mise: installing ${entries} tools`);
   const code = await runMise([mise, "install"]);
   if (code !== 0) throw new RedError(`mise could not install the suite (exit ${code})`);
+
+  await linkRedSkillsCore();
 }
 
 /**
@@ -708,6 +710,25 @@ export async function miseUpgradeSuite(platform: Platform): Promise<void> {
   log.step(`mise: upgrading ${names.length} tools`);
   const code = await runMise([mise, "upgrade", "--yes", ...names]);
   if (code !== 0) log.err(`mise upgrade exited ${code}`);
+
+  // Even when the upgrade reported a failure: it names several tools at
+  // once, so a non-zero exit says one of them did not move, not that
+  // none did. Repointing at whatever is now installed is correct in
+  // both cases, and is a no-op when nothing changed.
+  await linkRedSkillsCore();
+}
+
+/**
+ * Move ~/.red-skills/current onto whatever mise has just installed.
+ *
+ * Here rather than inside the mise calls above because both of them
+ * reach the core: the suite pass installs it alongside everything else,
+ * and the upgrade pass is what advances it. A machine without the core
+ * gets nothing and no message.
+ */
+async function linkRedSkillsCore(): Promise<void> {
+  const { convergeRedSkillsCoreLayout } = await import("./red-skills-core.ts");
+  convergeRedSkillsCoreLayout();
 }
 
 async function runMise(cmd: string[]): Promise<number> {
@@ -1379,9 +1400,16 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
         await ghInstall(pr.repo, pr.asset, pr.bin, pr.version);
       }
       return;
-    case "mise":
+    case "mise": {
       await miseInstall(pr, ctx.platform);
+      // mise puts a tool under its own installs tree and stops there,
+      // which is the whole story for a binary it also shims onto PATH.
+      // The RedSkills core is a tree the rest of the machine resolves
+      // through ~/.red-skills/current, so it needs the link moved too.
+      const { convergeCoreAfterMise } = await import("./red-skills-core.ts");
+      convergeCoreAfterMise(pr.spec);
       return;
+    }
     case "ppa":
       await ppaInstall(pr.ppa, pr.pkgs);
       return;
