@@ -197,3 +197,26 @@ export function resolveLaunch(
   }
   return { ok: true, target: launchTarget(host, executable, passthrough) };
 }
+
+/**
+ * Hand the terminal over and wait for it back.
+ *
+ * The three streams are inherited because this *is* the person's
+ * session — the host draws a full-screen interface of its own and reads
+ * the keyboard, neither of which survives a pipe. It lives here rather
+ * than in main.ts so the exception to the console-ownership rule is a
+ * file that can never run behind one of red-dev's own frames: nothing
+ * reaches this but `red-dev agents run`, typed at a shell.
+ *
+ * The environment is inherited as it is, not the unattended one:
+ * UNATTENDED_ENV exists to tell package managers that nobody is
+ * watching, and here somebody is.
+ */
+export async function runLaunchTarget(target: LaunchTarget): Promise<number> {
+  const child = Bun.spawn(target.argv, {
+    stdin: "inherit",
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  return await child.exited;
+}
