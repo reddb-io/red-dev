@@ -14,8 +14,9 @@
 import { describe, expect, test } from "bun:test";
 import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { escapedSequence, IMAGE_PASTE_INPUT } from "./actions/index.ts";
 import { zellijConfigAction, zellijConfigFor } from "./dotfiles.ts";
-import { repairedImports, requiredImports } from "./alacritty.ts";
+import { keysToml, repairedImports, requiredImports } from "./alacritty.ts";
 import type { Platform } from "./platform.ts";
 
 function platform(over: Partial<Platform>): Platform {
@@ -92,26 +93,30 @@ describe("where zellij puts a copied selection", () => {
 });
 
 describe("paste", () => {
-  // Read from the source: the generator is private, and what matters is
-  // that the file is generated at all rather than living in the
-  // write-once config where a later correction could never reach it.
+  // Against the generated file rather than the module that writes it:
+  // the Alt+V byte comes from src/actions/input.ts now, so a test that
+  // read the template would be testing where the value is interpolated
+  // rather than what Alacritty is told.
+  const keys = keysToml();
   const src = readFileSync("src/alacritty.ts", "utf8");
 
   test("leaves Ctrl+V for agent image paste", () => {
-    expect(src).not.toContain(
+    expect(keys).not.toContain(
       "key = 'V'\nmods = 'Control'\naction = 'Paste'",
     );
   });
 
   test("keeps Ctrl+Shift+V, which is what Alacritty ships", () => {
-    expect(src).toContain("mods = 'Control|Shift'");
+    expect(keys).toContain("mods = 'Control|Shift'");
   });
 
   test("sends Alt+V through as Ctrl+V so terminal agents can paste images", () => {
     // Alacritty owns Ctrl+V for text paste. Claude and Codex therefore
     // need a second key that reaches their image-clipboard handler rather
     // than being consumed by the terminal before either app sees it.
-    expect(src).toContain("mods = 'Alt'\nchars = \"\\\\u0016\"");
+    const { key, mods } = IMAGE_PASTE_INPUT.layers.alacritty;
+    const chars = escapedSequence(IMAGE_PASTE_INPUT.sequence);
+    expect(keys).toContain(`key = '${key}'\nmods = '${mods}'\nchars = "${chars}"`);
   });
 
   test("lives in a file red-dev rewrites", () => {

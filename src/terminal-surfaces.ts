@@ -39,6 +39,7 @@
 
 import { existsSync, mkdirSync } from "node:fs";
 import { unlink } from "node:fs/promises";
+import { INPUT_BINDINGS } from "./actions/index.ts";
 import { log } from "./log.ts";
 import { configHome } from "./shared-root.ts";
 import type { Platform } from "./platform.ts";
@@ -265,13 +266,27 @@ export async function applyDelta(): Promise<boolean> {
 
 // --------------------------------------------------- redcode, herdr
 
-const OPENCODE_INPUT = {
-  input_newline: "shift+return,ctrl+return,alt+return,ctrl+j",
-  input_paste: { key: "ctrl+v", preventDefault: false },
-} as const;
+/**
+ * RedCode's half of the input contract, read from the binding registry.
+ *
+ * Every gesture in src/actions/input.ts that RedCode has a keybind for,
+ * in registry order — which is the order they are written to tui.json, so
+ * reordering the registry would rewrite the file on every machine.
+ *
+ * The keys RedCode is told about are not the keys a person presses. It
+ * is handed `ctrl+v` for the image paste because Alt+V sends the Ctrl+V
+ * byte and that is what arrives; the registry is where the two ends of
+ * that translation are stated together.
+ */
+const OPENCODE_INPUT = INPUT_BINDINGS.flatMap((b) => (b.layers.redcode ? [b.layers.redcode] : []));
 
 export type OpenCodeInputOutcome = "wrote" | "already-set" | "conflict" | "malformed";
-export type OpenCodeInputResult = Record<keyof typeof OPENCODE_INPUT, OpenCodeInputOutcome>;
+export type OpenCodeInputResult = Record<string, OpenCodeInputOutcome>;
+
+/** The same verdict for every field — the file-level failures. */
+function uniformOpenCode(outcome: OpenCodeInputOutcome): OpenCodeInputResult {
+  return Object.fromEntries(OPENCODE_INPUT.map((k) => [k.field, outcome]));
+}
 
 function sameJson(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
@@ -294,30 +309,29 @@ export async function convergeOpenCodeInput(path: string): Promise<OpenCodeInput
       cfg = parsed as Record<string, unknown>;
     } catch {
       log.skip("RedCode tui.json is not valid JSON — left alone");
-      return { input_newline: "malformed", input_paste: "malformed" };
+      return uniformOpenCode("malformed");
     }
   }
 
   const existing = cfg["keybinds"];
   if (existing !== undefined && (typeof existing !== "object" || existing === null || Array.isArray(existing))) {
     log.skip("RedCode tui.json keybinds is not an object — left alone");
-    return { input_newline: "malformed", input_paste: "malformed" };
+    return uniformOpenCode("malformed");
   }
   const keybinds = { ...((existing ?? {}) as Record<string, unknown>) };
   const result = {} as OpenCodeInputResult;
   let changed = false;
 
-  for (const key of Object.keys(OPENCODE_INPUT) as Array<keyof typeof OPENCODE_INPUT>) {
-    const wanted = OPENCODE_INPUT[key];
-    if (!Object.prototype.hasOwnProperty.call(keybinds, key)) {
-      keybinds[key] = wanted;
-      result[key] = "wrote";
+  for (const { field, value } of OPENCODE_INPUT) {
+    if (!Object.prototype.hasOwnProperty.call(keybinds, field)) {
+      keybinds[field] = value;
+      result[field] = "wrote";
       changed = true;
-    } else if (sameJson(keybinds[key], wanted)) {
-      result[key] = "already-set";
+    } else if (sameJson(keybinds[field], value)) {
+      result[field] = "already-set";
     } else {
-      result[key] = "conflict";
-      log.skip(`RedCode ${key} is already bound — left alone`);
+      result[field] = "conflict";
+      log.skip(`RedCode ${field} is already bound — left alone`);
     }
   }
 

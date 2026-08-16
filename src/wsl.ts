@@ -16,6 +16,8 @@
 import { removeTemp, tempDir } from "./temp.ts";
 import { copyFileSync, existsSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { userInfo } from "node:os";
+import { IMAGE_PASTE_INPUT, NEWLINE_INPUT } from "./actions/index.ts";
+import type { InputBinding } from "./actions/index.ts";
 import { log, RedError } from "./log.ts";
 import type { Platform } from "./platform.ts";
 import { CURSOR } from "./terminal-cursor.ts";
@@ -825,32 +827,39 @@ interface WtSettings {
   [k: string]: unknown;
 }
 
+type WtAgentAction = { command: { action: string; input: string }; keys: string };
+
 /**
- * Shift+Enter, sent as something a program can actually see.
+ * A registry gesture, in the spelling Windows Terminal's settings.json uses.
  *
- * Windows Terminal, like every terminal, sends 0x0D for Enter and 0x0D
- * for Shift+Enter — the modifier never reaches the program. sendInput is
- * how WT is told to send something else, and ESC[13;2u is the same
- * kitty-protocol encoding src/alacritty.ts writes, so both emulators
- * deliver one sequence and config/bash/inputrc.conf binds it once.
+ * WT, like every terminal, sends 0x0D for Enter and 0x0D for Shift+Enter
+ * — the modifier never reaches the program. sendInput is how it is told
+ * to send something else, and the sequence comes from
+ * src/actions/input.ts, which is where src/alacritty.ts reads it too. One
+ * source is what makes "both emulators deliver the same bytes" a fact
+ * rather than two literals that happen to agree today.
  *
- * Written as \u001b so the source carries no control character;
- * JSON.stringify emits it as a real 0x1b byte in settings.json.
+ * Nothing is escaped by hand on this side: the registry holds the real
+ * control character and JSON.stringify writes it back as the \u001b
+ * escape settings.json is read with. Alacritty's TOML needs the escaping
+ * done for it, which is why that spelling lives in the registry too
+ * rather than being hand-typed at each end.
  */
-const SHIFT_ENTER_ACTION = {
-  command: { action: "sendInput", input: "\u001b[13;2u" },
-  keys: "shift+enter",
-};
+function sendInputAction(binding: InputBinding): WtAgentAction {
+  return {
+    command: { action: "sendInput", input: binding.sequence },
+    keys: binding.layers.windowsTerminal,
+  };
+}
+
+const SHIFT_ENTER_ACTION = sendInputAction(NEWLINE_INPUT);
 
 /**
  * The image gesture shared with Alacritty and Claude Code on Windows/WSL.
  * Ctrl+Shift+V remains terminal text paste; this sends the raw Ctrl+V byte
  * through to whichever agent owns clipboard-image input.
  */
-const ALT_V_ACTION = {
-  command: { action: "sendInput", input: "\u0016" },
-  keys: "alt+v",
-};
+const ALT_V_ACTION = sendInputAction(IMAGE_PASTE_INPUT);
 
 function hasKey(a: Record<string, unknown>, wanted: string): boolean {
   const keys = a["keys"];
@@ -976,11 +985,13 @@ export async function configureWindowsTerminal(opts: TerminalOptions): Promise<v
   // Agent input gestures, each added only when its key is free.
   const input = mergeWindowsTerminalAgentActions(settings.actions);
   settings.actions = input.actions;
-  if (input.added.includes("shift+enter")) {
-    log.plain(`       shift+enter sends ESC[13;2u — a newline, not a submit`);
+  const newlineKey = NEWLINE_INPUT.layers.windowsTerminal;
+  const pasteKey = IMAGE_PASTE_INPUT.layers.windowsTerminal;
+  if (input.added.includes(newlineKey)) {
+    log.plain(`       ${newlineKey} sends ESC[13;2u — a newline, not a submit`);
   }
-  if (input.added.includes("alt+v")) {
-    log.plain(`       alt+v reaches agent image paste; ctrl+shift+v remains text paste`);
+  if (input.added.includes(pasteKey)) {
+    log.plain(`       ${pasteKey} reaches agent image paste; ctrl+shift+v remains text paste`);
   }
   for (const key of input.conflicts) {
     log.skip(`windows terminal: ${key} is already bound to something else — left alone`);

@@ -28,6 +28,7 @@
  */
 
 import { existsSync } from "node:fs";
+import { NEWLINE_INPUT } from "./actions/index.ts";
 import { log } from "./log.ts";
 
 const CONTEXT = "Chat";
@@ -36,7 +37,11 @@ const CONTEXT = "Chat";
 type Managed = { key: string; action: string | null };
 
 const MANAGED: readonly Managed[] = [
-  { key: "shift+enter", action: "chat:newline" },
+  // From src/actions/input.ts, which is also what tells Alacritty and
+  // Windows Terminal to send a sequence Claude Code can receive. The
+  // binding was correct here for a year while the key never arrived;
+  // reading both halves from one entry is what stops that recurring.
+  NEWLINE_INPUT.layers.claude,
   { key: "ctrl+g", action: null },
 ];
 
