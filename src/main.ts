@@ -785,6 +785,17 @@ async function cmdUpdate(p: Platform, inv: Invocation): Promise<number> {
     // Upgrading can leave the manifest unsatisfied (a package removed, a
     // binary replaced), so always re-converge afterwards.
     converge: () => cmdInstall(p, inv, "update"),
+
+    // And then the versions nobody points at any more, which nothing on
+    // this machine collected before. Last, after the converge has
+    // installed whatever the upgrade left unsatisfied: mise prunes what
+    // no config names, and a prune before the converge would be reading
+    // a config that is not final yet.
+    prune: async () => {
+      if (inv.dryRun) return;
+      const { misePruneSuite } = await import("./providers.ts");
+      await misePruneSuite(p);
+    },
   };
 
   const run = await runUpdate(

@@ -719,6 +719,46 @@ export async function miseUpgradeSuite(platform: Platform): Promise<void> {
 }
 
 /**
+ * The argv that collects the versions nothing points at any more.
+ *
+ * Split out from the call below so the one thing that can be wrong here
+ * is testable on a machine with no mise: which tools it is allowed to
+ * reach. Named tool by tool for the same reason the upgrade above is —
+ * bare, mise prunes every unused version in the active config, and the
+ * user's old Node is not ours to collect. `--tools` keeps it off their
+ * tracked configuration links too, which are not versions at all.
+ */
+export function misePruneCommand(mise: string, names: string[]): string[] {
+  return [mise, "prune", "--tools", ...names];
+}
+
+/**
+ * Retire the versions the upgrade left behind.
+ *
+ * The policy is mise's, deliberately: it already knows which versions
+ * no config still names, and a keep-N of our own would be
+ * reimplementing the half of the tool we adopted it for. Nothing on
+ * this machine pruned anything before this existed — measured at about
+ * a gigabyte of RedSkills alone, one install at a time.
+ *
+ * A failure is a warning. This is the last thing an update does and the
+ * least important of them: a machine that could not collect its old
+ * versions is still a machine that updated.
+ */
+export async function misePruneSuite(platform: Platform): Promise<void> {
+  const mise = Bun.which("mise");
+  if (!mise) return;
+
+  const { miseToolNames } = await import("./mise-config.ts");
+  const names = miseToolNames(platform);
+  if (names.length === 0) return;
+
+  log.step(`mise: pruning unused versions of ${names.length} tools`);
+  const code = await runMise(misePruneCommand(mise, names));
+  if (code !== 0) log.warn(`mise prune exited ${code}`);
+}
+
+/**
  * Move ~/.red-skills/current onto whatever mise has just installed.
  *
  * Here rather than inside the mise calls above because both of them
