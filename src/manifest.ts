@@ -1090,13 +1090,16 @@ export const TOOLS: Tool[] = [
   {
     // Core, not desktop or wsl, and that is not laziness.
     //
-    // The shortcuts have to be written from inside WSL, which reaches
-    // the Windows host, and from native Windows, which is the host —
-    // and no other scope covers both: wsl never applies on Windows,
-    // desktop never applies inside a distro. The builtin says so out
-    // loud on a target with no Windows behind it.
+    // The Start Menu shortcuts have to be written from inside WSL, which
+    // reaches the Windows host, and from native Windows, which is the
+    // host — and no other scope covers both: wsl never applies on
+    // Windows, desktop never applies inside a distro. Bare-metal Ubuntu
+    // is the third target with a keyboard to claim, and its adapter
+    // writes GNOME custom keybindings instead. The builtin picks the one
+    // that belongs to this host and says so out loud on a machine with
+    // neither, which is any server.
     name: "hotkeys",
-    about: "Ctrl+Alt+T and Ctrl+Alt+Shift+T, as Start Menu shortcuts",
+    about: "the chord family, as Start Menu shortcuts and GNOME custom keybindings",
     scope: "core",
     managed: true,
     u24: builtin("hotkeys"),

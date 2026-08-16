@@ -24,14 +24,15 @@
  * "unavailable" would bury it.
  *
  * Firing does not depend on binding. The Enter key runs the action even
- * where nothing registers its chord, which is the case on GNOME today —
- * an unbound action reachable from the viewer is the remedy the ADR
+ * where nothing registers its chord — an action an adapter declines is
+ * still reachable from the viewer, which is the remedy the ADR
  * promises, and refusing to run it would leave the target with neither
  * the chord nor the fallback.
  */
 
 import { ACTIONS, actionById, validateActions } from "./actions/index.ts";
 import type { SemanticAction } from "./actions/index.ts";
+import { GNOME_ACTIONS, GNOME_BINDINGS, gnomeRefusal } from "./gnome-keys.ts";
 import { START_MENU_ACTIONS, WINDOWS_HOTKEYS } from "./hotkeys.ts";
 import type { Platform } from "./platform.ts";
 
@@ -64,22 +65,30 @@ export interface KeyEntry {
 /**
  * What an adapter has to say about one action.
  *
- * Three answers, because an adapter that does not register a chord is
- * saying one of two very different things. `unclaimed` is "I have never
- * carried this action" — a feature whose adapter half has not landed,
- * which is news to live with. `missing` is "I carry it and no chord came
- * back", which is the registry having lost something underneath a working
- * adapter, and is a bug. A boolean would report either one as the other.
+ * Four answers, because an adapter that does not register a chord is
+ * saying one of three very different things. `unclaimed` is "I have
+ * never carried this action" — a feature whose adapter half has not
+ * landed, which is news to live with. `missing` is "I carry it and no
+ * chord came back", which is the registry having lost something
+ * underneath a working adapter, and is a bug. `refused` is "I carry the
+ * target it applies to and I will not bind it", which ADR 0006 requires
+ * to arrive with a reason and without a substitute chord — the GNOME
+ * adapter says it about the elevated shell. A boolean would report any
+ * of them as any other.
  */
-type Registration = "bound" | "missing" | "unclaimed";
+type Registration =
+  | { state: "bound" }
+  | { state: "missing" }
+  | { state: "unclaimed" }
+  | { state: "refused"; reason: string };
 
 /**
  * The thing that turns a chord into a registration on this target.
  *
- * One today: the Windows Start Menu `.lnk`, in src/hotkeys.ts. GNOME's
- * is not written yet, and its absence is reported rather than hidden —
- * that absence is precisely what someone reading the viewer on Ubuntu
- * needs to be told.
+ * Two of them: the Windows Start Menu `.lnk`, in src/hotkeys.ts, and
+ * GNOME's custom keybindings, in src/gnome-keys.ts. Both read which
+ * chord an action carries from the registry and own only how it is
+ * registered, which is ADR 0006's whole division of labour.
  */
 interface Adapter {
   /** Named the way the reason sentence needs to read. */
@@ -92,8 +101,27 @@ function adapterFor(p: Platform): Adapter | null {
     return {
       name: "Windows Start Menu",
       registers: (id) => {
-        if (!START_MENU_ACTIONS.includes(id)) return "unclaimed";
-        return WINDOWS_HOTKEYS.some((h) => h.id === id && h.combo !== null) ? "bound" : "missing";
+        if (!START_MENU_ACTIONS.includes(id)) return { state: "unclaimed" };
+        return WINDOWS_HOTKEYS.some((h) => h.id === id && h.combo !== null)
+          ? { state: "bound" }
+          : { state: "missing" };
+      },
+    };
+  }
+  if (p.env === "desktop") {
+    return {
+      name: "GNOME keybindings",
+      registers: (id) => {
+        // Before the claimed set, because a refusal is a decision
+        // somebody wrote down and "no shortcut for it yet" is the
+        // sentence for an action nobody has decided about. Reading them
+        // the same way would lose the reason.
+        const refusal = gnomeRefusal(id);
+        if (refusal) return { state: "refused", reason: refusal };
+        if (!GNOME_ACTIONS.includes(id)) return { state: "unclaimed" };
+        return GNOME_BINDINGS.some((b) => b.id === id)
+          ? { state: "bound" }
+          : { state: "missing" };
       },
     };
   }
@@ -150,7 +178,7 @@ export function keyEntries(
     }
 
     const registration = adapter.registers(action.id);
-    if (registration === "missing") {
+    if (registration.state === "missing") {
       return {
         ...head,
         state: "broken",
@@ -158,7 +186,15 @@ export function keyEntries(
       };
     }
 
-    if (registration === "unclaimed") {
+    if (registration.state === "refused") {
+      // The adapter's own sentence, unedited. ADR 0006 asks for the
+      // reason and forbids a substitute chord; the row keeps the chord
+      // the registry gave it, unbound, so nobody reads a second key
+      // into the gap.
+      return { ...head, state: "unsupported", reason: registration.reason };
+    }
+
+    if (registration.state === "unclaimed") {
       // The sibling of the no-adapter sentence above, and deliberately
       // worded like it: an adapter exists here, it simply has not grown
       // a shortcut for this action. Reported as the fact it is rather
