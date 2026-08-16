@@ -3,14 +3,15 @@
  * resolver answers for it, and the four things an operator can do about
  * that.
  *
- * The first Panel, and the shape the rest are meant to copy. A Panel is
- * a red-dev TUI over one host subsystem, and it earns that by driving
- * the platform's *first-party* CLI rather than writing the files
- * underneath it — `nmcli` and `resolvectl` on Ubuntu, the NetTCPIP and
- * DnsClient cmdlets on Windows. Editing `/etc/resolv.conf` by hand would
- * work for about one reboot on a machine NetworkManager owns, and would
- * leave the host's own tools disagreeing with the Panel about what the
- * machine is configured to do.
+ * The first Panel, and the shape the rest copy — the shape itself now
+ * lives in src/panel.ts, which is where the two rules every Panel keeps
+ * are written down. A Panel is a red-dev TUI over one host subsystem,
+ * and it earns that by driving the platform's *first-party* CLI rather
+ * than writing the files underneath it — `nmcli` and `resolvectl` on
+ * Ubuntu, the NetTCPIP and DnsClient cmdlets on Windows. Editing
+ * `/etc/resolv.conf` by hand would work for about one reboot on a
+ * machine NetworkManager owns, and would leave the host's own tools
+ * disagreeing with the Panel about what the machine is configured to do.
  *
  * ## Looking is never privileged
  *
@@ -35,6 +36,12 @@
  * takes effect at the end of the next converge. Those are different
  * things and they stay different.
  *
+ * This is also the Panel where an act genuinely needs rights, which is
+ * not true of the other two: `pactl` and `powerprofilesctl` change the
+ * signed-in person's own session and ask for nothing. Writing DNS onto a
+ * NetworkManager connection is system configuration, and that is the
+ * difference — not that this Panel came first.
+ *
  * ## WSL asks the Windows host
  *
  * The same crossing `lan-address.ts` and `ssh-server.ts` already make,
@@ -55,32 +62,20 @@
  * the Panel shows after a change is what the machine actually holds.
  */
 
+import { panelTarget, runPlan, spawnCapture } from "./panel.ts";
+import type { Capture, PanelKey, PanelPlan, PanelTarget, Run } from "./panel.ts";
 import type { Platform } from "./platform.ts";
-import type { Gate } from "./rights.ts";
 
 /**
- * The two adapters this Panel has.
+ * The Panel vocabulary, re-exported so this module reads as one Panel.
  *
- * Not one per `Env`: Ubuntu desktop and an Ubuntu server drive the same
- * two binaries, and WSL drives the Windows ones. Darwin and an unknown
- * OS are absent deliberately, failing closed as `providerFor` does and
- * as ADR 0001 requires.
+ * Everything a Panel shares now lives in src/panel.ts, and nothing that
+ * consumes the network Panel should have to know which half of it moved
+ * there — the split is about two Panels not writing "which CLI answers
+ * for this machine" twice, not about a second import path for callers.
  */
-export type PanelTarget = "linux" | "windows";
-
-/**
- * Which CLI answers for this machine, or nothing when none does.
- *
- * Windows first, and WSL with it, in the same order `hostNetState` asks
- * the question — a WSL distro is `os: "linux"`, so testing Linux first
- * would send it to `nmcli`, which is not installed and would not be
- * describing the right machine if it were.
- */
-export function panelTarget(p: Platform): PanelTarget | null {
-  if (p.os === "windows" || p.env === "wsl") return "windows";
-  if (p.os === "linux") return "linux";
-  return null;
-}
+export { panelTarget, raisesRights, spawnCapture } from "./panel.ts";
+export type { Capture, Captured, PanelKey, PanelPlan, PanelTarget, Run } from "./panel.ts";
 
 /** The four, in the order the Panel offers them. */
 export type DnsChoice = "dhcp" | "cloudflare" | "google" | "custom";
@@ -155,51 +150,6 @@ export function serversFor(choice: DnsChoice, custom = ""): readonly string[] | 
 }
 
 // ----------------------------------------------------------- the plans
-
-/**
- * What the Panel would run, decided before anything runs.
- *
- * The same split `firePlan` makes, for the same reason: a plan can be
- * read by a test, and a refusal arrives as a sentence for the status
- * line rather than as a process that failed off screen. It is also what
- * makes "observation is never privileged" a checkable claim instead of a
- * paragraph — `gate` says which gate the acts pass, and `raisesRights`
- * reads the argv itself, so a plan cannot claim `null` while quietly
- * carrying a `sudo`.
- */
-export interface PanelPlan {
-  /**
-   * The one visible ask that raises the rights, before the acts.
-   *
-   * `sudo -v` on Ubuntu, so the password is typed once, in the ordinary
-   * terminal, at the moment the operator asked — the same shape
-   * `primeSudoInteractive` uses before the installer takes the screen.
-   * Null on Windows, where consent is not a separate question: the UAC
-   * dialog is raised by the act itself and cannot be raised early.
-   */
-  prime: readonly string[] | null;
-  /** The acts, in order, each already carrying the rights it needs. */
-  steps: readonly (readonly string[])[];
-  /** Which gate those acts pass, or null when they pass none. */
-  gate: Gate | null;
-  /** One line, for the status line under the list. */
-  note: string;
-}
-
-/**
- * Does this argv ask the machine for rights?
- *
- * Read off the words rather than taken on trust, because the claim worth
- * pinning is about what runs. Both spellings of each gate are here: the
- * Linux elevators as argv[0], and Windows' consent verb as it appears
- * inside a `-Command` string, where no amount of looking at argv[0]
- * would find it.
- */
-export function raisesRights(argv: readonly string[]): boolean {
-  const head = argv[0]?.toLowerCase().replace(/\.exe$/, "") ?? "";
-  if (["sudo", "pkexec", "doas", "su", "runas"].includes(head)) return true;
-  return argv.some((word) => /-verb\s+runas/i.test(word));
-}
 
 /**
  * The reads. Two commands on Ubuntu, one round trip on Windows.
@@ -485,15 +435,6 @@ const NOTHING: NetworkView = {
   named: null,
 };
 
-/** Ran, and what it printed. Same shape as `lan-address.ts`'s. */
-export interface Captured {
-  out: string;
-  code: number;
-}
-
-/** The seam the tests replace: how a question reaches the machine. */
-export type Capture = (cmd: readonly string[]) => Promise<Captured>;
-
 /**
  * Whether the observed resolvers are one of the named choices.
  *
@@ -724,26 +665,6 @@ function windowsLinkState(status: string): LinkState {
 
 // ------------------------------------------------------------- the seam
 
-/**
- * Ask the machine, with the child's streams captured.
- *
- * The same shape `lan-address.ts` uses, including the UTF-16LE decode:
- * PowerShell reached through WSL interop writes UTF-16LE when its stdout
- * is redirected, which is not JSON until it is decoded.
- */
-export async function spawnCapture(cmd: readonly string[]): Promise<Captured> {
-  const { readWindowsOutput } = await import("./windows-output.ts");
-  try {
-    const proc = Bun.spawn([...cmd], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
-    const out = await readWindowsOutput(proc.stdout);
-    return { out, code: await proc.exited };
-  } catch {
-    // A binary that is not there is an answer, not an exception: this
-    // machine cannot be asked, so it reports nothing.
-    return { out: "", code: 127 };
-  }
-}
-
 /** What this machine says about the network it is on. */
 export async function observeNetwork(
   p: Platform,
@@ -788,22 +709,6 @@ export interface PanelState {
 }
 
 export const PANEL_START: PanelState = { index: 0, custom: "" };
-
-/**
- * The keys the Panel reads, structurally — the same declaration
- * `keys.ts` makes, and for the same reason: tuiuiu's `Key` carries all
- * of these, so the component hands its own object straight in, and
- * naming only what is used keeps this module free of the renderer.
- */
-export interface PanelKey {
-  upArrow: boolean;
-  downArrow: boolean;
-  return: boolean;
-  escape: boolean;
-  backspace: boolean;
-  delete: boolean;
-  ctrl: boolean;
-}
 
 export interface PanelStep {
   state: PanelState;
@@ -866,40 +771,24 @@ export interface DnsOutcome {
   detail: string;
 }
 
-/** Run one argv attached to the terminal, and say how it ended. */
-export type Run = (argv: readonly string[]) => Promise<number>;
-
 /**
  * Carry out a plan: the visible ask, then the acts, stopping at the
  * first one that fails.
  *
- * Stopping matters on Ubuntu, where the two acts are "record it" and
- * "make it take effect": running the second after the first failed would
- * bring the connection up with the DNS it already had and report that as
- * the change the operator asked for.
+ * `runPlan` is the stopping, shared with the other Panels — and stopping
+ * is what matters most here, where the two Ubuntu acts are "record it"
+ * and "make it take effect". Running the second after the first failed
+ * would bring the connection up with the DNS it already had and report
+ * that as the change the operator asked for.
+ *
+ * What stays here is the sentence: a Panel names its own subject, so
+ * this one says `dns:` and the audio one says which device it moved.
  */
 export async function applyDns(plan: DnsPlan, run: Run): Promise<DnsOutcome> {
   if (!plan.ok) return { changed: false, detail: plan.detail };
-
-  if (plan.prime) {
-    const code = await run(plan.prime);
-    if (code !== 0) {
-      const { missingRights } = await import("./rights.ts");
-      return { changed: false, detail: missingRights("sudo").cause };
-    }
-  }
-
-  for (const step of plan.steps) {
-    const code = await run(step);
-    if (code !== 0) {
-      const { missingRights } = await import("./rights.ts");
-      // A non-zero exit from an elevated Start-Process is what a
-      // declined UAC dialog looks like from here; there is no separate
-      // signal for it, and the remedy is the same either way.
-      const gate = plan.gate ?? "sudo";
-      return { changed: false, detail: `${step[0]} failed — ${missingRights(gate).cause}` };
-    }
-  }
-
-  return { changed: true, detail: `dns: ${plan.note}` };
+  const outcome = await runPlan(plan, run);
+  return {
+    changed: outcome.done,
+    detail: outcome.done ? `dns: ${plan.note}` : outcome.detail,
+  };
 }
