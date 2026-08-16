@@ -10,6 +10,13 @@
 # runs, so a worker's local verdict and the merge queue's cannot drift.
 plugins:
   dev:
+    # Everything below is inert without this line. The activation gate is
+    # strict opt-in per directory (ADR 0067/0116): a `plugins.dev` block
+    # without `enabled: true` is discarded WHOLE — the standing drain and the
+    # validation moments included — and the engine then reports each moment as
+    # undeclared, which reads as the engine not seeing a file that is plainly
+    # here. Every Worker on this repo ran ungated until 2026-08-16 (#3939).
+    enabled: true
     afk:
       # A standing drain, so the queue keeps moving across a daemon restart.
       #
