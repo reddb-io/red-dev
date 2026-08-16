@@ -215,9 +215,13 @@ describe("searching", () => {
 
   test("the state is searchable, so 'unbound work' is one query", () => {
     expect(searchKeys(keyEntries(server), "unsupported")).toHaveLength(ACTIONS.length);
-    // On Windows the terminal pair is bound and the Panel is not, so the
-    // query answers with exactly what this machine does not register.
-    expect(searchKeys(entries, "unsupported").map((e) => e.id)).toEqual(["panel.network"]);
+    // On Windows the terminal pair is bound and the Panels are not, so
+    // the query answers with exactly what this machine does not register.
+    expect(searchKeys(entries, "unsupported").map((e) => e.id)).toEqual([
+      "panel.network",
+      "panel.audio",
+      "panel.power",
+    ]);
   });
 });
 
@@ -301,6 +305,28 @@ describe("what Enter runs", () => {
     ]);
   });
 
+  test("and every other Panel opens the same way, under the name on its id", () => {
+    // firePlan carries one case for all of them and takes the subsystem
+    // off the id. Three copies of that block is how the fourth Panel
+    // arrives with the gnome-terminal flag wrong, so this holds the
+    // shared path rather than the network Panel's copy of it.
+    for (const [id, name] of [["panel.audio", "audio"], ["panel.power", "power"]] as const) {
+      const onWindows = firePlan(id, windows, anything);
+      expect(onWindows.ok && onWindows.argv).toEqual([
+        "cmd.exe", "/c", "start", "", "red-dev.exe", "panel", name,
+      ]);
+
+      const onUbuntu = firePlan(id, desktop, anything);
+      expect(onUbuntu.ok && onUbuntu.argv).toEqual([
+        "alacritty", "-e", "red-dev", "panel", name,
+      ]);
+
+      const headless = firePlan(id, desktop, nothing);
+      expect(headless.ok).toBe(false);
+      expect(headless.ok === false && headless.detail).toContain(`red-dev panel ${name}`);
+    }
+  });
+
   test("and gnome-terminal is told with `--`, because its -e was deprecated years ago", () => {
     // A wrong flag here opens a terminal with a shell in it and no sign
     // that the command was dropped.
@@ -340,7 +366,13 @@ describe("the keystrokes the viewer reads", () => {
   test("the arrows move within what is visible and stop at the ends", () => {
     const down = viewerStep(entries, VIEWER_START, "", press({ downArrow: true })).state;
     expect(down.index).toBe(1);
-    const further = viewerStep(entries, down, "", press({ downArrow: true })).state;
+    // Pressed more times than there are rows, so what stops the cursor
+    // is the clamp rather than the arithmetic of this test — which is
+    // what used to stop it, back when the registry held three actions.
+    let further = down;
+    for (let i = 0; i <= entries.length; i++) {
+      further = viewerStep(entries, further, "", press({ downArrow: true })).state;
+    }
     expect(further.index).toBe(entries.length - 1);
     expect(viewerStep(entries, VIEWER_START, "", press({ upArrow: true })).state.index).toBe(0);
   });

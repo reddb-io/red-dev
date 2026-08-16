@@ -47,6 +47,8 @@ describe("the registry itself", () => {
       "terminal.new",
       "terminal.elevated",
       "panel.network",
+      "panel.audio",
+      "panel.power",
     ]);
   });
 

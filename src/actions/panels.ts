@@ -38,4 +38,27 @@ export const PANEL_ACTIONS: readonly SemanticAction[] = [
     // network panel to Super+Ctrl+W, which ADR 0006 leaves to the host.
     chord: "Ctrl+Alt+N",
   },
+  {
+    id: "panel.audio",
+    label: "Audio panel",
+    platforms: WITH_A_DISPLAY,
+    // Opening it lists what the machine plays and hears. Switching from
+    // inside it needs nothing on Ubuntu — the sound server belongs to
+    // the session — and on Windows it opens the host's own Sound page,
+    // because nothing Microsoft ships can set the default device.
+    mutates: false,
+    privileged: false,
+    // A for audio, and free in the family on both hosts.
+    chord: "Ctrl+Alt+A",
+  },
+  {
+    id: "panel.power",
+    label: "Power panel",
+    platforms: WITH_A_DISPLAY,
+    mutates: false,
+    privileged: false,
+    // P for power. Neither host claims it, and the one thing that might
+    // — GNOME's print-screen family — lives on Print, not on P.
+    chord: "Ctrl+Alt+P",
+  },
 ];

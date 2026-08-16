@@ -347,11 +347,19 @@ export function firePlan(
       };
     }
 
-    case "panel.network": {
+    case "panel.network":
+    case "panel.audio":
+    case "panel.power": {
       // A Panel is a TUI, so firing one means giving it a terminal of
       // its own. The viewer is already drawing in this one, and running
       // the Panel inside it would put two full-screen surfaces on the
       // same frame.
+      //
+      // One case for all of them, and the subsystem taken off the id
+      // rather than written out per Panel: every Panel is opened exactly
+      // the same way, and three copies of this block is how the fourth
+      // one arrives with the gnome-terminal flag wrong.
+      const name = id.slice("panel.".length);
       if (onWindowsHost(p)) {
         // `start` with the empty title slot, exactly as terminal.new
         // uses it, and for the same reason: this process is a console
@@ -361,8 +369,8 @@ export function firePlan(
         return {
           ok: true,
           id,
-          argv: ["cmd.exe", "/c", "start", "", "red-dev.exe", "panel", "network"],
-          note: "the network panel in a new window",
+          argv: ["cmd.exe", "/c", "start", "", "red-dev.exe", "panel", name],
+          note: `the ${name} panel in a new window`,
         };
       }
       const found = LINUX_TERMINALS.find((cmd) => locate(cmd) !== null);
@@ -374,14 +382,14 @@ export function firePlan(
         return {
           ok: false,
           id,
-          detail: "no terminal emulator on PATH — run `red-dev panel network` here instead",
+          detail: `no terminal emulator on PATH — run \`red-dev panel ${name}\` here instead`,
         };
       }
       return {
         ok: true,
         id,
-        argv: [found, TERMINAL_EXEC[found] ?? "-e", "red-dev", "panel", "network"],
-        note: `the network panel in ${found}`,
+        argv: [found, TERMINAL_EXEC[found] ?? "-e", "red-dev", "panel", name],
+        note: `the ${name} panel in ${found}`,
       };
     }
 

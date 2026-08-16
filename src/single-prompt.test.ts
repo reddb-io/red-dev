@@ -79,6 +79,19 @@ const EXEMPT: Record<string, string> = {
     "Ctrl+Alt+Shift+T shortcut raises through byte 21 of its .lnk. Nothing is being " +
     "converged, so there is no batch to defer it into — deferring it would mean " +
     "answering a request for a shell by scheduling one.",
+  "panel-network.ts":
+    "The DNS switch inside the network Panel, and the same argument keys.ts makes: " +
+    "the prompt is the act. Somebody highlighted a resolver and pressed enter, asking " +
+    "for a change to this machine now, and the batch is deliberately the wrong place " +
+    "for it (decision of 2026-08-15) — deferring it would mean the DNS they chose " +
+    "takes effect at the end of their next converge. It is the only Panel that " +
+    "elevates: audio and power drive commands that ask for nothing.",
+  "panel.ts":
+    "Names the elevators rather than running one. `raisesRights` reads an argv and " +
+    "answers whether it asks the machine for rights, which is how every Panel's " +
+    "observation is held to being unprivileged — the spellings in it are there to be " +
+    "found in somebody else's command. This module spawns nothing but the reads its " +
+    "callers hand it.",
   "wsl.ts":
     "The machine-wide font repair, which predates the guarantee and is the one " +
     "second prompt still in the tree. It fires only on a machine where the per-user " +
