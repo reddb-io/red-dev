@@ -43,7 +43,11 @@ describe("the registry itself", () => {
   test("carries the actions the areas have so far", () => {
     // Empty areas are aggregated too, so this is the whole list and not
     // just the module that happens to be filled.
-    expect(ACTIONS.map((a) => a.id)).toEqual(["terminal.new", "terminal.elevated"]);
+    expect(ACTIONS.map((a) => a.id)).toEqual([
+      "terminal.new",
+      "terminal.elevated",
+      "panel.network",
+    ]);
   });
 
   test("gives every action exactly one chord, in the Ctrl+Alt family", () => {

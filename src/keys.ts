@@ -32,7 +32,7 @@
 
 import { ACTIONS, actionById, validateActions } from "./actions/index.ts";
 import type { SemanticAction } from "./actions/index.ts";
-import { WINDOWS_HOTKEYS } from "./hotkeys.ts";
+import { START_MENU_ACTIONS, WINDOWS_HOTKEYS } from "./hotkeys.ts";
 import type { Platform } from "./platform.ts";
 
 /**
@@ -62,6 +62,18 @@ export interface KeyEntry {
 }
 
 /**
+ * What an adapter has to say about one action.
+ *
+ * Three answers, because an adapter that does not register a chord is
+ * saying one of two very different things. `unclaimed` is "I have never
+ * carried this action" — a feature whose adapter half has not landed,
+ * which is news to live with. `missing` is "I carry it and no chord came
+ * back", which is the registry having lost something underneath a working
+ * adapter, and is a bug. A boolean would report either one as the other.
+ */
+type Registration = "bound" | "missing" | "unclaimed";
+
+/**
  * The thing that turns a chord into a registration on this target.
  *
  * One today: the Windows Start Menu `.lnk`, in src/hotkeys.ts. GNOME's
@@ -72,14 +84,17 @@ export interface KeyEntry {
 interface Adapter {
   /** Named the way the reason sentence needs to read. */
   name: string;
-  binds(id: string): boolean;
+  registers(id: string): Registration;
 }
 
 function adapterFor(p: Platform): Adapter | null {
   if (p.env === "windows" || p.env === "wsl") {
     return {
       name: "Windows Start Menu",
-      binds: (id) => WINDOWS_HOTKEYS.some((h) => h.id === id && h.combo !== null),
+      registers: (id) => {
+        if (!START_MENU_ACTIONS.includes(id)) return "unclaimed";
+        return WINDOWS_HOTKEYS.some((h) => h.id === id && h.combo !== null) ? "bound" : "missing";
+      },
     };
   }
   return null;
@@ -134,11 +149,25 @@ export function keyEntries(
       };
     }
 
-    if (!adapter.binds(action.id)) {
+    const registration = adapter.registers(action.id);
+    if (registration === "missing") {
       return {
         ...head,
         state: "broken",
-        reason: `the ${adapter.name} adapter does not register it, though this target should`,
+        reason: `the ${adapter.name} adapter carries it and no chord came back, though this target should`,
+      };
+    }
+
+    if (registration === "unclaimed") {
+      // The sibling of the no-adapter sentence above, and deliberately
+      // worded like it: an adapter exists here, it simply has not grown
+      // a shortcut for this action. Reported as the fact it is rather
+      // than as a fault, because calling it broken would send whoever
+      // reads it looking for a shortcut that was never written.
+      return {
+        ...head,
+        state: "unsupported",
+        reason: `the ${adapter.name} adapter has no shortcut for it yet, so nothing registers the chord here`,
       };
     }
 
@@ -235,6 +264,22 @@ export type FirePlan =
  */
 const LINUX_TERMINALS = ["alacritty", "x-terminal-emulator", "gnome-terminal", "xterm"] as const;
 
+/**
+ * How each of them is told to run a command instead of a shell.
+ *
+ * Not one flag for all four. `gnome-terminal`'s `-e` takes a single
+ * string and has been deprecated for years; everything after `--` is the
+ * argv it runs, which is the form that survives an argument with a space
+ * in it. Getting this wrong opens a terminal with a shell in it and no
+ * sign that the command was dropped.
+ */
+const TERMINAL_EXEC: Record<string, string> = {
+  alacritty: "-e",
+  "x-terminal-emulator": "-e",
+  "gnome-terminal": "--",
+  xterm: "-e",
+};
+
 /** Windows is the host that registers chords, from either side of WSL. */
 function onWindowsHost(p: Platform): boolean {
   return p.env === "windows" || p.env === "wsl";
@@ -299,6 +344,44 @@ export function firePlan(
         id,
         argv: ["powershell.exe", "-NoProfile", "-Command", "Start-Process powershell -Verb RunAs"],
         note: "PowerShell, once the consent prompt is answered",
+      };
+    }
+
+    case "panel.network": {
+      // A Panel is a TUI, so firing one means giving it a terminal of
+      // its own. The viewer is already drawing in this one, and running
+      // the Panel inside it would put two full-screen surfaces on the
+      // same frame.
+      if (onWindowsHost(p)) {
+        // `start` with the empty title slot, exactly as terminal.new
+        // uses it, and for the same reason: this process is a console
+        // process, and spawning from it would hand the Panel the console
+        // red-dev is drawing in. red-dev.exe is on the PATH both
+        // installers write.
+        return {
+          ok: true,
+          id,
+          argv: ["cmd.exe", "/c", "start", "", "red-dev.exe", "panel", "network"],
+          note: "the network panel in a new window",
+        };
+      }
+      const found = LINUX_TERMINALS.find((cmd) => locate(cmd) !== null);
+      if (!found) {
+        // The refusal names the command, because that is the whole
+        // remedy: a person on a headless machine can run it where they
+        // already are, and telling them so is more use than a terminal
+        // that could not be opened.
+        return {
+          ok: false,
+          id,
+          detail: "no terminal emulator on PATH — run `red-dev panel network` here instead",
+        };
+      }
+      return {
+        ok: true,
+        id,
+        argv: [found, TERMINAL_EXEC[found] ?? "-e", "red-dev", "panel", "network"],
+        note: `the network panel in ${found}`,
       };
     }
 
