@@ -50,6 +50,8 @@ type Handlers = {
   plan: () => Promise<number>;
   platform: () => number;
   apps: () => Promise<number>;
+  keys: () => Promise<number>;
+  learn: () => Promise<number>;
   lang: () => Promise<number>;
   shell: () => Promise<number>;
   uninstall: () => Promise<number>;
@@ -238,6 +240,36 @@ async function redwallMenu(p: Platform): Promise<void> {
   }
 }
 
+/**
+ * The same flat list the fullscreen menu offers, in one line each.
+ *
+ * Held apart from the loop, and exported, because it is the narrow
+ * terminal's copy of a decision made in tui.ts: the menu grows by flat
+ * sections. Two copies that can silently disagree is how one surface
+ * ends up missing an entry for a release; a test reads both.
+ */
+export function menuEntries(p: Platform): [string, ...string[]] {
+  const wslish = p.env === "wsl" || p.os === "windows";
+  return [
+    "Install — converge this machine",
+    "Theme — colour scheme",
+    "Wallpaper — Red artwork",
+    "Font — family and size",
+    "Redwall — machine state on the wallpaper",
+    "Apps — optional tools",
+    "Keys — every action, its chord, and what is bound here",
+    "Languages — runtimes mise manages",
+    ...(wslish ? ["Shell — where a terminal lands"] : []),
+    "Update — upgrade, then converge",
+    "Plan — preview, change nothing",
+    "Doctor — report drift",
+    "Learn — the README, RedSkills, and the keys viewer",
+    "Uninstall — remove tools or config",
+    "Platform — what this machine is",
+    "Quit",
+  ];
+}
+
 export async function runMenu(
   p: Platform,
   inv: Invocation,
@@ -253,23 +285,7 @@ export async function runMenu(
   let last = 0;
 
   for (;;) {
-    const wslish = p.env === "wsl" || p.os === "windows";
-    const entries = [
-      "Install — converge this machine",
-      "Theme — colour scheme",
-      "Wallpaper — Red artwork",
-      "Font — family and size",
-      "Redwall — machine state on the wallpaper",
-      "Apps — optional tools",
-      "Languages — runtimes mise manages",
-      ...(wslish ? ["Shell — where a terminal lands"] : []),
-      "Update — upgrade, then converge",
-      "Plan — preview, change nothing",
-      "Doctor — report drift",
-      "Uninstall — remove tools or config",
-      "Platform — what this machine is",
-      "Quit",
-    ] as [string, ...string[]];
+    const entries = menuEntries(p);
 
     const picked = await select("What now?", entries, entries[0]);
     const verb = picked.split(" ")[0];
@@ -292,6 +308,12 @@ export async function runMenu(
         break;
       case "Apps":
         last = await h.apps();
+        break;
+      case "Keys":
+        last = await h.keys();
+        break;
+      case "Learn":
+        last = await h.learn();
         break;
       case "Languages":
         last = await h.lang();

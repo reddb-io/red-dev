@@ -75,14 +75,27 @@ function Swatches(hexes: string[]) {
   );
 }
 
-interface MenuSection {
+export interface MenuSection {
   key: string;
   label: string;
   /** Shown in the right-hand panel while this section is highlighted. */
   notes: string[];
 }
 
-const SECTIONS: MenuSection[] = [
+/**
+ * The menu, as a flat list.
+ *
+ * Flat is a decision, not a stage it has not grown out of. Omarchy's
+ * menu is a tree, and a tree is how "open the network panel" becomes
+ * three keystrokes down a path you have to remember the shape of; every
+ * section here is one move from the top, and the ones that would be
+ * branches — Keys, Learn — are sections of their own instead.
+ *
+ * Exported so a test can read the list. It is a claim about the product
+ * rather than about a render, and pinning it through a screenshot would
+ * make it a claim about layout.
+ */
+export const SECTIONS: MenuSection[] = [
   {
     // First, and it is not filler. The right panel was empty until a
     // section was highlighted, which meant the landing screen of the
@@ -139,6 +152,28 @@ const SECTIONS: MenuSection[] = [
     notes: [
       "Optional tools, never installed by a",
       "plain converge. Chosen, not assumed.",
+    ],
+  },
+  {
+    key: "keys",
+    label: "Keys",
+    notes: [
+      "Every action red-dev knows, its chord,",
+      "and whether this machine binds it.",
+      "Search it, and press enter to run one —",
+      "including the ones nothing binds here,",
+      "which are listed with the reason rather",
+      "than left out.",
+    ],
+  },
+  {
+    key: "learn",
+    label: "Learn",
+    notes: [
+      "The README at the section you want,",
+      "RedSkills, and the keys viewer — the",
+      "one answer a link cannot give, because",
+      "it is about this machine.",
     ],
   },
 ];

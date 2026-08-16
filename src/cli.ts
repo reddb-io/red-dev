@@ -182,6 +182,18 @@ export function buildCli(): CLI {
       apps: {
         description: "choose optional tools to install",
       },
+      keys: {
+        // No positional and no flags. What it lists comes from the
+        // action registry and what it says about each row comes from
+        // this machine, so there is nothing here for a caller to decide
+        // — and the search is typed into the viewer, not onto the
+        // command line, because the point of the thing is to find a
+        // chord you cannot name yet.
+        description: "search every action and its chord, and run one",
+      },
+      learn: {
+        description: "the README by anchor, RedSkills, and the keys viewer",
+      },
       agents: {
         description:
           "choose coding agents, wire red-skills into them, or `update` each by its publisher's mechanism",
