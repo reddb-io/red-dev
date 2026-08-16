@@ -153,7 +153,8 @@ export const SECTIONS: MenuSection[] = [
       "Optional tools and web apps, never",
       "installed by a plain converge. Chosen,",
       "not assumed — and unticking an",
-      "installed web app takes it back off.",
+      "installed one takes it back off, after",
+      "naming exactly what goes.",
     ],
   },
   {
