@@ -23,7 +23,6 @@ import {
   unlinkSync,
 } from "node:fs";
 import { log, RedError } from "./log.ts";
-import type { Tool } from "./manifest.ts";
 import { tlsTrustFailure, unattendedEnvironment } from "./unattended.ts";
 import type { Platform } from "./platform.ts";
 
@@ -807,177 +806,25 @@ async function cliNamesRedSkills(cmd: string[]): Promise<boolean> {
 }
 
 /**
- * Whether Claude's marketplace points at GitHub rather than at a
- * directory on this disk.
+ * Where the marketplace registration is decided, and why it is not here.
  *
- * The vendor installer registers `~/.red-skills/current`, which is a
- * symlink into a versioned snapshot taken the day it ran. Claude then
- * does exactly what it was asked: auto-update re-reads that directory,
- * finds it unchanged, and records a fresh lastUpdated. The machine
- * reports "Updated today" and sits on the version it was installed
- * with — 3.3.0 against 3.3.7 upstream, for a week, with nothing
- * anywhere saying so.
+ * This file used to hold the other side of it: a pair of probes asking
+ * whether each host's marketplace pointed at GitHub, and a pair of
+ * repairs that repointed a directory-registered host back at
+ * `reddb-io/red-skills`. That was right while nothing on the machine
+ * moved `~/.red-skills/current` — a directory source meant a host frozen
+ * at its install-day snapshot, reporting "Updated today" against a
+ * version a week behind.
  *
- * "Is red-skills in the list" cannot see that: the name is present
- * either way. The source is what distinguishes a marketplace that can
- * receive updates from one that only appears to.
+ * mise moves it now, so the directory is the only source pinned to the
+ * version this machine resolved, and red-dev registers from it. Keeping
+ * the repair beside that would be one converge evicting the registration
+ * the previous one made — the endless eviction the arbitration exists to
+ * end, with both ends of it in this repo.
+ *
+ * red-skills-registration.ts owns all of it: the boundary read, the
+ * declaration, and the read-back that proves it took.
  */
-export async function claudeMarketplaceIsGithub(): Promise<boolean | null> {
-  const home = process.env["HOME"] ?? process.env["USERPROFILE"];
-  if (!home) return null;
-  const path = `${home.replace(/\\/g, "/")}/.claude/plugins/known_marketplaces.json`;
-  if (!existsSync(path)) return null;
-  try {
-    const known = JSON.parse(await Bun.file(path).text()) as Record<
-      string,
-      { source?: { source?: string } }
-    >;
-    const entry = known["red-skills"];
-    if (!entry) return null;
-    return entry.source?.source === "github";
-  } catch {
-    // Unreadable is not the same as wrong. Null means "no opinion", and
-    // the caller leaves the machine alone rather than repointing a
-    // marketplace on a guess.
-    return null;
-  }
-}
-
-function tomlStringValue(line: string, key: string): string | null {
-  const match = line.match(new RegExp(`^\\s*${key}\\s*=\\s*"([^"]*)"\\s*$`));
-  return match?.[1] ?? null;
-}
-
-/**
- * Whether Codex's marketplace points at GitHub rather than a local
- * red-skills snapshot.
- *
- * Codex records marketplace sources in config.toml. A local source has
- * the same failure mode as Claude's directory marketplace: RedSkills
- * appears installed and enabled, but MCP launchers that fall back to
- * Codex's Git marketplace checkout have nowhere to go.
- */
-export async function codexMarketplaceIsGithub(): Promise<boolean | null> {
-  const home = process.env["HOME"] ?? process.env["USERPROFILE"];
-  if (!home) return null;
-  const path = `${home.replace(/\\/g, "/")}/.codex/config.toml`;
-  if (!existsSync(path)) return null;
-
-  try {
-    const lines = (await Bun.file(path).text()).split(/\r?\n/);
-    let inTable = false;
-    for (const line of lines) {
-      const table = line.match(/^\s*\[([^\]]+)\]\s*$/);
-      if (table) {
-        inTable = table[1] === "marketplaces.red-skills";
-        continue;
-      }
-      if (!inTable) continue;
-      const sourceType = tomlStringValue(line, "source_type");
-      if (sourceType !== null) return sourceType === "git";
-    }
-    return null;
-  } catch {
-    // Unreadable is not the same as wrong. Null means "no opinion", and
-    // the caller leaves the machine alone rather than repointing a
-    // marketplace on a guess.
-    return null;
-  }
-}
-
-/**
- * What a marketplace repair needs from outside itself.
- *
- * Both fields have real defaults and exist for the tests: a repair is a
- * sequence of commands issued to a CLI that may not be installed, and
- * the thing worth pinning is *which* commands, against *which* declared
- * plugin set. Injecting the runner is what lets that be asserted without
- * an agent, a marketplace or a network in the loop.
- */
-export interface MarketplaceRepair {
-  /** Runs one argv and answers its exit code. Defaults to spawnLogged. */
-  run?: (cmd: string[]) => Promise<number>;
-  /** The manifest to derive the plugin set from. Defaults to TOOLS. */
-  tools?: readonly Tool[];
-}
-
-async function repairRunner(opts: MarketplaceRepair): Promise<(cmd: string[]) => Promise<number>> {
-  if (opts.run) return opts.run;
-  const { spawnLogged } = await import("./providers.ts");
-  return (cmd: string[]) => spawnLogged(cmd);
-}
-
-/**
- * Repoint Claude's marketplace from the frozen directory to GitHub.
- *
- * Remove, re-add by repo, reinstall the plugins — the same five steps
- * anyone doing this by hand runs, because there is no `marketplace
- * set-source`. The plugins have to be reinstalled: they were installed
- * from a marketplace that no longer exists under that name.
- *
- * Which plugins is the manifest's answer, not this function's. A machine
- * that opted `brain` out has no entry for it, so a repair that named it
- * here would reinstall precisely what the operator removed.
- *
- * Not destructive in any way that matters. Everything removed here is
- * re-created from the origin in the same run, and the source cache under
- * ~/.red-skills is left alone.
- */
-export async function repointClaudeMarketplace(
-  p: Platform,
-  opts: MarketplaceRepair = {},
-): Promise<void> {
-  const run = await repairRunner(opts);
-  const { redSkillsPluginNames } = await import("./red-skills-plugins.ts");
-
-  log.step("red-skills: marketplace points at a local directory — repointing at GitHub");
-  log.plain("     A directory source cannot receive updates. Claude re-reads the");
-  log.plain("     same snapshot and records a new timestamp, so a stuck machine");
-  log.plain("     reports itself as current.");
-
-  await run(["claude", "plugin", "marketplace", "remove", "red-skills"]);
-  if ((await run(["claude", "plugin", "marketplace", "add", "reddb-io/red-skills"])) !== 0) {
-    throw new RedError("could not add the red-skills marketplace from GitHub");
-  }
-  for (const plugin of redSkillsPluginNames(p, opts.tools)) {
-    await run(["claude", "plugin", "install", `${plugin}@red-skills`]);
-  }
-  log.ok("red-skills marketplace now tracks reddb-io/red-skills");
-}
-
-/**
- * Repoint Codex's marketplace from a local snapshot to GitHub.
- *
- * Codex keeps plugin enablement when a marketplace is removed, but the
- * explicit add calls refresh the cache for whichever RedSkills plugins
- * this machine declares — they are what contribute skills, hooks and MCP
- * servers, and the set comes from the manifest for the same reason it
- * does above.
- */
-export async function repointCodexMarketplace(
-  p: Platform,
-  opts: MarketplaceRepair = {},
-): Promise<void> {
-  const run = await repairRunner(opts);
-  const { redSkillsPluginNames } = await import("./red-skills-plugins.ts");
-
-  log.step("red-skills: Codex marketplace points at a local directory — repointing at GitHub");
-  log.plain("     A local Codex marketplace can leave MCP launchers looking");
-  log.plain("     for a Git marketplace checkout that does not exist.");
-
-  if ((await run(["codex", "plugin", "marketplace", "remove", "red-skills"])) !== 0) {
-    throw new RedError("could not remove the local red-skills marketplace from Codex");
-  }
-  if ((await run(["codex", "plugin", "marketplace", "add", "reddb-io/red-skills"])) !== 0) {
-    throw new RedError("could not add the red-skills marketplace to Codex from GitHub");
-  }
-  for (const plugin of redSkillsPluginNames(p, opts.tools)) {
-    if ((await run(["codex", "plugin", "add", `${plugin}@red-skills`])) !== 0) {
-      throw new RedError(`could not install ${plugin}@red-skills into Codex`);
-    }
-  }
-  log.ok("Codex red-skills marketplace now tracks reddb-io/red-skills");
-}
 
 function configHome(): string {
   const home = process.env["HOME"] ?? process.env["USERPROFILE"] ?? "";
@@ -1046,16 +893,6 @@ export async function convergeRedSkills(p: Platform): Promise<void> {
   const { refreshProductSkill } = await import("./product-skill.ts");
   await refreshProductSkill(p);
 
-  // Before asking whether it is wired: a marketplace registered against
-  // a local directory is wired and permanently stale, which no amount
-  // of reinstalling the same installer will fix.
-  if (commandPath("claude") && (await claudeMarketplaceIsGithub()) === false) {
-    await repointClaudeMarketplace(p);
-  }
-  if (commandPath("codex") && (await codexMarketplaceIsGithub()) === false) {
-    await repointCodexMarketplace(p);
-  }
-
   const missing = await unwiredSkillHosts();
   if (missing.length === 0) {
     log.skip(`red-skills already wired into ${present.map((h) => h.cmd).join(", ")}`);
@@ -1070,6 +907,18 @@ export async function convergeRedSkills(p: Platform): Promise<void> {
       await applyRedcode(p);
     }
   }
+
+  // After the installer, never before it, because red-dev has the last
+  // word on this machine. The standalone one-liner registers from GitHub
+  // wherever it runs — including from the line above — and where red-dev
+  // is present the directory it advances is the declared source. Running
+  // this first would leave the installer's registration standing until
+  // the next converge.
+  //
+  // Free when the registration is already ours: the hosts are asked what
+  // they recorded, and an ordinary converge issues no commands at all.
+  const { convergeMarketplaceOwnership } = await import("./red-skills-registration.ts");
+  await convergeMarketplaceOwnership(p);
 
   // On both paths, and where the early return used to be. Being wired is
   // not the same as being current: mise advances the version underneath a
