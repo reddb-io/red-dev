@@ -26,6 +26,7 @@ import type { Platform } from "./platform.ts";
 // back from here, which is type-only and erased — there is no cycle at
 // run time.
 import { sshAccessRemoval } from "./ssh-access.ts";
+import { readRecord, uninstallHerdrPlugin, uninstallVscodeExtension } from "./red-skills-ext.ts";
 
 export interface Removal {
   tool: string;
@@ -155,6 +156,66 @@ export function removableTools(p: Platform): { tool: Tool; removal: Removal }[] 
   // not. See src/ssh-access.ts.
   const ssh = toolsInScope("core").find((tool) => tool.name === "ssh-server");
   if (ssh) out.push({ tool: ssh, removal: sshAccessRemoval(p) });
+
+  // The two RedSkills artifacts, which the loop cannot reach for the
+  // same two reasons: both are `managed`, so nothing probes for them,
+  // and both have a builtin provider, so `removalFor` has no package to
+  // name. What makes them removable anyway is the record the install
+  // writes — the only artifact on the machine that means "red-dev did
+  // this" rather than "an extension exists". No record, nothing offered:
+  // a machine that installed the extension by hand keeps it.
+  out.push(...redSkillsExtensionRemovals(p));
+  return out;
+}
+
+/**
+ * The removals the install record justifies, and only those.
+ *
+ * Exported so the record's authority over the offer is testable on its
+ * own: it is the whole difference between removing what we installed and
+ * removing what happens to be there.
+ */
+export function redSkillsExtensionRemovals(p: Platform): { tool: Tool; removal: Removal }[] {
+  // A home this process cannot name is a machine with no record to read,
+  // and that must not cost the operator the rest of the removal list.
+  let record;
+  try {
+    record = readRecord();
+  } catch {
+    return [];
+  }
+  const out: { tool: Tool; removal: Removal }[] = [];
+  const named = (name: string) => toolsInScope("optional").find((t) => t.name === name);
+
+  const vscode = named("red-skills-vscode");
+  if (vscode && record.vscode) {
+    const editors = record.vscode.editors ?? [];
+    out.push({
+      tool: vscode,
+      removal: {
+        tool: vscode.name,
+        how: `uninstall the extension from ${editors.join(", ") || "the editors it went into"}`,
+        run: async () => {
+          await uninstallVscodeExtension();
+        },
+      },
+    });
+  }
+
+  const herdr = named("red-skills-herdr");
+  if (herdr && record.herdr) {
+    out.push({
+      tool: herdr,
+      removal: {
+        tool: herdr.name,
+        how: "herdr plugin uninstall reddb-io.red-skills",
+        run: async () => {
+          await uninstallHerdrPlugin(p);
+        },
+      },
+    });
+  }
+
   return out;
 }
 

@@ -366,7 +366,7 @@ describe("the consumers that resolve through current", () => {
     }
   }
 
-  test("the extension builder still finds the source, and resolves past the link", async () => {
+  test("the layout is still readable through the link, and resolves past it", async () => {
     const home = fakeHome();
     const installs = fakeInstalls(["3.18.12"]);
     convergeRedSkillsCoreLayout({ home, installsDir: installs, platform: "linux" });
@@ -375,8 +375,8 @@ describe("the consumers that resolve through current", () => {
     await withHome(home, () => {
       expect(sourceRoot()).toBe(`${home}/.red-skills/current`);
       // The link is the only thing that moves and every version under
-      // it is immutable, so the resolved path is the whole freshness
-      // question for anything built out of the tree.
+      // it is immutable, so the resolved path is what names the version
+      // this machine is actually resolving through.
       expect(resolvedSource()).toBe(realpathSync(corePayloadDir(installs, "3.18.12")));
     });
   });
