@@ -23,7 +23,6 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { repointClaudeMarketplace, repointCodexMarketplace } from "./agents.ts";
 import { TOOLS, type Tool } from "./manifest.ts";
 import { convergeMiseConfig, miseConfigPath, miseEntries, miseToolNames } from "./mise-config.ts";
 import type { Platform } from "./platform.ts";
@@ -33,6 +32,10 @@ import {
   redSkillsPluginNames,
   REDSKILLS_PLUGIN_PREFIX,
 } from "./red-skills-plugins.ts";
+import {
+  REGISTRATION_HOSTS,
+  convergeMarketplaceOwnership,
+} from "./red-skills-registration.ts";
 
 const UBUNTU: Platform = {
   os: "linux",
@@ -155,13 +158,21 @@ describe("the set is derived, not written down", () => {
     // source because the absence of a list is not observable any other
     // way: a second copy would agree with the manifest on the day it was
     // written and drift from it silently afterwards.
-    const src = readFileSync(`${import.meta.dir}/agents.ts`, "utf8");
-    expect(src).not.toContain(`["dev", "memory", "brain"]`);
-    expect(src).toContain("redSkillsPluginNames");
+    //
+    // Both files, because both issue plugin commands: the registration
+    // reinstalls what a re-registration replaced, and the host refresh
+    // updates what is already installed.
+    for (const file of ["agents.ts", "red-skills-registration.ts", "red-skills-hosts.ts"]) {
+      const src = readFileSync(`${import.meta.dir}/${file}`, "utf8");
+      expect(src, file).not.toContain(`["dev", "memory", "brain"]`);
+    }
+    expect(readFileSync(`${import.meta.dir}/red-skills-registration.ts`, "utf8")).toContain(
+      "redSkillsPluginNames",
+    );
   });
 });
 
-/** The `<plugin>@red-skills` arguments a repair asked a host to install. */
+/** The `<plugin>@red-skills` arguments a registration asked a host to install. */
 function installedBy(calls: string[][]): string[] {
   return calls
     .map((cmd) => cmd.find((arg) => arg.endsWith("@red-skills")))
@@ -169,19 +180,40 @@ function installedBy(calls: string[][]): string[] {
     .map((arg) => arg.replace("@red-skills", ""));
 }
 
-async function claudeCalls(tools: readonly Tool[]): Promise<string[][]> {
+/** The source red-dev registers, which never has to exist for this. */
+const SOURCE = "/home/someone/.red-skills/current";
+
+/**
+ * What one host is asked when red-dev declares its registration.
+ *
+ * The host is picked out of the same table the converge walks, so a
+ * spelling that moves there moves here too rather than being asserted
+ * against a copy of it.
+ */
+async function hostCalls(name: string, tools: readonly Tool[]): Promise<string[][]> {
+  const host = REGISTRATION_HOSTS.find((h) => h.name === name);
+  if (!host) throw new Error(`no host named ${name}`);
   const { calls, run } = recorder();
-  await repointClaudeMarketplace(UBUNTU, { run, tools });
+  await convergeMarketplaceOwnership(UBUNTU, {
+    home: mkdtempSync(join(tmpdir(), "red-plugins-registration-")),
+    source: SOURCE,
+    hosts: [host],
+    present: () => true,
+    run,
+    tools,
+  });
   return calls;
 }
 
-async function codexCalls(tools: readonly Tool[]): Promise<string[][]> {
-  const { calls, run } = recorder();
-  await repointCodexMarketplace(UBUNTU, { run, tools });
-  return calls;
+function claudeCalls(tools: readonly Tool[]): Promise<string[][]> {
+  return hostCalls("claude", tools);
 }
 
-describe("the loops that reinstall plugins after a repair", () => {
+function codexCalls(tools: readonly Tool[]): Promise<string[][]> {
+  return hostCalls("codex", tools);
+}
+
+describe("the loops that reinstall the plugins a registration replaced", () => {
   test("Claude installs one plugin per manifest entry, in manifest order", async () => {
     // Order included: the manifest is where the dependency order between
     // plugins is expressed — memory builds on dev — so a repair that
@@ -214,14 +246,14 @@ describe("the loops that reinstall plugins after a repair", () => {
     }
   });
 
-  test("the marketplace itself is still repaired, whatever the plugin set is", async () => {
-    // The plugins are the second half of the repair. Deriving their set
-    // must not quietly drop the first half, which is the re-registration
-    // the whole function exists for.
+  test("the marketplace itself is still registered, whatever the plugin set is", async () => {
+    // The plugins are the second half of the declaration. Deriving their
+    // set must not quietly drop the first half, which is the
+    // re-registration the whole function exists for.
     const calls = await claudeCalls([]);
     expect(calls.map((cmd) => cmd.join(" "))).toEqual([
       "claude plugin marketplace remove red-skills",
-      "claude plugin marketplace add reddb-io/red-skills",
+      `claude plugin marketplace add ${SOURCE}`,
     ]);
   });
 });
