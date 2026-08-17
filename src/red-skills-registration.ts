@@ -196,6 +196,24 @@ export const REGISTRATION_HOSTS: readonly RegistrationHost[] = [
   },
 ];
 
+/**
+ * Is this the registration red-dev declares, on the path that moves?
+ *
+ * Directory-sourced is not enough on its own. A host registered against
+ * `versions/v3.3.0` is directory-sourced and pinned to a directory that is
+ * correct today and never moves again, which is the original frozen
+ * machine wearing the right kind. Only `current` follows mise.
+ *
+ * One definition, because two callers ask it: the converge, to decide it
+ * has nothing to do, and the drift check, to decide the machine is well.
+ */
+export function registrationIsOurs(
+  registration: MarketplaceRegistration | null,
+  source: string,
+): boolean {
+  return registration?.kind === "directory" && samePath(registration.source, source);
+}
+
 /** What one host was left registered against, or the reason nothing happened. */
 export interface RegistrationOutcome {
   /** The host's name in REGISTRATION_HOSTS. */
@@ -274,7 +292,7 @@ export async function convergeMarketplaceOwnership(
     }
 
     const before = await host.read(home);
-    if (before?.kind === "directory" && samePath(before.source, source)) {
+    if (registrationIsOurs(before, source)) {
       log.skip(`${host.name}: red-skills already registered from ${source}`);
       out.push({
         host: host.name,
