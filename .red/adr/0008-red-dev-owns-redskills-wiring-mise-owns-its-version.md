@@ -1,6 +1,6 @@
 # 0008 — red-dev owns RedSkills wiring; mise owns its version
 
-- Status: accepted
+- Status: superseded by ADR 0010
 - Date: 2026-08-16
 - Contexts: `agents`, `lifecycle`
 - Sources: the RedSkills `/start` grilling session of 2026-08-16; red-skills ADR 0146 (what gets published)

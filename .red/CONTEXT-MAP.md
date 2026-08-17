@@ -9,7 +9,7 @@ Bounded contexts split by **subject** (language boundary), never by OS nor by im
 | `interaction` | Semantic actions: hotkeys, tiling, workspaces, launcher | `.red/contexts/interaction/CONTEXT.md` |
 | `visual` | Visual system: themes, fonts, wallpapers, config ownership | `.red/contexts/visual/CONTEXT.md` |
 | `agents` | Agent hosts, RedSkills, MCPs, and agent accessibility | `.red/contexts/agents/CONTEXT.md` |
-| `lifecycle` | Self-update of the binary, channels, rollback, origin verification | *(no resolved terms yet)* |
+| `lifecycle` | Self-update of the binary, channels, rollback, origin verification | `.red/contexts/lifecycle/CONTEXT.md` |
 
 ## Relationships
 
