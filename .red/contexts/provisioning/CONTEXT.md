@@ -27,3 +27,9 @@ _Avoid_: optional list, extras, pre-installs (Omarchy's word for the same tier)
 ## E2E lane
 
 A clean machine (VM) for one target platform that walks the full journey — install → second convergence with zero drift → theme/font switch → N-1 update → rollback → uninstall. Incremental definition of done: each phase only closes with lanes covering what it shipped; no item is ever declared ready by mere file existence.
+
+## Offline depot
+
+A transportable, integrity-checked directory that carries everything needed to bootstrap a supported clean machine without network access: the RedSkills source, required binaries and dependencies, a lock, and checksums. A source checkout by itself is not an Offline depot.
+
+_Avoid_: offline cache (may be incomplete or disposable), checkout (only one input)

@@ -4,7 +4,19 @@ Agent hosts, RedSkills, MCPs, and RedDB products' accessibility to agents.
 
 ## Agent host
 
-An agent client program that consumes RedSkills on a provisioned machine. Decided supported set: Claude Code, Codex, RedCode, Gemini, Pi, and Hermes — all six with shared skills and doctor verification. RedCode is the installed OpenCode-compatible host; existing OpenCode installations are retained but are no longer selected or managed. Hermes depends on official upstream RedSkills support.
+An agent client program that consumes RedSkills on a provisioned machine. Decided supported set: Claude Code, Codex, OpenCode, RedCode, Gemini, Pi, and Hermes — all seven with shared skills and doctor verification. OpenCode and RedCode are both managed OpenCode-compatible hosts. Hermes depends on official upstream RedSkills support.
+
+## RedSkills package set
+
+A coherent, versioned unit of the RedSkills workstation distribution: core, all plugin payloads, host manifests and generators, shared runtimes, daemon, companion integrations, and their required artifacts. Releases are the reproducible default; a local source checkout may stand in for the package set during development without becoming a second installation model. AI coder activation is deliberately narrower than its contents: only the `dev` plugin is installed into agent hosts.
+
+_Avoid_: RedSkills install (ambiguous between acquisition and host activation), plugin bundle (only one part of the set)
+
+## User-global installation
+
+An agent-host integration available to one operating-system user in every repository and new session. It is not a system-wide installation shared by other users, and it does not imply that an already-running host has reloaded changed plugins.
+
+_Avoid_: global installation (ambiguous between user-global and system-wide)
 
 ## Default agent
 
