@@ -8,7 +8,8 @@
  *
  * Refreshing a host is a marketplace update plus one plugin update per
  * declared plugin — several CLI invocations and a network round trip
- * each, per host, and the plan is for five hosts. A converge runs often
+ * each, per host, across five hosts — and for three of them a generator
+ * run that walks the whole skill tree. A converge runs often
  * and the overwhelming majority of them resolve the version they resolved
  * last time, so running the walk unconditionally is a cost paid on every
  * converge for a result identical to doing nothing.
@@ -35,6 +36,34 @@
  * its own reasons — a half-written config, a login that expired. That is
  * a fact about that host, so it is reported against that host and the
  * rest of the walk continues.
+ *
+ * ## Two kinds of host, and why they are not symmetrical
+ *
+ * Claude and Codex are CLI calls red-dev makes itself: both expose a
+ * marketplace and a plugin cache, and refreshing them is a handful of
+ * arguments spelled out here.
+ *
+ * OpenCode, RedCode and pi have no marketplace. Their surface is
+ * generated — plugin modules, skill trees, MCP and TUI config — by
+ * scripts that ship inside the RedSkills tree, beside the skills they
+ * render. So this file invokes those scripts and never reimplements
+ * them: a generator ported into this repo would be separated from the
+ * tree it renders, and a skill added to RedSkills would have to wait for
+ * a red-dev release before it could appear on anyone's machine.
+ *
+ * The scripts are addressed by path inside the resolved checkout, which
+ * is also how each one finds the tree it renders — it resolves its own
+ * repo root from `dirname $0/..`. Invoking `<source>/scripts/...` is
+ * therefore the whole of "with the tree as their source".
+ *
+ * ## Unwiring goes back through the same scripts
+ *
+ * The generators write an uninstall manifest recording every path they
+ * created, and their `--uninstall` removes what that manifest names and
+ * nothing else. That conservatism is the point: a config directory holds
+ * files nobody here put there. So unwiring is the same script with one
+ * more flag, exactly as the standalone installer calls it, rather than a
+ * second opinion in this repo about what RedSkills left behind.
  */
 
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
@@ -44,54 +73,147 @@ import type { Platform } from "./platform.ts";
 import type { Tool } from "./manifest.ts";
 
 /**
- * One host red-dev refreshes, and the commands that refresh it.
+ * One command in a host's wiring.
  *
- * `argv` is a function of the plugin set rather than a fixed list: which
- * plugins this machine carries is the manifest's answer, and a table that
- * wrote them down would be a second place for that to be declared.
+ * `optional` is what `try_run … || true` is in the shared installer, and
+ * it is load-bearing rather than decorative: removing a plugin that was
+ * never installed exits non-zero, and treating that as a failed host
+ * would leave a machine permanently unstamped and permanently rewalked.
  */
+export interface HostStep {
+  /** The command, as argv. */
+  argv: string[];
+  /** A non-zero exit here is reported, and the host carries on. */
+  optional?: boolean;
+}
+
+/**
+ * What a host's commands are a function of.
+ *
+ * The plugin set because which plugins this machine carries is the
+ * manifest's answer, and a table that wrote them down would be a second
+ * place for that to be declared. The checkout because three of the five
+ * hosts are wired by scripts that live inside it.
+ */
+export interface HostContext {
+  /** The plugin set this machine declares. */
+  plugins: readonly string[];
+  /** The resolved checkout — `~/.red-skills/versions/v<x>`, resolved. */
+  source: string;
+}
+
+/** One host red-dev wires RedSkills into, and how. */
 export interface SkillHostRefresh {
   /** Key in the stamp, and the name that appears in a log line. */
   name: string;
   /** The command that has to be on PATH for this host to exist. */
   cmd: string;
-  /** The refresh, as argv, in the order it has to be issued. */
-  argv: (plugins: readonly string[]) => string[][];
+  /** The refresh, in the order it has to be issued. */
+  wire: (ctx: HostContext) => HostStep[];
+  /** The removal, in the order it has to be issued. */
+  unwire: (ctx: HostContext) => HostStep[];
+}
+
+/** A command whose failure fails the host. */
+function must(...argv: string[]): HostStep {
+  return { argv };
+}
+
+/** A command whose failure is reported and stepped over. */
+function may(...argv: string[]): HostStep {
+  return { argv, optional: true };
 }
 
 /**
- * The hosts red-dev drives itself.
+ * A generator inside the installed tree, addressed by path.
  *
- * Claude and Codex are CLI calls, and each answers in its own currency —
- * both spellings were read off the installed CLIs rather than assumed:
+ * The path is the whole contract. Each script resolves its own repo root
+ * from where it sits, so naming it under `source` is what hands it the
+ * tree — there is no second flag saying which checkout to render, and
+ * inventing one here would be a place for the two to disagree.
+ */
+function generator(source: string, script: string): string {
+  return `${source}/scripts/${script}`;
+}
+
+/**
+ * OpenCode and RedCode, which are the same generator with a `--host`.
+ *
+ * RedCode is an OpenCode-compatible host: same generated surface, a
+ * different config directory. The shared installer expresses that as one
+ * function called twice, and so does this — a second table row spelling
+ * the same three flags out again is a place for them to drift.
+ */
+function opencodeCompatible(host: string): SkillHostRefresh {
+  const script = (source: string) => generator(source, "install-opencode.sh");
+  return {
+    name: host,
+    cmd: host,
+    wire: ({ source }) => [must(script(source), "--global", "--host", host)],
+    unwire: ({ source }) => [must(script(source), "--uninstall", "--global", "--host", host)],
+  };
+}
+
+/**
+ * The five hosts, and what each one is asked.
+ *
+ * Claude and Codex answer in their own currency, and both spellings were
+ * read off the installed CLIs rather than assumed:
  *
  *   claude  `plugin marketplace update <name>`  then `plugin update <p>`
  *   codex   `plugin marketplace upgrade <name>` then `plugin add <p>`
  *
- * Codex has no `plugin update`. Its `add` reinstalls from the refreshed
- * marketplace snapshot, which is the same fallback the marketplace
- * repair in agents.ts already relies on.
+ * Codex has no `plugin update` at all, so a refresh there is a remove
+ * followed by an add: the add reinstalls from the marketplace snapshot
+ * the line above it just upgraded. The remove is optional because a
+ * plugin that is not installed yet — the first converge on this machine,
+ * or a plugin the operator only just opted in to — makes it exit
+ * non-zero, and that is not a broken host.
  *
- * OpenCode, RedCode and pi are refreshed by the generators inside the
- * installed tree rather than by commands red-dev spells out, so they join
- * this table with the slice that invokes them.
+ * OpenCode, RedCode and pi are the tree's own generators, invoked with
+ * the tree as their source. pi takes `--source-dir` as well as the path,
+ * because it can install its packages from npm instead and the local
+ * checkout is what pins every host on this machine to one version.
  */
 export const REFRESH_HOSTS: readonly SkillHostRefresh[] = [
   {
     name: "claude",
     cmd: "claude",
-    argv: (plugins) => [
-      ["claude", "plugin", "marketplace", "update", "red-skills"],
-      ...plugins.map((p) => ["claude", "plugin", "update", `${p}@red-skills`]),
+    wire: ({ plugins }) => [
+      must("claude", "plugin", "marketplace", "update", "red-skills"),
+      ...plugins.map((p) => must("claude", "plugin", "update", `${p}@red-skills`)),
+    ],
+    unwire: ({ plugins }) => [
+      // `--keep-data`, matching the shared installer: unwiring a host is
+      // not a request to delete whatever the plugin stored for you.
+      ...plugins.map((p) => may("claude", "plugin", "remove", "--keep-data", p)),
+      may("claude", "plugin", "marketplace", "remove", "red-skills"),
     ],
   },
   {
     name: "codex",
     cmd: "codex",
-    argv: (plugins) => [
-      ["codex", "plugin", "marketplace", "upgrade", "red-skills"],
-      ...plugins.map((p) => ["codex", "plugin", "add", `${p}@red-skills`]),
+    wire: ({ plugins }) => [
+      must("codex", "plugin", "marketplace", "upgrade", "red-skills"),
+      ...plugins.flatMap((p) => [
+        may("codex", "plugin", "remove", `${p}@red-skills`),
+        must("codex", "plugin", "add", `${p}@red-skills`),
+      ]),
     ],
+    unwire: ({ plugins }) => [
+      ...plugins.map((p) => may("codex", "plugin", "remove", `${p}@red-skills`)),
+      may("codex", "plugin", "marketplace", "remove", "red-skills"),
+    ],
+  },
+  opencodeCompatible("opencode"),
+  opencodeCompatible("redcode"),
+  {
+    name: "pi",
+    cmd: "pi",
+    wire: ({ source }) => [
+      must(generator(source, "install-pi.sh"), "--source-dir", source, "--user"),
+    ],
+    unwire: ({ source }) => [must(generator(source, "install-pi.sh"), "--uninstall", "--user")],
   },
 ];
 
@@ -199,6 +321,7 @@ export async function refreshSkillHosts(
 
   const version = versionOf(source);
   const stamp = readHostStamp(home);
+  const ctx: HostContext = { plugins, source };
   const out: HostRefreshOutcome[] = [];
 
   for (const host of hosts) {
@@ -216,7 +339,7 @@ export async function refreshSkillHosts(
     }
 
     log.step(`${host.name}: refreshing red-skills against ${version}`);
-    const failure = await refreshOne(host, plugins, run);
+    const failure = await runSteps(host.wire(ctx), run);
     if (failure !== null) {
       // Reported and survived. The stamp keeps whatever it held, so the
       // next converge asks this host again.
@@ -234,22 +357,105 @@ export async function refreshSkillHosts(
   return out;
 }
 
-/** Runs one host's commands, and answers the first failure or null. */
-async function refreshOne(
-  host: SkillHostRefresh,
-  plugins: readonly string[],
+/** Runs one host's commands, and answers the first hard failure or null. */
+async function runSteps(
+  steps: readonly HostStep[],
   run: (cmd: string[]) => Promise<number>,
 ): Promise<string | null> {
-  for (const cmd of host.argv(plugins)) {
+  for (const step of steps) {
+    const what = step.argv.join(" ");
     let code: number;
     try {
-      code = await run(cmd);
+      code = await run(step.argv);
     } catch (error) {
-      return `${cmd.join(" ")} could not be run: ${(error as Error).message}`;
+      if (step.optional) {
+        log.warn(`${what} could not be run: ${(error as Error).message}`);
+        continue;
+      }
+      return `${what} could not be run: ${(error as Error).message}`;
     }
-    if (code !== 0) return `${cmd.join(" ")} exited ${code}`;
+    if (code === 0) continue;
+    if (step.optional) {
+      log.skip(`${what} exited ${code}, which this step is allowed to do`);
+      continue;
+    }
+    return `${what} exited ${code}`;
   }
   return null;
+}
+
+/** What one host did on the way out, or the reason it did nothing. */
+export interface HostUnwireOutcome {
+  /** The host's name in REFRESH_HOSTS. */
+  host: string;
+  /** True only when every required command for this host succeeded. */
+  unwired: boolean;
+  /** Why not, present exactly when `unwired` is false. */
+  reason?: string;
+}
+
+/**
+ * Take RedSkills back out of every host on the machine.
+ *
+ * The generator hosts route through the same scripts that wired them,
+ * which remove what their own manifest recorded and leave everything
+ * else alone — see the header. Claude and Codex are the CLI calls that
+ * undo the CLI calls above.
+ *
+ * With no checkout there is nothing to unwire *through*: the scripts
+ * live in the tree, and this repo deliberately holds no second opinion
+ * about which files RedSkills wrote. So a machine with no checkout is
+ * left alone and says so, rather than being guessed at.
+ *
+ * A host that comes out has its stamp entry dropped. The stamp means
+ * "this host has been refreshed against that checkout", which stops
+ * being true the moment the host is unwired — leaving it would let the
+ * next converge skip re-wiring a host that no longer has anything.
+ */
+export async function unwireSkillHosts(
+  p: Platform,
+  opts: HostRefreshOptions = {},
+): Promise<HostUnwireOutcome[]> {
+  const home = opts.home ?? homeOf();
+  const hosts = opts.hosts ?? REFRESH_HOSTS;
+
+  const source = opts.source !== undefined ? opts.source : await currentSource();
+  if (source === null) {
+    log.skip("red-skills: not installed, no host to unwire");
+    return [];
+  }
+
+  const plugins = opts.plugins ?? (await declaredPlugins(p, opts.tools));
+  const present = opts.present ?? (await presenceProbe());
+  const run = opts.run ?? (await defaultRunner());
+
+  const ctx: HostContext = { plugins, source };
+  const stamp = readHostStamp(home);
+  const out: HostUnwireOutcome[] = [];
+
+  for (const host of hosts) {
+    if (!present(host.cmd)) {
+      out.push({ host: host.name, unwired: false, reason: `${host.cmd} is not installed` });
+      continue;
+    }
+
+    log.step(`${host.name}: removing red-skills`);
+    const failure = await runSteps(host.unwire(ctx), run);
+    if (failure !== null) {
+      log.warn(`${host.name}: ${failure}`);
+      out.push({ host: host.name, unwired: false, reason: failure });
+      continue;
+    }
+
+    if (host.name in stamp) {
+      delete stamp[host.name];
+      await writeHostStamp(home, stamp);
+    }
+    log.ok(`${host.name}: red-skills removed`);
+    out.push({ host: host.name, unwired: true });
+  }
+
+  return out;
 }
 
 async function currentSource(): Promise<string | null> {
