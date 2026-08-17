@@ -1054,16 +1054,25 @@ export async function convergeRedSkills(p: Platform): Promise<void> {
   const missing = await unwiredSkillHosts();
   if (missing.length === 0) {
     log.skip(`red-skills already wired into ${present.map((h) => h.cmd).join(", ")}`);
-    return;
+  } else {
+    log.step(`red-skills: not wired into ${missing.map((h) => h.cmd).join(", ")}`);
+    await installRedSkills();
+    // The RedSkills generator owns the provider/MCP portions of opencode.json;
+    // red-dev owns terminal-following theme/input defaults. Re-apply our small
+    // merge after generation so a first RedCode migration converges in one run.
+    if (commandPath("redcode")) {
+      const { applyRedcode } = await import("./terminal-surfaces.ts");
+      await applyRedcode(p);
+    }
   }
 
-  log.step(`red-skills: not wired into ${missing.map((h) => h.cmd).join(", ")}`);
-  await installRedSkills();
-  // The RedSkills generator owns the provider/MCP portions of opencode.json;
-  // red-dev owns terminal-following theme/input defaults. Re-apply our small
-  // merge after generation so a first RedCode migration converges in one run.
-  if (commandPath("redcode")) {
-    const { applyRedcode } = await import("./terminal-surfaces.ts");
-    await applyRedcode(p);
-  }
+  // On both paths, and where the early return used to be. Being wired is
+  // not the same as being current: mise advances the version underneath a
+  // machine that was wired months ago, and the hosts read a marketplace
+  // cache that only moves when something tells it to.
+  //
+  // Free when nothing moved — the walk is gated on the resolved checkout,
+  // so an ordinary converge issues no host commands at all.
+  const { refreshSkillHosts } = await import("./red-skills-hosts.ts");
+  await refreshSkillHosts(p);
 }
