@@ -503,33 +503,55 @@ async function checkWslDistro(p: Platform): Promise<DriftCheck> {
 }
 
 /**
- * Whether red-skills can actually receive updates.
+ * Whether the marketplace reads the version this machine resolved.
  *
- * A marketplace registered against a local directory is the worst kind
- * of wrong: Claude re-reads the snapshot, finds it unchanged, and writes
- * a fresh timestamp — so the machine reports itself current while
- * sitting on whatever version the installer captured. Seen at 3.3.0
- * against 3.3.7 upstream, reporting "Updated today".
+ * This check used to read the other way round, and was right to: a
+ * directory registration meant a host frozen at its install-day
+ * snapshot, re-reading an unchanged tree and writing a fresh timestamp
+ * over it. Seen at 3.3.0 against 3.3.7 upstream, reporting "Updated
+ * today".
+ *
+ * mise moves the directory now. Where red-dev has a checkout it is the
+ * declared owner of the registration, so a host still pointed at GitHub
+ * is one the standalone installer got to last — it will keep resolving
+ * whatever is published rather than the version this machine pinned.
+ *
+ * With no checkout there is nothing red-dev owns here, and the
+ * standalone registration is the only one on the machine. That is not
+ * drift; it is the supported install mode, and saying otherwise would
+ * send an operator to fix a machine that is working.
  */
 async function checkRedSkillsSource(): Promise<DriftCheck> {
   if (!Bun.which("claude")) {
     return { name: "red-skills", status: "n/a", detail: "claude not installed" };
   }
   try {
-    const { claudeMarketplaceIsGithub } = await import("./agents.ts");
-    const github = await claudeMarketplaceIsGithub();
-    if (github === null) {
+    const { sourceRoot } = await import("./red-skills-ext.ts");
+    const source = sourceRoot();
+    if (source === null) {
+      return { name: "red-skills", status: "n/a", detail: "no managed checkout to register" };
+    }
+
+    const { claudeRegistration, registrationIsOurs } = await import(
+      "./red-skills-registration.ts"
+    );
+    const home = (process.env["HOME"] ?? process.env["USERPROFILE"] ?? "").replace(/\\/g, "/");
+    const registration = await claudeRegistration(home);
+    if (registration === null) {
       return { name: "red-skills", status: "n/a", detail: "no marketplace registered" };
     }
-    return github
-      ? { name: "red-skills", status: "ok", detail: "tracking reddb-io/red-skills" }
-      : {
-          name: "red-skills",
-          status: "drift",
-          detail:
-            "marketplace points at a local directory — it reports updates it cannot receive",
-          fix: "red-dev install core",
-        };
+    if (registrationIsOurs(registration, source)) {
+      return { name: "red-skills", status: "ok", detail: `registered from ${source}` };
+    }
+    return {
+      name: "red-skills",
+      status: "drift",
+      detail:
+        registration.kind === "github"
+          ? "marketplace tracks GitHub — this machine resolves red-skills through mise, and red-dev owns the registration"
+          : `marketplace is registered from ${registration.source}, which nothing advances`,
+      fix: "red-dev install core",
+    };
   } catch (err) {
     return { name: "red-skills", status: "n/a", detail: (err as Error).message };
   }
