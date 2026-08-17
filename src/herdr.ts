@@ -91,3 +91,31 @@ command = "herdr plugin action invoke ${toggleDashboardAction(p)} --plugin reddb
   log.ok("herdr: prefix+d opens the RedSkills dashboard");
   return true;
 }
+
+/**
+ * Take the binding back out when the plugin it invokes is removed.
+ *
+ * Only the generated block, found by its own header and ending at the
+ * blank line or end of file that closed it. A binding the operator wrote
+ * — including one that claims prefix+d, which the install deliberately
+ * refused to overwrite — is left exactly where it is. This is the same
+ * rule the dotfiles uninstall follows: unhook without rewriting a file
+ * we do not own.
+ */
+export async function unbindHerdrDashboard(p: Platform): Promise<boolean> {
+  const path = herdrConfigPath(p);
+  if (path === null || !existsSync(path)) return false;
+
+  const existing = await Bun.file(path).text();
+  const lines = existing.split("\n");
+  const start = lines.indexOf(GENERATED);
+  if (start === -1) return false;
+
+  let end = start + 1;
+  while (end < lines.length && lines[end]?.trim() !== "") end++;
+  const kept = [...lines.slice(0, start), ...lines.slice(end)].join("\n").trim();
+
+  await Bun.write(path, kept === "" ? "" : `${kept}\n`);
+  log.ok("herdr: the generated prefix+d binding is gone");
+  return true;
+}

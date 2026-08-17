@@ -1006,11 +1006,13 @@ export const TOOLS: Tool[] = [
     win: winget("BlenderFoundation.Blender"),
   },
   {
-    // Both build from the red-skills monorepo, which means a pnpm install
-    // of a turbo workspace the first time. The note exposes that cost;
-    // the setup still follows its uniform opt-out contract.
+    // Both come from the artifacts RedSkills already publishes: the
+    // `.vsix` and the plugin bundle are attached to every release, so
+    // neither needs a checkout, a pnpm install, or a build here. That is
+    // also the only way they can still be installed — the published
+    // package stopped carrying monorepo source.
     name: "red-skills-vscode",
-    about: "RedSkills panel for VS Code — builds from source, needs pnpm",
+    about: "RedSkills panel for VS Code — the published .vsix",
     scope: "optional",
     managed: true,
     u24: builtin("red-skills-vscode"),

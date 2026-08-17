@@ -12,7 +12,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { bindHerdrDashboard, herdrConfigPath } from "./herdr.ts";
+import { bindHerdrDashboard, herdrConfigPath, unbindHerdrDashboard } from "./herdr.ts";
 import type { Platform } from "./platform.ts";
 
 const LINUX: Platform = {
@@ -97,6 +97,39 @@ describe("binding the dashboard", () => {
     await bindHerdrDashboard(WINDOWS);
     const path = herdrConfigPath(WINDOWS) as string;
     expect(readFileSync(path, "utf8")).toContain("invoke toggle-dashboard-windows");
+  });
+});
+
+describe("unbinding it again", () => {
+  test("takes the generated block back out", async () => {
+    const path = machine();
+    await bindHerdrDashboard(LINUX);
+    expect(await unbindHerdrDashboard(LINUX)).toBe(true);
+    expect(readFileSync(path, "utf8")).not.toContain("prefix+d");
+  });
+
+  test("leaves everything the operator wrote", async () => {
+    // The one rule the uninstall shares with the dotfiles: unhook
+    // without rewriting a file we do not own.
+    const mine = '[theme]\nname = "tokyo-night"\n\n[[keys.command]]\nkey = "prefix+g"\ntype = "popup"\ncommand = "lazygit"\n';
+    const path = machine(mine);
+    await bindHerdrDashboard(LINUX);
+    await unbindHerdrDashboard(LINUX);
+    expect(readFileSync(path, "utf8").trim()).toBe(mine.trim());
+  });
+
+  test("leaves a prefix+d of the user's own alone", async () => {
+    // The install refused to claim this key; the uninstall must not
+    // claim the right to delete what claimed it instead.
+    const mine = '[[keys.command]]\nkey = "prefix+d"\ntype = "popup"\ncommand = "lazygit"\n';
+    const path = machine(mine);
+    expect(await unbindHerdrDashboard(LINUX)).toBe(false);
+    expect(readFileSync(path, "utf8")).toBe(mine);
+  });
+
+  test("says no when there is nothing to unbind", async () => {
+    machine();
+    expect(await unbindHerdrDashboard(LINUX)).toBe(false);
   });
 });
 
