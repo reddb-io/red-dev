@@ -17,13 +17,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { TOOLS, applicableScopes, providerFor } from "./manifest.ts";
-import {
-  AGENTS,
-  SKILL_HOSTS,
-  claudeMarketplaceIsGithub,
-  codexMarketplaceIsGithub,
-  repairCopiedRedSkillsCurrent,
-} from "./agents.ts";
+import { AGENTS, SKILL_HOSTS, repairCopiedRedSkillsCurrent } from "./agents.ts";
 import type { Platform } from "./platform.ts";
 
 function platform(over: Partial<Platform>): Platform {
@@ -160,129 +154,38 @@ describe("how it decides it is already done", () => {
   });
 });
 
-describe("a marketplace that reports updates it cannot receive", () => {
+describe("which registration a converge leaves behind", () => {
   const src = readFileSync("src/agents.ts", "utf8");
 
-  /** A HOME holding one crafted known_marketplaces.json. */
-  function fakeHome(entry: unknown): string {
-    const dir = mkdtempSync(`${tmpdir()}/red-mkt-`);
-    mkdirSync(`${dir}/.claude/plugins`, { recursive: true });
-    if (entry !== undefined) {
-      writeFileSync(
-        `${dir}/.claude/plugins/known_marketplaces.json`,
-        JSON.stringify({ "red-skills": entry }),
-      );
-    }
-    return dir;
-  }
-
-  async function sourceIsGithub(entry: unknown): Promise<boolean | null> {
-    const saved = process.env["HOME"];
-    process.env["HOME"] = fakeHome(entry);
-    try {
-      return await claudeMarketplaceIsGithub();
-    } finally {
-      if (saved === undefined) delete process.env["HOME"];
-      else process.env["HOME"] = saved;
-    }
-  }
-
-  test("a directory source is drift, however recently it says it updated", async () => {
-    // The exact entry off a real machine: autoUpdate on, a timestamp
-    // from today, and a version a week behind. Claude re-reads the
-    // snapshot, finds it unchanged, and records success.
-    expect(
-      await sourceIsGithub({
-        source: { source: "directory", path: "/home/x/.red-skills/current" },
-        lastUpdated: "2026-08-02T12:35:21.550Z",
-        autoUpdate: true,
-      }),
-    ).toBe(false);
-  });
-
-  test("a github source is what a working one looks like", async () => {
-    expect(
-      await sourceIsGithub({ source: { source: "github", repo: "reddb-io/red-skills" } }),
-    ).toBe(true);
-  });
-
-  test("no entry is no opinion, not a verdict", async () => {
-    // Null means leave the machine alone. Repointing a marketplace on a
-    // guess is worse than the drift.
-    expect(await sourceIsGithub(undefined)).toBeNull();
-  });
-
-  /** A HOME holding one crafted Codex config.toml. */
-  function fakeCodexHome(sourceType?: string): string {
-    const dir = mkdtempSync(`${tmpdir()}/red-codex-mkt-`);
-    mkdirSync(`${dir}/.codex`, { recursive: true });
-    if (sourceType !== undefined) {
-      writeFileSync(
-        `${dir}/.codex/config.toml`,
-        [
-          "[marketplaces.red-skills]",
-          'last_updated = "2026-08-02T18:04:00Z"',
-          `source_type = "${sourceType}"`,
-          sourceType === "git"
-            ? 'source = "https://github.com/reddb-io/red-skills.git"'
-            : 'source = "/home/x/.red-skills/versions/v3.3.0"',
-          "",
-        ].join("\n"),
-      );
-    }
-    return dir;
-  }
-
-  async function codexSourceIsGithub(sourceType?: string): Promise<boolean | null> {
-    const saved = process.env["HOME"];
-    process.env["HOME"] = fakeCodexHome(sourceType);
-    try {
-      return await codexMarketplaceIsGithub();
-    } finally {
-      if (saved === undefined) delete process.env["HOME"];
-      else process.env["HOME"] = saved;
-    }
-  }
-
-  test("Codex has the same local-marketplace drift as Claude", async () => {
-    expect(await codexSourceIsGithub("local")).toBe(false);
-  });
-
-  test("Codex git marketplaces can receive RedSkills updates", async () => {
-    expect(await codexSourceIsGithub("git")).toBe(true);
-  });
-
-  test("no Codex marketplace entry is no opinion", async () => {
-    expect(await codexSourceIsGithub(undefined)).toBeNull();
-  });
-
-  test("the name alone cannot tell the two apart", () => {
-    // Which is why the old check could not see this: `red-skills`
-    // appears in `plugin marketplace list` either way.
+  test("the marketplace list cannot tell a directory source from a GitHub one", () => {
+    // `red-skills` is in `plugin marketplace list` either way, which is
+    // why being wired and being registered the way red-dev declares are
+    // two different questions asked in two different places.
     const wired = src.slice(src.indexOf("async function cliNamesRedSkills"));
     expect(wired.slice(0, wired.indexOf("\n}"))).toContain("red-skills");
-    expect(src).toContain("claudeMarketplaceIsGithub");
-    expect(src).toContain("codexMarketplaceIsGithub");
+    expect(src).toContain("convergeMarketplaceOwnership");
   });
 
-  test("the repair reinstalls the plugins it removed", () => {
-    // They came from a marketplace that no longer exists under that
-    // name, so re-adding the source is not enough on its own.
-    //
-    // Which plugins is no longer written here: the set is the manifest's,
-    // and src/red-skills-plugins.test.ts asserts the commands a repair
-    // actually issues against it. What is left to pin at this level is
-    // that the reinstall step still exists at all.
-    const repair = src.slice(src.indexOf("export async function repointClaudeMarketplace"));
-    expect(repair).toContain("redSkillsPluginNames");
-    expect(repair).toContain("@red-skills");
+  test("red-dev declares its registration after the installer, never before", () => {
+    // `install.sh` registers from GitHub wherever it runs, including from
+    // the line above this one. Declaring first would leave the
+    // installer's registration standing until the next converge — which
+    // is the eviction seen from inside a single run.
+    const converge = src.slice(src.indexOf("export async function convergeRedSkills"));
+    const installed = converge.indexOf("await installRedSkills()");
+    const declared = converge.indexOf("convergeMarketplaceOwnership");
+    expect(installed).toBeGreaterThan(-1);
+    expect(declared).toBeGreaterThan(installed);
   });
 
-  test("the Codex repair refreshes the plugins that provide MCPs", () => {
-    const repair = src.slice(src.indexOf("export async function repointCodexMarketplace"));
-    expect(repair).toContain("plugin");
-    expect(repair).toContain("marketplace");
-    expect(repair).toContain("redSkillsPluginNames");
+  test("and nothing here heals a registration back to GitHub", () => {
+    // Both ends of the eviction used to live in this file: one converge
+    // registering the directory mise advances, the next repointing it at
+    // the repo. Where red-dev is present the directory wins, so the
+    // repair is gone rather than merely unused.
+    expect(src).not.toContain("repointClaudeMarketplace");
+    expect(src).not.toContain("repointCodexMarketplace");
+    expect(src).not.toContain('"add", "reddb-io/red-skills"');
   });
 
   test("castle has the repo-local fallback Codex already searches", () => {
