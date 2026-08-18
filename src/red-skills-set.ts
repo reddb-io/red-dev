@@ -88,6 +88,7 @@
 
 import { spawnSync } from "node:child_process";
 import {
+  chmodSync,
   cpSync,
   existsSync,
   lstatSync,
@@ -480,6 +481,7 @@ export type SetFailure =
   | "signature"
   | "tree"
   | "skew"
+  | "payload"
   | "downgrade";
 
 export type SetVerification =
@@ -638,7 +640,36 @@ export type MiseCandidate =
   | { kind: "skew"; versions: Record<string, string[]> }
   /** Some tool has not been installed at all yet — mid-converge, not a fault. */
   | { kind: "incomplete"; missing: string[] }
+  /** Every core mise has is a payload that cannot compose a set. */
+  | { kind: "unusable"; reason: string }
   | { kind: "none" };
+
+/**
+ * What a core payload must carry for the tree composed from it to serve
+ * every consumer: the two marketplace manifests the Claude and Codex
+ * registrations read, the shims, and the generators the OpenCode/RedCode
+ * and Pi refreshes run. Relative to the core package root.
+ *
+ * Checked before anything is composed, because a payload from before
+ * the package set (the npm package carried none of these until 3.19)
+ * composes a tree that *looks* complete and then fails at every host —
+ * and mise's release-age policy makes such a payload the one it
+ * resolves for days after a release. Refusing keeps `current` on the
+ * tree that works.
+ */
+export const CORE_PAYLOAD_CONTRACT: readonly string[] = [
+  "package.json",
+  ".claude-plugin/marketplace.json",
+  ".agents/plugins/marketplace.json",
+  "bin",
+  "scripts/install-opencode.sh",
+  "scripts/install-pi.sh",
+];
+
+/** What a core payload is missing to compose a set, or nothing. PURE over the tree. */
+export function corePayloadGaps(core: string): string[] {
+  return CORE_PAYLOAD_CONTRACT.filter((rel) => !existsSync(join(core, rel)));
+}
 
 /**
  * The one version to compose, or why there is none.
@@ -657,9 +688,28 @@ export function candidateFromMise(installsRoot: string, plugins: readonly string
 
   const versions: Record<string, string[]> = {};
   const missing: string[] = [];
+  const unusable: string[] = [];
   for (const [tool, dir] of Object.entries(dirs)) {
     const pkg = tool === REDSKILLS_CORE_ALIAS ? CORE_PACKAGE : `@reddb-io/${tool}`;
-    const present = installedVersions(dir).filter((v) => existsSync(join(payloadDir(dir, v, pkg), "package.json")));
+    let present = installedVersions(dir).filter((v) => existsSync(join(payloadDir(dir, v, pkg), "package.json")));
+    if (tool === REDSKILLS_CORE_ALIAS) {
+      // Only a core that can compose a set counts as a version of the
+      // core; one that cannot is remembered so the refusal can say why.
+      const usable = present.filter((v) => corePayloadGaps(payloadDir(dir, v, pkg)).length === 0);
+      unusable.push(...present.filter((v) => !usable.includes(v)));
+      if (present.length > 0 && usable.length === 0) {
+        const newest = present.at(-1) as string;
+        const gaps = corePayloadGaps(payloadDir(dir, newest, pkg));
+        return {
+          kind: "unusable",
+          reason:
+            `core ${newest} carries no ${gaps.join(", ")} — a payload from before the ` +
+            "package set cannot compose one (mise resolves a release only after its " +
+            "minimum release age; the newer core is not there yet)",
+        };
+      }
+      present = usable;
+    }
     versions[tool] = present;
     if (present.length === 0) missing.push(tool);
   }
@@ -720,6 +770,10 @@ export function composeSet(
   candidate: Extract<MiseCandidate, { kind: "ready" }>,
   dest: string,
 ): { ok: true } | { ok: false; reason: string } {
+  const gaps = corePayloadGaps(candidate.core);
+  if (gaps.length > 0) {
+    return { ok: false, reason: `core ${candidate.version} carries no ${gaps.join(", ")}` };
+  }
   for (const [name, dir] of Object.entries(candidate.plugins)) {
     const dist = join(dir, "dist");
     if (existsSync(dist) && !existsSync(join(dist, `${name}.bundle.min.mjs`))) {
@@ -745,7 +799,34 @@ export function composeSet(
     mkdirSync(dirname(config), { recursive: true });
     writeFileSync(config, hostActivationConfig(Object.keys(candidate.plugins)), "utf8");
   }
+  restoreScriptModes(dest);
   return { ok: true };
+}
+
+/**
+ * Make the generators runnable again.
+ *
+ * An npm tarball drops the executable bit on `scripts/*.sh`, and the
+ * host refresh spawns `<tree>/scripts/install-opencode.sh` directly —
+ * which is EACCES on a tree copied straight out of a package. The
+ * standalone installer runs them under `bash` for the same reason. This
+ * is red-dev's own copy, so the bit is put back where it belongs; on
+ * Windows the mode is meaningless and the call is harmless.
+ */
+function restoreScriptModes(tree: string): void {
+  const scripts = join(tree, "scripts");
+  for (const name of listing(scripts)) {
+    if (!name.endsWith(".sh")) continue;
+    const path = join(scripts, name);
+    if (statOf(path)?.isFile()) {
+      try {
+        chmodSync(path, 0o755);
+      } catch {
+        // A filesystem that refuses modes gives the same answer it gave
+        // the tarball; the host refresh will say so.
+      }
+    }
+  }
 }
 
 /**
@@ -1016,6 +1097,7 @@ export function convergeRedSkillsPackageSet(
     // Mid-converge: the rows install one at a time and ask after each.
     return unchanged();
   }
+  if (candidate.kind === "unusable") return refuse("payload", candidate.reason);
   if (candidate.kind === "skew") {
     const detail = Object.entries(candidate.versions)
       .map(([tool, list]) => `${tool} ${list.length > 0 ? list.join(",") : "none"}`)
@@ -1227,6 +1309,7 @@ function copyTree(from: string, to: string): void {
   rmSync(staging, { recursive: true, force: true });
   mkdirSync(dirname(to), { recursive: true });
   cpSync(from, staging, { recursive: true, dereference: true });
+  restoreScriptModes(staging);
   renameSync(staging, to);
 }
 

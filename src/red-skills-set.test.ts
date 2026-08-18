@@ -26,6 +26,7 @@ import {
   readFileSync,
   readlinkSync,
   realpathSync,
+  rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -41,6 +42,8 @@ import type { Platform } from "./platform.ts";
 import {
   candidateFromMise,
   composeSet,
+  CORE_PAYLOAD_CONTRACT,
+  corePayloadGaps,
   convergeRedSkillsPackageSet,
   convergeSetAfterMise,
   coreInstallsDir,
@@ -122,7 +125,7 @@ const reject: SignatureVerifier = () => ({ ok: false, reason: "test refused it" 
  */
 function fakeInstalls(
   versions: Partial<Record<"core" | (typeof PLUGINS)[number], string[]>>,
-  opts: { selectors?: boolean; content?: Record<string, string>; noBundle?: string[] } = {},
+  opts: { selectors?: boolean; content?: Record<string, string>; noBundle?: string[]; legacyCore?: string[] } = {},
 ): string {
   const root = mkdtempSync(join(tmpdir(), "red-set-installs-"));
   const content = opts.content ?? {};
@@ -130,6 +133,7 @@ function fakeInstalls(
     const payload = payloadDir(coreInstallsDir(root), version, "@reddb-io/red-skills");
     mkdirSync(join(payload, "bin"), { recursive: true });
     mkdirSync(join(payload, ".claude-plugin"), { recursive: true });
+    mkdirSync(join(payload, ".agents", "plugins"), { recursive: true });
     mkdirSync(join(payload, "dist"), { recursive: true });
     mkdirSync(join(payload, "scripts"), { recursive: true });
     writeFileSync(
@@ -138,12 +142,21 @@ function fakeInstalls(
     );
     writeFileSync(join(payload, "bin", "red-skills-redskilled.mjs"), "// redskilled\n");
     writeFileSync(join(payload, "bin", "red-skills-dev.mjs"), "// dev shim\n");
-    writeFileSync(
-      join(payload, ".claude-plugin", "marketplace.json"),
-      `${JSON.stringify({ name: "red-skills", plugins: PLUGINS.map((p) => ({ name: p, source: `./plugins/${p}` })) })}\n`,
-    );
+    const marketplace = `${JSON.stringify({ name: "red-skills", plugins: PLUGINS.map((p) => ({ name: p, source: `./plugins/${p}` })) })}\n`;
+    writeFileSync(join(payload, ".claude-plugin", "marketplace.json"), marketplace);
+    writeFileSync(join(payload, ".agents", "plugins", "marketplace.json"), marketplace);
     writeFileSync(join(payload, "dist", "opencode-host.bundle.min.mjs"), "// opencode-host\n");
-    writeFileSync(join(payload, "scripts", "install-opencode.sh"), "#!/bin/bash\n");
+    // Mode 0644, exactly as npm unpacks them.
+    writeFileSync(join(payload, "scripts", "install-opencode.sh"), "#!/bin/bash\n", { mode: 0o644 });
+    writeFileSync(join(payload, "scripts", "install-pi.sh"), "#!/bin/bash\n", { mode: 0o644 });
+    // A core from before the package set: bins and dist, nothing a host
+    // could register or run — the shape mise resolves while a newer
+    // release is still under its minimum release age.
+    if ((opts.legacyCore ?? []).includes(version)) {
+      rmSync(join(payload, ".claude-plugin"), { recursive: true });
+      rmSync(join(payload, ".agents"), { recursive: true });
+      rmSync(join(payload, "scripts"), { recursive: true });
+    }
   }
   for (const name of PLUGINS) {
     for (const version of versions[name] ?? []) {
@@ -235,6 +248,8 @@ function fakeManifestSet(opts: {
       `${JSON.stringify({ name: "@reddb-io/red-skills", version: opts.version ?? "3.19.5" })}\n`,
     );
     writeFileSync(join(tree, "bin", "red-skills-redskilled.mjs"), "// redskilled\n");
+    mkdirSync(join(tree, "scripts"), { recursive: true });
+    writeFileSync(join(tree, "scripts", "install-opencode.sh"), "#!/bin/bash\n", { mode: 0o644 });
   }
   return dir;
 }
@@ -398,6 +413,41 @@ describe("the candidate mise offers, read as one set rather than four tools", ()
     if (c.kind === "incomplete") expect(c.missing).toEqual(["red-skills-dev", "red-skills-memory", "red-skills-brain"]);
   });
 
+  test("a core from before the package set is unusable, and the refusal says what it lacks", () => {
+    // What this machine met on 2026-08-18: mise's minimum release age
+    // resolved 3.18.12 for all four tools, and that core carries no
+    // marketplace manifests and no generators. Composing it produced a
+    // tree every host failed against; refusing keeps `current` on the
+    // tree that works.
+    const root = aligned(["3.18.12"], { legacyCore: ["3.18.12"] });
+    const c = candidateFromMise(root, PLUGINS);
+    expect(c.kind).toBe("unusable");
+    if (c.kind === "unusable") {
+      expect(c.reason).toContain("core 3.18.12 carries no .claude-plugin/marketplace.json, .agents/plugins/marketplace.json, scripts/install-opencode.sh, scripts/install-pi.sh");
+      expect(c.reason).toContain("minimum release age");
+    }
+    expect(corePayloadGaps(payloadDir(coreInstallsDir(root), "3.18.12", "@reddb-io/red-skills"))).toEqual(
+      CORE_PAYLOAD_CONTRACT.filter((r) => r !== "package.json" && r !== "bin"),
+    );
+  });
+
+  test("a legacy core beside a complete one does not count, and the complete one wins", () => {
+    const root = fakeInstalls(
+      { core: ["3.18.12", "3.19.5"], dev: ["3.18.12", "3.19.5"], memory: ["3.18.12", "3.19.5"], brain: ["3.18.12", "3.19.5"] },
+      { legacyCore: ["3.18.12"] },
+    );
+    const c = candidateFromMise(root, PLUGINS);
+    expect(c.kind).toBe("ready");
+    if (c.kind === "ready") expect(c.version).toBe("3.19.5");
+    // And with the plugins only at the legacy version, there is no set
+    // — not a broken one.
+    const skewed = fakeInstalls(
+      { core: ["3.18.12", "3.19.5"], dev: ["3.18.12"], memory: ["3.18.12"], brain: ["3.18.12"] },
+      { legacyCore: ["3.18.12"] },
+    );
+    expect(candidateFromMise(skewed, PLUGINS).kind).toBe("skew");
+  });
+
   test("nothing installed at all is none", () => {
     expect(candidateFromMise(mkdtempSync(join(tmpdir(), "red-set-empty-")), PLUGINS)).toEqual({ kind: "none" });
   });
@@ -435,6 +485,11 @@ describe("the composed set", () => {
     expect(existsSync(join(tree, "dist", "opencode-host.bundle.min.mjs"))).toBe(true);
     // The activation config the OpenCode generator dies without.
     expect(readFileSync(join(tree, ".red", "config.yaml"), "utf8")).toBe(hostActivationConfig(PLUGINS));
+    // And the generators runnable: an npm tarball drops the bit, and the
+    // host refresh spawns them by path.
+    for (const script of ["install-opencode.sh", "install-pi.sh"]) {
+      expect(statSync(join(tree, "scripts", script)).mode & 0o111, script).toBe(0o111);
+    }
   });
 
   test("the activation config enables exactly the plugins the set carries", () => {
@@ -488,6 +543,29 @@ describe("the composed set", () => {
     expect(readFileSync(packageSetStatePath(home), "utf8")).not.toBe(beforeState);
     // And a second refusal for the same reason writes nothing more.
     expect(converge(home, skewed).writes).toEqual([]);
+  });
+
+  test("a legacy core is refused with current left where the standalone installer put it", () => {
+    // The tree install.sh materialised is what the hosts read today;
+    // a refused candidate must leave it exactly there, so the
+    // registration that runs next still finds a marketplace to register.
+    const home = fakeHome();
+    const legacy = join(home, ".red-skills", "versions", "v3.19.5");
+    mkdirSync(join(legacy, ".claude-plugin"), { recursive: true });
+    writeFileSync(join(legacy, "package.json"), "{}\n");
+    writeFileSync(join(legacy, ".claude-plugin", "marketplace.json"), "{}\n");
+    mkdirSync(join(home, ".red-skills"), { recursive: true });
+    symlinkSync(legacy, redSkillsCurrentLink(home));
+
+    const result = converge(home, aligned(["3.18.12"], { legacyCore: ["3.18.12"] }));
+
+    expect(result.refused?.failure).toBe("payload");
+    expect(result.active).toBeNull();
+    expect(realpathSync(redSkillsCurrentLink(home))).toBe(realpathSync(legacy));
+    expect(existsSync(join(realpathSync(redSkillsCurrentLink(home)), ".claude-plugin", "marketplace.json"))).toBe(true);
+    expect(existsSync(join(home, ".red-skills", "sets"))).toBe(false);
+    const rows = redSkillsSetRows(redSkillsSetReport(home));
+    expect(rows.at(-1)!.detail).toStartWith("last candidate refused (payload): core 3.18.12 carries no");
   });
 
   test("skew on a machine with no set leaves it with no set, and no current", () => {
@@ -748,6 +826,7 @@ describe("activating a published set", () => {
     expect(realpathSync(current)).toBe(realpathSync(result.revisionDir!));
     expect(result.revisionDir).toBe(redSkillsSetDir(home, revisionKey(result.active!)));
     expect(existsSync(join(result.revisionDir!, "plugins", "dev", "skills"))).toBe(true);
+    expect(statSync(join(result.revisionDir!, "scripts", "install-opencode.sh")).mode & 0o111).toBe(0o111);
     expect(readPackageSetState(home).revisions[0]).toMatchObject({ kind: "manifest", trust: "trusted" });
     // A copy into machine-owned storage: the set directory could be a
     // USB stick, and nothing on the machine may keep pointing at it.

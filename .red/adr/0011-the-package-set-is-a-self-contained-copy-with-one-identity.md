@@ -59,6 +59,12 @@ unknown schema is refused as incompatible metadata.
 
 ## Consequences
 
+- A core payload that cannot compose a set — no marketplace manifests, no generators; the
+  shape of the npm package before 3.19 — is refused, and `current` stays on the tree that
+  works. mise's `minimum_release_age` makes exactly that payload the one it resolves for
+  days after a release (observed on 2026-08-18: `latest` was 3.18.12 while 3.19.5 was
+  published), so this refusal is the ordinary state of a machine right after a RedSkills
+  release, not an edge case.
 - The four mise entries stay as the *acquisition* until #203's mise plugin and
   reddb-io/red-skills#3977's complete set replace them; what changed is that they are no
   longer resolved into the layout independently.

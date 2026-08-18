@@ -331,6 +331,10 @@ describe("what the hosts are asked", () => {
     const codex = hostNamed("codex");
     const steps = codex.wire(CTX);
     expect(steps[0]?.argv).toEqual(["codex", "plugin", "marketplace", "upgrade", "red-skills"]);
+    // Optional: a Directory marketplace — the one red-dev registers —
+    // is "not configured as a Git marketplace" to `upgrade`, and the
+    // add below reads the tree as it stands.
+    expect(steps[0]?.optional).toBe(true);
     expect(steps.some((s) => s.argv.includes("update"))).toBe(false);
 
     for (const plugin of PLUGINS) {
