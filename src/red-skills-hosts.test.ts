@@ -24,7 +24,9 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -40,6 +42,7 @@ import {
   redSkillsHostReport,
   redSkillsHostRows,
   removeSkillHosts,
+  type AdapterContext,
   type HostAdapter,
   type HostOutcome,
   type HostReconcileOptions,
@@ -163,8 +166,15 @@ done
 interface SetOptions {
   /** Skills the `dev` plugin carries. */
   skills?: string[];
-  /** Whether `dev` declares an MCP server for a host to project. */
-  mcp?: boolean;
+  /**
+   * Whether `dev` declares an MCP server for a host to project.
+   *
+   * `"dangling"` declares one whose script is not in the set — the shape a
+   * half-composed package set has, and the one a host must refuse.
+   */
+  mcp?: boolean | "dangling";
+  /** Whether `dev` declares hooks, and whether their scripts are there. */
+  hooks?: "declared" | "dangling";
   /** Generators to leave out, for the hosts that then have none. */
   without?: string[];
 }
@@ -191,10 +201,41 @@ function packageSet(opts: SetOptions = {}): string {
   addSkill(tree, "memory", "memory-only");
 
   if (opts.mcp !== false) {
+    // The dangling variant names a script by path, which is the only kind
+    // of declaration a host can check: `bun run d.mjs` resolves against a
+    // cwd nothing here owns, and pretending to verify it would be a check
+    // that fails on every correct set.
+    const server = opts.mcp === "dangling"
+      ? { command: "bun", args: ["run", "${CLAUDE_PLUGIN_ROOT}/servers/redskilled.mjs"] }
+      : { command: "bun", args: ["run", "d.mjs"] };
     writeFileSync(
       join(tree, "plugins", "dev", ".mcp.json"),
-      `${JSON.stringify({ mcpServers: { redskilled: { command: "bun", args: ["run", "d.mjs"] } } }, null, 2)}\n`,
+      `${JSON.stringify({ mcpServers: { redskilled: server } }, null, 2)}\n`,
     );
+  }
+
+  if (opts.hooks !== undefined) {
+    const dir = join(tree, "plugins", "dev", "hooks");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "hooks.json"),
+      `${JSON.stringify(
+        {
+          hooks: {
+            PreToolUse: [
+              { matcher: "Bash", hooks: [{ type: "command", command: "${CLAUDE_PLUGIN_ROOT}/hooks/castle.sh" }] },
+            ],
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    if (opts.hooks === "declared") {
+      const script = join(dir, "castle.sh");
+      writeFileSync(script, "#!/usr/bin/env bash\nexit 0\n");
+      chmodSync(script, 0o755);
+    }
   }
 
   mkdirSync(join(tree, ".red"), { recursive: true });
@@ -704,6 +745,235 @@ describe("configuration the operator owns", () => {
   });
 });
 
+// ------------------------------------------------------------- the Gemini
+
+/** What the Gemini adapter is a function of, for the checks called directly. */
+function geminiContext(m: Machine): AdapterContext {
+  return {
+    plugins: ACTIVATED,
+    source: m.tree,
+    setDigest: "0".repeat(64),
+    setVersion: "v9.9.9",
+    current: m.current,
+    home: m.home,
+    config: m.config,
+  };
+}
+
+const GEMINI_EXTENSION = ["extensions", "red-skills"] as const;
+
+function geminiDir(m: Machine): string {
+  return join(m.home, ".gemini", ...GEMINI_EXTENSION);
+}
+
+function geminiSettingsFile(m: Machine): string {
+  return join(m.home, ".gemini", "settings.json");
+}
+
+/** Every file under a tree, with the bytes and the mtime that prove no rewrite. */
+function snapshot(root: string, base = root): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const name of readdirSync(root).sort()) {
+    const path = join(root, name);
+    if (statSync(path).isDirectory()) {
+      Object.assign(out, snapshot(path, base));
+      continue;
+    }
+    out[path.slice(base.length)] = `${statSync(path).mtimeMs}\0${readFileSync(path, "utf8")}`;
+  }
+  return out;
+}
+
+async function geminiCheck(m: Machine): Promise<{ ok: boolean; reason?: string }> {
+  const adapter = adapterNamed("gemini");
+  const ctx = geminiContext(m);
+  const checked = await adapter.check?.(ctx, adapter.plan(ctx));
+  if (!checked) throw new Error("the Gemini adapter answers no check");
+  return checked.ok ? { ok: true } : { ok: false, reason: checked.reason };
+}
+
+function geminiOnly(m: Machine, opts: HostReconcileOptions = {}): Promise<HostOutcome[]> {
+  return reconcile(m, { run: runner(m).run, adapters: [adapterNamed("gemini")], ...opts });
+}
+
+describe("the Gemini projection of the local dev set", () => {
+  test("a set whose declared hook script is not in it never reaches the disk", async () => {
+    // The fixture the acceptance criteria ask for: a projection that names
+    // a path nothing carries. Refused at plan time, so `~/.gemini` is
+    // exactly as it was and there is no half-installed extension to find.
+    const m = machine({ hooks: "dangling" });
+    const { calls, run } = runner(m);
+    const out = await geminiOnly(m, { run });
+
+    expect(out[0]?.status).toBe("blocked");
+    expect(out[0]?.reason).toContain("hooks/castle.sh");
+    expect(calls).toEqual([]);
+    expect(existsSync(geminiDir(m))).toBe(false);
+    expect(readFileSync(geminiSettingsFile(m), "utf8")).toBe(geminiSettings());
+    expect(readHostRegistry(m.home).hosts["gemini"]).toBeUndefined();
+  });
+
+  test("and neither does one whose declared MCP server points at nothing", async () => {
+    const m = machine({ mcp: "dangling" });
+    const out = await geminiOnly(m);
+
+    expect(out[0]?.status).toBe("blocked");
+    expect(out[0]?.reason).toContain("servers/redskilled.mjs");
+    expect(existsSync(geminiDir(m))).toBe(false);
+    expect(readFileSync(geminiSettingsFile(m), "utf8")).toBe(geminiSettings());
+    expect(readHostRegistry(m.home).hosts["gemini"]).toBeUndefined();
+  });
+
+  test("a valid set installs into a clean Gemini home with nothing spawned", async () => {
+    // No `~/.gemini` at all, and no command issued: the projection is
+    // files red-dev writes itself, so it needs no CLI and no network.
+    const m = machine({ hooks: "declared" });
+    rmSync(join(m.home, ".gemini"), { recursive: true, force: true });
+
+    const { calls, run } = runner(m);
+    const out = await geminiOnly(m, { run });
+
+    expect(out[0]?.status).toBe("reconciled");
+    expect(out[0]?.mode).toBe("extension");
+    expect(calls).toEqual([]);
+
+    expect(JSON.parse(readFileSync(join(geminiDir(m), "gemini-extension.json"), "utf8"))).toMatchObject({
+      name: "red-skills",
+      contextFileName: "REDSKILLS.md",
+    });
+    expect(readFileSync(join(geminiDir(m), "REDSKILLS.md"), "utf8")).toContain("shipped");
+    expect(existsSync(join(geminiDir(m), "skills", "shipped", "SKILL.md"))).toBe(true);
+    expect(JSON.parse(readFileSync(geminiSettingsFile(m), "utf8"))["mcpServers"]).toEqual({
+      "red-skills-redskilled": { command: "bun", args: ["run", "d.mjs"] },
+    });
+    expect(readHostRegistry(m.home).hosts["gemini"]?.mode).toBe("extension");
+  });
+
+  test("verification reads Gemini's own state back, not the exit code", async () => {
+    const m = machine({ hooks: "declared" });
+
+    // Nothing projected yet: there is no extension for Gemini to load.
+    expect(await geminiCheck(m)).toMatchObject({ ok: false });
+
+    await geminiOnly(m);
+    expect(await geminiCheck(m)).toEqual({ ok: true });
+
+    // Every declared surface, one at a time. The manifest Gemini reads
+    // first, the skills path it resolves out of it, and the server it
+    // starts from a file red-dev owns one field of.
+    const manifest = join(geminiDir(m), "gemini-extension.json");
+    const kept = readFileSync(manifest, "utf8");
+    writeFileSync(manifest, "{ not json\n");
+    expect((await geminiCheck(m)).reason).toContain("Gemini can load");
+    writeFileSync(manifest, kept);
+
+    rmSync(join(geminiDir(m), "skills", "shipped"), { recursive: true, force: true });
+    expect((await geminiCheck(m)).reason).toContain("skills/shipped");
+    mkdirSync(join(geminiDir(m), "skills", "shipped"), { recursive: true });
+    writeFileSync(join(geminiDir(m), "skills", "shipped", "SKILL.md"), "---\nname: shipped\n---\n");
+
+    writeFileSync(geminiSettingsFile(m), geminiSettings());
+    expect((await geminiCheck(m)).reason).toContain("mcpServers.red-skills-redskilled");
+  });
+
+  test("and a state that moved under it is reconciled again rather than skipped", async () => {
+    const m = machine({ hooks: "declared" });
+    await geminiOnly(m);
+
+    // A second tool rewrote the settings file, taking our server with it.
+    writeFileSync(geminiSettingsFile(m), geminiSettings());
+    const out = await geminiOnly(m);
+
+    expect(out[0]?.status).toBe("reconciled");
+    expect(JSON.parse(readFileSync(geminiSettingsFile(m), "utf8"))["mcpServers"]["red-skills-redskilled"])
+      .toEqual({ command: "bun", args: ["run", "d.mjs"] });
+  });
+
+  test("re-running the install produces no drift at all", async () => {
+    const m = machine({ hooks: "declared" });
+    expect((await geminiOnly(m))[0]?.status).toBe("reconciled");
+    const before = snapshot(join(m.home, ".gemini"));
+
+    const { calls, run } = runner(m);
+    const out = await geminiOnly(m, { run });
+
+    expect(out[0]?.status).toBe("current");
+    expect(calls).toEqual([]);
+    // Byte for byte and mtime for mtime: a converge that rewrote an
+    // unchanged file would be claiming work it did not do.
+    expect(snapshot(join(m.home, ".gemini"))).toEqual(before);
+  });
+
+  test("uninstall removes what it owns and leaves the rest of ~/.gemini", async () => {
+    const m = machine({ hooks: "declared" });
+    await geminiOnly(m);
+
+    const theirs = join(m.home, ".gemini", "extensions", "their-extension");
+    mkdirSync(theirs, { recursive: true });
+    writeFileSync(join(theirs, "gemini-extension.json"), "{ \"name\": \"theirs\" }\n");
+
+    const out = await removeSkillHosts(UBUNTU, {
+      home: m.home,
+      config: m.config,
+      source: m.tree,
+      plugins: ACTIVATED,
+      present: () => true,
+      run: runner(m).run,
+      adapters: [adapterNamed("gemini")],
+    });
+
+    expect(out[0]?.removed).toBe(true);
+    expect(existsSync(geminiDir(m))).toBe(false);
+    expect(readFileSync(join(theirs, "gemini-extension.json"), "utf8")).toContain("theirs");
+    expect(readFileSync(geminiSettingsFile(m), "utf8")).toBe(geminiSettings());
+    expect(readHostRegistry(m.home).hosts["gemini"]).toBeUndefined();
+  });
+
+  test("what Gemini cannot be given is said in the outcome and in doctor", async () => {
+    // Hooks are the rich capability the set carries and this host has no
+    // runner for. Saying so is the point: a converge that reported seven
+    // identical hosts would be describing the table, not the machine.
+    const m = machine({ hooks: "declared" });
+    const first = await geminiOnly(m);
+
+    expect(first[0]?.status).toBe("reconciled");
+    expect(first[0]?.missing?.join(" ")).toContain("hooks");
+
+    // And it survives into the record, so the converge that skips the host
+    // still says what the host does not have.
+    const second = await geminiOnly(m);
+    expect(second[0]?.status).toBe("current");
+    expect(second[0]?.missing?.join(" ")).toContain("hooks");
+
+    const row = redSkillsHostRows(redSkillsHostReport(m.home)).find((r) => r.detail.startsWith("gemini"));
+    expect(row?.detail).toContain("hooks");
+    expect(redSkillsHostReport(m.home).hosts[0]?.capabilities).toContainEqual(
+      expect.objectContaining({ name: "hooks", state: "unsupported" }),
+    );
+  });
+
+  test("a set that declares no MCP is reported as carrying none, not as broken", async () => {
+    const m = machine({ mcp: false });
+    const out = await geminiOnly(m);
+
+    expect(out[0]?.status).toBe("reconciled");
+    expect(out[0]?.missing?.join(" ")).toContain("mcp");
+    expect(readFileSync(geminiSettingsFile(m), "utf8")).toBe(geminiSettings());
+  });
+
+  test("a Gemini session that was up is told to restart, never killed", async () => {
+    const m = machine({ hooks: "declared" });
+    const { calls, run } = runner(m);
+    const out = await geminiOnly(m, { run, running: () => true });
+
+    expect(out[0]?.reload).toBe("restart-needed");
+    expect(calls).toEqual([]);
+    const row = redSkillsHostRows(redSkillsHostReport(m.home)).find((r) => r.detail.startsWith("gemini"));
+    expect(row?.status).toBe("warn");
+    expect(row?.detail).toContain("restart needed");
+  });
+});
+
 // -------------------------------------------------------------- the removal
 
 describe("removal is the ownership manifest, replayed", () => {
@@ -881,5 +1151,8 @@ describe("the converge reaches the reconciliation", () => {
     const wired = converge.indexOf("already wired into");
     expect(wired).toBeGreaterThan(-1);
     expect(converge.slice(wired)).toContain("reconcileSkillHosts");
+    // And what a host did not get is on the converge itself rather than
+    // only in a doctor run nobody is obliged to make.
+    expect(converge.slice(wired)).toContain("h.missing");
   });
 });
