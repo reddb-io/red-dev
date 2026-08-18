@@ -781,14 +781,48 @@ async function cmdPrivileged(p: Platform, inv: Invocation): Promise<number> {
 async function cmdRedSkills(p: Platform, inv: Invocation): Promise<number> {
   const { isPluginPhase, PLUGIN_PHASES, runPluginPhase } = await import("./red-skills-mise-plugin.ts");
   const phase = inv.redSkillsPhase ?? "install";
+
+  // `sync` is red-dev's own, and is not one of the plugin's scripts on
+  // purpose: a development checkout moves for reasons mise cannot see,
+  // so nothing mise runs may advance one. See src/red-skills-checkout.ts.
+  if (phase === "sync") return await cmdRedSkillsSync(p, inv);
+
   if (!isPluginPhase(phase)) {
-    log.err(`unknown phase '${phase}' (expected: ${PLUGIN_PHASES.join(", ")})`);
+    log.err(`unknown phase '${phase}' (expected: ${[...PLUGIN_PHASES, "sync"].join(", ")})`);
     return 1;
   }
   return await runPluginPhase(phase, {
     manifestPlatform: p,
     ...(inv.redSkillsSelector ? { selector: inv.redSkillsSelector } : {}),
   });
+}
+
+/**
+ * Sync one development checkout, and reconcile the hosts against it.
+ *
+ * The explicit operation the override requires: a content identity read
+ * off the checkout, a digest-keyed staging built once and reused after,
+ * and the same reconciliation stamp every other acquisition is gated on
+ * — so a second sync with no edits in between writes nothing at all.
+ */
+async function cmdRedSkillsSync(p: Platform, inv: Invocation): Promise<number> {
+  const dir = inv.redSkillsSelector;
+  if (!dir) {
+    log.err("red-skills sync needs the checkout to sync: `red-dev red-skills sync <path>`");
+    return 1;
+  }
+
+  const { announceCheckout, syncRedSkillsCheckout } = await import("./red-skills-checkout.ts");
+  const { reconcileRedSkills } = await import("./red-skills-acquire.ts");
+
+  const synced = await syncRedSkillsCheckout({ dir, manifestPlatform: p });
+  announceCheckout(synced);
+  if (synced.outcome === "refused") return 1;
+
+  const reconciled = await reconcileRedSkills({ manifestPlatform: p });
+  if (reconciled.reconciled) log.ok(`red-skills: ${reconciled.reason}`);
+  else log.skip(`red-skills: ${reconciled.reason}`);
+  return 0;
 }
 
 /**
