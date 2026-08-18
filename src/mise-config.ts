@@ -75,7 +75,39 @@ export interface MiseEntry {
   alias?: string;
   /** A mise version selector: "1.23.2", "0.28", "latest". */
   version: string;
+  /**
+   * A command mise runs after it installs or upgrades this tool.
+   *
+   * The seam ADR 0010 asks for: `mise upgrade red-skills` has to reach
+   * red-dev's host reconciliation, and mise's own tool-level
+   * `postinstall` is the supported way to be told that a tool moved.
+   * Absent on every other entry, because a tool that is one binary on
+   * PATH has nothing for this machine to reconcile afterwards.
+   */
+  postinstall?: string;
 }
+
+/**
+ * What mise runs after RedSkills moves.
+ *
+ * The command is idempotent by construction — it compares the active
+ * package-set identity against the one the hosts were last converged
+ * against and returns without writing when they agree — so mise
+ * invoking it after a reinstall that changed nothing costs one process
+ * and no host state. See reconcileRedSkills in red-skills-acquire.ts.
+ */
+export const REDSKILLS_RECONCILE_POSTINSTALL = "red-dev red-skills reconcile";
+
+/**
+ * The alias whose entry carries that postinstall.
+ *
+ * Spelled here rather than imported from red-skills-set.ts, for the
+ * reason the spec is duplicated there rather than imported from here:
+ * this module is what the manifest projects, and an import in the other
+ * direction would close a cycle around a top-level `const`. A test pins
+ * the two spellings against each other.
+ */
+const REDSKILLS_ALIAS = "red-skills";
 
 /**
  * The directory mise installs tools into.
@@ -90,6 +122,23 @@ export function miseInstallRoot(env: NodeJS.ProcessEnv = process.env): string {
   const xdg = env["XDG_DATA_HOME"];
   if (xdg) return join(xdg, "mise", "installs");
   return join(homedir(), ".local", "share", "mise", "installs");
+}
+
+/**
+ * The directory mise keeps its plugins in.
+ *
+ * Beside `installs` under the same data root, and resolved the same
+ * way, because a machine that moved `MISE_DATA_DIR` moved both. A local
+ * plugin is a directory here; there is no registry entry and no network
+ * step, which is what makes `mise plugins link` and writing the
+ * directory ourselves the same act.
+ */
+export function misePluginRoot(env: NodeJS.ProcessEnv = process.env): string {
+  const explicit = env["MISE_DATA_DIR"];
+  if (explicit) return join(explicit, "plugins");
+  const xdg = env["XDG_DATA_HOME"];
+  if (xdg) return join(xdg, "mise", "plugins");
+  return join(homedir(), ".local", "share", "mise", "plugins");
 }
 
 /** Where the fragment lands. */
@@ -130,7 +179,17 @@ export function renderMiseConfig(entries: MiseEntry[]): string {
 
   if (sorted.length > 0) {
     out.push("", "[tools]");
-    for (const e of sorted) out.push(`${tomlKey(e.alias ?? e.spec)} = ${str(e.version)}`);
+    for (const e of sorted) {
+      const key = tomlKey(e.alias ?? e.spec);
+      // An inline table only where there is something to say beyond the
+      // version: every other row stays the one-line form a person can
+      // read, and a diff of this file keeps showing only what moved.
+      out.push(
+        e.postinstall
+          ? `${key} = { version = ${str(e.version)}, postinstall = ${str(e.postinstall)} }`
+          : `${key} = ${str(e.version)}`,
+      );
+    }
   }
 
   return `${out.join("\n")}\n`;
@@ -146,6 +205,12 @@ export function miseEntries(p: Platform, tools: readonly Tool[] = TOOLS): MiseEn
       spec: pr.spec,
       ...(pr.alias ? { alias: pr.alias } : {}),
       version: pr.version ?? "latest",
+      // The RedSkills entry, and only it: whichever way mise advances
+      // the package set — a suite upgrade, a bare `mise upgrade
+      // red-skills`, a first install — the hosts are reconciled from
+      // the same place afterwards, rather than only when red-dev
+      // happened to be the one driving.
+      ...(pr.alias === REDSKILLS_ALIAS ? { postinstall: REDSKILLS_RECONCILE_POSTINSTALL } : {}),
     });
   }
   return entries;

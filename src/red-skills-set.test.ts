@@ -37,7 +37,12 @@ import { join } from "node:path";
 
 import { sha256Hex } from "./checksum.ts";
 import { providerFor, TOOLS } from "./manifest.ts";
-import { miseEntries, miseToolNames, renderMiseConfig } from "./mise-config.ts";
+import {
+  miseEntries,
+  miseToolNames,
+  REDSKILLS_RECONCILE_POSTINSTALL,
+  renderMiseConfig,
+} from "./mise-config.ts";
 import type { Platform } from "./platform.ts";
 import { activatedPlugins } from "./red-skills-plugins.ts";
 import {
@@ -272,6 +277,16 @@ function findCosign(): string {
   const resolved = miseWhich("cosign");
   if (resolved) return resolved;
   if (onPath) return onPath;
+  // The installed binary before the shim, because the tests below run
+  // cosign with HOME pointed at a throwaway directory: a shim resolves
+  // the tool through mise's data dir under *that* HOME, finds nothing
+  // there, and answers "cosign is not a valid shim" — a failure about
+  // the harness wearing the clothes of a failure about the signature.
+  const installs = join(homedir(), ".local", "share", "mise", "installs", "cosign");
+  for (const selector of ["latest", "3", ...listing(installs)]) {
+    const binary = join(installs, selector, "cosign");
+    if (existsSync(binary)) return binary;
+  }
   const shim = join(homedir(), ".local", "share", "mise", "shims", "cosign");
   if (existsSync(shim)) return shim;
   throw new Error(
@@ -284,6 +299,15 @@ function miseWhich(tool: string): string | null {
   const answer = spawnSync("mise", ["which", tool], { encoding: "utf8" });
   const path = answer.status === 0 ? answer.stdout.trim() : "";
   return path.length > 0 && existsSync(path) ? path : null;
+}
+
+/** The names in one directory, or none when it is not there. */
+function listing(dir: string): string[] {
+  try {
+    return readdirSync(dir).sort();
+  } catch {
+    return [];
+  }
 }
 
 // ------------------------------------------------------------- the entries
@@ -314,6 +338,10 @@ describe("the manifest entries mise resolves", () => {
         spec: REDSKILLS_CORE_SPEC,
         alias: REDSKILLS_CORE_ALIAS,
         version: "latest",
+        // The seam ADR 0010 asks for: mise tells red-dev that the set
+        // moved. Asserted as a whole entry rather than a field, so a
+        // postinstall appearing on some *other* tool would fail here.
+        postinstall: REDSKILLS_RECONCILE_POSTINSTALL,
       });
     }
   });
@@ -321,7 +349,9 @@ describe("the manifest entries mise resolves", () => {
   test("the rendered fragment declares both halves, and quotes the spec", () => {
     const out = renderMiseConfig(miseEntries(UBUNTU));
     expect(out).toContain('red-skills = "npm:@reddb-io/red-skills"');
-    expect(out).toContain('red-skills = "latest"');
+    expect(out).toContain(
+      `red-skills = { version = "latest", postinstall = "${REDSKILLS_RECONCILE_POSTINSTALL}" }`,
+    );
   });
 
   test("the projection is byte-identical across runs", () => {

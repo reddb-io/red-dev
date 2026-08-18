@@ -769,6 +769,29 @@ async function cmdPrivileged(p: Platform, inv: Invocation): Promise<number> {
 }
 
 /**
+ * The phases mise's local plugin dispatches into, and the two a person
+ * has a reason to type.
+ *
+ * Every one of them is the acquisition in src/red-skills-acquire.ts;
+ * this is only the argv that reaches it. `list-all` and `latest-stable`
+ * print to stdout because that is what mise parses, so they must not be
+ * decorated — which is why the phase writes its answer through `out`
+ * rather than through a step line.
+ */
+async function cmdRedSkills(p: Platform, inv: Invocation): Promise<number> {
+  const { isPluginPhase, PLUGIN_PHASES, runPluginPhase } = await import("./red-skills-mise-plugin.ts");
+  const phase = inv.redSkillsPhase ?? "install";
+  if (!isPluginPhase(phase)) {
+    log.err(`unknown phase '${phase}' (expected: ${PLUGIN_PHASES.join(", ")})`);
+    return 1;
+  }
+  return await runPluginPhase(phase, {
+    manifestPlatform: p,
+    ...(inv.redSkillsSelector ? { selector: inv.redSkillsSelector } : {}),
+  });
+}
+
+/**
  * Update the machine: the package managers, then everything they do not
  * own, then the converge that checks the result against the manifest.
  *
@@ -789,6 +812,17 @@ async function cmdUpdate(p: Platform, inv: Invocation): Promise<number> {
     // install and leaves the checkout frozen forever under update.
     "red-skills": async () => {
       if (inv.dryRun) return;
+
+      // The online acquisition first, and through the same functions the
+      // mise plugin dispatches into — that is what makes `mise upgrade
+      // red-skills` and `red-dev update` reach one active digest instead
+      // of two implementations that agree until they do not. It reports
+      // `unavailable` and changes nothing until red-skills publishes the
+      // complete set (reddb-io/red-skills#3977), so the composed set the
+      // npm entries produce is what the stages below still advance.
+      const { updateRedSkillsPackageSet } = await import("./red-skills-acquire.ts");
+      await updateRedSkillsPackageSet({ manifestPlatform: p });
+
       const { updateRedSkills } = await import("./agents.ts");
       await updateRedSkills(p);
     },
@@ -2265,6 +2299,8 @@ async function main(): Promise<number> {
       return await cmdSsh(p, inv);
     case "learn":
       return await cmdLearn(p);
+    case "red-skills":
+      return await cmdRedSkills(p, inv);
     case "agents":
       return await cmdAgents(p, inv);
     case "lang":
