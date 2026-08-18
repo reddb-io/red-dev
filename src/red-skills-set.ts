@@ -486,7 +486,14 @@ export type SetFailure =
   | "tree"
   | "skew"
   | "payload"
-  | "downgrade";
+  | "downgrade"
+  // The last two are the acquisition's (red-skills-acquire.ts) rather
+  // than the verifier's: a set is refused the same way and recorded in
+  // the same state file whether it was composed from mise, imported
+  // from a depot, or downloaded — so it has one vocabulary, and doctor
+  // has one line to print it with.
+  | "cross-commit"
+  | "network";
 
 export type SetVerification =
   | {
@@ -605,6 +612,20 @@ export function payloadDir(installsDir: string, version: string, pkg: string): s
 }
 
 const EXACT_VERSION = /^(\d+)\.(\d+)\.(\d+)$/;
+
+/**
+ * The versions a *set* may carry, which is one more shape than mise's
+ * install directories have.
+ *
+ * ADR 0010's `next` channel is the prereleases: a machine following it
+ * activates a tree whose package.json says `3.20.0-next.1`, and a
+ * pattern that only admits `x.y.z` would refuse it as "no workstation
+ * tree" — a refusal about the version number wearing the clothes of a
+ * refusal about the payload. Deliberately not used for mise's installs
+ * tree above, where the exact-version rule is what tells a version
+ * apart from the `latest` and `3.18` selector links beside it.
+ */
+const SET_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
 /**
  * The exact versions mise has installed of one tool, oldest first.
@@ -955,7 +976,7 @@ export function revisionKey(id: PackageSetIdentity): string {
   return `${id.version}+${id.digest.slice(0, 12)}`;
 }
 
-const REVISION_KEY = /^\d+\.\d+\.\d+\+[0-9a-f]{12}$/;
+const REVISION_KEY = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\+[0-9a-f]{12}$/;
 
 /** `3.19.5+3fcba9589ff0@626a284` — one line naming one set. PURE. */
 export function formatPackageSetIdentity(id: PackageSetIdentity): string {
@@ -1291,6 +1312,21 @@ function recordRefusal(home: string, state: PackageSetState, refusal: PackageSet
 }
 
 /**
+ * The same record, for a refusal that happened before a candidate ever
+ * reached the converge.
+ *
+ * The acquisition refuses earlier than this module can: assets that
+ * belong to another commit, a release with no signature beside its
+ * manifest, a remote that could not be read. Those are the answer to
+ * the same question doctor asks — "why is this machine not on the
+ * revision it was told to be on" — so they are written to the same
+ * field rather than to a log line that scrolls away.
+ */
+export function recordPackageSetRefusal(home: string, refusal: PackageSetRefusal): string[] {
+  return recordRefusal(home, readPackageSetState(home), refusal);
+}
+
+/**
  * Drop the revision directories past the retention, and nothing else.
  *
  * Only directories named like a revision under `sets/`, plus a staging
@@ -1437,7 +1473,7 @@ function activeIdentity(state: PackageSetState): PackageSetIdentity | null {
 function versionOfTree(tree: string): string | null {
   try {
     const parsed = JSON.parse(readFileSync(join(tree, "package.json"), "utf8")) as { version?: unknown };
-    return typeof parsed.version === "string" && EXACT_VERSION.test(parsed.version) ? parsed.version : null;
+    return typeof parsed.version === "string" && SET_VERSION.test(parsed.version) ? parsed.version : null;
   } catch {
     return null;
   }

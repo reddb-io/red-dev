@@ -1535,8 +1535,22 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
         return;
       }
       if (pr.name === "red-skills") {
+        // The local mise plugin first: it is a directory of dispatchers
+        // into red-dev, so it costs nothing to have and it has to exist
+        // before any `[tools]` entry could name it (ADR 0010).
+        const { convergeRedSkillsMisePlugin } = await import("./red-skills-mise-plugin.ts");
+        convergeRedSkillsMisePlugin();
+
         const { convergeRedSkills } = await import("./agents.ts");
         await convergeRedSkills(ctx.platform);
+
+        // And record what the hosts were just converged against. mise
+        // runs the tool-level postinstall after every install it
+        // performs, including one that reinstalled the same revision;
+        // the stamp is what lets that call return without rewiring
+        // hosts red-dev has already wired this run.
+        const { reconcileRedSkills } = await import("./red-skills-acquire.ts");
+        await reconcileRedSkills({ reconcile: () => {} });
         return;
       }
       if (pr.name === "claude-keybindings") {

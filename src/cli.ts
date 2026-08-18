@@ -202,6 +202,28 @@ export function buildCli(): CLI {
       learn: {
         description: "the README by anchor, RedSkills, and the keys viewer",
       },
+      "red-skills": {
+        // The phases mise's plugin scripts dispatch into, and the two a
+        // person has a reason to type: `install [selector]` to move this
+        // machine onto a channel, version or commit, and `reconcile` to
+        // wire the hosts against whatever is active. Its own positionals
+        // rather than `scope`, which would reject `install` as an
+        // invalid scope and print the wrong list of words.
+        description:
+          "acquire the RedSkills package set: list-all, latest-stable, install [selector], reconcile",
+        positional: [
+          {
+            name: "phase",
+            description: "list-all, latest-stable, install, reconcile",
+            required: false,
+          },
+          {
+            name: "selector",
+            description: "with `install`: stable, next, a version, or a commit",
+            required: false,
+          },
+        ],
+      },
       agents: {
         description:
           "choose coding agents, wire red-skills into them, or `update` each by its publisher's mechanism",
@@ -324,6 +346,14 @@ export interface Invocation {
    * scope, and reusing `name` would reject it as an unknown theme.
    */
   logsWhich: string | undefined;
+  /**
+   * `red-skills <phase> [selector]` — its own two positionals, because
+   * a phase mise invokes and a revision a person pins are different
+   * facts, and one positional would swallow only the first word of
+   * `red-skills install 3.19.5`.
+   */
+  redSkillsPhase: string | undefined;
+  redSkillsSelector: string | undefined;
   /** Explicit selections make agents/lang safe to invoke across WSL unattended. */
   agentKeys: string[] | undefined;
   /**
@@ -426,6 +456,8 @@ export function parseArgs(cli: CLI, argv: string[]): Invocation {
     // under their own key; the caller reads whichever applies.
     scope: scope ?? (typeof rawName === "string" ? rawName : undefined),
     logsWhich: typeof pos["which"] === "string" ? pos["which"] : undefined,
+    redSkillsPhase: typeof pos["phase"] === "string" ? pos["phase"] : undefined,
+    redSkillsSelector: typeof pos["selector"] === "string" ? pos["selector"] : undefined,
     agentKeys:
       typeof rawAgents === "string" && !agentDefault && !agentRun && !agentUpdate
         ? rawAgents.split(",").map((value) => value.trim()).filter(Boolean)
