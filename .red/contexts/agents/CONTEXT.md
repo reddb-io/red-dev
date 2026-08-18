@@ -10,6 +10,8 @@ An agent client program that consumes RedSkills on a provisioned machine. Decide
 
 A coherent, versioned unit of the RedSkills workstation distribution: core, all plugin payloads, host manifests and generators, shared runtimes, daemon, companion integrations, and their required artifacts. Releases are the reproducible default; a local source checkout may stand in for the package set during development without becoming a second installation model. AI coder activation is deliberately narrower than its contents: only the `dev` plugin is installed into agent hosts.
 
+On a machine today the set is **composed** by red-dev from mise's installs (core + every declared plugin at the one version present in all of them, copied into a self-contained tree under `~/.red-skills/sets/<version>+<digest12>`, `unsigned`) or **published** (a directory carrying the `red.package-set.v1` manifest, its cosign bundle, artifacts and tree, verified to `trusted`); either way it is the only thing `~/.red-skills/current` may name, and its identity is version + digest + source commit, never a path (ADR 0011).
+
 _Avoid_: RedSkills install (ambiguous between acquisition and host activation), plugin bundle (only one part of the set)
 
 ## User-global installation

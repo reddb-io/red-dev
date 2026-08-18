@@ -1,0 +1,16 @@
+{
+  "source": "https://tuf-repo-cdn.sigstore.dev",
+  "target": "trusted_root.json",
+  "vendoredAs": "vendor/sigstore/trusted_root.embedded",
+  "whyTheExtension": "The bytes are the published trusted_root.json unchanged. It is imported into the binary as an embedded *file* (Bun `with { type: \"file\" }`) and written back out as trusted_root.json for cosign; a `.json` specifier would type as the parsed object in TypeScript whatever the import attribute says.",
+  "mediaType": "application/vnd.dev.sigstore.trustedroot+json;version=0.1",
+  "sha256": "6494e21ea73fa7ee769f85f57d5a3e6a08725eae1e38c755fc3517c9e6bc0b66",
+  "fetchedOn": "2026-08-18",
+  "fetchedWith": "cosign v3.1.3 `cosign initialize` (~/.sigstore/root/tuf-repo-cdn.sigstore.dev/targets/trusted_root.json)",
+  "why": [
+    "A cosign bundle carries the signature, the signing certificate and the transparency-log entry, but not the Sigstore trust roots (Fulcio, Rekor, CT log keys) it has to be checked against. Online, cosign fetches those through TUF from the public repository; on a machine with no network it needs a trusted_root.json handed to it. Vendoring the one the public TUF repository publishes is what lets a RedSkills package set verify on an air-gapped workstation, which is the whole point of the Offline depot (ADR 0010).",
+    "The file is not a secret and not a key: it is the public root of trust everybody verifying public Sigstore signatures already relies on. Pinning its sha256 here is so a re-vendor is a visible change and a corrupted copy is refused rather than trusted.",
+    "The public roots rotate rarely, but they do rotate. When cosign starts refusing a fresh red-skills release with the vendored root, the fix is `cosign initialize`, copy the new targets/trusted_root.json here, and update the digest and date on this line."
+  ],
+  "refresh": "PATH=\"$HOME/.local/share/mise/shims:$PATH\" cosign initialize && cp ~/.sigstore/root/tuf-repo-cdn.sigstore.dev/targets/trusted_root.json vendor/sigstore/trusted_root.embedded && sha256sum vendor/sigstore/trusted_root.embedded"
+}

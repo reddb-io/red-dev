@@ -685,7 +685,7 @@ export async function miseInstallSuite(platform: Platform): Promise<void> {
   const code = await runMise([mise, "install"]);
   if (code !== 0) throw new RedError(`mise could not install the suite (exit ${code})`);
 
-  await linkRedSkillsCore();
+  await linkRedSkillsCore(platform);
 }
 
 /**
@@ -715,7 +715,7 @@ export async function miseUpgradeSuite(platform: Platform): Promise<void> {
   // once, so a non-zero exit says one of them did not move, not that
   // none did. Repointing at whatever is now installed is correct in
   // both cases, and is a no-op when nothing changed.
-  await linkRedSkillsCore();
+  await linkRedSkillsCore(platform);
 }
 
 /**
@@ -759,16 +759,17 @@ export async function misePruneSuite(platform: Platform): Promise<void> {
 }
 
 /**
- * Move ~/.red-skills/current onto whatever mise has just installed.
+ * Compose the RedSkills package set from whatever mise has just installed,
+ * and move ~/.red-skills/current onto it.
  *
  * Here rather than inside the mise calls above because both of them
- * reach the core: the suite pass installs it alongside everything else,
- * and the upgrade pass is what advances it. A machine without the core
- * gets nothing and no message.
+ * reach the RedSkills packages: the suite pass installs them alongside
+ * everything else, and the upgrade pass is what advances them. A machine
+ * without them gets nothing and no message.
  */
-async function linkRedSkillsCore(): Promise<void> {
-  const { convergeRedSkillsCoreLayout } = await import("./red-skills-core.ts");
-  convergeRedSkillsCoreLayout();
+async function linkRedSkillsCore(platform: Platform): Promise<void> {
+  const { convergeRedSkillsPackageSet } = await import("./red-skills-set.ts");
+  convergeRedSkillsPackageSet({ manifestPlatform: platform });
 }
 
 async function runMise(cmd: string[]): Promise<number> {
@@ -1444,10 +1445,12 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
       await miseInstall(pr, ctx.platform);
       // mise puts a tool under its own installs tree and stops there,
       // which is the whole story for a binary it also shims onto PATH.
-      // The RedSkills core is a tree the rest of the machine resolves
-      // through ~/.red-skills/current, so it needs the link moved too.
-      const { convergeCoreAfterMise } = await import("./red-skills-core.ts");
-      convergeCoreAfterMise(pr.spec);
+      // RedSkills is a tree the rest of the machine resolves through
+      // ~/.red-skills/current, composed from the core and the plugin
+      // packages together, so whichever of those just moved the set
+      // they make up has to be recomposed and the link moved too.
+      const { convergeSetAfterMise } = await import("./red-skills-set.ts");
+      convergeSetAfterMise(pr.spec, { manifestPlatform: ctx.platform });
       return;
     }
     case "ppa":

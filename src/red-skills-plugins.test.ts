@@ -26,7 +26,7 @@ import { join } from "node:path";
 import { TOOLS, type Tool } from "./manifest.ts";
 import { convergeMiseConfig, miseConfigPath, miseEntries, miseToolNames } from "./mise-config.ts";
 import type { Platform } from "./platform.ts";
-import { REDSKILLS_CORE_SPEC } from "./red-skills-core.ts";
+import { REDSKILLS_CORE_SPEC } from "./red-skills-set.ts";
 import {
   redSkillsPluginEntries,
   redSkillsPluginNames,

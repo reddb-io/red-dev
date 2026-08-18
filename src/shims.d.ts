@@ -44,3 +44,15 @@ declare module "*.ttf" {
   const path: string;
   export default path;
 }
+
+/**
+ * Same mechanism, for the vendored Sigstore trust root. It is JSON on
+ * disk, but it is handed to cosign as a *file*, so what the importer
+ * needs is a path to write out, not the parsed object — and a `.json`
+ * specifier types as the object whatever the import attribute says,
+ * which is why the vendored copy carries this extension instead.
+ */
+declare module "*.embedded" {
+  const path: string;
+  export default path;
+}

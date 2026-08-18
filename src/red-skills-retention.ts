@@ -159,9 +159,11 @@ export function clearLegacyRedSkills(opts: LegacyCleanupOptions = {}): LegacyCle
 /**
  * The extracted trees under ~/.red-skills/versions, minus the live one.
  *
- * Only real directories: a link there is the layout red-skills-core.ts
- * maintains, pointing into mise's installs, and removing it would both
- * cost nothing and risk deleting through it.
+ * Only real directories: a link there is what the ADR 0008 layout
+ * left, pointing into mise's installs, and removing it would both cost
+ * nothing and risk deleting through it. (The package set that replaced
+ * that layout lives under ~/.red-skills/sets, and red-skills-set.ts
+ * retires its own revisions.)
  */
 function supersededVersionTrees(home: string): LegacyItem[] {
   const versions = join(home, ".red-skills", "versions");

@@ -220,6 +220,9 @@ jobs:
       - name: Typecheck
         run: bunx tsc --noEmit
 
+      # The package-set tests sign and verify with the real cosign; see ci.yml.
+      - uses: sigstore/cosign-installer@v3
+
       - name: Test
         run: bun test
 
