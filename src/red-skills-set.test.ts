@@ -1038,11 +1038,18 @@ describe("cosign, the verifier every real machine uses", () => {
       "--trusted-root", "/root.json",
       "/s/m.json",
     ]);
-    // Verbatim from the verifier the release ships.
-    const theirs = readFileSync(`${import.meta.dir}/../../../../../red-skills/scripts/verify-package-set.mjs`, "utf8");
-    if (theirs) {
-      const match = /const RELEASE_IDENTITY =\s*("[^"]*")\s*\+\s*("[^"]*");/.exec(theirs);
-      if (match) expect(REDSKILLS_RELEASE_IDENTITY).toBe(JSON.parse(match[1]!) + JSON.parse(match[2]!));
+    // Verbatim from the verifier the release ships — cross-checked
+    // against the sibling checkout where there is one (a maintainer's
+    // machine), and pinned here for everywhere else.
+    expect(REDSKILLS_RELEASE_IDENTITY).toBe(
+      "^https://github\\.com/reddb-io/red-skills/\\.github/workflows/red-publish\\.yml@refs/heads/main$" +
+        "|^https://github\\.com/reddb-io/red-skills/\\.github/workflows/red-publish\\.yml@refs/tags/v[0-9]+\\.[0-9]+\\.[0-9]+$",
+    );
+    const sibling = `${import.meta.dir}/../../red-skills/scripts/verify-package-set.mjs`;
+    if (existsSync(sibling)) {
+      const match = /const RELEASE_IDENTITY =\s*("[^"]*")\s*\+\s*("[^"]*");/.exec(readFileSync(sibling, "utf8"));
+      expect(match).not.toBeNull();
+      expect(REDSKILLS_RELEASE_IDENTITY).toBe(JSON.parse(match![1]!) + JSON.parse(match![2]!));
     }
   });
 
