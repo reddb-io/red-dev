@@ -879,13 +879,19 @@ function restoreScriptModes(tree: string): void {
  * different one. Symlinks are hashed by their target text; there should
  * be none in a composed set, and one that appears is part of the
  * identity rather than invisible to it.
+ *
+ * `skip` is how a development checkout leaves out what is not its
+ * content — its `.git`, its `node_modules` — without a second walk that
+ * would be free to hash a tree differently from this one.
  */
-export function treeDigest(root: string): string {
+export function treeDigest(root: string, opts: { skip?: (rel: string) => boolean } = {}): string {
   const lines: string[] = [];
+  const skip = opts.skip ?? (() => false);
   const walk = (dir: string, rel: string): void => {
     for (const name of listing(dir)) {
       const path = join(dir, name);
       const relPath = rel ? `${rel}/${name}` : name;
+      if (skip(relPath)) continue;
       const stat = statOf(path);
       if (!stat) continue;
       if (stat.isSymbolicLink()) {
@@ -910,9 +916,10 @@ export interface PackageSetRevision {
   key: string;
   version: string;
   digest: string;
-  /** Empty for a composed set. */
+  /** Empty for a composed set, and for a checkout that is not clean at a commit. */
   sourceCommit: string;
-  kind: "composed" | "manifest";
+  /** `checkout` is a development tree staged by red-dev, never a release. */
+  kind: "composed" | "manifest" | "checkout";
   trust: "trusted" | "unsigned";
   /** The immutable directory this revision is addressable through. */
   path: string;
@@ -1026,6 +1033,14 @@ export interface PackageSetConvergeOptions {
    * consulted — this is what a depot import or a fixture hands in.
    */
   source?: string;
+  /**
+   * A development checkout's staged tree, activated as an unsigned
+   * `checkout` revision. There is no manifest and no signature to verify
+   * — a working tree publishes neither — so the caller
+   * (src/red-skills-checkout.ts) has already established the identity
+   * from the content, and this is only the activation.
+   */
+  checkout?: { tree: string; identity: PackageSetIdentity };
   /** Defaults to mise's installs root. */
   installsRoot?: string;
   /** The plugins the composed set must carry. Defaults to the manifest's. */
@@ -1104,6 +1119,28 @@ export function convergeRedSkillsPackageSet(
   };
 
   const activeTrusted = activeRevision(state)?.trust === "trusted";
+
+  // A checkout, before the two acquisitions, and deliberately not
+  // subject to the downgrade guard below: that guard exists so an
+  // unsigned set nobody asked for cannot displace a verified one, and a
+  // checkout is the one candidate somebody asked for by name. The
+  // verified revision it displaces stays retained as the rollback.
+  if (opts.checkout !== undefined) {
+    const { tree, identity } = opts.checkout;
+    if (!existsSync(join(tree, "package.json"))) {
+      return refuse("tree", `the staged checkout at ${tree} carries no workstation tree`);
+    }
+    const key = revisionKey(identity);
+    const path = redSkillsSetDir(home, key);
+    return activate(
+      home,
+      platform,
+      state,
+      { key, ...identity, kind: "checkout", trust: "unsigned", path },
+      () => copyTree(tree, path),
+      opts.stageOnly === true,
+    );
+  }
 
   if (opts.source !== undefined) {
     const verifier = opts.verifier ?? cosignVerifier({ home });
@@ -1375,7 +1412,7 @@ export interface SetDoctorReport {
     version: string;
     digest: string;
     sourceCommit: string;
-    kind: "composed" | "manifest";
+    kind: "composed" | "manifest" | "checkout";
     trust: "trusted" | "unsigned";
     path: string;
   } | null;
@@ -1420,6 +1457,13 @@ export interface SetDoctorRow {
   detail: string;
 }
 
+/** How each kind of revision is named in a report. PURE. */
+const SET_KIND_LABEL: Record<PackageSetRevision["kind"], string> = {
+  composed: "composed from mise",
+  manifest: "published set",
+  checkout: "development checkout",
+};
+
 /** The report as the lines `red-dev doctor` prints. PURE. */
 export function redSkillsSetRows(report: SetDoctorReport): SetDoctorRow[] {
   const rows: SetDoctorRow[] = [];
@@ -1430,10 +1474,12 @@ export function redSkillsSetRows(report: SetDoctorReport): SetDoctorRow[] {
     rows.push({
       status: a.trust === "trusted" ? "ok" : "warn",
       detail:
-        `${formatPackageSetIdentity(a)} — ${a.kind === "composed" ? "composed from mise" : "published set"}, ` +
+        `${formatPackageSetIdentity(a)} — ${SET_KIND_LABEL[a.kind]}, ` +
         (a.trust === "trusted"
           ? "signature verified over the declared artifacts"
-          : "unsigned (nothing published signs a composed set yet)"),
+          : a.kind === "checkout"
+            ? "unsigned (a development checkout is not a release, and `red-dev red-skills sync` advances it)"
+            : "unsigned (nothing published signs a composed set yet)"),
     });
     const rollback = report.retained[1];
     if (!rollback) {

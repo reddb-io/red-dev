@@ -210,16 +210,17 @@ export function buildCli(): CLI {
         // rather than `scope`, which would reject `install` as an
         // invalid scope and print the wrong list of words.
         description:
-          "acquire the RedSkills package set: list-all, latest-stable, install [selector], reconcile",
+          "acquire the RedSkills package set: list-all, latest-stable, install [selector], sync <path>, reconcile",
         positional: [
           {
             name: "phase",
-            description: "list-all, latest-stable, install, reconcile",
+            description: "list-all, latest-stable, install, sync, reconcile",
             required: false,
           },
           {
             name: "selector",
-            description: "with `install`: stable, next, a version, or a commit",
+            description:
+              "with `install`: stable, next, a version, or a commit; with `sync`: a development checkout",
             required: false,
           },
         ],

@@ -479,6 +479,7 @@ red-dev agents default codex # change it
 red-dev agents run           # start the Default agent
 red-dev agents update        # refresh each host by its publisher's mechanism
 red-dev red-skills install [selector] # acquire the package set: stable | next | version | commit
+red-dev red-skills sync <path> # run a development checkout, built into staging, never a release
 red-dev red-skills reconcile # wire the hosts against the active package set, once
 red-dev share [path]         # one directory both WSL and Windows read
 red-dev share adopt <tool>   # move that tool's configuration into it

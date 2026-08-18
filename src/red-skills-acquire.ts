@@ -837,6 +837,12 @@ export async function acquireRedSkills(opts: AcquireOptions = {}): Promise<Acqui
   const run = opts.run ?? systemRunner;
   const url = opts.url ?? REDSKILLS_GIT_URL;
   const raw = opts.selector ?? env[CHANNEL_ENV] ?? DEFAULT_CHANNEL;
+  // Whether a revision was *asked* for, as against defaulted to. The
+  // difference decides what happens on a machine resolving a
+  // development checkout: `red-dev red-skills install 3.19.5` is a
+  // person leaving the override, and an unpinned `red-dev update` is
+  // not — see the checkout short-cut below.
+  const pinned = opts.selector !== undefined || env[CHANNEL_ENV] !== undefined;
 
   /**
    * Every ending that is not an activation, in one shape.
@@ -879,6 +885,24 @@ export async function acquireRedSkills(opts: AcquireOptions = {}): Promise<Acqui
       `'${raw}' is not a channel (${CHANNELS.join(", ")}), a version, or a 40-character commit`,
       "manifest",
     );
+  }
+
+  // Before the network, because a machine on a development checkout has
+  // nothing to ask the remote. `red-dev update` runs this on every run
+  // with no selector, and an update that replaced somebody's working
+  // tree with `stable` would be an update that undid the override it was
+  // never told about. Naming a revision explicitly still leaves it.
+  if (!pinned) {
+    const override = activeCheckoutRevision(home);
+    if (override) {
+      return nothing(
+        "current",
+        `this machine resolves the development checkout ${override.key} — ` +
+          "`red-dev red-skills sync <path>` advances it",
+        null,
+        { selector, active: activeIdentityOf(home) },
+      );
+    }
   }
 
   const listed = listRemoteRevisions(run, url);
@@ -1150,6 +1174,19 @@ export function announce(a: Acquisition): void {
 }
 
 // ------------------------------------------------------------------ details
+
+/**
+ * The active revision when it is a development checkout, or null.
+ *
+ * Read from the state file rather than tracked here, because the
+ * override is a fact about what this machine resolves and the state
+ * file is where that fact already lives.
+ */
+function activeCheckoutRevision(home: string): { key: string } | null {
+  const state = readPackageSetState(home);
+  const active = state.revisions.find((r) => r.key === state.active);
+  return active && active.kind === "checkout" ? { key: active.key } : null;
+}
 
 function activeIdentityOf(home: string): PackageSetIdentity | null {
   const state = readPackageSetState(home);
