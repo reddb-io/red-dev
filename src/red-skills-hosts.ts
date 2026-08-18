@@ -63,6 +63,19 @@
  * one named field of a user's file through src/owned-config.ts, which
  * leaves every other byte of that file exactly where it was.
  *
+ * ## Converged is not the same as equal
+ *
+ * Seven hosts do not have seven equal surfaces. Gemini takes skills and
+ * MCP and has no hook runner at all, so a set that ships hooks reaches it
+ * without them; a set may declare no MCP for anybody. Both leave a host
+ * that is genuinely converged and genuinely poorer than its neighbour, and
+ * a walk that answered "reconciled" and stopped would be reporting the
+ * table rather than the machine. So each plan says what became of every
+ * capability the set carries, the record keeps it, and the converge and
+ * doctor both name what a host did not get — with `absent` (the set
+ * carried none) kept apart from `unsupported` (the host cannot take it),
+ * because only one of the two is fixed by shipping a better set.
+ *
  * Everything red-dev owns is written into the record as an ownership
  * manifest, and removal is that manifest read back. That is the whole of
  * the uninstall contract: a config directory holds files nobody here put
@@ -80,7 +93,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 
 import { sha256Hex } from "./checksum.ts";
 import { log } from "./log.ts";
@@ -128,6 +141,34 @@ export type AdapterMode = "marketplace" | "generator" | "extension" | "skills";
 
 /** Whether a running session has yet to see what converged underneath it. */
 export type ReloadState = "current" | "restart-needed";
+
+/**
+ * One thing the package set carries, and what became of it in this host.
+ *
+ * Seven hosts do not have seven equal surfaces. Gemini takes skills and
+ * MCP and has no hook runner at all; a set may declare no MCP for anyone.
+ * Both of those produce a host that is genuinely converged and genuinely
+ * has less than its neighbour, and the two reasons are not the same fact:
+ * `absent` is something the set never carried, `unsupported` is something
+ * the host cannot be given. A converge that reported seven identical rows
+ * would be describing the table instead of the machine, which is the
+ * failure this whole module is a correction to.
+ */
+export interface HostCapability {
+  /** `skills`, `mcp`, `hooks`. */
+  name: string;
+  /** Projected into the host, absent from the set, or beyond the host. */
+  state: "projected" | "absent" | "unsupported";
+  /** Why it is not projected. Present exactly when it is not. */
+  reason?: string;
+}
+
+/** The capabilities a host did not get, as the lines a person reads. */
+export function missingCapabilities(capabilities: readonly HostCapability[] = []): string[] {
+  return capabilities
+    .filter((c) => c.state !== "projected")
+    .map((c) => `no ${c.name}: ${c.reason ?? c.state}`);
+}
 
 /** What every adapter is a function of. */
 export interface AdapterContext {
@@ -196,6 +237,8 @@ export interface HostPlan {
   merges: OwnedMerge[];
   /** State that must exist afterwards for this host to count as done. */
   expect: OwnedEntry[];
+  /** What the set carries, and what this host does with each of it. */
+  capabilities: HostCapability[];
   /**
    * Where a generator records what it wrote.
    *
@@ -217,6 +260,7 @@ function plan(partial: Partial<HostPlan> & { mode: AdapterMode }): HostPlan {
     copies: [],
     merges: [],
     expect: [],
+    capabilities: [],
     manifests: [],
     ...partial,
   };
@@ -240,7 +284,7 @@ export interface HostAdapter {
    * facts that live inside an application's own store, where the file
    * exists either way and only its contents say whether the host agrees.
    */
-  check?: (ctx: AdapterContext) => Promise<HostCheck>;
+  check?: (ctx: AdapterContext, plan: HostPlan) => Promise<HostCheck>;
   /** The commands that take this host's own state back out. */
   remove: (ctx: AdapterContext) => HostStep[];
 }
@@ -466,20 +510,126 @@ function setSkills(ctx: AdapterContext): SetSkill[] {
 function declaredMcp(ctx: AdapterContext): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const plugin of ctx.plugins) {
-    const file = join(pluginDir(ctx, plugin), ".mcp.json");
-    if (!existsSync(file)) continue;
-    try {
-      const parsed = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
-      const servers = (parsed["mcpServers"] ?? parsed) as Record<string, unknown>;
-      if (servers === null || typeof servers !== "object" || Array.isArray(servers)) continue;
-      for (const [name, value] of Object.entries(servers)) out[`${MARKETPLACE}-${name}`] = value;
-    } catch {
-      // A payload we cannot read is a payload we do not project. The host
-      // is reported as unconverged rather than given half a config.
-      log.warn(`red-skills: ${file} is not JSON — no MCP projected from it`);
+    for (const [name, value] of Object.entries(pluginMcp(pluginDir(ctx, plugin)))) {
+      out[`${MARKETPLACE}-${name}`] = value;
     }
   }
   return out;
+}
+
+/** One plugin's servers, under the names the plugin itself gave them. */
+function pluginMcp(root: string): Record<string, unknown> {
+  const file = join(root, ".mcp.json");
+  if (!existsSync(file)) return {};
+  try {
+    const parsed = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+    const servers = (parsed["mcpServers"] ?? parsed) as Record<string, unknown>;
+    if (servers === null || typeof servers !== "object" || Array.isArray(servers)) return {};
+    return servers;
+  } catch {
+    // A payload we cannot read is a payload we do not project. The host
+    // is reported as unconverged rather than given half a config.
+    log.warn(`red-skills: ${file} is not JSON — no MCP projected from it`);
+    return {};
+  }
+}
+
+/**
+ * The commands one plugin's `hooks/hooks.json` declares, flattened.
+ *
+ * Shape rather than schema: the file nests matchers inside event names and
+ * hooks inside matchers, and everything read out of it here is the one
+ * field that names something on disk. A file this cannot parse declares no
+ * hook, which is the same answer as a plugin that ships none — the host
+ * that has no hook runner is told the truth either way.
+ */
+function pluginHooks(root: string): string[] {
+  const file = join(root, "hooks", "hooks.json");
+  if (!existsSync(file)) return [];
+  const out: string[] = [];
+  const walk = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item);
+      return;
+    }
+    if (node === null || typeof node !== "object") return;
+    const record = node as Record<string, unknown>;
+    const command = record["command"];
+    if (typeof command === "string") out.push(command);
+    for (const value of Object.values(record)) walk(value);
+  };
+  try {
+    walk(JSON.parse(readFileSync(file, "utf8")));
+  } catch {
+    log.warn(`red-skills: ${file} is not JSON — no hook read out of it`);
+    return [];
+  }
+  return out;
+}
+
+/** One file the activated payload names, and what named it. */
+interface DeclaredPath {
+  /** The declaration it came out of, for the sentence a person reads. */
+  what: string;
+  /** Where it resolves to inside the package set. */
+  path: string;
+}
+
+/**
+ * The file a token in a declared command names, or null if it names none.
+ *
+ * A command is `bun`, `node`, a plugin-root path or an argument that is
+ * not a path at all, and only the third of those is checkable: a bare
+ * program name resolves off PATH and a bare filename resolves against a
+ * cwd nothing here owns, so treating either as a dangling path would be a
+ * check that fails on every correct set. A token still carrying a
+ * variable after expansion belongs to the host that expands it.
+ */
+function declaredPathIn(root: string, token: string): string | null {
+  // A function replacement, so a `$&` in the resolved path stays literal.
+  const expanded = token.replace(/\$\{(?:CLAUDE|CODEX)_PLUGIN_ROOT\}/g, () => root);
+  if (expanded.includes("$")) return null;
+  if (!expanded.includes("/") && !expanded.includes("\\")) return null;
+  return isAbsolute(expanded) ? expanded : join(root, expanded);
+}
+
+/**
+ * Every file the activated payload names, so a dangling one can be caught.
+ *
+ * A package set composed halfway declares a server and a hook whose
+ * scripts are not in the tarball. Installing that projects a config whose
+ * every entry fails the moment the host tries to use it — an MCP server
+ * that dies at launch, a hook that is not there — and a host recorded as
+ * converged against it is the worst of the two ways to be wrong. So the
+ * declarations are resolved against the set before anything is written.
+ */
+function declaredPaths(ctx: AdapterContext): DeclaredPath[] {
+  const out: DeclaredPath[] = [];
+  for (const plugin of ctx.plugins) {
+    const root = pluginDir(ctx, plugin);
+    for (const command of pluginHooks(root)) {
+      for (const token of command.split(/\s+/)) {
+        const path = declaredPathIn(root, token);
+        if (path !== null) out.push({ what: `${plugin} hook`, path });
+      }
+    }
+    for (const [name, server] of Object.entries(pluginMcp(root))) {
+      for (const token of serverTokens(server)) {
+        const path = declaredPathIn(root, token);
+        if (path !== null) out.push({ what: `${plugin} MCP server ${name}`, path });
+      }
+    }
+  }
+  return out;
+}
+
+/** The command and arguments of one declared server, as flat strings. */
+function serverTokens(server: unknown): string[] {
+  if (server === null || typeof server !== "object") return [];
+  const record = server as Record<string, unknown>;
+  const command = typeof record["command"] === "string" ? [record["command"]] : [];
+  const args = Array.isArray(record["args"]) ? record["args"].filter((a) => typeof a === "string") : [];
+  return [...command, ...(args as string[])];
 }
 
 /**
@@ -518,9 +668,21 @@ const gemini: HostAdapter = {
       return plan({ mode: "extension", blocked: "the package set carries no skills to project" });
     }
 
-    const dir = join(ctx.home, ".gemini", "extensions", MARKETPLACE);
+    // Before a byte is written, because the alternative is a config whose
+    // every entry fails the first time Gemini uses it and a home directory
+    // holding half an extension nothing recorded.
+    const dangling = declaredPaths(ctx).find((declared) => !existsSync(declared.path));
+    if (dangling !== undefined) {
+      return plan({
+        mode: "extension",
+        blocked: `the ${dangling.what} names ${dangling.path}, which the package set does not carry`,
+      });
+    }
+
+    const dir = geminiExtensionDir(ctx);
     const mcp = declaredMcp(ctx);
-    const settings = join(ctx.home, ".gemini", "settings.json");
+    const hooks = ctx.plugins.flatMap((p) => pluginHooks(pluginDir(ctx, p)));
+    const settings = geminiSettingsFile(ctx);
     return plan({
       mode: "extension",
       writes: [
@@ -532,7 +694,7 @@ const gemini: HostAdapter = {
             2,
           )}\n`,
         },
-        { path: join(dir, "REDSKILLS.md"), bytes: contextFile(ctx, skills) },
+        { path: join(dir, "REDSKILLS.md"), bytes: contextFile(ctx, skills, mcp, hooks) },
       ],
       copies: skills.map((skill) => ({ from: skill.path, to: join(dir, "skills", skill.name) })),
       merges: Object.entries(mcp).map(([name, value]) => ({
@@ -544,13 +706,105 @@ const gemini: HostAdapter = {
       // removing RedSkills has to leave `~/.gemini/extensions` the way it
       // found it rather than with our empty shell still sitting in it.
       expect: [{ kind: "path", path: dir }],
+      capabilities: [
+        { name: "skills", state: "projected" },
+        Object.keys(mcp).length > 0
+          ? { name: "mcp", state: "projected" }
+          : { name: "mcp", state: "absent", reason: "the package set declares no MCP server" },
+        // Not a gap in the projection: Gemini has no hook runner to give
+        // them to, so a set that carries hooks reaches this host without
+        // them and doctor says which capability was left behind.
+        hooks.length > 0
+          ? {
+              name: "hooks",
+              state: "unsupported",
+              reason: `Gemini runs no hook of its own, so the ${hooks.length} the set declares are not projected`,
+            }
+          : { name: "hooks", state: "absent", reason: "the package set declares no hook" },
+      ],
     });
   },
+  check: (ctx, desired) => geminiCheck(ctx, desired),
   remove: (ctx) => {
     const script = generator(ctx.source, "install-gemini.sh");
     return existsSync(script) ? [must(script, "--uninstall", "--user")] : [];
   },
 };
+
+/** The directory red-dev owns outright under Gemini's extensions. */
+function geminiExtensionDir(ctx: AdapterContext): string {
+  return join(ctx.home, ".gemini", "extensions", MARKETPLACE);
+}
+
+/** The file Gemini resolves its MCP servers from, and the operator owns. */
+function geminiSettingsFile(ctx: AdapterContext): string {
+  return join(ctx.home, ".gemini", "settings.json");
+}
+
+/**
+ * What Gemini itself says it has, read back the way Gemini reads it.
+ *
+ * The exit code proves nothing here — nothing was spawned. What can be
+ * wrong is everything between the plan and the load: a manifest Gemini's
+ * parser rejects, a `contextFileName` pointing at a file that is not
+ * beside it, a skills directory that was copied and then emptied, a server
+ * a second tool took back out of `settings.json`. Each of those leaves a
+ * host that looks installed from the outside and loads nothing, and each
+ * of them is a reason to reconcile rather than a reason to record.
+ *
+ * The declared paths are resolved again at the end rather than only at
+ * plan time, because this is also what a skipped converge asks: a set
+ * edited in place under a recorded host can lose the script its server
+ * runs, and the host has to stop being current the moment it does.
+ *
+ * A generator in the tree answers for its own tree — its install manifest
+ * is what verification reads, generically — so this stands down for it.
+ */
+async function geminiCheck(ctx: AdapterContext, desired: HostPlan): Promise<HostCheck> {
+  if (desired.mode !== "extension") return { ok: true, witness: "" };
+
+  const dir = geminiExtensionDir(ctx);
+  const manifest = join(dir, "gemini-extension.json");
+  if (!existsSync(manifest)) return { ok: false, reason: `${manifest} is not there` };
+
+  let loaded: Record<string, unknown>;
+  try {
+    loaded = JSON.parse(readFileSync(manifest, "utf8")) as Record<string, unknown>;
+  } catch {
+    return { ok: false, reason: `${manifest} is not JSON Gemini can load` };
+  }
+  if (loaded["name"] !== MARKETPLACE) {
+    return { ok: false, reason: `${manifest} declares the extension as ${String(loaded["name"])}` };
+  }
+  const contextFileName = loaded["contextFileName"];
+  if (typeof contextFileName !== "string" || !existsSync(join(dir, contextFileName))) {
+    return { ok: false, reason: `${manifest} names a context file Gemini cannot read` };
+  }
+
+  for (const skill of setSkills(ctx)) {
+    const projected = join(dir, "skills", skill.name, "SKILL.md");
+    if (!existsSync(projected)) return { ok: false, reason: `${projected} is not there` };
+  }
+
+  const settings = geminiSettingsFile(ctx);
+  const text = existsSync(settings) ? readFileSync(settings, "utf8") : "";
+  const servers = declaredMcp(ctx);
+  for (const [name, value] of Object.entries(servers)) {
+    const seen = readOwnedField(text, ["mcpServers", name]);
+    if (seen === undefined) return { ok: false, reason: `${settings} declares no mcpServers.${name}` };
+    if (JSON.stringify(seen) !== JSON.stringify(value)) {
+      return { ok: false, reason: `mcpServers.${name} in ${settings} is not the server the set declares` };
+    }
+  }
+
+  for (const declared of declaredPaths(ctx)) {
+    if (!existsSync(declared.path)) {
+      return { ok: false, reason: `the ${declared.what} names ${declared.path}, which is not there` };
+    }
+  }
+
+  return { ok: true, witness: JSON.stringify({ loaded, servers: Object.keys(servers).sort() }) };
+}
 
 /**
  * Hermes, which has skills and nothing else.
@@ -592,17 +846,44 @@ const hermes: HostAdapter = {
   },
 };
 
-/** What Gemini reads when it loads the extension: the set, as one page. */
-function contextFile(ctx: AdapterContext, skills: readonly SetSkill[]): string {
+/**
+ * What Gemini reads when it loads the extension: the set, as one page.
+ *
+ * The servers and the missing hook runner are on it as well as the skills,
+ * because a model told what it has is also being told what it does not:
+ * a session that believes a hook fires on its behalf is a session waiting
+ * for something nothing on this host will ever run.
+ */
+function contextFile(
+  ctx: AdapterContext,
+  skills: readonly SetSkill[],
+  servers: Readonly<Record<string, unknown>>,
+  hooks: readonly string[],
+): string {
+  const names = Object.keys(servers).sort();
   const lines = [
     `# RedSkills ${ctx.setVersion}`,
     "",
     `Projected by red-dev from ${ctx.current}. Do not edit: this file is`,
     "rewritten whenever the package set moves.",
     "",
+    "## Skills",
+    "",
     ...skills.map((skill) =>
       skill.description ? `- **${skill.name}** — ${skill.description}` : `- **${skill.name}**`
     ),
+    "",
+    "## MCP servers",
+    "",
+    ...(names.length > 0
+      ? names.map((name) => `- \`${name}\`, started by Gemini from \`settings.json\`.`)
+      : ["The package set declares none."]),
+    "",
+    "## Hooks",
+    "",
+    hooks.length > 0
+      ? `The set declares ${hooks.length}, and Gemini runs no hook of its own: none of them fires here.`
+      : "The package set declares none.",
   ];
   return `${lines.join("\n")}\n`;
 }
@@ -637,6 +918,15 @@ export interface HostRecord {
   mode: AdapterMode;
   /** The plugins activated in this host. */
   plugins: string[];
+  /**
+   * What the set carried and what this host got of it.
+   *
+   * Optional because it arrived after schema 2 shipped, and a record
+   * written before it is not wrong — it is a record from a converge that
+   * did not have the vocabulary. It reads as no capability reported, and
+   * the next converge that touches the host writes the real answer.
+   */
+  capabilities?: HostCapability[];
   /** The digest of the owned state, as it was on disk when verified. */
   stateDigest: string;
   /** Whether a session running at the time still has to be restarted. */
@@ -757,6 +1047,13 @@ export interface HostOutcome {
   reason?: string;
   /** Present when this converge verified the host. */
   reload?: ReloadState;
+  /**
+   * What the set carries and this host did not get, in sentences.
+   *
+   * Reported on the skipped converge as well as the reconciling one, out
+   * of the record — a host is no richer on the day nothing happened to it.
+   */
+  missing?: string[];
 }
 
 /** Whether every required host converged. */
@@ -919,6 +1216,7 @@ export async function reconcileSkillHosts(
         mode: recorded.mode,
         reason: `already reconciled at ${ctx.setVersion}`,
         reload: recorded.reload,
+        missing: missingCapabilities(recorded.capabilities),
       });
       continue;
     }
@@ -949,6 +1247,7 @@ export async function reconcileSkillHosts(
       setVersion: ctx.setVersion,
       mode: desired.mode,
       plugins: [...plugins],
+      capabilities: desired.capabilities,
       stateDigest: verified.stateDigest,
       reload,
       owned: verified.owned,
@@ -956,7 +1255,13 @@ export async function reconcileSkillHosts(
     };
     await writeHostRegistry(home, registry);
     log.ok(`${adapter.name}: red-skills reconciled to ${ctx.setVersion}`);
-    out.push({ host: adapter.name, status: "reconciled", mode: desired.mode, reload });
+    out.push({
+      host: adapter.name,
+      status: "reconciled",
+      mode: desired.mode,
+      reload,
+      missing: missingCapabilities(desired.capabilities),
+    });
   }
 
   return out;
@@ -983,7 +1288,7 @@ async function isCurrent(
   if (record.mode !== desired.mode) return false;
   if (record.plugins.join("\0") !== ctx.plugins.join("\0")) return false;
 
-  const witness = adapter.check ? await adapter.check(ctx) : ({ ok: true, witness: "" } as HostCheck);
+  const witness = adapter.check ? await adapter.check(ctx, desired) : ({ ok: true, witness: "" } as HostCheck);
   if (!witness.ok) return false;
   return (await stateDigestOf(record.owned, witness.witness)) === record.stateDigest;
 }
@@ -1099,7 +1404,7 @@ async function verifyPlan(
     return { ...empty, reason: "the generator recorded no install manifest" };
   }
 
-  const check = adapter.check ? await adapter.check(ctx) : ({ ok: true, witness: "" } as HostCheck);
+  const check = adapter.check ? await adapter.check(ctx, desired) : ({ ok: true, witness: "" } as HostCheck);
   if (!check.ok) return { ...empty, reason: check.reason };
 
   for (const entry of owned) {
@@ -1276,6 +1581,8 @@ export interface HostDoctorRow {
   /** The state that reconciliation owns, as observed when it verified. */
   stateDigest: string;
   plugins: string[];
+  /** What the set carried and what this host got of it. */
+  capabilities: HostCapability[];
   reload: ReloadState;
   verifiedAt: string;
 }
@@ -1314,6 +1621,7 @@ export function redSkillsHostReport(
       setVersion: record.setVersion,
       stateDigest: record.stateDigest,
       plugins: record.plugins,
+      capabilities: record.capabilities ?? [],
       reload: record.reload,
       verifiedAt: record.verifiedAt,
     });
@@ -1328,13 +1636,20 @@ export interface HostDoctorLine {
 
 /** The report as the lines doctor prints. */
 export function redSkillsHostRows(report: HostDoctorReport): HostDoctorLine[] {
-  const rows: HostDoctorLine[] = report.hosts.map((row) => ({
-    status: row.reload === "restart-needed" ? "warn" : "ok",
-    detail:
-      `${row.host} (${row.mode}) — ${row.setVersion} ${row.setDigest.slice(0, 12)}, ` +
-      `state ${row.stateDigest.slice(0, 12)}, ${row.plugins.join(", ") || "no plugin"} activated` +
-      (row.reload === "restart-needed" ? " — restart needed to load it" : ""),
-  }));
+  const rows: HostDoctorLine[] = report.hosts.map((row) => {
+    // Said on the same line as the digests, because "converged" and "has
+    // less than its neighbour" are both true of this host at once and
+    // reading one without the other is how a machine is misdescribed.
+    const missing = missingCapabilities(row.capabilities);
+    return {
+      status: row.reload === "restart-needed" ? "warn" : "ok",
+      detail:
+        `${row.host} (${row.mode}) — ${row.setVersion} ${row.setDigest.slice(0, 12)}, ` +
+        `state ${row.stateDigest.slice(0, 12)}, ${row.plugins.join(", ") || "no plugin"} activated` +
+        (missing.length > 0 ? ` — ${missing.join("; ")}` : "") +
+        (row.reload === "restart-needed" ? " — restart needed to load it" : ""),
+    };
+  });
   if (report.unrecorded.length > 0) {
     rows.push({
       status: "n/a",
