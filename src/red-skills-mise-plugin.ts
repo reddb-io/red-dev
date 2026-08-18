@@ -58,6 +58,7 @@ import {
   type AcquireOptions,
   type CommandRunner,
 } from "./red-skills-acquire.ts";
+import { checkoutLabel, checkoutPathOf } from "./red-skills-checkout.ts";
 
 /**
  * The plugin's directory name, which is also the tool name mise knows.
@@ -257,6 +258,23 @@ export async function runPluginPhase(
   // it; a selector on the command line wins, because that is how a
   // person asks for one revision without editing their config.
   const selector = opts.selector ?? env["ASDF_INSTALL_VERSION"] ?? DEFAULT_CHANNEL;
+
+  // A `path:` override is a working tree, and mise has no way to see
+  // that one moved: there is no version to compare, no tag to resolve
+  // and no release to fetch. So `mise upgrade` records the pin and
+  // acquires nothing — the checkout is advanced by the one explicit
+  // command that reads its content, and by nothing else.
+  const checkout = checkoutPathOf(selector);
+  if (checkout !== null) {
+    log.skip(
+      `red-skills: ${checkoutLabel(checkout)} is a development checkout — ` +
+        `advanced by \`red-dev red-skills sync ${checkout}\`, not by mise`,
+    );
+    const pinPath = env["ASDF_INSTALL_PATH"];
+    if (pinPath) writeReceipt(pinPath, null, null, checkout);
+    return 0;
+  }
+
   if (!parseSelector(selector)) {
     log.err(`red-skills: '${selector}' is not a channel, a version, or a commit`);
     return 1;
@@ -289,6 +307,7 @@ function writeReceipt(
   installPath: string,
   active: { version: string; digest: string; sourceCommit: string } | null,
   commit: string | null,
+  checkout: string | null = null,
 ): void {
   mkdirSync(installPath, { recursive: true });
   writeFileSync(
@@ -300,6 +319,11 @@ function writeReceipt(
         version: active?.version ?? null,
         digest: active?.digest ?? null,
         sourceCommit: active?.sourceCommit ?? commit ?? null,
+        // Present only for a `path:` override, and the reason this
+        // directory is not empty: mise reads an empty install as a
+        // failed one, and what it installed here is a pin naming a
+        // working tree rather than a revision anybody published.
+        ...(checkout === null ? {} : { checkout }),
         postinstall: REDSKILLS_RECONCILE_POSTINSTALL,
       },
       null,
