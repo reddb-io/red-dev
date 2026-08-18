@@ -38,6 +38,11 @@ jobs:
       - name: Typecheck
         run: bunx tsc --noEmit
 
+      # The RedSkills package-set tests verify a real release bundle and
+      # a fixture signed here with cosign — the same program a machine
+      # runs (it is a core manifest entry), never a reimplementation.
+      - uses: sigstore/cosign-installer@v3
+
       - name: Test
         run: bun test
 
