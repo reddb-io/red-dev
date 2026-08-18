@@ -168,7 +168,10 @@ function opencodeCompatible(host: string): SkillHostRefresh {
  * the line above it just upgraded. The remove is optional because a
  * plugin that is not installed yet — the first converge on this machine,
  * or a plugin the operator only just opted in to — makes it exit
- * non-zero, and that is not a broken host.
+ * non-zero, and that is not a broken host. The upgrade is optional too:
+ * `marketplace upgrade` only knows Git marketplaces, and where red-dev
+ * owns the registration the marketplace is a directory — the add reads
+ * the tree as it stands, and there is nothing to upgrade.
  *
  * OpenCode, RedCode and pi are the tree's own generators, invoked with
  * the tree as their source. pi takes `--source-dir` as well as the path,
@@ -194,7 +197,7 @@ export const REFRESH_HOSTS: readonly SkillHostRefresh[] = [
     name: "codex",
     cmd: "codex",
     wire: ({ plugins }) => [
-      must("codex", "plugin", "marketplace", "upgrade", "red-skills"),
+      may("codex", "plugin", "marketplace", "upgrade", "red-skills"),
       ...plugins.flatMap((p) => [
         may("codex", "plugin", "remove", `${p}@red-skills`),
         must("codex", "plugin", "add", `${p}@red-skills`),

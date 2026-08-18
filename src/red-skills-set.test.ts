@@ -146,8 +146,9 @@ function fakeInstalls(
     writeFileSync(join(payload, ".claude-plugin", "marketplace.json"), marketplace);
     writeFileSync(join(payload, ".agents", "plugins", "marketplace.json"), marketplace);
     writeFileSync(join(payload, "dist", "opencode-host.bundle.min.mjs"), "// opencode-host\n");
-    writeFileSync(join(payload, "scripts", "install-opencode.sh"), "#!/bin/bash\n");
-    writeFileSync(join(payload, "scripts", "install-pi.sh"), "#!/bin/bash\n");
+    // Mode 0644, exactly as npm unpacks them.
+    writeFileSync(join(payload, "scripts", "install-opencode.sh"), "#!/bin/bash\n", { mode: 0o644 });
+    writeFileSync(join(payload, "scripts", "install-pi.sh"), "#!/bin/bash\n", { mode: 0o644 });
     // A core from before the package set: bins and dist, nothing a host
     // could register or run — the shape mise resolves while a newer
     // release is still under its minimum release age.
@@ -247,6 +248,8 @@ function fakeManifestSet(opts: {
       `${JSON.stringify({ name: "@reddb-io/red-skills", version: opts.version ?? "3.19.5" })}\n`,
     );
     writeFileSync(join(tree, "bin", "red-skills-redskilled.mjs"), "// redskilled\n");
+    mkdirSync(join(tree, "scripts"), { recursive: true });
+    writeFileSync(join(tree, "scripts", "install-opencode.sh"), "#!/bin/bash\n", { mode: 0o644 });
   }
   return dir;
 }
@@ -482,6 +485,11 @@ describe("the composed set", () => {
     expect(existsSync(join(tree, "dist", "opencode-host.bundle.min.mjs"))).toBe(true);
     // The activation config the OpenCode generator dies without.
     expect(readFileSync(join(tree, ".red", "config.yaml"), "utf8")).toBe(hostActivationConfig(PLUGINS));
+    // And the generators runnable: an npm tarball drops the bit, and the
+    // host refresh spawns them by path.
+    for (const script of ["install-opencode.sh", "install-pi.sh"]) {
+      expect(statSync(join(tree, "scripts", script)).mode & 0o111, script).toBe(0o111);
+    }
   });
 
   test("the activation config enables exactly the plugins the set carries", () => {
@@ -818,6 +826,7 @@ describe("activating a published set", () => {
     expect(realpathSync(current)).toBe(realpathSync(result.revisionDir!));
     expect(result.revisionDir).toBe(redSkillsSetDir(home, revisionKey(result.active!)));
     expect(existsSync(join(result.revisionDir!, "plugins", "dev", "skills"))).toBe(true);
+    expect(statSync(join(result.revisionDir!, "scripts", "install-opencode.sh")).mode & 0o111).toBe(0o111);
     expect(readPackageSetState(home).revisions[0]).toMatchObject({ kind: "manifest", trust: "trusted" });
     // A copy into machine-owned storage: the set directory could be a
     // USB stick, and nothing on the machine may keep pointing at it.

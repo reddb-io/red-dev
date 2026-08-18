@@ -88,6 +88,7 @@
 
 import { spawnSync } from "node:child_process";
 import {
+  chmodSync,
   cpSync,
   existsSync,
   lstatSync,
@@ -798,7 +799,34 @@ export function composeSet(
     mkdirSync(dirname(config), { recursive: true });
     writeFileSync(config, hostActivationConfig(Object.keys(candidate.plugins)), "utf8");
   }
+  restoreScriptModes(dest);
   return { ok: true };
+}
+
+/**
+ * Make the generators runnable again.
+ *
+ * An npm tarball drops the executable bit on `scripts/*.sh`, and the
+ * host refresh spawns `<tree>/scripts/install-opencode.sh` directly —
+ * which is EACCES on a tree copied straight out of a package. The
+ * standalone installer runs them under `bash` for the same reason. This
+ * is red-dev's own copy, so the bit is put back where it belongs; on
+ * Windows the mode is meaningless and the call is harmless.
+ */
+function restoreScriptModes(tree: string): void {
+  const scripts = join(tree, "scripts");
+  for (const name of listing(scripts)) {
+    if (!name.endsWith(".sh")) continue;
+    const path = join(scripts, name);
+    if (statOf(path)?.isFile()) {
+      try {
+        chmodSync(path, 0o755);
+      } catch {
+        // A filesystem that refuses modes gives the same answer it gave
+        // the tarball; the host refresh will say so.
+      }
+    }
+  }
 }
 
 /**
@@ -1281,6 +1309,7 @@ function copyTree(from: string, to: string): void {
   rmSync(staging, { recursive: true, force: true });
   mkdirSync(dirname(to), { recursive: true });
   cpSync(from, staging, { recursive: true, dereference: true });
+  restoreScriptModes(staging);
   renameSync(staging, to);
 }
 
