@@ -1108,7 +1108,21 @@ export const TOOLS: Tool[] = [
     win: builtin("hotkeys"),
   },
   {
-    // The RedSkills payload, which used to arrive as a curled
+    // What checks a RedSkills package set's signature. The release signs
+    // its manifest with cosign (keyless, through the GitHub Actions
+    // identity), and red-dev verifies the bundle before `current` moves
+    // — with the vendored Sigstore trust root, so an air-gapped depot
+    // import verifies too. Spawned rather than reimplemented: a
+    // signature verifier is the one component that must be the same
+    // program the publisher's own verifier runs. src/red-skills-set.ts.
+    name: "cosign",
+    about: "verifies the RedSkills package set's release signature",
+    scope: "core",
+    u24: mise("cosign"),
+    win: mise("cosign"),
+  },
+  {
+    // The RedSkills core payload, which used to arrive as a curled
     // install.sh and therefore never moved again. It is an npm package,
     // so mise resolves it through the `npm:` backend and `red-dev
     // update` carries it forward with the rest of the suite.
@@ -1119,8 +1133,11 @@ export const TOOLS: Tool[] = [
     //
     // Half a migration on its own: mise installs into its own tree and
     // every consumer on the machine resolves through
-    // ~/.red-skills/current. src/red-skills-core.ts is the other half,
-    // and runs straight after this entry does.
+    // ~/.red-skills/current. src/red-skills-set.ts is the other half:
+    // it copies this core and every plugin row below — at the one
+    // version present in all of them — into a self-contained package
+    // set under ~/.red-skills/sets and points current at it, straight
+    // after any of these entries has run.
     //
     // Before the marketplace row below rather than after it: the row
     // below wires agents against the payload, and wiring against a

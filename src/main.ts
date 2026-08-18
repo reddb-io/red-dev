@@ -292,6 +292,24 @@ async function cmdDoctor(p: Platform, inv: Invocation): Promise<number> {
     }
   }
 
+  // The RedSkills package set this machine resolves: which revision,
+  // whether anything vouches for it, what it would roll back to, and
+  // why the last candidate was turned away. Read from the state the
+  // converge wrote — nothing here recomposes or re-verifies anything.
+  log.plain("\n[red-skills]");
+  const { redSkillsSetReport, redSkillsSetRows } = await import("./red-skills-set.ts");
+  const setHome = (process.env["HOME"] ?? process.env["USERPROFILE"] ?? "").replace(/\\/g, "/");
+  let setProblems = 0;
+  for (const row of redSkillsSetRows(redSkillsSetReport(setHome))) {
+    if (row.status === "ok") log.ok(row.detail);
+    else if (row.status === "n/a") log.skip(row.detail);
+    else if (row.status === "warn") log.warn(row.detail);
+    else {
+      log.err(row.detail);
+      setProblems++;
+    }
+  }
+
   // The machine's agent posture, in the one place that already answers
   // "is this machine ready": which host red-dev hands work to, how old
   // each installed host's copy is, and the per-provider allowance detail
@@ -315,7 +333,7 @@ async function cmdDoctor(p: Platform, inv: Invocation): Promise<number> {
   log.plain("");
   if (
     missing > 0 || outdated > 0 || mismatched > 0 || drifted > 0 || hostProblems > 0 ||
-    shadowedCount > 0 || agentProblems > 0
+    shadowedCount > 0 || agentProblems > 0 || setProblems > 0
   ) {
     const parts = [`${missing} tool(s) missing`];
     if (outdated > 0) parts.push(`${outdated} outdated`);
@@ -329,6 +347,7 @@ async function cmdDoctor(p: Platform, inv: Invocation): Promise<number> {
     parts.push(`${drifted} config drift(s)`);
     if (hostProblems > 0) parts.push(`${hostProblems} host health problem(s)`);
     if (agentProblems > 0) parts.push(`${agentProblems} agent posture problem(s)`);
+    if (setProblems > 0) parts.push(`${setProblems} RedSkills package set problem(s)`);
     log.warn(parts.join(", "));
     return 1;
   }
