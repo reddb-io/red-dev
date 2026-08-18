@@ -921,12 +921,27 @@ export async function convergeRedSkills(p: Platform): Promise<void> {
   await convergeMarketplaceOwnership(p);
 
   // On both paths, and where the early return used to be. Being wired is
-  // not the same as being current: mise advances the version underneath a
-  // machine that was wired months ago, and the hosts read a marketplace
-  // cache that only moves when something tells it to.
+  // not the same as being current: mise advances the set underneath a
+  // machine that was wired months ago, and the hosts read caches and
+  // generated trees that only move when something tells them to.
   //
-  // Free when nothing moved — the walk is gated on the resolved checkout,
-  // so an ordinary converge issues no host commands at all.
-  const { refreshSkillHosts } = await import("./red-skills-hosts.ts");
-  await refreshSkillHosts(p);
+  // Free when nothing moved — a host whose recorded set digest, mode and
+  // observed state all still hold is skipped, so an ordinary converge
+  // issues no host commands at all. It is not free the moment any of them
+  // stops holding, which is the whole difference from the path-only stamp
+  // this replaced: a checkout edited in place keeps its path.
+  const { reconcileSkillHosts, reconciliationFailed } = await import("./red-skills-hosts.ts");
+  const hosts = await reconcileSkillHosts(p);
+
+  // A host that did not converge does not roll back the ones that did —
+  // the plugin managers offer no cross-host transaction, and undoing six
+  // good hosts because the seventh is broken would cost more than it
+  // saves. It is said out loud instead, once, naming them: partial state
+  // is visible and retryable, and silence is what turns it into a machine
+  // nobody knows is half-wired.
+  if (reconciliationFailed(hosts)) {
+    const stuck = hosts.filter((h) => h.status === "blocked" || h.status === "failed");
+    log.warn(`red-skills: not reconciled into ${stuck.map((h) => h.host).join(", ")}`);
+    for (const h of stuck) log.plain(`       ${h.host}: ${h.reason ?? "no reason given"}`);
+  }
 }
