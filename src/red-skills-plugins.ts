@@ -69,3 +69,25 @@ export function redSkillsPluginEntries(
 export function redSkillsPluginNames(p: Platform, tools: readonly Tool[] = TOOLS): string[] {
   return redSkillsPluginEntries(p, tools).map((e) => e.spec.slice(REDSKILLS_PLUGIN_PREFIX.length));
 }
+
+/**
+ * The one plugin switched on in the coder hosts.
+ *
+ * Spec #201 draws the line here: the package set carries every payload, so
+ * that activating another one later is a flag rather than a download, and
+ * exactly one of them is switched on. `dev` is the global process surface
+ * everybody wants; Memory, Brain and the maintainer-only behaviour must not
+ * start acting on a machine because they happened to be in the tarball.
+ *
+ * It lives beside the manifest projection rather than beside the host
+ * adapters because both sides need it and neither may own it: the set is
+ * composed with an activation config that says which plugins the
+ * generators render, and the hosts are handed the same set to install. Two
+ * spellings of "only dev" is one more pair that can disagree.
+ */
+export const ACTIVATED_PLUGIN = "dev";
+
+/** The activation set, out of everything the machine carries locally. */
+export function activatedPlugins(declared: readonly string[]): string[] {
+  return declared.filter((name) => name === ACTIVATED_PLUGIN);
+}
