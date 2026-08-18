@@ -1,41 +1,48 @@
 /**
- * What a converge asks the agent hosts to do, and when it asks nothing.
+ * What a converge asks the seven hosts, and what it refuses to write down.
  *
- * A marketplace update plus one plugin update per declared plugin, across
- * every host on the machine, is a walk of several CLIs and a network
- * round trip each. Run on every converge it is pure cost: the overwhelming
- * majority of converges resolve the same red-skills version they resolved
- * last time, and refreshing a host against a tree it already read changes
- * nothing on the machine.
+ * Two observables are held here and nothing else. The first is the command
+ * trace: a reconciliation that "decided" not to run and issued the commands
+ * anyway is the bug, and so is one that reports a host as current after the
+ * host refused. The second is the state on disk afterwards — the generated
+ * trees, the projected extensions, the operator's own settings file — which
+ * is the half the retired stamp never looked at and the half this module
+ * exists to observe.
  *
- * The observable these tests hold is the command trace, never an internal
- * flag. A refresh that "decided" not to run and issued the commands
- * anyway is the bug; so is one that reports a host as current after the
- * host refused the call. So the runner is injected and what is asserted
- * is the argv that reached it — which also means all of this holds with
- * no red-skills, no marketplace and no agent CLI on the machine.
- *
- * Two of those describes go further and actually run a generator, out of
- * a fixture tree with a real script in it. That is the only way to assert
- * the thing the split exists for: a skill added to the tree appears on
- * the machine with nothing here changed, and unwiring removes what the
- * generator's own manifest recorded rather than what this repo guesses.
+ * So the runner is injected and the hosts are fakes, but the package set is
+ * a real tree with real generators in it, and the generators really run.
+ * That is the only way to assert the thing the split exists for: a skill
+ * added to the tree appears on the machine with nothing here changed, and
+ * removal takes back what the generator's own manifest recorded rather than
+ * what this repo guesses.
  */
 
 import { describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { Platform } from "./platform.ts";
+import { activatedPlugins } from "./red-skills-plugins.ts";
+import { hostActivationConfig } from "./red-skills-set.ts";
 import {
-  REFRESH_HOSTS,
-  readHostStamp,
-  refreshSkillHosts,
-  unwireSkillHosts,
-  type HostContext,
-  type HostRefreshOptions,
-  type SkillHostRefresh,
+  HOST_ADAPTERS,
+  readHostRegistry,
+  reconcileSkillHosts,
+  redSkillsHostReport,
+  redSkillsHostRows,
+  removeSkillHosts,
+  type HostAdapter,
+  type HostOutcome,
+  type HostReconcileOptions,
 } from "./red-skills-hosts.ts";
 
 const UBUNTU: Platform = {
@@ -48,416 +55,31 @@ const UBUNTU: Platform = {
   caps: { apt: true, gui: true, systemd: true, winget: false, flatpak: false },
 };
 
-/** Two versions of the same checkout: the resolved path is what moves. */
-const OLD = "/home/someone/.red-skills/versions/v3.3.0";
-const NEW = "/home/someone/.red-skills/versions/v3.4.0";
+/** What the set carries, and what red-dev switches on out of it. */
+const CARRIED = ["dev", "memory"];
+const ACTIVATED = ["dev"];
 
-const PLUGINS = ["dev", "memory"];
-
-const CTX: HostContext = { plugins: PLUGINS, source: NEW };
-
-/** The hosts red-dev drives with its own CLI calls. */
-const CLI_HOSTS = ["claude", "codex"];
-/** The hosts wired by the generators inside the installed tree. */
+/** The hosts red-dev drives with an application's own CLI. */
+const MARKETPLACE_HOSTS = ["claude", "codex"];
+/** The hosts a generator inside the set wires. */
 const GENERATOR_HOSTS = ["opencode", "redcode", "pi"];
+/** The hosts red-dev projects itself, because the set ships no generator. */
+const PROJECTED_HOSTS = ["gemini", "hermes"];
 
-function hostNamed(name: string): SkillHostRefresh {
-  const host = REFRESH_HOSTS.find((h) => h.name === name);
-  if (!host) throw new Error(`no host named ${name}`);
-  return host;
-}
+const STAMPED_AT = "2026-08-18T00:00:00.000Z";
 
-function home(): string {
-  return mkdtempSync(join(tmpdir(), "red-hosts-home-"));
-}
-
-/** Collects the argv a refresh issued, and answers with `code`. */
-function recorder(code: (cmd: string[]) => number = () => 0): {
-  calls: string[][];
-  run: (cmd: string[]) => Promise<number>;
-} {
-  const calls: string[][] = [];
-  return {
-    calls,
-    run: async (cmd: string[]) => {
-      calls.push(cmd);
-      return code(cmd);
-    },
-  };
-}
-
-/** A machine with every declared host installed, at `source`. */
-function refresh(
-  opts: HostRefreshOptions & { source: string },
-): ReturnType<typeof refreshSkillHosts> {
-  return refreshSkillHosts(UBUNTU, {
-    plugins: PLUGINS,
-    present: () => true,
-    ...opts,
-  });
-}
-
-/** What one host is asked, as lines, in the order it is asked. */
-function wireOf(host: SkillHostRefresh, ctx: HostContext = CTX): string[] {
-  return host.wire(ctx).map((s) => s.argv.join(" "));
-}
+// ------------------------------------------------------------- the fixtures
 
 /**
- * The commands one host answered for.
+ * A generator, faked down to the two things red-dev knows about it.
  *
- * Matched against that host's own steps rather than against the CLI
- * name: three of the five hosts are wired by a script path, and two of
- * those three are the same script told which host it is working for.
+ * It renders every skill of every plugin the set's activation config
+ * enables, and it records every path it wrote in an uninstall manifest that
+ * its own `--uninstall` reads back. Everything else about the real script
+ * is deliberately on the other side of the fence.
  */
-function forHost(calls: string[][], host: SkillHostRefresh, ctx: HostContext = CTX): string[] {
-  const mine = new Set(wireOf(host, ctx));
-  return calls.map((c) => c.join(" ")).filter((c) => mine.has(c));
-}
-
-describe("the hosts are refreshed when the resolved version moved", () => {
-  test("a first converge refreshes every host once", async () => {
-    // Nothing stamped yet, which is the state of a machine that has never
-    // been refreshed. Unknown is not "current": an empty stamp has to
-    // mean refresh, or a machine gets its first refresh never.
-    const root = home();
-    const { calls, run } = recorder();
-    const out = await refresh({ home: root, source: NEW, run });
-
-    expect(out.every((o) => o.refreshed)).toBe(true);
-    expect(out.map((o) => o.host)).toEqual(REFRESH_HOSTS.map((h) => h.name));
-    expect(calls.map((c) => c.join(" "))).toEqual(REFRESH_HOSTS.flatMap((h) => wireOf(h)));
-  });
-
-  test("and issues them exactly once per host, not once per plugin set", async () => {
-    // The failure this pins is a loop nested one level too deep: the
-    // marketplace refreshed once per plugin rather than once per host.
-    const { calls, run } = recorder();
-    await refresh({ home: home(), source: NEW, run });
-
-    for (const name of CLI_HOSTS) {
-      const host = hostNamed(name);
-      const marketplace = forHost(calls, host).filter((c) => c.includes("marketplace"));
-      expect(marketplace.length, name).toBe(1);
-    }
-    // And the generators are invoked once each, whatever the plugin set:
-    // which plugins to render is the tree's question, not this repo's.
-    for (const name of GENERATOR_HOSTS) {
-      expect(forHost(calls, hostNamed(name)).length, name).toBe(1);
-    }
-  });
-
-  test("a converge whose resolved version is unchanged issues no host commands", async () => {
-    // The whole point of the slice. Not "issues fewer" and not "issues
-    // them and they no-op" — the trace is empty.
-    const root = home();
-    await refresh({ home: root, source: NEW, run: recorder().run });
-
-    const { calls, run } = recorder();
-    const out = await refresh({ home: root, source: NEW, run });
-
-    expect(calls).toEqual([]);
-    expect(out.every((o) => !o.refreshed)).toBe(true);
-    for (const o of out) expect(o.reason, o.host).toContain("v3.4.0");
-  });
-
-  test("a version that moved afterwards refreshes them again", async () => {
-    // Both directions, because a gate that only ever says "skip" is as
-    // broken as one that never does.
-    const root = home();
-    await refresh({ home: root, source: OLD, run: recorder().run });
-
-    const { calls, run } = recorder();
-    const out = await refresh({ home: root, source: NEW, run });
-
-    expect(out.every((o) => o.refreshed)).toBe(true);
-    expect(calls.length).toBeGreaterThan(0);
-    for (const host of REFRESH_HOSTS) {
-      expect(readHostStamp(root)[host.name], host.name).toBe(NEW);
-    }
-  });
-
-  test("red-skills absent from the machine refreshes nothing", async () => {
-    const { calls, run } = recorder();
-    const out = await refreshSkillHosts(UBUNTU, {
-      home: home(),
-      source: null,
-      plugins: PLUGINS,
-      present: () => true,
-      run,
-    });
-
-    expect(calls).toEqual([]);
-    expect(out).toEqual([]);
-  });
-});
-
-describe("a host that is not on the machine", () => {
-  test("is skipped with a reason rather than counted as refreshed", async () => {
-    // The distinction is load-bearing for the stamp below: "we refreshed
-    // it" and "it is not here" are different facts, and collapsing them
-    // is how a host that arrives next week never gets refreshed at all.
-    // Asserted for every host in turn, because the generator hosts are
-    // absent from far more machines than Claude is.
-    for (const skip of REFRESH_HOSTS) {
-      const { calls, run } = recorder();
-      const out = await refresh({
-        home: home(),
-        source: NEW,
-        present: (cmd) => cmd !== skip.cmd,
-        run,
-      });
-
-      const skipped = out.find((o) => o.host === skip.name);
-      expect(skipped?.refreshed, skip.name).toBe(false);
-      expect(skipped?.reason, skip.name).toContain("not installed");
-      expect(forHost(calls, skip), skip.name).toEqual([]);
-      expect(out.filter((o) => o.host !== skip.name).every((o) => o.refreshed), skip.name).toBe(
-        true,
-      );
-    }
-  });
-
-  test("and is refreshed on the converge after it appears", async () => {
-    // Absence must not be stamped. A skipped host recorded as current is
-    // a host installed tomorrow and left on yesterday's tree forever.
-    const first = hostNamed("claude");
-    const root = home();
-    await refresh({ home: root, source: NEW, present: (c) => c !== first.cmd, run: recorder().run });
-    expect(readHostStamp(root)[first.name]).toBeUndefined();
-
-    const { calls, run } = recorder();
-    const out = await refresh({ home: root, source: NEW, run });
-
-    expect(out.find((o) => o.host === first.name)?.refreshed).toBe(true);
-    expect(forHost(calls, first).length).toBeGreaterThan(0);
-    // And only that host: the others were already at this version.
-    expect(calls.every((c) => c[0] === first.cmd)).toBe(true);
-  });
-});
-
-describe("a host that refuses the refresh", () => {
-  test("does not prevent the others", async () => {
-    // One CLI broken for its own reasons — a half-written config, an
-    // expired login — is the ordinary state of a machine with several
-    // agents on it. It cannot be allowed to end the walk.
-    const [first, ...rest] = REFRESH_HOSTS;
-    expect(rest.length).toBeGreaterThan(0);
-
-    const { calls, run } = recorder((cmd) => (cmd[0] === (first as { cmd: string }).cmd ? 1 : 0));
-    const out = await refresh({ home: home(), source: NEW, run });
-
-    expect(out.find((o) => o.host === (first as { name: string }).name)?.refreshed).toBe(false);
-    for (const host of rest) {
-      expect(out.find((o) => o.host === host.name)?.refreshed, host.name).toBe(true);
-      expect(forHost(calls, host), host.name).toEqual(wireOf(host));
-    }
-  });
-
-  test("a runner that throws is a failed host, not a failed converge", async () => {
-    const [first, ...rest] = REFRESH_HOSTS;
-    const calls: string[][] = [];
-    const out = await refresh({
-      home: home(),
-      source: NEW,
-      run: async (cmd) => {
-        if (cmd[0] === (first as { cmd: string }).cmd) throw new Error("spawn failed");
-        calls.push(cmd);
-        return 0;
-      },
-    });
-
-    expect(out.find((o) => o.host === (first as { name: string }).name)?.refreshed).toBe(false);
-    for (const host of rest) {
-      expect(forHost(calls, host).length, host.name).toBeGreaterThan(0);
-    }
-  });
-
-  test("is retried on the next converge, because it was never stamped", async () => {
-    const first = hostNamed("claude");
-    const root = home();
-    const failing = recorder((cmd) => (cmd[0] === first.cmd ? 1 : 0));
-    await refresh({ home: root, source: NEW, run: failing.run });
-    expect(readHostStamp(root)[first.name]).toBeUndefined();
-
-    const { calls, run } = recorder();
-    const out = await refresh({ home: root, source: NEW, run });
-
-    expect(out.find((o) => o.host === first.name)?.refreshed).toBe(true);
-    expect(forHost(calls, first)).toEqual(wireOf(first));
-    expect(readHostStamp(root)[first.name]).toBe(NEW);
-  });
-});
-
-describe("what the hosts are asked", () => {
-  test("the five hosts are the ones the spec settled, by name", () => {
-    expect(REFRESH_HOSTS.map((h) => h.name)).toEqual([...CLI_HOSTS, ...GENERATOR_HOSTS]);
-  });
-
-  test("Claude and Codex are red-dev's own CLI calls", () => {
-    // Not a script, not a generator: the two hosts with a marketplace are
-    // the two red-dev drives itself, and every argv it issues is
-    // addressed to the CLI whose presence gated the call.
-    for (const name of CLI_HOSTS) {
-      const host = hostNamed(name);
-      for (const step of [...host.wire(CTX), ...host.unwire(CTX)]) {
-        expect(step.argv[0], `${name}: ${step.argv.join(" ")}`).toBe(host.cmd);
-      }
-      expect(wireOf(host).some((c) => c.includes("marketplace")), name).toBe(true);
-    }
-  });
-
-  test("every host refreshes each declared plugin", async () => {
-    // Derived from the argument, never a literal here: the plugin set is
-    // the manifest's answer, and a test that wrote one down would be a
-    // second place for it to be declared. Only the CLI hosts take it —
-    // the generators read the tree they ship in.
-    for (const name of CLI_HOSTS) {
-      const host = hostNamed(name);
-      const argv = wireOf(host);
-      for (const plugin of PLUGINS) {
-        expect(
-          argv.some((c) => c.includes(`${plugin}@red-skills`)),
-          `${name}/${plugin}`,
-        ).toBe(true);
-      }
-    }
-  });
-
-  test("Codex removes and re-adds, because it has no plugin update", () => {
-    // Codex's CLI has `marketplace upgrade` and `plugin add`, and no
-    // `plugin update` at all. So the refresh is a remove followed by an
-    // add of the same plugin, in that order, against the marketplace
-    // snapshot the line above them just upgraded.
-    const codex = hostNamed("codex");
-    const steps = codex.wire(CTX);
-    expect(steps[0]?.argv).toEqual(["codex", "plugin", "marketplace", "upgrade", "red-skills"]);
-    // Optional: a Directory marketplace — the one red-dev registers —
-    // is "not configured as a Git marketplace" to `upgrade`, and the
-    // add below reads the tree as it stands.
-    expect(steps[0]?.optional).toBe(true);
-    expect(steps.some((s) => s.argv.includes("update"))).toBe(false);
-
-    for (const plugin of PLUGINS) {
-      const at = steps.findIndex(
-        (s) => s.argv.includes("remove") && s.argv.includes(`${plugin}@red-skills`),
-      );
-      expect(at, plugin).toBeGreaterThan(-1);
-      expect(steps[at + 1]?.argv, plugin).toEqual([
-        "codex",
-        "plugin",
-        "add",
-        `${plugin}@red-skills`,
-      ]);
-      // The remove is the fallback half, not a precondition: a plugin
-      // this machine has never installed makes it exit non-zero, and
-      // that is not a broken host.
-      expect(steps[at]?.optional, plugin).toBe(true);
-      expect(steps[at + 1]?.optional, plugin).toBeUndefined();
-    }
-  });
-
-  test("a plugin Codex has never seen does not fail the host", async () => {
-    // The same fact as above, held at the trace: a non-zero `remove` is
-    // stepped over, the `add` still runs, and the host is stamped.
-    const root = home();
-    const codex = hostNamed("codex");
-    const { calls, run } = recorder((cmd) => (cmd.includes("remove") ? 1 : 0));
-    const out = await refresh({ home: root, source: NEW, hosts: [codex], run });
-
-    expect(out).toEqual([{ host: "codex", refreshed: true }]);
-    expect(calls.map((c) => c.join(" "))).toEqual(wireOf(codex));
-    expect(readHostStamp(root)["codex"]).toBe(NEW);
-  });
-
-  test("an empty plugin set still refreshes the marketplace", async () => {
-    // A machine that opted every plugin out still carries the core, and
-    // the marketplace it registers is what a later opt-in reads.
-    const { calls, run } = recorder();
-    await refresh({ home: home(), source: NEW, plugins: [], run });
-    const empty: HostContext = { plugins: [], source: NEW };
-    expect(calls.map((c) => c.join(" "))).toEqual(REFRESH_HOSTS.flatMap((h) => wireOf(h, empty)));
-    for (const name of CLI_HOSTS) {
-      expect(forHost(calls, hostNamed(name), empty).length, name).toBe(1);
-    }
-  });
-
-  test("the converge reaches the refresh on the already-wired path too", () => {
-    // Asserted against the source because it is not observable any other
-    // way without an agent CLI in the loop, and because the failure it
-    // guards is precise: convergeRedSkills used to return at "already
-    // wired", which is every ordinary converge. A refresh written and
-    // never reached from there would leave the version moving under a
-    // machine whose hosts are never told.
-    const src = readFileSync(`${import.meta.dir}/agents.ts`, "utf8");
-    const converge = src.slice(src.indexOf("export async function convergeRedSkills"));
-    const wired = converge.indexOf("already wired into");
-    expect(wired).toBeGreaterThan(-1);
-    expect(converge.slice(wired)).toContain("refreshSkillHosts");
-  });
-});
-
-describe("the three generator hosts", () => {
-  test("are wired by invoking a script inside the installed tree", async () => {
-    // The split the spec settled, held at the argv. Nothing here spells
-    // out a plugin module, a skill path or an MCP entry: the whole of
-    // red-dev's contribution is naming a script under the checkout.
-    for (const name of GENERATOR_HOSTS) {
-      const host = hostNamed(name);
-      for (const step of [...host.wire(CTX), ...host.unwire(CTX)]) {
-        expect(step.argv[0], `${name}: ${step.argv.join(" ")}`).toStartWith(`${NEW}/scripts/`);
-        expect(step.argv[0], name).toEndWith(".sh");
-      }
-    }
-  });
-
-  test("take the resolved checkout as their source, not a path of our own", async () => {
-    // A generator renders the skills that ship beside it, so the tree it
-    // is invoked out of is the tree it renders. Moving the checkout has
-    // to move every command — a path pinned anywhere in this repo would
-    // render yesterday's tree on a machine mise has already advanced.
-    for (const name of GENERATOR_HOSTS) {
-      const host = hostNamed(name);
-      const old = host.wire({ plugins: PLUGINS, source: OLD });
-      expect(old.every((s) => s.argv.join(" ").includes(OLD)), name).toBe(true);
-      expect(old.some((s) => s.argv.join(" ").includes(NEW)), name).toBe(false);
-    }
-  });
-
-  test("are the same generator for OpenCode and RedCode, told which host", () => {
-    // RedCode is an OpenCode-compatible host: one generator, two config
-    // directories. Two implementations of that would be the drift this
-    // whole split exists to avoid, in miniature.
-    const opencode = hostNamed("opencode").wire(CTX)[0]?.argv ?? [];
-    const redcode = hostNamed("redcode").wire(CTX)[0]?.argv ?? [];
-    expect(opencode[0]).toBe(redcode[0]);
-    expect(opencode.slice(opencode.indexOf("--host"))).toEqual(["--host", "opencode"]);
-    expect(redcode.slice(redcode.indexOf("--host"))).toEqual(["--host", "redcode"]);
-  });
-
-  test("hand pi the checkout explicitly, because it can install from npm instead", () => {
-    const pi = hostNamed("pi").wire(CTX)[0]?.argv ?? [];
-    expect(pi[0]).toBe(`${NEW}/scripts/install-pi.sh`);
-    expect(pi.slice(1)).toEqual(["--source-dir", NEW, "--user"]);
-  });
-});
-
-/**
- * A tree shaped like the installed checkout, with a real generator in it.
- *
- * The script is a stand-in for `scripts/install-opencode.sh` and holds
- * only the part of its contract these tests are about: it renders every
- * skill it finds under the tree it lives in, and it records every path
- * it wrote in an uninstall manifest that its own `--uninstall` reads
- * back. Everything red-dev knows about that contract is the two argv
- * lines above; the rest is deliberately on the other side of the fence.
- */
-function fixtureTree(skills: string[]): string {
-  const tree = mkdtempSync(join(tmpdir(), "red-hosts-tree-"));
-  mkdirSync(join(tree, "scripts"), { recursive: true });
-  const script = join(tree, "scripts", "install-opencode.sh");
-  writeFileSync(
-    script,
-    `#!/usr/bin/env bash
+function opencodeGenerator(): string {
+  return `#!/usr/bin/env bash
 set -euo pipefail
 tree="$(cd "$(dirname "$0")/.." && pwd)"
 action=install
@@ -482,178 +104,782 @@ if [[ "$action" == "uninstall" ]]; then
 fi
 mkdir -p "$config/skills"
 : > "$manifest"
-for skill in "$tree"/plugins/*/skills/*/SKILL.md; do
-  name="$(basename "$(dirname "$skill")")"
-  mkdir -p "$config/skills/$name"
-  cp "$skill" "$config/skills/$name/SKILL.md"
-  printf '%s\\n' "$config/skills/$name" >> "$manifest"
+for plugin in "$tree"/plugins/*/; do
+  name="$(basename "$plugin")"
+  flag="$(awk -v want="  $name:" '$0 == want { found = 1; next } found { print; exit }' "$tree/.red/config.yaml")"
+  case "$flag" in *"enabled: true"*) ;; *) continue ;; esac
+  for skill in "$plugin"skills/*/SKILL.md; do
+    [[ -f "$skill" ]] || continue
+    s="$(basename "$(dirname "$skill")")"
+    mkdir -p "$config/skills/$s"
+    cp "$skill" "$config/skills/$s/SKILL.md"
+    printf '%s\\n' "$config/skills/$s" >> "$manifest"
+  done
 done
-`,
-  );
-  chmodSync(script, 0o755);
-  for (const skill of skills) addSkill(tree, skill);
+`;
+}
+
+/** pi's, which writes under the home rather than under the config root. */
+function piGenerator(): string {
+  return `#!/usr/bin/env bash
+set -euo pipefail
+tree="$(cd "$(dirname "$0")/.." && pwd)"
+action=install
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --uninstall) action=uninstall ;;
+    --source-dir) tree="$2"; shift ;;
+  esac
+  shift
+done
+config="\${HOME:?}/.pi"
+manifest="$config/redskills-install-manifest.txt"
+if [[ "$action" == "uninstall" ]]; then
+  if [[ -f "$manifest" ]]; then
+    while IFS= read -r path || [[ -n "$path" ]]; do
+      if [[ -n "$path" ]]; then rm -rf "$path"; fi
+    done < "$manifest"
+    rm -f "$manifest"
+  fi
+  exit 0
+fi
+mkdir -p "$config/skills"
+: > "$manifest"
+for plugin in "$tree"/plugins/*/; do
+  name="$(basename "$plugin")"
+  flag="$(awk -v want="  $name:" '$0 == want { found = 1; next } found { print; exit }' "$tree/.red/config.yaml")"
+  case "$flag" in *"enabled: true"*) ;; *) continue ;; esac
+  for skill in "$plugin"skills/*/SKILL.md; do
+    [[ -f "$skill" ]] || continue
+    s="$(basename "$(dirname "$skill")")"
+    mkdir -p "$config/skills/$s"
+    cp "$skill" "$config/skills/$s/SKILL.md"
+    printf '%s\\n' "$config/skills/$s" >> "$manifest"
+  done
+done
+`;
+}
+
+interface SetOptions {
+  /** Skills the `dev` plugin carries. */
+  skills?: string[];
+  /** Whether `dev` declares an MCP server for a host to project. */
+  mcp?: boolean;
+  /** Generators to leave out, for the hosts that then have none. */
+  without?: string[];
+}
+
+/** A package set: the shape composeSet produces, small enough to hash. */
+function packageSet(opts: SetOptions = {}): string {
+  const tree = mkdtempSync(join(tmpdir(), "red-hosts-set-"));
+  const without = opts.without ?? [];
+
+  mkdirSync(join(tree, "scripts"), { recursive: true });
+  for (const [name, body] of [
+    ["install-opencode.sh", opencodeGenerator()],
+    ["install-pi.sh", piGenerator()],
+  ] as const) {
+    if (without.includes(name)) continue;
+    const path = join(tree, "scripts", name);
+    writeFileSync(path, body);
+    chmodSync(path, 0o755);
+  }
+
+  for (const skill of opts.skills ?? ["shipped"]) addSkill(tree, "dev", skill);
+  // A payload the set carries and nothing activates. Every assertion about
+  // "only dev" is really an assertion that this one never lands.
+  addSkill(tree, "memory", "memory-only");
+
+  if (opts.mcp !== false) {
+    writeFileSync(
+      join(tree, "plugins", "dev", ".mcp.json"),
+      `${JSON.stringify({ mcpServers: { redskilled: { command: "bun", args: ["run", "d.mjs"] } } }, null, 2)}\n`,
+    );
+  }
+
+  mkdirSync(join(tree, ".red"), { recursive: true });
+  writeFileSync(join(tree, ".red", "config.yaml"), hostActivationConfig(CARRIED, ACTIVATED));
   return tree;
 }
 
-/** One more skill in the tree, which is the only edit these tests make. */
-function addSkill(tree: string, name: string): void {
-  const dir = join(tree, "plugins", "dev", "skills", name);
+/** One more skill in the tree, which is the only edit some tests make. */
+function addSkill(tree: string, plugin: string, name: string): void {
+  const dir = join(tree, "plugins", plugin, "skills", name);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "SKILL.md"), `---\nname: ${name}\n---\n`);
+  writeFileSync(join(dir, "SKILL.md"), `---\nname: ${name}\ndescription: what ${name} does\n---\n`);
 }
 
-/** Runs the argv for real, against a config directory of our own. */
-function spawner(config: string): (cmd: string[]) => Promise<number> {
-  return async (cmd: string[]) => {
-    const proc = Bun.spawn(cmd, {
-      env: { ...process.env, XDG_CONFIG_HOME: config },
-      stdout: "ignore",
-      stderr: "ignore",
-      stdin: "ignore",
-    });
-    return await proc.exited;
+/** Claude's own store, with a marketplace of the operator's beside ours. */
+function knownMarketplaces(current: string): string {
+  return `{
+  "their-marketplace": {
+    "source": { "source": "github", "repo": "someone/theirs" }
+  },
+  "red-skills": {
+    "source": { "source": "directory", "path": "${current}" }
+  }
+}
+`;
+}
+
+/** The same fact in Codex's vocabulary, in the file Codex writes it to. */
+function codexConfig(current: string): string {
+  return `model = "gpt-5"
+
+[marketplaces.red-skills]
+source_type = "local"
+source = "${current}"
+`;
+}
+
+/** A Gemini settings file with the operator's hand all over it. */
+function geminiSettings(): string {
+  return `{
+  "theme": "GitHub Dark",
+  "mcpServers": {
+    "their-own": {
+      "command": "node",
+      "args": ["/home/someone/tools/server.mjs"]
+    }
+  },
+  "autoAccept": false
+}
+`;
+}
+
+interface Machine {
+  home: string;
+  config: string;
+  tree: string;
+  current: string;
+}
+
+/** A machine with all seven hosts, a package set, and settings of its own. */
+function machine(opts: SetOptions = {}): Machine {
+  const home = mkdtempSync(join(tmpdir(), "red-hosts-home-"));
+  const config = join(home, ".config");
+  const tree = packageSet(opts);
+  const current = `${home}/.red-skills/current`;
+
+  mkdirSync(join(home, ".claude", "plugins"), { recursive: true });
+  writeFileSync(join(home, ".claude", "plugins", "known_marketplaces.json"), knownMarketplaces(current));
+  mkdirSync(join(home, ".codex"), { recursive: true });
+  writeFileSync(join(home, ".codex", "config.toml"), codexConfig(current));
+  mkdirSync(join(home, ".gemini"), { recursive: true });
+  writeFileSync(join(home, ".gemini", "settings.json"), geminiSettings());
+
+  return { home, config, tree, current };
+}
+
+/**
+ * Collects the argv a reconciliation issued, and runs the real ones.
+ *
+ * A generator is addressed by absolute path and actually executes; a host
+ * CLI is a name this machine does not have, and is recorded and answered
+ * for. `code` overrides both, which is how a refusing host is expressed.
+ */
+function runner(
+  m: Machine,
+  code: (cmd: string[]) => number = () => 0,
+): { calls: string[][]; run: (cmd: string[]) => Promise<number> } {
+  const calls: string[][] = [];
+  return {
+    calls,
+    run: async (cmd: string[]) => {
+      calls.push(cmd);
+      const forced = code(cmd);
+      if (forced !== 0) return forced;
+      const argv0 = cmd[0] ?? "";
+      if (!argv0.startsWith("/")) return 0;
+      const proc = Bun.spawn(cmd, {
+        env: { ...process.env, HOME: m.home, XDG_CONFIG_HOME: m.config },
+        stdout: "ignore",
+        stderr: "ignore",
+        stdin: "ignore",
+      });
+      return await proc.exited;
+    },
   };
 }
 
-function skillPath(config: string, host: string, name: string): string {
-  return join(config, host, "skills", name, "SKILL.md");
+function reconcile(m: Machine, opts: HostReconcileOptions = {}): Promise<HostOutcome[]> {
+  return reconcileSkillHosts(UBUNTU, {
+    home: m.home,
+    config: m.config,
+    source: m.tree,
+    current: m.current,
+    plugins: ACTIVATED,
+    present: () => true,
+    running: () => false,
+    now: () => STAMPED_AT,
+    ...opts,
+  });
 }
 
-describe("no generator logic is reimplemented here", () => {
-  test("a skill added to the tree lands on the machine with nothing changed here", async () => {
-    // The reason for the whole split, made observable. The only edit
-    // between the two converges below is one directory inside a fixture
-    // tree — no table in this repo names a skill, so none had to grow a
-    // row for `arrived-later` to appear.
-    const tree = fixtureTree(["shipped"]);
-    const config = mkdtempSync(join(tmpdir(), "red-hosts-config-"));
-    const opencode = hostNamed("opencode");
+function statusOf(out: readonly HostOutcome[], host: string): string | undefined {
+  return out.find((o) => o.host === host)?.status;
+}
 
-    const first = await refresh({
-      home: home(),
-      source: tree,
-      hosts: [opencode],
-      run: spawner(config),
-    });
-    expect(first).toEqual([{ host: "opencode", refreshed: true }]);
-    expect(existsSync(skillPath(config, "opencode", "shipped"))).toBe(true);
-    expect(existsSync(skillPath(config, "opencode", "arrived-later"))).toBe(false);
+function adapterNamed(name: string): HostAdapter {
+  const adapter = HOST_ADAPTERS.find((a) => a.name === name);
+  if (!adapter) throw new Error(`no adapter named ${name}`);
+  return adapter;
+}
 
-    addSkill(tree, "arrived-later");
-    // A fresh home so the stamp does not skip: the point is what the
-    // generator renders, not when the walk decides to ask it.
-    const second = await refresh({
-      home: home(),
-      source: tree,
-      hosts: [opencode],
-      run: spawner(config),
-    });
+function lines(calls: readonly string[][]): string[] {
+  return calls.map((c) => c.join(" "));
+}
 
-    expect(second).toEqual([{ host: "opencode", refreshed: true }]);
-    expect(existsSync(skillPath(config, "opencode", "arrived-later"))).toBe(true);
-    expect(existsSync(skillPath(config, "opencode", "shipped"))).toBe(true);
+// -------------------------------------------------------------- the seven
+
+describe("the seven adapters Spec #201 settled", () => {
+  test("are the ones in the table, by name and in walk order", () => {
+    expect(HOST_ADAPTERS.map((a) => a.name)).toEqual([
+      "claude",
+      "codex",
+      "opencode",
+      "redcode",
+      "gemini",
+      "pi",
+      "hermes",
+    ]);
+  });
+
+  test("a first converge reconciles every one of them", async () => {
+    // Nothing recorded yet, which is the state of a machine that has never
+    // been reconciled. Unknown is not "current": an empty registry has to
+    // mean reconcile, or a machine gets its first one never.
+    const m = machine();
+    const { run } = runner(m);
+    const out = await reconcile(m, { run });
+
+    expect(out.map((o) => o.host)).toEqual(HOST_ADAPTERS.map((a) => a.name));
+    for (const o of out) expect(o.status, `${o.host}: ${o.reason ?? ""}`).toBe("reconciled");
+  });
+
+  test("and records the mechanism each one was actually reached through", async () => {
+    // Not a column of the table: for Gemini and Hermes the mode is a fact
+    // about the package set, and the day RedSkills ships a generator for
+    // them the same adapter records `generator` instead.
+    const m = machine();
+    await reconcile(m, { run: runner(m).run });
+    const hosts = readHostRegistry(m.home).hosts;
+
+    for (const name of MARKETPLACE_HOSTS) expect(hosts[name]?.mode, name).toBe("marketplace");
+    for (const name of GENERATOR_HOSTS) expect(hosts[name]?.mode, name).toBe("generator");
+    expect(hosts["gemini"]?.mode).toBe("extension");
+    expect(hosts["hermes"]?.mode).toBe("skills");
+  });
+
+  test("a set that ships a generator for a projected host uses it instead", async () => {
+    const m = machine();
+    const script = join(m.tree, "scripts", "install-gemini.sh");
+    writeFileSync(script, "#!/usr/bin/env bash\nexit 0\n");
+    chmodSync(script, 0o755);
+
+    const { calls, run } = runner(m);
+    const out = await reconcile(m, { run, adapters: [adapterNamed("gemini")] });
+
+    // Blocked rather than reconciled, and deliberately: the script above
+    // records no install manifest, so there is nothing to observe and
+    // nothing that could be removed later. What is asserted here is the
+    // choice — the projection stood down for the tree's own generator.
+    expect(out[0]?.mode).toBe("generator");
+    expect(lines(calls)).toEqual([`${script} --source-dir ${m.tree} --user`]);
+    expect(existsSync(join(m.home, ".gemini", "extensions", "red-skills"))).toBe(false);
   });
 });
 
-describe("unwiring a generator host", () => {
-  test("goes through the same script and removes exactly what the manifest recorded", async () => {
-    // The conservative removal belongs to the generator, because the
-    // manifest is the only record of what it wrote. A second opinion in
-    // this repo would be a list of paths that drifts from the tree —
-    // and the way it fails is by deleting somebody else's file.
-    const tree = fixtureTree(["shipped", "also-shipped"]);
-    const config = mkdtempSync(join(tmpdir(), "red-hosts-config-"));
-    const root = home();
-    const redcode = hostNamed("redcode");
+// -------------------------------------------------------------- only `dev`
 
-    await refresh({ home: root, source: tree, hosts: [redcode], run: spawner(config) });
-    expect(existsSync(skillPath(config, "redcode", "shipped"))).toBe(true);
-    expect(readHostStamp(root)["redcode"]).toBe(tree);
-
-    // Something the generator never wrote, in the directory it writes
-    // into. Nothing recorded it, so nothing may remove it.
-    const mine = join(config, "redcode", "skills", "hand-written");
-    mkdirSync(mine, { recursive: true });
-    writeFileSync(join(mine, "SKILL.md"), "mine\n");
-
-    const calls: string[][] = [];
-    const run = spawner(config);
-    const out = await unwireSkillHosts(UBUNTU, {
-      home: root,
-      source: tree,
-      plugins: PLUGINS,
-      present: () => true,
-      hosts: [redcode],
-      run: (cmd) => {
-        calls.push(cmd);
-        return run(cmd);
-      },
-    });
-
-    expect(out).toEqual([{ host: "redcode", unwired: true }]);
-    expect(calls.map((c) => c.join(" "))).toEqual([
-      `${tree}/scripts/install-opencode.sh --uninstall --global --host redcode`,
-    ]);
-    // What the manifest recorded is gone, and only that.
-    expect(existsSync(skillPath(config, "redcode", "shipped"))).toBe(false);
-    expect(existsSync(skillPath(config, "redcode", "also-shipped"))).toBe(false);
-    expect(existsSync(join(config, "redcode", "redskills-install-manifest.txt"))).toBe(false);
-    expect(existsSync(join(mine, "SKILL.md"))).toBe(true);
-    // And the host is no longer claimed as refreshed against that tree,
-    // so the next converge wires it again rather than skipping it.
-    expect(readHostStamp(root)["redcode"]).toBeUndefined();
+describe("only the dev plugin is activated", () => {
+  test("out of everything the machine carries locally", () => {
+    expect(activatedPlugins(["dev", "memory", "brain"])).toEqual(["dev"]);
+    expect(activatedPlugins(["memory", "brain"])).toEqual([]);
   });
 
-  test("with no checkout on the machine, unwires nothing rather than guessing", async () => {
-    // The scripts live in the tree. With no tree there is no record of
-    // what was written, and this repo does not hold a second copy of it.
-    const { calls, run } = recorder();
-    const out = await unwireSkillHosts(UBUNTU, {
-      home: home(),
+  test("the marketplace hosts are never asked for another one", async () => {
+    const m = machine();
+    const { calls, run } = runner(m);
+    await reconcile(m, { run, plugins: ACTIVATED });
+
+    const issued = lines(calls).join("\n");
+    expect(issued).toContain("dev@red-skills");
+    expect(issued).not.toContain("memory@red-skills");
+    expect(issued).not.toContain("brain@red-skills");
+  });
+
+  test("the projected hosts carry dev's skills and nothing else", async () => {
+    const m = machine({ skills: ["shipped", "also-shipped"] });
+    await reconcile(m, { run: runner(m).run });
+
+    const gemini = join(m.home, ".gemini", "extensions", "red-skills", "skills");
+    const hermes = join(m.home, ".hermes", "skills", "red-skills");
+    for (const root of [gemini, hermes]) {
+      expect(existsSync(join(root, "shipped", "SKILL.md")), root).toBe(true);
+      expect(existsSync(join(root, "also-shipped", "SKILL.md")), root).toBe(true);
+      expect(existsSync(join(root, "memory-only")), root).toBe(false);
+    }
+  });
+
+  test("and the generators render what the set's activation config enables", async () => {
+    // The three hosts red-dev hands no plugin list to. Activation reaches
+    // them through the config composeSet writes beside the tree, which is
+    // why that file names every payload and enables one.
+    const m = machine();
+    await reconcile(m, { run: runner(m).run });
+
+    expect(readFileSync(join(m.tree, ".red", "config.yaml"), "utf8")).toContain(
+      "  dev:\n    enabled: true\n  memory:\n    enabled: false\n",
+    );
+    for (const host of ["opencode", "redcode"]) {
+      expect(existsSync(join(m.config, host, "skills", "shipped", "SKILL.md")), host).toBe(true);
+      expect(existsSync(join(m.config, host, "skills", "memory-only")), host).toBe(false);
+    }
+    expect(existsSync(join(m.home, ".pi", "skills", "shipped", "SKILL.md"))).toBe(true);
+    expect(existsSync(join(m.home, ".pi", "skills", "memory-only"))).toBe(false);
+  });
+});
+
+// ----------------------------------------------------------- the regression
+
+/**
+ * The rule this module replaced, spelled out so the miss can be asserted.
+ *
+ * A host was current when the checkout path it was last refreshed against
+ * was the path resolved now. Nothing else was compared, which is why an
+ * edit that keeps the path is invisible to it.
+ */
+function pathOnlyStampSaysCurrent(stamped: string, resolved: string): boolean {
+  return stamped === resolved;
+}
+
+describe("a source that changed in place", () => {
+  test("is missed by the retired path-only stamp and caught by the record", async () => {
+    // A development checkout, or a set rebuilt from the same version: the
+    // bytes moved and the path did not. This is the case Spec #201 names
+    // as the reason a path stamp cannot be the identity.
+    const m = machine();
+    await reconcile(m, { run: runner(m).run });
+    const before = readHostRegistry(m.home).hosts["opencode"];
+    expect(before?.setDigest).toBeTruthy();
+
+    addSkill(m.tree, "dev", "arrived-later");
+
+    // The old rule, on the same two facts it had: the resolved path is the
+    // stamped path, so it reports a host that has never seen the new skill
+    // as already refreshed.
+    expect(pathOnlyStampSaysCurrent(m.tree, m.tree)).toBe(true);
+
+    const { calls, run } = runner(m);
+    const out = await reconcile(m, { run });
+
+    expect(calls.length).toBeGreaterThan(0);
+    for (const o of out) expect(o.status, `${o.host}: ${o.reason ?? ""}`).toBe("reconciled");
+    const after = readHostRegistry(m.home).hosts["opencode"];
+    expect(after?.setDigest).not.toBe(before?.setDigest);
+    // And the skill is on the machine, with nothing in this repo changed
+    // to let it through: the generator renders the tree it ships in.
+    expect(existsSync(join(m.config, "opencode", "skills", "arrived-later", "SKILL.md"))).toBe(true);
+    expect(existsSync(join(m.home, ".gemini", "extensions", "red-skills", "skills", "arrived-later")))
+      .toBe(true);
+  });
+
+  test("while a converge that changed nothing issues no commands at all", async () => {
+    // The other direction, because a gate that only ever says "reconcile"
+    // is as broken as one that never does. Not "issues fewer" and not
+    // "issues them and they no-op" — the trace is empty.
+    const m = machine();
+    await reconcile(m, { run: runner(m).run });
+
+    const { calls, run } = runner(m);
+    const out = await reconcile(m, { run });
+
+    expect(calls).toEqual([]);
+    for (const o of out) expect(o.status, o.host).toBe("current");
+  });
+
+  test("red-skills absent from the machine reconciles nothing", async () => {
+    const m = machine();
+    const { calls, run } = runner(m);
+    const out = await reconcile(m, { source: null, run });
+
+    expect(calls).toEqual([]);
+    expect(out).toEqual([]);
+  });
+});
+
+describe("state that moved under a host", () => {
+  test("is reconciled again, and only that host is", async () => {
+    // The observation the stamp could never make. Nothing about the set
+    // changed; what changed is that the machine no longer has what the
+    // record says it has.
+    const m = machine();
+    await reconcile(m, { run: runner(m).run });
+    rmSync(join(m.config, "opencode", "skills", "shipped"), { recursive: true, force: true });
+
+    const { calls, run } = runner(m);
+    const out = await reconcile(m, { run });
+
+    expect(statusOf(out, "opencode")).toBe("reconciled");
+    expect(lines(calls)).toEqual([`${m.tree}/scripts/install-opencode.sh --global --host opencode`]);
+    expect(existsSync(join(m.config, "opencode", "skills", "shipped", "SKILL.md"))).toBe(true);
+    for (const other of ["redcode", "gemini", "pi", "hermes", "claude", "codex"]) {
+      expect(statusOf(out, other), other).toBe("current");
+    }
+  });
+
+  test("including one an operator edited by hand", async () => {
+    const m = machine();
+    await reconcile(m, { run: runner(m).run });
+    writeFileSync(
+      join(m.home, ".gemini", "extensions", "red-skills", "REDSKILLS.md"),
+      "somebody rewrote this\n",
+    );
+
+    const out = await reconcile(m, { run: runner(m).run });
+    expect(statusOf(out, "gemini")).toBe("reconciled");
+    expect(readFileSync(join(m.home, ".gemini", "extensions", "red-skills", "REDSKILLS.md"), "utf8"))
+      .toContain("shipped");
+  });
+});
+
+// ---------------------------------------------------------- the verification
+
+describe("nothing short of a verified reconciliation is recorded", () => {
+  test("a host that refuses a required command", async () => {
+    const m = machine();
+    const { run } = runner(m, (cmd) => (cmd[0] === "claude" ? 1 : 0));
+    const out = await reconcile(m, { run });
+
+    expect(statusOf(out, "claude")).toBe("failed");
+    expect(readHostRegistry(m.home).hosts["claude"]).toBeUndefined();
+    // And the others are untouched by it: one CLI broken for its own
+    // reasons is the ordinary state of a machine with several agents.
+    for (const other of HOST_ADAPTERS.filter((a) => a.name !== "claude")) {
+      expect(statusOf(out, other.name), other.name).toBe("reconciled");
+    }
+  });
+
+  test("a runner that throws is a failed host, not a failed converge", async () => {
+    const m = machine();
+    const out = await reconcile(m, {
+      run: async (cmd) => {
+        if (cmd[0] === "codex") throw new Error("spawn failed");
+        return 0;
+      },
+      adapters: [adapterNamed("codex"), adapterNamed("hermes")],
+    });
+
+    expect(statusOf(out, "codex")).toBe("failed");
+    expect(statusOf(out, "hermes")).toBe("reconciled");
+    expect(readHostRegistry(m.home).hosts["codex"]).toBeUndefined();
+  });
+
+  test("a generator that succeeded and recorded no manifest", async () => {
+    // The partial case, and the one that matters most: every command
+    // exited zero, so an exit-code verdict would call this converged. What
+    // is missing is any record of what was written, which means nothing to
+    // observe now and nothing to remove later.
+    const m = machine();
+    const script = join(m.tree, "scripts", "install-opencode.sh");
+    writeFileSync(script, "#!/usr/bin/env bash\nexit 0\n");
+    chmodSync(script, 0o755);
+
+    const out = await reconcile(m, { run: runner(m).run, adapters: [adapterNamed("opencode")] });
+
+    expect(out[0]?.status).toBe("failed");
+    expect(out[0]?.reason).toContain("install manifest");
+    expect(readHostRegistry(m.home).hosts["opencode"]).toBeUndefined();
+  });
+
+  test("a marketplace host whose registration still points somewhere else", async () => {
+    // Told to update, and it did — but what it wrote down says GitHub.
+    // That is exactly the state a record must not describe as converged,
+    // and only reading the host's own file can tell.
+    const m = machine();
+    writeFileSync(
+      join(m.home, ".claude", "plugins", "known_marketplaces.json"),
+      `{\n  "red-skills": {\n    "source": { "source": "github", "repo": "reddb-io/red-skills" }\n  }\n}\n`,
+    );
+
+    const out = await reconcile(m, { run: runner(m).run, adapters: [adapterNamed("claude")] });
+
+    expect(out[0]?.status).toBe("failed");
+    expect(out[0]?.reason).toContain("registered from");
+    expect(readHostRegistry(m.home).hosts["claude"]).toBeUndefined();
+  });
+
+  test("a set with no generator for a host it needs one for", async () => {
+    const m = machine({ without: ["install-opencode.sh", "install-pi.sh"] });
+    const { calls, run } = runner(m);
+    const out = await reconcile(m, { run });
+
+    for (const host of GENERATOR_HOSTS) {
+      expect(statusOf(out, host), host).toBe("blocked");
+      expect(readHostRegistry(m.home).hosts[host], host).toBeUndefined();
+    }
+    expect(lines(calls).some((c) => c.includes("/scripts/"))).toBe(false);
+    // Blocked is a reported failure of the whole walk, not a quiet skip:
+    // seven-host success cannot be claimed while one of them is stuck.
+    for (const host of PROJECTED_HOSTS) expect(statusOf(out, host), host).toBe("reconciled");
+  });
+
+  test("a set with no skills leaves the projected hosts blocked", async () => {
+    const m = machine({ skills: [], mcp: false });
+    const out = await reconcile(m, { run: runner(m).run });
+
+    for (const host of PROJECTED_HOSTS) {
+      expect(statusOf(out, host), host).toBe("blocked");
+      expect(readHostRegistry(m.home).hosts[host], host).toBeUndefined();
+    }
+  });
+
+  test("a host that is not on the machine, until the converge after it appears", async () => {
+    // Absence must not be recorded. A skipped host written down as current
+    // is a host installed tomorrow and left on yesterday's set forever.
+    const m = machine();
+    const first = await reconcile(m, { run: runner(m).run, present: (cmd) => cmd !== "hermes" });
+
+    expect(statusOf(first, "hermes")).toBe("absent");
+    expect(first.find((o) => o.host === "hermes")?.reason).toContain("not installed");
+    expect(readHostRegistry(m.home).hosts["hermes"]).toBeUndefined();
+
+    const second = await reconcile(m, { run: runner(m).run });
+    expect(statusOf(second, "hermes")).toBe("reconciled");
+    expect(existsSync(join(m.home, ".hermes", "skills", "red-skills", "shipped"))).toBe(true);
+  });
+});
+
+// ------------------------------------------------------ the operator's files
+
+describe("configuration the operator owns", () => {
+  test("keeps every byte outside the field red-dev owns", async () => {
+    const m = machine();
+    await reconcile(m, { run: runner(m).run });
+
+    const after = readFileSync(join(m.home, ".gemini", "settings.json"), "utf8");
+    // Their formatting, their key order, their server, their trailing
+    // newline. A parse-and-restringify merge loses all four.
+    expect(after).toContain(`  "theme": "GitHub Dark",\n`);
+    expect(after).toContain(`      "args": ["/home/someone/tools/server.mjs"]\n`);
+    expect(after).toContain(`  "autoAccept": false\n`);
+    expect(after.endsWith("}\n")).toBe(true);
+    // And the one thing that is ours, named so it cannot collide.
+    expect(JSON.parse(after)["mcpServers"]["red-skills-redskilled"]).toEqual({
+      command: "bun",
+      args: ["run", "d.mjs"],
+    });
+  });
+
+  test("and is handed back exactly as it was when RedSkills is removed", async () => {
+    const m = machine();
+    await reconcile(m, { run: runner(m).run });
+    await removeSkillHosts(UBUNTU, {
+      home: m.home,
+      config: m.config,
+      source: m.tree,
+      plugins: ACTIVATED,
+      present: () => true,
+      run: runner(m).run,
+    });
+
+    expect(readFileSync(join(m.home, ".gemini", "settings.json"), "utf8")).toBe(geminiSettings());
+  });
+
+  test("a set that declares no MCP never opens the settings file at all", async () => {
+    const m = machine({ mcp: false });
+    rmSync(join(m.tree, "plugins", "dev", ".mcp.json"), { force: true });
+    await reconcile(m, { run: runner(m).run });
+
+    expect(readFileSync(join(m.home, ".gemini", "settings.json"), "utf8")).toBe(geminiSettings());
+    expect(existsSync(join(m.home, ".gemini", "extensions", "red-skills"))).toBe(true);
+  });
+
+  test("Claude's own store is read and never rewritten", async () => {
+    const m = machine();
+    await reconcile(m, { run: runner(m).run });
+    expect(readFileSync(join(m.home, ".claude", "plugins", "known_marketplaces.json"), "utf8"))
+      .toBe(knownMarketplaces(m.current));
+  });
+});
+
+// -------------------------------------------------------------- the removal
+
+describe("removal is the ownership manifest, replayed", () => {
+  test("takes back what was recorded and nothing beside it", async () => {
+    const m = machine({ skills: ["shipped", "also-shipped"] });
+    await reconcile(m, { run: runner(m).run });
+
+    // Things nobody here wrote, in the directories red-dev writes into.
+    // Nothing recorded them, so nothing may remove them.
+    const theirs = [
+      join(m.config, "opencode", "skills", "hand-written"),
+      join(m.home, ".gemini", "extensions", "their-extension"),
+      join(m.home, ".hermes", "skills", "theirs"),
+      join(m.home, ".pi", "skills", "hand-written"),
+    ];
+    for (const dir of theirs) {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "SKILL.md"), "mine\n");
+    }
+
+    const { calls, run } = runner(m);
+    const out = await removeSkillHosts(UBUNTU, {
+      home: m.home,
+      config: m.config,
+      source: m.tree,
+      plugins: ACTIVATED,
+      present: () => true,
+      run,
+    });
+
+    expect(out.every((o) => o.removed)).toBe(true);
+    // The generators were routed back through their own scripts.
+    expect(lines(calls)).toContain(`${m.tree}/scripts/install-opencode.sh --uninstall --global --host opencode`);
+    expect(lines(calls)).toContain(`${m.tree}/scripts/install-pi.sh --uninstall --user`);
+    // What was recorded is gone.
+    expect(existsSync(join(m.config, "opencode", "skills", "shipped"))).toBe(false);
+    expect(existsSync(join(m.config, "redcode", "redskills-install-manifest.txt"))).toBe(false);
+    expect(existsSync(join(m.home, ".gemini", "extensions", "red-skills"))).toBe(false);
+    expect(existsSync(join(m.home, ".hermes", "skills", "red-skills"))).toBe(false);
+    expect(existsSync(join(m.home, ".pi", "skills", "shipped"))).toBe(false);
+    // And what was not is untouched.
+    for (const dir of theirs) expect(existsSync(join(dir, "SKILL.md")), dir).toBe(true);
+    // Including the operator's other marketplace, in the file red-dev
+    // takes only its own entry out of.
+    expect(readFileSync(join(m.home, ".claude", "plugins", "known_marketplaces.json"), "utf8")).toBe(
+      `{\n  "their-marketplace": {\n    "source": { "source": "github", "repo": "someone/theirs" }\n  }\n}\n`,
+    );
+    // The record goes with the state it described.
+    expect(readHostRegistry(m.home).hosts).toEqual({});
+  });
+
+  test("works with the package set already pruned off the machine", async () => {
+    // The record is the manifest, so removal does not need the tree the
+    // way the old unwire did. Only the host's own commands do, and those
+    // are skipped rather than guessed at.
+    const m = machine();
+    await reconcile(m, { run: runner(m).run });
+
+    const { calls, run } = runner(m);
+    const out = await removeSkillHosts(UBUNTU, {
+      home: m.home,
+      config: m.config,
       source: null,
-      plugins: PLUGINS,
+      plugins: ACTIVATED,
       present: () => true,
       run,
     });
 
     expect(calls).toEqual([]);
-    expect(out).toEqual([]);
+    expect(out.every((o) => o.removed)).toBe(true);
+    expect(existsSync(join(m.config, "opencode", "skills", "shipped"))).toBe(false);
+    expect(existsSync(join(m.home, ".gemini", "extensions", "red-skills"))).toBe(false);
+    expect(readHostRegistry(m.home).hosts).toEqual({});
   });
 
-  test("a host that is not installed is skipped with a reason", async () => {
-    const { calls, run } = recorder();
-    const out = await unwireSkillHosts(UBUNTU, {
-      home: home(),
-      source: NEW,
-      plugins: PLUGINS,
-      present: (cmd) => cmd !== "pi",
+  test("a host nothing was recorded for is left alone", async () => {
+    const m = machine();
+    const { calls, run } = runner(m);
+    const out = await removeSkillHosts(UBUNTU, {
+      home: m.home,
+      config: m.config,
+      source: m.tree,
+      plugins: ACTIVATED,
+      present: () => true,
       run,
     });
 
-    const pi = out.find((o) => o.host === "pi");
-    expect(pi?.unwired).toBe(false);
-    expect(pi?.reason).toContain("not installed");
-    expect(calls.some((c) => c.join(" ").includes("install-pi.sh"))).toBe(false);
-    expect(out.filter((o) => o.host !== "pi").every((o) => o.unwired)).toBe(true);
+    expect(calls).toEqual([]);
+    expect(out.every((o) => !o.removed)).toBe(true);
+    for (const o of out) expect(o.reason, o.host).toContain("nothing was recorded");
+  });
+});
+
+// --------------------------------------------------------------- the report
+
+describe("what doctor is told", () => {
+  test("every host's observed digest, mode and reload state, as data", async () => {
+    const m = machine();
+    await reconcile(m, { run: runner(m).run });
+
+    const report = redSkillsHostReport(m.home);
+    expect(report.unrecorded).toEqual([]);
+    expect(report.hosts.map((h) => h.host)).toEqual(HOST_ADAPTERS.map((a) => a.name));
+    for (const row of report.hosts) {
+      expect(row.setDigest, row.host).toMatch(/^[0-9a-f]{64}$/);
+      expect(row.stateDigest, row.host).toMatch(/^[0-9a-f]{64}$/);
+      expect(row.plugins, row.host).toEqual(ACTIVATED);
+      expect(row.reload, row.host).toBe("current");
+      expect(row.verifiedAt, row.host).toBe(STAMPED_AT);
+    }
+    // Two hosts with different state have different state digests: the
+    // number describes the machine rather than the set.
+    const digests = new Set(report.hosts.map((h) => h.stateDigest));
+    expect(digests.size).toBeGreaterThan(1);
   });
 
-  test("every host's removal is the undo of its own wiring", () => {
-    // Held for all five: the CLI hosts hand back their marketplace, the
-    // generator hosts hand back to the script that wired them.
-    for (const host of REFRESH_HOSTS) {
-      const steps = host.unwire(CTX);
-      expect(steps.length, host.name).toBeGreaterThan(0);
-      if (GENERATOR_HOSTS.includes(host.name)) {
-        expect(steps.map((s) => s.argv[0]), host.name).toEqual(
-          host.wire(CTX).map((s) => s.argv[0]),
-        );
-        expect(steps.every((s) => s.argv.includes("--uninstall")), host.name).toBe(true);
-      } else {
-        expect(steps.some((s) => s.argv.includes("marketplace")), host.name).toBe(true);
-        // Removing what may never have been added is allowed to fail: an
-        // uninstall that throws halfway leaves a host part-wired.
-        expect(steps.every((s) => s.optional === true), host.name).toBe(true);
-      }
-    }
+  test("names the hosts it has never observed rather than omitting them", async () => {
+    const m = machine();
+    await reconcile(m, { run: runner(m).run, adapters: [adapterNamed("hermes")] });
+
+    const report = redSkillsHostReport(m.home);
+    expect(report.hosts.map((h) => h.host)).toEqual(["hermes"]);
+    expect(report.unrecorded).toEqual(["claude", "codex", "opencode", "redcode", "gemini", "pi"]);
+    expect(redSkillsHostRows(report).some((r) => r.status === "n/a")).toBe(true);
+  });
+
+  test("a session that was up is reported as needing a restart, never killed", async () => {
+    // Plugin freshness does not justify interrupting somebody's work, so
+    // the only thing that happens to a running host is that it is said so.
+    const m = machine();
+    const { calls, run } = runner(m);
+    const out = await reconcile(m, { run, running: () => true, adapters: [adapterNamed("hermes")] });
+
+    expect(out[0]?.reload).toBe("restart-needed");
+    expect(readHostRegistry(m.home).hosts["hermes"]?.reload).toBe("restart-needed");
+    expect(lines(calls).some((c) => c.includes("kill") || c.includes("pkill"))).toBe(false);
+
+    const rows = redSkillsHostRows(redSkillsHostReport(m.home));
+    expect(rows.find((r) => r.detail.startsWith("hermes"))?.status).toBe("warn");
+    expect(rows.find((r) => r.detail.startsWith("hermes"))?.detail).toContain("restart needed");
+  });
+
+  test("with nothing recorded at all it says so and reads no host", () => {
+    const home = mkdtempSync(join(tmpdir(), "red-hosts-empty-"));
+    const report = redSkillsHostReport(home);
+    expect(report.hosts).toEqual([]);
+    expect(report.unrecorded).toEqual(HOST_ADAPTERS.map((a) => a.name));
+  });
+
+  test("the registry the path-only stamp left behind reads as no record", async () => {
+    // The old file was a bare host-to-path map with no schema. Every host
+    // is reconciled once on the converge after the upgrade, which is
+    // correct: there is nothing in it worth believing.
+    const m = machine();
+    const path = join(m.home, ".local", "share", "red-dev", "red-skills-hosts.json");
+    mkdirSync(join(m.home, ".local", "share", "red-dev"), { recursive: true });
+    writeFileSync(path, `${JSON.stringify({ claude: m.tree, opencode: m.tree }, null, 2)}\n`);
+
+    expect(readHostRegistry(m.home).hosts).toEqual({});
+    const out = await reconcile(m, { run: runner(m).run });
+    for (const o of out) expect(o.status, o.host).toBe("reconciled");
+  });
+});
+
+describe("the converge reaches the reconciliation", () => {
+  test("on the already-wired path too", () => {
+    // Asserted against the source because it is not observable any other
+    // way without an agent CLI in the loop, and because the failure it
+    // guards is precise: convergeRedSkills used to return at "already
+    // wired", which is every ordinary converge. A reconciliation written
+    // and never reached from there would leave the set moving under a
+    // machine whose hosts are never told.
+    const src = readFileSync(`${import.meta.dir}/agents.ts`, "utf8");
+    const converge = src.slice(src.indexOf("export async function convergeRedSkills"));
+    const wired = converge.indexOf("already wired into");
+    expect(wired).toBeGreaterThan(-1);
+    expect(converge.slice(wired)).toContain("reconcileSkillHosts");
   });
 });

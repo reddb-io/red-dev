@@ -310,6 +310,19 @@ async function cmdDoctor(p: Platform, inv: Invocation): Promise<number> {
     }
   }
 
+  // And what each of the seven hosts was observed to have: the set digest
+  // it was reconciled against, the mechanism it was reached through, the
+  // digest of the state that reconciliation owns, and whether a session
+  // that was up still has to be restarted to load it. Every one of those
+  // was read off the machine at the time it was recorded, which is the
+  // whole difference from the refresh stamp this replaced.
+  const { redSkillsHostReport, redSkillsHostRows } = await import("./red-skills-hosts.ts");
+  for (const row of redSkillsHostRows(redSkillsHostReport(setHome))) {
+    if (row.status === "ok") log.ok(row.detail);
+    else if (row.status === "n/a") log.skip(row.detail);
+    else log.warn(row.detail);
+  }
+
   // The machine's agent posture, in the one place that already answers
   // "is this machine ready": which host red-dev hands work to, how old
   // each installed host's copy is, and the per-provider allowance detail

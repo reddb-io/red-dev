@@ -39,6 +39,7 @@ import { sha256Hex } from "./checksum.ts";
 import { providerFor, TOOLS } from "./manifest.ts";
 import { miseEntries, miseToolNames, renderMiseConfig } from "./mise-config.ts";
 import type { Platform } from "./platform.ts";
+import { activatedPlugins } from "./red-skills-plugins.ts";
 import {
   candidateFromMise,
   composeSet,
@@ -254,15 +255,35 @@ function fakeManifestSet(opts: {
   return dir;
 }
 
-/** The cosign binary, wherever this machine keeps it. */
+/**
+ * The cosign binary, wherever this machine keeps it.
+ *
+ * A mise shim is resolved to the executable behind it while the resolving
+ * still works. The signing case below hands cosign a HOME of its own so
+ * the throwaway key lands in a temporary directory — and a HOME with no
+ * mise config in it is a HOME where the shim answers "cosign is not a
+ * valid shim" instead of signing anything. Asking mise now, with the real
+ * environment still in place, is the difference between a test that
+ * exercises cosign and one that reports the machine as broken.
+ */
 function findCosign(): string {
   const onPath = Bun.which("cosign");
+  if (onPath && !onPath.includes("/mise/shims/")) return onPath;
+  const resolved = miseWhich("cosign");
+  if (resolved) return resolved;
   if (onPath) return onPath;
   const shim = join(homedir(), ".local", "share", "mise", "shims", "cosign");
   if (existsSync(shim)) return shim;
   throw new Error(
     "cosign is required for these tests: `mise use -g cosign` (it is a core manifest entry, and CI installs it)",
   );
+}
+
+/** What mise says a shimmed tool actually is, or null when it cannot say. */
+function miseWhich(tool: string): string | null {
+  const answer = spawnSync("mise", ["which", tool], { encoding: "utf8" });
+  const path = answer.status === 0 ? answer.stdout.trim() : "";
+  return path.length > 0 && existsSync(path) ? path : null;
 }
 
 // ------------------------------------------------------------- the entries
@@ -483,8 +504,12 @@ describe("the composed set", () => {
     // And the asset the memory bundle lazily loads beside itself.
     expect(existsSync(join(tree, "dist", "memory-tokenizer.asset.cjs"))).toBe(true);
     expect(existsSync(join(tree, "dist", "opencode-host.bundle.min.mjs"))).toBe(true);
-    // The activation config the OpenCode generator dies without.
-    expect(readFileSync(join(tree, ".red", "config.yaml"), "utf8")).toBe(hostActivationConfig(PLUGINS));
+    // The activation config the OpenCode generator dies without, naming
+    // every payload the set carries and enabling the one Spec #201
+    // activates.
+    expect(readFileSync(join(tree, ".red", "config.yaml"), "utf8")).toBe(
+      hostActivationConfig(PLUGINS, activatedPlugins(PLUGINS)),
+    );
     // And the generators runnable: an npm tarball drops the bit, and the
     // host refresh spawns them by path.
     for (const script of ["install-opencode.sh", "install-pi.sh"]) {
@@ -492,9 +517,17 @@ describe("the composed set", () => {
     }
   });
 
-  test("the activation config enables exactly the plugins the set carries", () => {
-    expect(hostActivationConfig(["dev", "memory"])).toContain("plugins:\n  dev:\n    enabled: true\n  memory:\n    enabled: true\n");
-    expect(hostActivationConfig(["dev"])).not.toContain("memory");
+  test("the activation config names every payload and enables only dev", () => {
+    // Both halves are load-bearing. Naming a payload the set carries is
+    // what makes switching it on later a flag rather than a download;
+    // enabling only `dev` is what stops Memory and Brain acting on a
+    // machine because they happened to be in the tarball.
+    const carried = ["dev", "memory"];
+    expect(hostActivationConfig(carried, activatedPlugins(carried))).toContain(
+      "plugins:\n  dev:\n    enabled: true\n  memory:\n    enabled: false\n",
+    );
+    expect(hostActivationConfig(["dev"], ["dev"])).not.toContain("memory");
+    expect(activatedPlugins(["dev", "memory", "brain"])).toEqual(["dev"]);
   });
 
   test("nothing inside the set is a link into mise's tree", () => {

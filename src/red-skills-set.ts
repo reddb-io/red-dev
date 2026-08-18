@@ -113,7 +113,11 @@ import { sha256Hex } from "./checksum.ts";
 import { log } from "./log.ts";
 import { miseInstallRoot } from "./mise-config.ts";
 import type { Platform } from "./platform.ts";
-import { REDSKILLS_PLUGIN_PREFIX, redSkillsPluginNames } from "./red-skills-plugins.ts";
+import {
+  activatedPlugins,
+  REDSKILLS_PLUGIN_PREFIX,
+  redSkillsPluginNames,
+} from "./red-skills-plugins.ts";
 
 // ------------------------------------------------------------- the names
 
@@ -741,8 +745,20 @@ export function candidateFromMise(installsRoot: string, plugins: readonly string
  * enables nothing inside any project. It is the ADR 0067 opt-in gate
  * for the plugins the composed set carries, written once beside the
  * tree, exactly as the standalone installer writes it. PURE.
+ *
+ * Every plugin the set carries gets a row, and only the activated ones
+ * get a true. That distinction is the whole of Spec #201's "every payload
+ * is installed, `dev` is activated": omitting the others would make
+ * switching one on a download again, and enabling them would start Memory
+ * and Brain acting on a machine because they were in the tarball. The
+ * generators read these flags, which is how the three hosts red-dev does
+ * not hand a plugin list to are held to the same activation as the four
+ * it does.
  */
-export function hostActivationConfig(plugins: readonly string[]): string {
+export function hostActivationConfig(
+  plugins: readonly string[],
+  activated: readonly string[] = plugins,
+): string {
   const lines = [
     "# Written by red-dev: activation flags for the host-install generator",
     "# (opencode-host) over the composed RedSkills package set. Not a",
@@ -750,7 +766,9 @@ export function hostActivationConfig(plugins: readonly string[]): string {
     "# nothing inside any project.",
     "plugins:",
   ];
-  for (const name of plugins) lines.push(`  ${name}:`, "    enabled: true");
+  for (const name of plugins) {
+    lines.push(`  ${name}:`, `    enabled: ${activated.includes(name)}`);
+  }
   return `${lines.join("\n")}\n`;
 }
 
@@ -797,7 +815,8 @@ export function composeSet(
   const config = join(dest, ".red", "config.yaml");
   if (!existsSync(config)) {
     mkdirSync(dirname(config), { recursive: true });
-    writeFileSync(config, hostActivationConfig(Object.keys(candidate.plugins)), "utf8");
+    const carried = Object.keys(candidate.plugins);
+    writeFileSync(config, hostActivationConfig(carried, activatedPlugins(carried)), "utf8");
   }
   restoreScriptModes(dest);
   return { ok: true };
