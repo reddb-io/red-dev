@@ -28,6 +28,7 @@ describe("the ubuntu 24.04 offline depot journey", () => {
     // Named, so that a journey which quietly stopped making one of these
     // checks fails here rather than passing with fewer of them.
     expect(result.checks.map((c) => c.name)).toEqual([
+      "target-fit",
       "export",
       "manifest",
       "lock",
@@ -56,6 +57,7 @@ describe("the ubuntu 24.04 offline depot journey", () => {
   test("the lines a person reads say which check failed", () => {
     const lines = journeyLines({
       ok: false,
+      target: "ubuntu-24.04-x64",
       root: null,
       checks: [
         { name: "export", ok: true, detail: "depot exported" },
@@ -64,6 +66,6 @@ describe("the ubuntu 24.04 offline depot journey", () => {
     });
     expect(lines[0]).toBe("ok   export — depot exported");
     expect(lines[1]).toBe("FAIL import — entry checksum mismatch");
-    expect(lines[2]).toContain("1 of 2 checks failed");
+    expect(lines[2]).toContain("ubuntu-24.04-x64 offline depot journey: 1 of 2 checks failed");
   });
 });
