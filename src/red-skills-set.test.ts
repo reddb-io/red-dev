@@ -50,6 +50,7 @@ import {
   composeSet,
   CORE_PAYLOAD_CONTRACT,
   corePayloadGaps,
+  activateStagedPackageSet,
   convergeRedSkillsPackageSet,
   convergeSetAfterMise,
   coreInstallsDir,
@@ -933,15 +934,93 @@ describe("activating a published set", () => {
     const home = fakeHome();
     const before = converge(home, aligned(["3.19.4"]));
     const staged = converge(home, "unused", { source: fakeManifestSet(), verifier: accept, stageOnly: true });
+    const identity = staged.staged!;
     expect(staged.refused).toBeNull();
     expect(staged.active).toEqual(before.active);
-    expect(staged.writes.length).toBe(1);
-    expect(existsSync(staged.writes[0]!)).toBe(true);
+    // The revision's tree, and the record saying it is pending. Nothing
+    // else: `current` still resolves to the set this machine was on.
+    const tree = staged.writes[0]!;
+    expect(staged.writes).toEqual([tree, packageSetStatePath(home)]);
+    expect(existsSync(tree)).toBe(true);
     expect(realpathSync(redSkillsCurrentLink(home))).toBe(realpathSync(before.revisionDir!));
+    expect(readPackageSetState(home).staged?.path).toBe(tree);
+    expect(staged.staged).toEqual(identity);
     // Activating it afterwards is the ordinary path, and finds the copy already there.
     const activated = converge(home, "unused", { source: fakeManifestSet(), verifier: accept });
-    expect(activated.writes).not.toContain(staged.writes[0]);
-    expect(realpathSync(redSkillsCurrentLink(home))).toBe(realpathSync(staged.writes[0]!));
+    expect(activated.writes).not.toContain(tree);
+    expect(activated.staged).toBeNull();
+    expect(readPackageSetState(home).staged).toBeNull();
+    expect(realpathSync(redSkillsCurrentLink(home))).toBe(realpathSync(tree));
+  });
+});
+
+// ------------------------------------------------------- the staged half
+
+/**
+ * What a machine does with a revision it verified and did not activate.
+ *
+ * The Workers rule of ADR 0010 is two operations, not one: an update that
+ * meets a running Worker stages the complete revision, and a later run
+ * activates it. The second must not acquire anything — the bytes were
+ * verified when they were staged, and re-fetching them would make an
+ * offline machine unable to finish an update it had already paid for.
+ */
+describe("activating what was staged", () => {
+  test("nothing staged is not a failure, it is nothing to do", () => {
+    const home = fakeHome();
+    converge(home, aligned(["3.19.4"]));
+    expect(activateStagedPackageSet({ home, platform: "linux" })).toBeNull();
+  });
+
+  test("moves current onto the staged revision without acquiring it again", () => {
+    const home = fakeHome();
+    const before = converge(home, aligned(["3.19.4"]));
+    const staged = converge(home, "unused", { source: fakeManifestSet(), verifier: accept, stageOnly: true });
+    const tree = staged.writes[0]!;
+
+    // Every input the acquisition would need is gone: the source
+    // directory it verified, and any verifier it could ask again.
+    const activated = activateStagedPackageSet({ home, platform: "linux" })!;
+    expect(activated.active).toEqual(staged.staged);
+    expect(activated.staged).toBeNull();
+    expect(activated.writes).not.toContain(tree);
+    expect(realpathSync(redSkillsCurrentLink(home))).toBe(realpathSync(tree));
+    // And the revision it replaced is still the rollback.
+    expect(realpathSync(redSkillsPreviousLink(home))).toBe(realpathSync(before.revisionDir!));
+    expect(readPackageSetState(home).staged).toBeNull();
+  });
+
+  test("a second activation has nothing left to activate", () => {
+    const home = fakeHome();
+    converge(home, aligned(["3.19.4"]));
+    converge(home, "unused", { source: fakeManifestSet(), verifier: accept, stageOnly: true });
+    activateStagedPackageSet({ home, platform: "linux" });
+    expect(activateStagedPackageSet({ home, platform: "linux" })).toBeNull();
+  });
+
+  test("a staged tree that is gone is refused rather than pointed at", () => {
+    const home = fakeHome();
+    const before = converge(home, aligned(["3.19.4"]));
+    const staged = converge(home, "unused", { source: fakeManifestSet(), verifier: accept, stageOnly: true });
+    rmSync(staged.writes[0]!, { recursive: true, force: true });
+
+    const activated = activateStagedPackageSet({ home, platform: "linux" })!;
+    expect(activated.refused?.failure).toBe("tree");
+    expect(activated.active).toEqual(before.active);
+    expect(realpathSync(redSkillsCurrentLink(home))).toBe(realpathSync(before.revisionDir!));
+    // Cleared, so doctor stops promising an activation that cannot happen.
+    expect(readPackageSetState(home).staged).toBeNull();
+  });
+
+  test("doctor names the pending revision beside the active one", () => {
+    const home = fakeHome();
+    converge(home, aligned(["3.19.4"]));
+    converge(home, "unused", { source: fakeManifestSet(), verifier: accept, stageOnly: true });
+    const report = redSkillsSetReport(home);
+    expect(report.active?.version).toBe("3.19.4");
+    expect(report.staged).toMatchObject({ kind: "manifest", trust: "trusted", addressable: true });
+    const row = redSkillsSetRows(report).find((r) => r.detail.includes("staged and pending"))!;
+    expect(row.status).toBe("warn");
   });
 });
 
@@ -1095,7 +1174,7 @@ describe("what doctor says", () => {
 
   test("no set: one line, and no rollback", () => {
     const home = fakeHome();
-    expect(redSkillsSetReport(home)).toEqual({ active: null, retained: [], refused: null });
+    expect(redSkillsSetReport(home)).toEqual({ active: null, retained: [], refused: null, staged: null });
     expect(redSkillsSetRows(redSkillsSetReport(home))).toEqual([
       { status: "n/a", detail: "no RedSkills package set is active on this machine" },
     ]);
@@ -1119,6 +1198,7 @@ describe("what doctor says", () => {
         { key: "3.19.4+<digest12>", version: "3.19.4", digest: "<digest>", sourceCommit: "", kind: "composed", trust: "unsigned", path: "<home>/.red-skills/sets/3.19.4+<digest12>", addressable: true },
       ],
       refused: null,
+      staged: null,
     });
     const rows = redSkillsSetRows(redSkillsSetReport(home));
     expect(rows[0]!.status).toBe("warn");
