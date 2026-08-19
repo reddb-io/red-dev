@@ -10,8 +10,16 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { MIGRATIONS } from "./migrations.ts";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import {
+  MIGRATIONS,
+  migrationLedgerPath,
+  readMigrationLedger,
+  writeMigrationLedger,
+} from "./migrations.ts";
 
 describe("the ledger", () => {
   test("ids are unique, because the ledger is keyed on them", () => {
@@ -54,5 +62,44 @@ describe("the migration that removed the hotkeys", () => {
     // no longer exists.
     const src = readFileSync("src/migrations.ts", "utf8");
     expect(src).not.toContain("Remove-Item");
+  });
+});
+
+describe("the ledger's home", () => {
+  test("is per-side, beside the run logs, not in the shared preferences file", () => {
+    // The case that made this necessary: on WSL the preferences file is
+    // the Windows host's, so a repair run inside the distro used to
+    // mark itself done for the host too. The transcript directory is
+    // resolved per-side, and these are two different machines' answers.
+    const distro = migrationLedgerPath({ HOME: "/home/me" });
+    const host = migrationLedgerPath({ LOCALAPPDATA: "C:\\Users\\me\\AppData\\Local" });
+    expect(distro).toBe("/home/me/.local/state/red-dev/migrations.json");
+    expect(host).toBe("C:/Users/me/AppData/Local/red-dev/logs/migrations.json");
+    expect(distro).not.toBe(host);
+  });
+
+  test("round-trips what has run, and reads an absent or broken file as nothing run", () => {
+    const dir = mkdtempSync(join(tmpdir(), "red-ledger-"));
+    const path = join(dir, "migrations.json");
+
+    expect(readMigrationLedger(path)).toEqual(new Set());
+
+    writeMigrationLedger(["2026-08-19-red-skills-under-red", "2026-07-29-font-registration"], path);
+    expect(readMigrationLedger(path)).toEqual(
+      new Set(["2026-08-19-red-skills-under-red", "2026-07-29-font-registration"]),
+    );
+
+    writeFileSync(path, "{ not json");
+    expect(readMigrationLedger(path)).toEqual(new Set());
+  });
+
+  test("carries nothing over from the shared list it replaced", async () => {
+    // Seeding from `preferences.migrations` would reproduce the bug on
+    // every machine that has one: those ids may have been written by
+    // the other side of the boundary. `applies()` is what keeps a
+    // machine from repairing itself twice.
+    const source = await Bun.file("src/migrations.ts").text();
+    expect(source).not.toContain("prefs.migrations");
+    expect(source).not.toContain("{ migrations:");
   });
 });

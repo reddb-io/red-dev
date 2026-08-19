@@ -81,7 +81,17 @@ export interface Preferences {
   crashHandoff?: boolean;
   /** mise runtime ids chosen for this workstation. */
   runtimes?: string[];
-  /** Ids of one-off repairs already applied; see src/migrations.ts. */
+  /**
+   * Where the repair ledger used to live, until 2026-08-19.
+   *
+   * Read by nothing now. On a WSL machine this file is the Windows
+   * host's, so one list spoke for two filesystems and a repair applied
+   * inside the distro marked itself done for the host as well. The
+   * ledger is per-side now — `migrationLedgerPath` in src/migrations.ts
+   * — and this field is left declared so an older field in an existing
+   * file round-trips through `writePreferences` rather than being
+   * dropped by it.
+   */
   migrations?: string[];
 }
 

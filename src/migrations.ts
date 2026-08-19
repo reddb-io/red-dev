@@ -22,12 +22,15 @@
  *    machine does not look like it silently did something.
  */
 
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+
 import { log } from "./log.ts";
 import { providerFor, TOOLS } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
 import { readPreferences, writePreferences } from "./preferences.ts";
 import { userBinDir } from "./providers.ts";
+import { transcriptDir } from "./transcript.ts";
 
 export interface Migration {
   /** Sortable and unique. The date this was written, not when it runs. */
@@ -510,6 +513,61 @@ export function staleReleaseBinaries(p: Platform): { name: string; path: string 
 }
 
 /**
+ * `<state>/migrations.json` — what this side of the machine has run.
+ *
+ * The ledger used to live in the preferences file, and on a WSL machine
+ * that file is the *host's*: `configDir` sends the distro to the
+ * Windows AppData so the terminal, the theme and the chosen runtimes
+ * are one answer across the boundary (src/alacritty.ts). Those belong
+ * shared. A repair does not. `2026-08-19-red-skills-under-red` ran
+ * inside the distro, moved the tree there, and recorded itself — and
+ * the Windows side, whose own `~/.red-skills` was still sitting beside
+ * the new root, then read that record and skipped the repair for good.
+ * Two filesystems, one list, and whichever side converged first spoke
+ * for both.
+ *
+ * The transcript directory is already per-side — it is where each
+ * side's own run logs land — so the ledger goes beside the evidence of
+ * the runs that wrote it.
+ *
+ * Nothing is carried over from the old shared list. Seeding from it
+ * would reproduce exactly the bug above on every machine that has one:
+ * the entries there may have been written by the other side. What
+ * protects a machine from a second run is `applies()`, which asks the
+ * disk rather than the ledger — the ledger's job is to stop re-asking,
+ * not to be the only thing standing between a machine and a repair it
+ * has already had.
+ */
+export function migrationLedgerPath(env?: Record<string, string | undefined>): string {
+  return `${transcriptDir(env)}/migrations.json`;
+}
+
+/** What this side has run, or an empty set on a machine that has run nothing. */
+export function readMigrationLedger(path = migrationLedgerPath()): Set<string> {
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as { applied?: unknown };
+    if (!Array.isArray(parsed.applied)) return new Set();
+    return new Set(parsed.applied.filter((id): id is string => typeof id === "string"));
+  } catch {
+    // Absent, or written by something that is not this. Either way the
+    // migrations below decide for themselves whether they apply.
+    return new Set();
+  }
+}
+
+/** Record what this side has run. A ledger that cannot be written is not fatal. */
+export function writeMigrationLedger(applied: Iterable<string>, path = migrationLedgerPath()): void {
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${JSON.stringify({ schema: 1, applied: [...applied].sort() }, null, 2)}\n`);
+  } catch {
+    // The worst case is re-checking every `applies()` on the next
+    // converge, which is what this file exists to save rather than
+    // something it is needed for.
+  }
+}
+
+/**
  * Run whatever has not run yet.
  *
  * Failures are reported and recorded as *not* applied, so the next
@@ -517,8 +575,8 @@ export function staleReleaseBinaries(p: Platform): { name: string; path: string 
  * itself done is worse than one that never existed.
  */
 export async function runPendingMigrations(p: Platform): Promise<number> {
-  const prefs = await readPreferences(p);
-  const done = new Set(prefs.migrations ?? []);
+  const ledger = migrationLedgerPath();
+  const done = readMigrationLedger(ledger);
   const pending = MIGRATIONS.filter((m) => !done.has(m.id));
 
   if (pending.length === 0) return 0;
@@ -551,6 +609,6 @@ export async function runPendingMigrations(p: Platform): Promise<number> {
     }
   }
 
-  await writePreferences(p, { migrations: [...done] });
+  writeMigrationLedger(done, ledger);
   return ran;
 }
