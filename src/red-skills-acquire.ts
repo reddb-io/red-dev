@@ -819,6 +819,15 @@ export interface Acquisition {
   candidate: string | null;
   /** What `~/.red-skills/current` names once this returns. */
   active: PackageSetIdentity | null;
+  /**
+   * The revision verified and staged rather than activated, or null.
+   *
+   * Non-null exactly when a Worker held the activation. `active` still
+   * names what the machine resolves, so a caller writing down "which
+   * revision is this" — mise's install receipt, most of all — can say
+   * the one that was actually acquired instead of the one it replaced.
+   */
+  staged: PackageSetIdentity | null;
   writes: string[];
 }
 
@@ -871,6 +880,7 @@ export async function acquireRedSkills(opts: AcquireOptions = {}): Promise<Acqui
     snapshot: null,
     candidate: null,
     active: activeIdentityOf(home),
+    staged: null,
     writes:
       outcome === "refused" && failure !== null
         ? recordPackageSetRefusal(home, { failure, reason })
@@ -1025,6 +1035,7 @@ export async function acquireRedSkills(opts: AcquireOptions = {}): Promise<Acqui
     snapshot: { path: snapshot.path, created: snapshot.created },
     candidate,
     active: converged.active,
+    staged: converged.staged,
     writes: converged.writes,
   };
 }
