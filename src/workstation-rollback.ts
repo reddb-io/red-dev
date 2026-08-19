@@ -805,6 +805,9 @@ export async function rollbackWorkstation(
 
   // ------------------------------------------------------------- the record
   const restored: WorkstationRevision = { ...target, activatedAt: opts.at };
+  // What this rollback left, which is the pending activation on a
+  // machine that had drifted forward and the active record otherwise.
+  const left = state.pending ?? state.active;
   const desired: WorkstationRevisionState =
     state.pending === null
       ? {
@@ -814,7 +817,7 @@ export async function rollbackWorkstation(
           // rollback left is retained and named, and it is not a
           // rollback target.
           previous: null,
-          rolledBackFrom: state.active,
+          rolledBackFrom: left,
           pending: null,
         }
       : {
@@ -826,7 +829,7 @@ export async function rollbackWorkstation(
           schema: 1,
           active: restored,
           previous: state.previous,
-          rolledBackFrom: state.pending,
+          rolledBackFrom: left,
           pending: null,
         };
   writes.push(...writeWorkstationRevisions(home, desired));
@@ -845,7 +848,7 @@ export async function rollbackWorkstation(
   const reason = verified
     ? outcome === "converged"
       ? `this machine was already on ${restored.key}`
-      : `restored ${restored.key} from ${state.active?.key ?? "an unrecorded revision"} — ${installed.report.installed.length} application(s) put back, no network request`
+      : `restored ${restored.key} from ${left?.key ?? "an unrecorded revision"} — ${installed.report.installed.length} application(s) put back, no network request`
     : `restored ${restored.key} with ${installed.report.failed.length} application(s) and ${failedSurfaces.length} surface(s) unconverged`;
 
   announce({ outcome, reason, surfaces, restartNeeded, workers });
@@ -855,7 +858,7 @@ export async function rollbackWorkstation(
     reason,
     failure: verified ? null : "install",
     restored,
-    from: state.active,
+    from: left,
     install: installed.report,
     surfaces,
     restartNeeded,
