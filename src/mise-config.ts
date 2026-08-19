@@ -44,7 +44,7 @@
  * second migration rather than another line in the manifest.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -122,6 +122,68 @@ export function miseInstallRoot(env: NodeJS.ProcessEnv = process.env): string {
   const xdg = env["XDG_DATA_HOME"];
   if (xdg) return join(xdg, "mise", "installs");
   return join(homedir(), ".local", "share", "mise", "installs");
+}
+
+/**
+ * The binary of a mise-installed tool, by path rather than by `$PATH`.
+ *
+ * A converge installs a tool and then uses it, and those are two things
+ * in one process: `$PATH` was read when this process started, so a tool
+ * mise put on disk thirty seconds ago is not on it and will not be
+ * until a new shell. Resolving through the bare command name meant the
+ * item that installed cosign was followed by the item that needs it
+ * reporting `Executable not found in $PATH: "cosign"` — on a machine
+ * where cosign had just been installed successfully, which reads as a
+ * broken install rather than as the ordering problem it is.
+ *
+ * mise's layout is `<installs>/<tool>/<version>/[bin/]<exe>`. The
+ * version directories include symlinks (`latest`, `3`, `3.1`) beside
+ * the real ones; a link is preferred where it exists, because it is
+ * what mise moves when it upgrades and following it keeps this answer
+ * correct after the next one. Falling back to the newest real version
+ * covers a tree where nothing linked.
+ *
+ * Returns null when mise has no such tool, and every caller falls back
+ * to the bare name: a machine that installed the tool some other way
+ * still works, and the error it gets when it did not is the same one it
+ * always was.
+ */
+export function miseToolBin(
+  tool: string,
+  exe: string = tool,
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  const root = join(miseInstallRoot(env), tool);
+  let names: string[];
+  try {
+    names = readdirSync(root);
+  } catch {
+    return null;
+  }
+
+  const windows = process.platform === "win32";
+  const candidates = ["latest", ...names.filter((n) => n !== "latest").sort(byVersionDesc)];
+  for (const name of candidates) {
+    for (const rel of windows ? [`${exe}.exe`, join("bin", `${exe}.exe`)] : [exe, join("bin", exe)]) {
+      const path = join(root, name, rel);
+      if (existsSync(path)) return path;
+    }
+  }
+  return null;
+}
+
+/** Newest first, by numeric segments, so `3.10.0` sorts above `3.9.0`. */
+function byVersionDesc(a: string, b: string): number {
+  const parts = (v: string) => v.split(/[.+-]/).map((n) => Number.parseInt(n, 10));
+  const x = parts(a);
+  const y = parts(b);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const l = x[i];
+    const r = y[i];
+    if (Number.isNaN(l ?? NaN) || Number.isNaN(r ?? NaN)) return a < b ? 1 : -1;
+    if ((l ?? -1) !== (r ?? -1)) return (r ?? -1) - (l ?? -1);
+  }
+  return 0;
 }
 
 /**

@@ -112,6 +112,7 @@ import trustedRootFile from "../vendor/sigstore/trusted_root.embedded" with { ty
 import { redSkillsRoot } from "./red-skills-root.ts";
 import { sha256Hex } from "./checksum.ts";
 import { log } from "./log.ts";
+import { miseToolBin } from "./mise-config.ts";
 import { miseInstallRoot } from "./mise-config.ts";
 import type { Platform } from "./platform.ts";
 import {
@@ -447,7 +448,10 @@ export function materialiseTrustedRoot(home: string): string {
 /** The verifier every real machine uses: cosign, keyless, offline. */
 export function cosignVerifier(opts: CosignOptions = {}): SignatureVerifier {
   return (manifestPath, bundlePath) => {
-    const cosignBin = opts.cosignBin ?? "cosign";
+    // The mise copy by path first: cosign is a declared tool, and the
+    // converge that installs it needs it in the very next item, before
+    // any shell has re-read $PATH. See miseToolBin.
+    const cosignBin = opts.cosignBin ?? miseToolBin("cosign") ?? "cosign";
     const trustedRoot =
       opts.trustedRoot === undefined
         ? materialiseTrustedRoot(opts.home ?? homeOf(process.env))

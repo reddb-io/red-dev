@@ -17,10 +17,15 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+
 import {
   miseConfigPath,
   miseEntries,
+  miseInstallRoot,
+  miseToolBin,
   renderMiseConfig,
   type MiseEntry,
 } from "./mise-config.ts";
@@ -146,5 +151,50 @@ describe("miseConfigPath", () => {
     const path = miseConfigPath("/home/someone");
     // Writing config.toml would take the user's runtimes with it.
     expect(path).toBe("/home/someone/.config/mise/conf.d/10-reddb-io.toml");
+  });
+});
+
+describe("the binary of a mise-installed tool", () => {
+  function installs(): string {
+    const root = mkdtempSync(join(tmpdir(), "mise-tool-bin-"));
+    mkdirSync(join(root, "installs"), { recursive: true });
+    return root;
+  }
+
+  function tool(root: string, name: string, version: string, rel: string[]): string {
+    const path = join(root, "installs", name, version, ...rel);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, "#!/bin/sh\n");
+    return path;
+  }
+
+  test("is null when mise has never installed it, so the caller falls back to the name", () => {
+    expect(miseToolBin("cosign", "cosign", { MISE_DATA_DIR: installs() })).toBeNull();
+  });
+
+  test("follows `latest`, which is what an upgrade moves", () => {
+    const root = installs();
+    tool(root, "cosign", "3.1.3", ["cosign"]);
+    const latest = tool(root, "cosign", "latest", ["cosign"]);
+    expect(miseToolBin("cosign", "cosign", { MISE_DATA_DIR: root })).toBe(latest);
+  });
+
+  test("takes the newest real version when nothing is linked, numerically", () => {
+    const root = installs();
+    tool(root, "cosign", "3.9.0", ["cosign"]);
+    const newest = tool(root, "cosign", "3.10.0", ["cosign"]);
+    expect(miseToolBin("cosign", "cosign", { MISE_DATA_DIR: root })).toBe(newest);
+  });
+
+  test("looks inside bin/ too, which is where most tools land", () => {
+    const root = installs();
+    const nested = tool(root, "node", "24.18.0", ["bin", "node"]);
+    expect(miseToolBin("node", "node", { MISE_DATA_DIR: root })).toBe(nested);
+  });
+
+  test("resolves through the same data root the rest of this module does", () => {
+    const root = installs();
+    const path = tool(root, "cosign", "3.1.3", ["cosign"]);
+    expect(path.startsWith(miseInstallRoot({ MISE_DATA_DIR: root }))).toBe(true);
   });
 });
