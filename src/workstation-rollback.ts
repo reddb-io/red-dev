@@ -696,7 +696,7 @@ export async function rollbackWorkstation(
 ): Promise<WorkstationRollback> {
   const { home } = opts;
   const state = readWorkstationRevisions(home);
-  const workers = await (opts.workers ?? defaultWorkers)();
+  const workers = await (opts.workers ?? countRunningWorkers)();
 
   const empty = (
     outcome: RollbackOutcome,
@@ -970,7 +970,15 @@ function defaultConverge(): () => Promise<{
 }
 
 /** Active Workers, over the daemon's existing socket and never a new one. */
-async function defaultWorkers(): Promise<number | null> {
+/**
+ * Active Workers on this machine, or null when the daemon cannot say.
+ *
+ * Exported because an uninstall needs exactly the same answer a rollback
+ * needs, from exactly the same place: the daemon's existing socket,
+ * without starting one. Two callers asking two ways would eventually be
+ * two different opinions about whether somebody is working.
+ */
+export async function countRunningWorkers(): Promise<number | null> {
   const { readHostInventoryNoStart } = await import("./host-state.ts");
   const inventory = await readHostInventoryNoStart();
   return inventory === null ? null : inventory.workers.length;
