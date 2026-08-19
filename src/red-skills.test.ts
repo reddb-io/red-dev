@@ -39,7 +39,7 @@ describe("red-skills as a converge step", () => {
   test("acquires the package set, and downloads no standalone installer", () => {
     // ADR 0010 leaves one acquisition on the machine. red-dev used to
     // curl `scripts/install.sh` from the repo's v3 branch and hand it
-    // the whole job — a second owner of `~/.red-skills/current` that
+    // the whole job — a second owner of `~/.red/skills/current` that
     // registered its own marketplaces and generated its own host
     // surfaces, which is how the hosts and the editor extension came to
     // be on different revisions of the same product.
@@ -114,7 +114,7 @@ describe("the copied Windows current snapshot", () => {
   });
 
   test("is cleared before the package set tries to link over it", () => {
-    // The set activates by putting a link at `~/.red-skills/current` and
+    // The set activates by putting a link at `~/.red/skills/current` and
     // refuses to remove a real directory standing there. The copy is
     // the one such directory red-dev can prove it owns, so clearing it
     // has to happen above the acquisition rather than after it fails.
@@ -190,7 +190,7 @@ describe("which registration a converge leaves behind", () => {
   });
 
   test("red-dev declares its registration after the source exists, never before", () => {
-    // The directory red-dev registers is `~/.red-skills/current`, so a
+    // The directory red-dev registers is `~/.red/skills/current`, so a
     // converge that declared before acquiring would point both hosts at
     // a path with nothing behind it. The acquisition is now conditional
     // — only a machine with no source at all reaches it — and the

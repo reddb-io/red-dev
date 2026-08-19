@@ -25,7 +25,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { MIGRATIONS } from "./migrations.ts";
-import { planLegacyRedSkillsCleanup } from "./red-skills-retention.ts";
+import { inventoryLegacyWorkstation } from "./red-skills-adopt.ts";
 import {
   legacyRedSkillsRoot,
   redSkillsCurrent,
@@ -112,37 +112,50 @@ describe("relocating the old root", () => {
     expect(existsSync(join(legacyRedSkillsRoot(home), "reconciled.json"))).toBe(true);
   });
 
-  test("is in the ledger, after the legacy retention that clears what it would otherwise carry", () => {
+  test("is in the ledger, after the adoption that inventories what it would otherwise carry", () => {
     const ids = MIGRATIONS.map((m) => m.id);
     const at = ids.indexOf("2026-08-19-red-skills-under-red");
     expect(at).toBeGreaterThan(ids.indexOf("2026-08-16-red-skills-legacy-retention"));
   });
 });
 
-describe("the legacy retention and the move", () => {
-  test("leftovers under the old root are planned before the move and not twice after it", () => {
+describe("the adoption and the move", () => {
+  test("standalone trees under the old root are inventoried before the move, and once after it", async () => {
     const home = fakeHome();
     const legacy = legacyRedSkillsRoot(home);
-    const live = join(legacy, "versions", "v3.18.12");
-    const stale = join(legacy, "versions", "v3.17.1");
-    for (const dir of [live, stale]) {
-      mkdirSync(dir, { recursive: true });
-      writeFileSync(join(dir, "package.json"), "{}");
+    for (const version of ["v3.17.1", "v3.18.12"]) {
+      const tree = join(legacy, "versions", version);
+      mkdirSync(join(tree, ".claude-plugin"), { recursive: true });
+      writeFileSync(join(tree, ".claude-plugin", "marketplace.json"), "{}");
+      writeFileSync(join(tree, ".upstream"), "reddb-io/red-skills\n");
     }
-    symlinkSync(live, join(legacy, "current"), "dir");
+    symlinkSync(join(legacy, "versions", "v3.18.12"), join(legacy, "current"), "dir");
     mkdirSync(join(legacy, "cache"), { recursive: true });
     writeFileSync(join(legacy, "cache", "v3.17.1.tar.gz"), "x".repeat(64));
+    const opts = { home, config: join(home, ".config"), registrations: async () => ({}) };
 
-    // The ledger runs the 2026-08-16 entry first, against a machine whose
-    // state is still under the old name: it has to see the leftovers there.
-    const before = planLegacyRedSkillsCleanup({ home }).map((i) => i.path).sort();
-    expect(before).toEqual([join(legacy, "cache", "v3.17.1.tar.gz"), stale].sort());
+    // The ledger adopts first, against a machine whose state is still
+    // under the old name: the inventory has to see it there.
+    const before = (await inventoryLegacyWorkstation(opts)).items.map((i) => i.path).sort();
+    expect(before).toEqual(
+      [
+        join(legacy, "cache", "v3.17.1.tar.gz"),
+        join(legacy, "versions", "v3.17.1"),
+        join(legacy, "versions", "v3.18.12"),
+      ].sort(),
+    );
 
     relocateLegacyRedSkillsRoot(home);
 
-    // Moved, the same two are under the new root.
+    // Moved, the same three are under the new root — and only there.
     const root = redSkillsRoot(home);
-    const after = planLegacyRedSkillsCleanup({ home }).map((i) => i.path).sort();
-    expect(after).toEqual([join(root, "cache", "v3.17.1.tar.gz"), join(root, "versions", "v3.17.1")].sort());
+    const after = (await inventoryLegacyWorkstation(opts)).items.map((i) => i.path).sort();
+    expect(after).toEqual(
+      [
+        join(root, "cache", "v3.17.1.tar.gz"),
+        join(root, "versions", "v3.17.1"),
+        join(root, "versions", "v3.18.12"),
+      ].sort(),
+    );
   });
 });

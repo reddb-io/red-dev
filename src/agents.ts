@@ -665,7 +665,7 @@ export async function installAgent(a: AgentSpec, p: Platform): Promise<void> {
  * There used to be a `curl | sh` here: the standalone `install.sh`,
  * downloaded from the repo's `v3` branch on every run, which registered
  * its own marketplaces, generated its own host surfaces and owned
- * `~/.red-skills/current`. ADR 0010 ends it. The set is one acquisition
+ * `~/.red/skills/current`. ADR 0010 ends it. The set is one acquisition
  * — a verified, signed, immutable revision staged under its own name —
  * and this is a call into it rather than a second implementation beside
  * it, because two acquisition paths on one machine is exactly how the
@@ -683,7 +683,7 @@ export async function installRedSkills(p?: Platform): Promise<void> {
   log.plain("     the host generators and every companion artifact, from one revision.");
 
   // Before the acquisition, because the acquisition cannot get past it.
-  // A package set activates by putting a link at `~/.red-skills/current`
+  // A package set activates by putting a link at `~/.red/skills/current`
   // and src/red-skills-set.ts refuses to remove a real directory sitting
   // there — correctly, since deleting a directory it did not create is
   // not its business. Spec #185's Git Bash copy is exactly such a
@@ -704,7 +704,7 @@ export async function installRedSkills(p?: Platform): Promise<void> {
  *
  * A Spec #185 leftover, and the only one the adoption in
  * src/red-skills-adopt.ts cannot reach: its walk covers
- * `~/.red-skills/versions`, and this is a copy of one of those trees
+ * `~/.red/skills/versions`, and this is a copy of one of those trees
  * standing on the path the package set has to link. The two markers the
  * standalone tarball carries are what keep a similarly named user
  * directory out of scope — without both of them this declines, and the

@@ -38,6 +38,7 @@ import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { sha256Hex } from "../checksum.ts";
+import { redSkillsRoot } from "../red-skills-root.ts";
 import { claudeRegistrationPath, codexRegistrationPath } from "../red-skills-registration.ts";
 import {
   packageSetStatePath,
@@ -50,7 +51,7 @@ import {
 /** The releases the standalone installer left extracted, oldest first. */
 export const LEGACY_VERSIONS: readonly string[] = ["3.16.0", "3.17.0", "3.18.0"];
 
-/** The one `~/.red-skills/current` pointed at when Spec #185 stopped. */
+/** The one `current` pointed at when Spec #185 stopped. */
 export const LEGACY_CURRENT = "3.18.0";
 
 /** The plugins each host kept a per-version copy of. */
@@ -124,7 +125,11 @@ export function materialiseLegacyWorkstation(
 // ------------------------------------------------------- the standalone tree
 
 /**
- * `~/.red-skills/versions/<v>` plus the `current` link into the newest.
+ * `versions/<v>` under the RedSkills root, plus the `current` link into
+ * the newest. The standalone installer wrote these under `~/.red-skills`;
+ * red-dev moves that directory to `~/.red/skills` before anything is
+ * adopted (src/migrations.ts, 2026-08-19), so the workstation is
+ * materialised where the adoption actually finds it.
  *
  * Each tree carries the two markers the standalone installer leaves —
  * the marketplace manifest every host registered against and the
@@ -133,7 +138,7 @@ export function materialiseLegacyWorkstation(
  * than out of somebody's afternoon.
  */
 function standaloneTrees(home: string): void {
-  const versions = join(home, ".red-skills", "versions");
+  const versions = join(redSkillsRoot(home), "versions");
   for (const version of LEGACY_VERSIONS) {
     const tree = join(versions, version);
     mkdirSync(join(tree, ".claude-plugin"), { recursive: true });
@@ -149,9 +154,9 @@ function standaloneTrees(home: string): void {
   symlinkSync(join(versions, LEGACY_CURRENT), redSkillsCurrentLink(home), "dir");
 }
 
-/** The tarballs `~/.red-skills/cache` kept after unpacking each one. */
+/** The tarballs `cache/` kept after unpacking each one. */
 function retainedTarballs(home: string): void {
-  const cache = join(home, ".red-skills", "cache");
+  const cache = join(redSkillsRoot(home), "cache");
   mkdirSync(cache, { recursive: true });
   for (const version of LEGACY_VERSIONS) {
     writeFileSync(join(cache, `red-skills-${version}.tar.gz`), `tarball ${version}\n`);

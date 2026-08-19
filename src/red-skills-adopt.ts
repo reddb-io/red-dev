@@ -2,7 +2,7 @@
  * Adopting a Spec #185 workstation into the package set, conservatively.
  *
  * A machine provisioned by the standalone `install.sh` carries an entire
- * second RedSkills: extracted trees under `~/.red-skills/versions`, the
+ * second RedSkills: extracted trees under `~/.red/skills/versions`, the
  * tarballs they came out of, a Git-sourced marketplace in Claude and
  * Codex, generated OpenCode/RedCode/pi surfaces recorded in their own
  * manifests, the per-version plugin copy each host kept, and the
@@ -72,6 +72,7 @@ import { homedir } from "node:os";
 import { dirname, join, relative } from "node:path";
 
 import { log } from "./log.ts";
+import { legacyRedSkillsRoot, redSkillsRoot } from "./red-skills-root.ts";
 import { readCompanionRegistry, retainedVersions, type CompanionOutcome } from "./red-skills-companions.ts";
 import { HOST_ADAPTERS, readHostRegistry, type HostOutcome } from "./red-skills-hosts.ts";
 import {
@@ -201,7 +202,26 @@ export async function inventoryLegacyWorkstation(
 }
 
 /**
- * The extracted trees under `~/.red-skills/versions`.
+ * `~/.red/skills`, and `~/.red-skills` while it is still a directory of
+ * its own.
+ *
+ * The ledger adopts before it moves the old root across
+ * (src/migrations.ts: 2026-08-16, then 2026-08-19), so on a Spec #185
+ * machine that has done neither the standalone trees are still under
+ * the old name when the first inventory looks. Once moved there is
+ * nothing at the old name and only the new root is scanned; a symlink
+ * somebody put there is not ours and is skipped.
+ */
+function standaloneRoots(home: string): string[] {
+  const roots = [redSkillsRoot(home)];
+  const legacy = legacyRedSkillsRoot(home);
+  const stat = statOf(legacy);
+  if (stat && stat.isDirectory() && !stat.isSymbolicLink()) roots.push(legacy);
+  return roots;
+}
+
+/**
+ * The extracted trees under `~/.red/skills/versions`.
  *
  * Real directories only, and only ones carrying the two markers the
  * standalone installer leaves — a `.upstream` stamp beside a marketplace
@@ -211,21 +231,23 @@ export async function inventoryLegacyWorkstation(
  * same as something it may delete.
  */
 function standaloneTrees(home: string): LegacyItem[] {
-  const versions = join(home, ".red-skills", "versions");
   const out: LegacyItem[] = [];
-  for (const name of listing(versions)) {
-    const path = join(versions, name);
-    const stat = statOf(path);
-    if (!stat || stat.isSymbolicLink() || !stat.isDirectory()) continue;
-    if (!existsSync(join(path, ".upstream"))) continue;
-    if (!existsSync(join(path, ".claude-plugin", "marketplace.json"))) continue;
-    out.push({ kind: "standalone-tree", path, detail: name, bytes: treeBytes(path) });
+  for (const root of standaloneRoots(home)) {
+    const versions = join(root, "versions");
+    for (const name of listing(versions)) {
+      const path = join(versions, name);
+      const stat = statOf(path);
+      if (!stat || stat.isSymbolicLink() || !stat.isDirectory()) continue;
+      if (!existsSync(join(path, ".upstream"))) continue;
+      if (!existsSync(join(path, ".claude-plugin", "marketplace.json"))) continue;
+      out.push({ kind: "standalone-tree", path, detail: name, bytes: treeBytes(path) });
+    }
   }
   return out;
 }
 
 /**
- * The tarballs `~/.red-skills/cache` kept after unpacking each one.
+ * The tarballs `~/.red/skills/cache` kept after unpacking each one.
  *
  * The directory itself is not an item. It is where the standalone
  * installer downloads to, and on a machine still running that installer
@@ -233,14 +255,16 @@ function standaloneTrees(home: string): LegacyItem[] {
  * to have — the cleanup prunes it only once it is empty.
  */
 function standaloneTarballs(home: string): LegacyItem[] {
-  const cache = join(home, ".red-skills", "cache");
   const out: LegacyItem[] = [];
-  for (const name of listing(cache)) {
-    if (!name.endsWith(".tar.gz")) continue;
-    const path = join(cache, name);
-    const stat = statOf(path);
-    if (!stat || stat.isSymbolicLink() || !stat.isFile()) continue;
-    out.push({ kind: "standalone-tarball", path, detail: name, bytes: stat.size });
+  for (const root of standaloneRoots(home)) {
+    const cache = join(root, "cache");
+    for (const name of listing(cache)) {
+      if (!name.endsWith(".tar.gz")) continue;
+      const path = join(cache, name);
+      const stat = statOf(path);
+      if (!stat || stat.isSymbolicLink() || !stat.isFile()) continue;
+      out.push({ kind: "standalone-tarball", path, detail: name, bytes: stat.size });
+    }
   }
   return out;
 }
@@ -803,22 +827,26 @@ function writeAdoptionRecord(home: string, record: AdoptionRecord): void {
 /**
  * Take the two standalone directories once they hold nothing.
  *
- * Only when empty, and never `~/.red-skills` itself: the package set
- * lives under it, and a cleanup that reached one level higher would
- * remove the source it just verified.
+ * Only when empty, and never the root itself: the package set lives
+ * under `~/.red/skills`, and a cleanup that reached one level higher
+ * would remove the source it just verified. The old root, while it is
+ * still a directory, is the migration's to move — not this one's to
+ * remove.
  */
 function pruneEmptyStandaloneRoots(home: string): void {
-  for (const name of ["versions", "cache"]) {
-    const dir = join(home, ".red-skills", name);
-    if (!existsSync(dir)) continue;
-    if (listing(dir).length > 0) continue;
-    try {
-      // `recursive` on a directory this has just proved is empty, because
-      // `rmSync` refuses a directory without it — the flag is how node
-      // spells "remove a directory", not a licence to remove a tree.
-      rmSync(dir, { recursive: true, force: true });
-    } catch {
-      // An empty directory left behind costs nothing.
+  for (const root of standaloneRoots(home)) {
+    for (const name of ["versions", "cache"]) {
+      const dir = join(root, name);
+      if (!existsSync(dir)) continue;
+      if (listing(dir).length > 0) continue;
+      try {
+        // `recursive` on a directory this has just proved is empty, because
+        // `rmSync` refuses a directory without it — the flag is how node
+        // spells "remove a directory", not a licence to remove a tree.
+        rmSync(dir, { recursive: true, force: true });
+      } catch {
+        // An empty directory left behind costs nothing.
+      }
     }
   }
 }

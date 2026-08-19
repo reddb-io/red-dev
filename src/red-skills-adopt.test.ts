@@ -11,7 +11,7 @@
  * layout under test is the layout the production modules read.
  */
 
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -37,6 +37,19 @@ import {
   PREVIOUS_SET,
   type LegacyShape,
 } from "./fixtures/legacy-workstation.ts";
+
+// The inventory reads `$XDG_CONFIG_HOME` when no `config` is given, and
+// GitHub's runners export one. The fixture writes its generated surfaces
+// under `<home>/.config`, so the variable has to be out of the way here
+// or the inventory looks at the runner's config and names nothing.
+let xdgConfigHome: string | undefined;
+beforeAll(() => {
+  xdgConfigHome = process.env["XDG_CONFIG_HOME"];
+  delete process.env["XDG_CONFIG_HOME"];
+});
+afterAll(() => {
+  if (xdgConfigHome !== undefined) process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
+});
 
 function machine(shape: LegacyShape = "standalone") {
   const home = mkdtempSync(join(tmpdir(), `red-adopt-${shape}-`));
@@ -111,7 +124,7 @@ describe("the inventory of a Spec #185 workstation", () => {
     // was written, and frozen after it because nothing moved the
     // directory it names. Only `current` follows the package set.
     const { home } = machine("mixed");
-    const pinned = join(home, ".red-skills", "versions", LEGACY_CURRENT);
+    const pinned = join(home, ".red", "skills", "versions", LEGACY_CURRENT);
     const inventory = await inventoryLegacyWorkstation({
       home,
       registrations: async () => ({ claude: { kind: "directory", source: pinned } }),
@@ -127,8 +140,8 @@ describe("the inventory of a Spec #185 workstation", () => {
 
   test("a directory somebody else made under versions/ is left alone", async () => {
     const { home } = machine();
-    const mine = join(home, ".red-skills", "versions", "notes");
-    writeFileSync(join(home, ".red-skills", "versions", "loose.txt"), "mine\n");
+    const mine = join(home, ".red", "skills", "versions", "notes");
+    writeFileSync(join(home, ".red", "skills", "versions", "loose.txt"), "mine\n");
     Bun.spawnSync(["mkdir", "-p", mine]);
     writeFileSync(join(mine, "README.md"), "mine\n");
 
@@ -273,9 +286,9 @@ describe("an adoption interrupted before it verified", () => {
     expect(adoption.removed).toEqual([]);
     // The source itself, byte for byte: `current` still resolves, every
     // version tree is there, and both hosts still have their caches.
-    expect(existsSync(join(home, ".red-skills", "current", "package.json"))).toBe(true);
+    expect(existsSync(join(home, ".red", "skills", "current", "package.json"))).toBe(true);
     for (const version of LEGACY_VERSIONS) {
-      expect(existsSync(join(home, ".red-skills", "versions", version, ".upstream"))).toBe(true);
+      expect(existsSync(join(home, ".red", "skills", "versions", version, ".upstream"))).toBe(true);
     }
     expect(
       existsSync(join(home, ".claude", "plugins", "cache", "red-skills", "dev", "3.16.0")),
@@ -303,7 +316,7 @@ describe("an adoption interrupted before it verified", () => {
     // reached its cleanup. Nothing about that state may stop the machine
     // working, and a second adoption must be willing to start again.
     const { home } = machine("interrupted");
-    expect(existsSync(join(home, ".red-skills", "current", "package.json"))).toBe(true);
+    expect(existsSync(join(home, ".red", "skills", "current", "package.json"))).toBe(true);
     const inventory = await inventoryLegacyWorkstation({ home, registrations: stillGit });
     expect(inventory.items.length).toBeGreaterThan(0);
   });
@@ -333,8 +346,8 @@ describe("a successful adoption", () => {
   test("removes the standalone ownership and the caches beyond the window", async () => {
     const { home, adoption } = await adopted();
     expect(adoption.outcome).toBe("adopted");
-    expect(existsSync(join(home, ".red-skills", "versions"))).toBe(false);
-    expect(existsSync(join(home, ".red-skills", "cache"))).toBe(false);
+    expect(existsSync(join(home, ".red", "skills", "versions"))).toBe(false);
+    expect(existsSync(join(home, ".red", "skills", "cache"))).toBe(false);
     for (const version of ["3.16.0", "3.17.0", LEGACY_CURRENT]) {
       expect(
         existsSync(join(home, ".claude", "plugins", "cache", "red-skills", "brain", version)),
@@ -351,8 +364,8 @@ describe("a successful adoption", () => {
   test("leaves the package set it adopted onto exactly where it was", async () => {
     const { home, adoption } = await adopted();
     expect(adoption.outcome).toBe("adopted");
-    expect(existsSync(join(home, ".red-skills", "current", "package.json"))).toBe(true);
-    expect(existsSync(join(home, ".red-skills", "package-set.json"))).toBe(true);
+    expect(existsSync(join(home, ".red", "skills", "current", "package.json"))).toBe(true);
+    expect(existsSync(join(home, ".red", "skills", "package-set.json"))).toBe(true);
   });
 
   test("preserves every file the operator wrote", async () => {
@@ -409,7 +422,7 @@ describe("a successful adoption", () => {
     expect(kept.length).toBe(2);
     expect(kept[0]!.reason).toContain("still records a github source");
     // And the rest of the adoption still happened.
-    expect(existsSync(join(fixture.home, ".red-skills", "versions"))).toBe(false);
+    expect(existsSync(join(fixture.home, ".red", "skills", "versions"))).toBe(false);
   });
 
   test("the companion record goes only once the registry covers it", async () => {
@@ -498,7 +511,7 @@ describe("what the converge gates the cleanup on", () => {
       at: "2026-08-19T07-00-00Z",
     });
     expect(adoption.outcome).toBe("held");
-    expect(existsSync(join(home, ".red-skills", "versions", LEGACY_CURRENT))).toBe(true);
+    expect(existsSync(join(home, ".red", "skills", "versions", LEGACY_CURRENT))).toBe(true);
   });
 });
 

@@ -358,7 +358,7 @@ addressable, and how much derived state the retention is holding.
 
 A machine that was provisioned by the standalone `install.sh` is **adopted**
 rather than overwritten. It carries an entire second RedSkills — extracted trees
-under `~/.red-skills/versions`, the tarballs they came out of, Git-sourced
+under `~/.red/skills/versions` (moved there from `~/.red-skills`, where the installer wrote them), the tarballs they came out of, Git-sourced
 marketplaces in Claude and Codex, generated OpenCode/RedCode and pi surfaces
 recorded in their own manifests, the per-version plugin copy each host kept, and
 the release-driven companion record — and the whole of it is inventoried and
