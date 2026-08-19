@@ -1290,6 +1290,7 @@ build instead.
 | apt, ppa, apt repos, winget, GitHub releases | [`src/providers.ts`](src/providers.ts) |
 | Shell configuration, shipped as-is | [`config/bash/`](config/bash/) |
 | Terminal and multiplexer config | [`src/alacritty.ts`](src/alacritty.ts), [`config/zellij/`](config/zellij/) |
+| RedSkills hosts, companions and the state they own | [`src/red-skills-hosts.ts`](src/red-skills-hosts.ts), [`src/red-skills-companions.ts`](src/red-skills-companions.ts), [`src/owned-state.ts`](src/owned-state.ts) |
 | Themes and where they are applied | [`src/themes.ts`](src/themes.ts), [`src/theme-apply.ts`](src/theme-apply.ts) |
 | The WSL-to-Windows boundary | [`src/wsl.ts`](src/wsl.ts) |
 | Wallpapers | [`src/wallpaper.ts`](src/wallpaper.ts), [`assets/wallpapers/`](assets/wallpapers) |

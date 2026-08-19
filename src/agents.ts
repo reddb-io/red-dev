@@ -739,15 +739,14 @@ export async function updateRedSkills(p: Platform): Promise<void> {
   const { refreshProductSkill } = await import("./product-skill.ts");
   await refreshProductSkill(p);
 
-  const { sourceRoot, refreshRedSkillsExtensions } = await import("./red-skills-ext.ts");
+  const { sourceRoot } = await import("./red-skills-ext.ts");
 
-  // Also before it, and for a reason that used to point the other way.
-  // The extension and the herdr plugin were built out of the checkout,
-  // so a machine without one had nothing to rebuild; they now come from
-  // the published release, so a machine without a checkout is precisely
-  // a machine that can still be advanced. Gating them on the tree would
-  // leave exactly those machines behind.
-  await refreshRedSkillsExtensions(p);
+  // The companions before the early return, and out of the set rather
+  // than out of a release. They used to be resolved from GitHub here,
+  // which is what let an editor extension and the agent hosts on one
+  // machine come from two different revisions; now both read the same
+  // digest, and a machine whose set has not moved does nothing.
+  await convergeRedSkillsCompanions(p);
 
   if (!sourceRoot()) {
     log.skip("red-skills: not installed, nothing to advance");
@@ -880,6 +879,13 @@ export async function unwiredSkillHosts(): Promise<SkillHost[]> {
  * and with no agent to configure it has nothing to do.
  */
 export async function convergeRedSkills(p: Platform): Promise<void> {
+  // The companions first, and deliberately above the guard below: the
+  // runtimes, the daemon, herdr, the editor extension and zellij's
+  // dashboard are RedSkills on this workstation whether or not a coding
+  // agent is installed on it, and gating them on one would leave a
+  // machine with an editor and no coder holding none of them.
+  await convergeRedSkillsCompanions(p);
+
   const present = SKILL_HOSTS.filter((h) => commandPath(h.cmd));
   if (present.length === 0) {
     log.skip("red-skills: no coding agent installed to configure");
@@ -953,5 +959,32 @@ export async function convergeRedSkills(p: Platform): Promise<void> {
   // prevent. Skipped hosts say it too, out of what they recorded.
   for (const h of hosts) {
     for (const gap of h.missing ?? []) log.skip(`${h.host}: ${gap}`);
+  }
+}
+
+/**
+ * The rest of the RedSkills workstation, out of the same set.
+ *
+ * The runtimes on PATH, the daemon, the herdr plugin, the VS Code
+ * extension and zellij's dashboard are converged from artifacts inside
+ * the same package set the hosts are reconciled against — so the version
+ * an operator types is the version their agents read, which is the drift
+ * Spec #201 exists to end. Free when nothing moved, for the same reason
+ * the host walk is: a companion whose recorded digest, artifact version
+ * and observed state all still hold issues no commands at all.
+ *
+ * A companion the set does not carry yet is `unavailable` and is not a
+ * failure; one that refused is, and is said out loud without taking the
+ * artifact the machine was already using with it.
+ */
+export async function convergeRedSkillsCompanions(p: Platform): Promise<void> {
+  const { reconcileCompanions, companionReconciliationFailed } = await import(
+    "./red-skills-companions.ts"
+  );
+  const companions = await reconcileCompanions(p);
+  if (companionReconciliationFailed(companions)) {
+    const stuck = companions.filter((c) => c.status === "blocked" || c.status === "failed");
+    log.warn(`red-skills: companions not converged: ${stuck.map((c) => c.companion).join(", ")}`);
+    for (const c of stuck) log.plain(`       ${c.companion}: ${c.reason ?? "no reason given"}`);
   }
 }

@@ -1407,8 +1407,8 @@ const BUILTIN_INTENT: Partial<Record<BuiltinName, string>> = {
   "shared-root": "creating the shared workspace root and its permissions",
   hotkeys: "registering the Windows hotkeys",
   "red-skills": "cloning or updating red-skills and wiring the agent plugins",
-  "red-skills-vscode": "installing the red-skills VS Code extension",
-  "red-skills-herdr": "installing the herdr plugin for red-skills",
+  "red-skills-vscode": "installing the red-skills VS Code extension out of the package set",
+  "red-skills-herdr": "installing the herdr plugin out of the package set",
   blender: "installing Blender — this one is over a gigabyte",
   "wsl-sync": "syncing the WSL distro settings with the host",
   "codex-statusline": "writing project, branch, model, effort, context and quotas into the Codex statusline",
@@ -1519,14 +1519,19 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
         if (applied.length > 0) log.ok(`themed: ${applied.join(", ")}`);
         return;
       }
-      if (pr.name === "red-skills-vscode") {
-        const { installVscodeExtension } = await import("./red-skills-ext.ts");
-        await installVscodeExtension();
-        return;
-      }
-      if (pr.name === "red-skills-herdr") {
-        const { installHerdrPlugin } = await import("./red-skills-ext.ts");
-        await installHerdrPlugin(ctx.platform);
+      if (pr.name === "red-skills-vscode" || pr.name === "red-skills-herdr") {
+        // One walk, one companion. Both artifacts now live inside the
+        // package set rather than on a release page, so the row's job is
+        // to name which surface is being converged and let the
+        // reconciliation answer for it — including the answer "the set
+        // this machine holds does not carry it yet".
+        const { reconcileCompanions, COMPANION_ADAPTERS } = await import(
+          "./red-skills-companions.ts"
+        );
+        const want = pr.name === "red-skills-vscode" ? "vscode" : "herdr";
+        await reconcileCompanions(ctx.platform, {
+          adapters: COMPANION_ADAPTERS.filter((a) => a.name === want),
+        });
         return;
       }
       if (pr.name === "blender") {

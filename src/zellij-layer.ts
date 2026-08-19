@@ -84,6 +84,32 @@ export async function zellijLayerPath(p: Platform): Promise<string> {
   return `${configHome(p, "zellij")}/zellij/${ZELLIJ_LAYER_FILE}`;
 }
 
+/**
+ * The RedSkills half of zellij's configuration.
+ *
+ * Written by the companion converge out of whatever the active package
+ * set carries — the dashboard binding, and whatever else a set decides
+ * its zellij surface is — and read back here as the middle layer of the
+ * composition. red-dev's base loses to it, and the operator's own
+ * `config.user.kdl` beats both.
+ */
+export const ZELLIJ_COMPANION_FILE = "config.red-skills.kdl";
+
+export async function zellijCompanionLayerPath(p: Platform): Promise<string> {
+  const { configHome } = await import("./shared-root.ts");
+  return `${configHome(p, "zellij")}/zellij/${ZELLIJ_COMPANION_FILE}`;
+}
+
+export async function readZellijCompanionLayer(p: Platform): Promise<string | null> {
+  const path = await zellijCompanionLayerPath(p);
+  if (!existsSync(path)) return null;
+  try {
+    return await Bun.file(path).text();
+  } catch {
+    return null;
+  }
+}
+
 export async function readZellijLayer(p: Platform): Promise<string | null> {
   const path = await zellijLayerPath(p);
   if (!existsSync(path)) return null;
@@ -386,13 +412,33 @@ function mergeKeybinds(base: Node, layer: Node): Node | null {
  * always written it, including the hashes that recognise them.
  */
 export function composeZellijConfig(base: string, layer: string | null): string {
-  const layerNodes = layer ? parseBlock(layer).nodes : [];
-  if (layerNodes.length === 0) return base;
+  return composeZellijLayers(base, [layer]);
+}
+
+/**
+ * The same composition over more than one layer, innermost first.
+ *
+ * The RedSkills package set carries a zellij fragment of its own — the
+ * dashboard layout's binding — and it sits between red-dev's base and the
+ * person's `config.user.kdl`: it wins over the base, and loses to the
+ * operator, who is the only author on this machine whose file is never
+ * rewritten. Folding `composeZellijConfig` twice would work and would
+ * also stamp the header into the middle of the document, so the layers
+ * are merged in one pass and the header is written once, at the end.
+ */
+export function composeZellijLayers(base: string, layers: readonly (string | null)[]): string {
+  const declared = layers
+    .map((layer) => (layer ? parseBlock(layer).nodes : []))
+    .filter((nodes) => nodes.length > 0);
+  if (declared.length === 0) return base;
 
   const parsed = parseBlock(base);
-  const merged = mergeLevel(parsed.nodes, layerNodes, nameOf, (b, l) =>
-    nameOf(b.header) === "keybinds" ? mergeKeybinds(b, l) : null,
-  );
+  let merged = parsed.nodes;
+  for (const nodes of declared) {
+    merged = mergeLevel(merged, nodes, nameOf, (b, l) =>
+      nameOf(b.header) === "keybinds" ? mergeKeybinds(b, l) : null,
+    );
+  }
 
   const body = merged.map((n) => renderNode(n, 0)).join("");
   const tail = parsed.tail.trim() ? `\n${parsed.tail.trim()}` : "";

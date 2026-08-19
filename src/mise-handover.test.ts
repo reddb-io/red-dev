@@ -25,6 +25,7 @@ import { providerFor, TOOLS } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
 import { miseEntries, miseToolNames } from "./mise-config.ts";
 import { staleReleaseBinaries } from "./migrations.ts";
+import { runtimeBinDir } from "./red-skills-companions.ts";
 import { locateTool } from "./verify-install.ts";
 
 const ubuntu: Platform = {
@@ -123,6 +124,18 @@ describe("mise's shims", () => {
     const shims = path.indexOf("/shims");
     expect(bin).toBeGreaterThan(-1);
     expect(shims).toBeGreaterThan(bin);
+  });
+
+  test("and lose in turn to the RedSkills launchers red-dev writes", () => {
+    // The runtime an operator types has to come out of the package set
+    // their agent hosts read. mise shims the same npm package into its
+    // own install tree, so red-dev's launcher directory is prepended
+    // after the shims — and it is named here from the module that writes
+    // into it, because a second spelling of that path in shell is a place
+    // for the two to disagree silently.
+    const shims = path.indexOf("/shims");
+    const launchers = path.indexOf(runtimeBinDir("$HOME"));
+    expect(launchers).toBeGreaterThan(shims);
   });
 
   test("are searched when verifying a tool the current run just installed", () => {

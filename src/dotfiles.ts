@@ -16,8 +16,9 @@ import { existsSync, mkdirSync } from "node:fs";
 import { log } from "./log.ts";
 import type { Platform } from "./platform.ts";
 import {
-  composeZellijConfig,
+  composeZellijLayers,
   isComposedZellijConfig,
+  readZellijCompanionLayer,
   readZellijLayer,
   seedZellijLayer,
   ZELLIJ_LAYER_FILE,
@@ -543,7 +544,11 @@ export async function installZellijConfig(p: Platform): Promise<void> {
 
   const base = zellijConfigFor(p);
   const layer = await readZellijLayer(p);
-  const shipped = composeZellijConfig(base, layer);
+  // Three authors, in the order they win: red-dev's base, the fragment
+  // the RedSkills package set carries for its dashboard, and the
+  // operator's own layer last. The middle one is only there on a machine
+  // whose companion converge found a zellij surface in the set.
+  const shipped = composeZellijLayers(base, [await readZellijCompanionLayer(p), layer]);
   const layered = shipped !== base;
   const current = existsSync(path) ? await Bun.file(path).text() : null;
   switch (zellijLayerAction(current, base, shipped)) {

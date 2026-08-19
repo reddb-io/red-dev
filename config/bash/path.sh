@@ -78,6 +78,19 @@ _red_path_prepend "$HOME/.local/bin"
 # there, the copy mise keeps current is the one that answers.
 _red_path_prepend "${MISE_DATA_DIR:-$HOME/.local/share/mise}/shims"
 
+# The RedSkills runtimes, ahead of both.
+#
+# mise installs the npm package and shims its commands into its own
+# install tree; red-dev composes the package set that every agent host
+# and companion on this machine resolves, and writes one launcher per
+# runtime into the directory below. Both spellings of `rsp` would
+# otherwise be on PATH with mise's winning, which is how a machine ends
+# up running a runtime from one revision while its hosts read another.
+# This directory is red-dev's alone — nothing else writes into it — and
+# each launcher execs the shim inside ~/.red-skills/current, so it
+# follows the active set and a rollback takes it back.
+_red_path_prepend "$HOME/.local/share/red-dev/red-skills/bin"
+
 # Project-local binstubs (./bin/rails and friends). This is upstream
 # omakub behaviour and it is a real trade-off: a relative PATH entry
 # means cd-ing into an untrusted repo puts its ./bin ahead of system

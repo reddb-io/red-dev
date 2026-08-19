@@ -323,6 +323,21 @@ async function cmdDoctor(p: Platform, inv: Invocation): Promise<number> {
     else log.warn(row.detail);
   }
 
+  // And the same question of the companions: which set each of the
+  // runtimes, the daemon, the herdr plugin, the extension and zellij came
+  // out of, and which version of the artifact itself that produced. The
+  // second half is the one the hosts do not have to answer — a `.vsix`
+  // carries its own version, and "which extension is on this machine" is
+  // not something the set's version can say.
+  const { redSkillsCompanionReport, redSkillsCompanionRows } = await import(
+    "./red-skills-companions.ts"
+  );
+  for (const row of redSkillsCompanionRows(redSkillsCompanionReport(setHome))) {
+    if (row.status === "ok") log.ok(row.detail);
+    else if (row.status === "n/a") log.skip(row.detail);
+    else log.warn(row.detail);
+  }
+
   // The machine's agent posture, in the one place that already answers
   // "is this machine ready": which host red-dev hands work to, how old
   // each installed host's copy is, and the per-provider allowance detail
