@@ -1,0 +1,352 @@
+{
+  "schema": "red.workstation-lock.v1",
+  "target": {
+    "id": "ubuntu-24.04-x64",
+    "label": "Ubuntu 24.04 desktop, x64",
+    "surfaces": [
+      {
+        "id": "ubuntu-24.04-x64",
+        "os": "linux",
+        "distro": "ubuntu",
+        "version": "24.04",
+        "arch": "x64",
+        "env": "desktop",
+        "role": "both"
+      }
+    ]
+  },
+  "origin": "fixture",
+  "resolvedAt": "2026-08-18T00:00:00Z",
+  "apps": [
+    {
+      "id": "claude-code",
+      "label": "Claude Code",
+      "kind": "coder",
+      "surface": "ubuntu-24.04-x64",
+      "version": "2.0.36",
+      "source": {
+        "kind": "installer",
+        "coordinate": "https://claude.ai/install.sh 2.0.36",
+        "origin": "https://claude.ai/install.sh",
+        "publisher": "Anthropic"
+      },
+      "artifact": {
+        "name": "claude-code-2.0.36-linux-x64.tar.gz",
+        "sha256": "386b3caa5decf6560691bb7083cf3467c165c8d70fa089e7d38e1443c683b845"
+      },
+      "provenance": {
+        "attestation": "release-checksums",
+        "reference": "https://claude.ai/install.sh.sha256"
+      },
+      "cloudAuth": {
+        "service": "Anthropic",
+        "evidence": "~/.claude/.credentials.json"
+      }
+    },
+    {
+      "id": "codex",
+      "label": "Codex CLI",
+      "kind": "coder",
+      "surface": "ubuntu-24.04-x64",
+      "version": "0.55.0",
+      "source": {
+        "kind": "npm",
+        "coordinate": "@openai/codex@0.55.0",
+        "origin": "https://registry.npmjs.org/@openai/codex/-/codex-0.55.0.tgz",
+        "publisher": "OpenAI"
+      },
+      "artifact": {
+        "name": "codex-0.55.0.tgz",
+        "sha256": "cec2e9b44810f0d64deb19c8e35d1197a2853354b79512c2c4ee50cc6baba05c"
+      },
+      "provenance": {
+        "attestation": "npm-provenance",
+        "reference": "https://registry.npmjs.org/-/npm/v1/attestations/@openai/codex@0.55.0"
+      },
+      "cloudAuth": {
+        "service": "OpenAI",
+        "evidence": "~/.codex/auth.json"
+      }
+    },
+    {
+      "id": "gemini",
+      "label": "Gemini CLI",
+      "kind": "coder",
+      "surface": "ubuntu-24.04-x64",
+      "version": "0.14.2",
+      "source": {
+        "kind": "npm",
+        "coordinate": "@google/gemini-cli@0.14.2",
+        "origin": "https://registry.npmjs.org/@google/gemini-cli/-/gemini-cli-0.14.2.tgz",
+        "publisher": "Google"
+      },
+      "artifact": {
+        "name": "gemini-cli-0.14.2.tgz",
+        "sha256": "19a8d0c785349febe5ad11af060afb9309a636b0347848b5ed4e60df859ed320"
+      },
+      "provenance": {
+        "attestation": "npm-provenance",
+        "reference": "https://registry.npmjs.org/-/npm/v1/attestations/@google/gemini-cli@0.14.2"
+      },
+      "cloudAuth": {
+        "service": "Google",
+        "evidence": "~/.gemini/oauth_creds.json"
+      }
+    },
+    {
+      "id": "herdr",
+      "label": "Herdr",
+      "kind": "companion",
+      "surface": "ubuntu-24.04-x64",
+      "version": "0.9.4",
+      "source": {
+        "kind": "installer",
+        "coordinate": "https://herdr.dev/install.sh 0.9.4",
+        "origin": "https://herdr.dev/install.sh",
+        "publisher": "Herdr"
+      },
+      "artifact": {
+        "name": "herdr-0.9.4-linux-x64.tar.gz",
+        "sha256": "9ea2ad049543b25c6099f691ee1698b6efaf6db15e606ee0820462df9c881915"
+      },
+      "provenance": {
+        "attestation": "release-checksums",
+        "reference": "https://herdr.dev/install.sh.sha256"
+      },
+      "cloudAuth": null
+    },
+    {
+      "id": "hermes",
+      "label": "Hermes Agent",
+      "kind": "coder",
+      "surface": "ubuntu-24.04-x64",
+      "version": "1.2.0",
+      "source": {
+        "kind": "installer",
+        "coordinate": "https://hermes.nousresearch.com/install.sh 1.2.0",
+        "origin": "https://hermes.nousresearch.com/install.sh",
+        "publisher": "Nous Research"
+      },
+      "artifact": {
+        "name": "hermes-1.2.0-linux-x64.tar.gz",
+        "sha256": "d436e4191bc33d980913213cb29ca8045f018e66192d4bd2b08f0115317b01cb"
+      },
+      "provenance": {
+        "attestation": "release-checksums",
+        "reference": "https://hermes.nousresearch.com/install.sh.sha256"
+      },
+      "cloudAuth": {
+        "service": "Nous Research",
+        "evidence": "~/.hermes/credentials.json"
+      }
+    },
+    {
+      "id": "mise",
+      "label": "mise",
+      "kind": "tooling",
+      "surface": "ubuntu-24.04-x64",
+      "version": "2026.8.3",
+      "source": {
+        "kind": "apt-repo",
+        "coordinate": "mise=2026.8.3",
+        "origin": "https://mise.jdx.dev/deb",
+        "publisher": "jdx"
+      },
+      "artifact": {
+        "name": "mise_2026.8.3_amd64.deb",
+        "sha256": "7193384b56f4751a9e8fdbe13995d6c70b6182816ea2b47acb9e7b23139dcedd"
+      },
+      "provenance": {
+        "attestation": "publisher-key",
+        "reference": "https://mise.jdx.dev/gpg-key.pub"
+      },
+      "cloudAuth": null
+    },
+    {
+      "id": "node",
+      "label": "Node.js",
+      "kind": "runtime",
+      "surface": "ubuntu-24.04-x64",
+      "version": "24.7.0",
+      "source": {
+        "kind": "mise",
+        "coordinate": "node@24.7.0",
+        "origin": "https://nodejs.org/dist/v24.7.0/node-v24.7.0-linux-x64.tar.xz",
+        "publisher": "OpenJS Foundation"
+      },
+      "artifact": {
+        "name": "node-v24.7.0-linux-x64.tar.xz",
+        "sha256": "0405f27e86d453c0abdccacf2c0a5fd4e82d19e93f279ee3d19fca22a69869d6"
+      },
+      "provenance": {
+        "attestation": "release-checksums",
+        "reference": "https://nodejs.org/dist/v24.7.0/SHASUMS256.txt.asc"
+      },
+      "cloudAuth": null
+    },
+    {
+      "id": "opencode",
+      "label": "OpenCode",
+      "kind": "coder",
+      "surface": "ubuntu-24.04-x64",
+      "version": "1.18.18",
+      "source": {
+        "kind": "npm",
+        "coordinate": "opencode-ai@1.18.18",
+        "origin": "https://registry.npmjs.org/opencode-ai/-/opencode-ai-1.18.18.tgz",
+        "publisher": "OpenCode"
+      },
+      "artifact": {
+        "name": "opencode-ai-1.18.18.tgz",
+        "sha256": "14029fb7cf2c651d07c4e6546349567187fd6f02a05dab9a419692af17290251"
+      },
+      "provenance": {
+        "attestation": "npm-provenance",
+        "reference": "https://registry.npmjs.org/-/npm/v1/attestations/opencode-ai@1.18.18"
+      },
+      "cloudAuth": {
+        "service": "model provider",
+        "evidence": "~/.local/share/opencode/auth.json"
+      }
+    },
+    {
+      "id": "pi",
+      "label": "Pi",
+      "kind": "coder",
+      "surface": "ubuntu-24.04-x64",
+      "version": "0.65.3",
+      "source": {
+        "kind": "npm",
+        "coordinate": "@mariozechner/pi-coding-agent@0.65.3",
+        "origin": "https://registry.npmjs.org/@mariozechner/pi-coding-agent/-/pi-coding-agent-0.65.3.tgz",
+        "publisher": "Mario Zechner"
+      },
+      "artifact": {
+        "name": "pi-coding-agent-0.65.3.tgz",
+        "sha256": "593d6c8ab5f416f8d0e60a025a345e4c1348d598cdd88d6aac41a1fabce864ad"
+      },
+      "provenance": {
+        "attestation": "npm-provenance",
+        "reference": "https://registry.npmjs.org/-/npm/v1/attestations/@mariozechner/pi-coding-agent@0.65.3"
+      },
+      "cloudAuth": {
+        "service": "model provider",
+        "evidence": "~/.pi/auth.json"
+      }
+    },
+    {
+      "id": "python",
+      "label": "Python",
+      "kind": "runtime",
+      "surface": "ubuntu-24.04-x64",
+      "version": "3.13.5",
+      "source": {
+        "kind": "mise",
+        "coordinate": "python@3.13.5",
+        "origin": "https://www.python.org/ftp/python/3.13.5/Python-3.13.5.tar.xz",
+        "publisher": "Python Software Foundation"
+      },
+      "artifact": {
+        "name": "Python-3.13.5.tar.xz",
+        "sha256": "1bc8ea67175f102e2a3fb23e06ba708507c873c8e98a55d4ae0f65a00efe96d8"
+      },
+      "provenance": {
+        "attestation": "release-checksums",
+        "reference": "https://www.python.org/ftp/python/3.13.5/Python-3.13.5.tar.xz.asc"
+      },
+      "cloudAuth": null
+    },
+    {
+      "id": "red-dev",
+      "label": "red-dev",
+      "kind": "tooling",
+      "surface": "ubuntu-24.04-x64",
+      "version": "1.0.56",
+      "source": {
+        "kind": "github-release",
+        "coordinate": "reddb-io/red-dev@v1.0.56",
+        "origin": "https://github.com/reddb-io/red-dev/releases/download/v1.0.56/red-dev-linux-x64",
+        "publisher": "RedDB"
+      },
+      "artifact": {
+        "name": "red-dev-linux-x64",
+        "sha256": "193c27ac8786dcb9b72bc4f402870d8688af5b07d533fe1e0b1a148f17802bc2"
+      },
+      "provenance": {
+        "attestation": "github-attestation",
+        "reference": "https://github.com/reddb-io/red-dev/attestations/v1.0.56"
+      },
+      "cloudAuth": null
+    },
+    {
+      "id": "redcode",
+      "label": "RedCode",
+      "kind": "coder",
+      "surface": "ubuntu-24.04-x64",
+      "version": "1.4.2",
+      "source": {
+        "kind": "github-release",
+        "coordinate": "reddb-io/redcode@v1.4.2",
+        "origin": "https://github.com/reddb-io/redcode/releases/download/v1.4.2/redcode-linux-x64.tar.gz",
+        "publisher": "RedDB"
+      },
+      "artifact": {
+        "name": "redcode-linux-x64.tar.gz",
+        "sha256": "29a7b2953a722ea26a9ab6a171bc0c46d96f32c79f617983c741610c50ee2912"
+      },
+      "provenance": {
+        "attestation": "github-attestation",
+        "reference": "https://github.com/reddb-io/redcode/attestations/v1.4.2"
+      },
+      "cloudAuth": {
+        "service": "model provider",
+        "evidence": "~/.local/share/redcode/auth.json"
+      }
+    },
+    {
+      "id": "vscode",
+      "label": "Visual Studio Code",
+      "kind": "editor",
+      "surface": "ubuntu-24.04-x64",
+      "version": "1.104.2",
+      "source": {
+        "kind": "apt-repo",
+        "coordinate": "code=1.104.2",
+        "origin": "https://packages.microsoft.com/repos/code",
+        "publisher": "Microsoft"
+      },
+      "artifact": {
+        "name": "code_1.104.2-1_amd64.deb",
+        "sha256": "4b9a1c44327dddf7c5fc200dd9c7b888a5675f07f1ab25474a81c5ce48f1aee8"
+      },
+      "provenance": {
+        "attestation": "publisher-key",
+        "reference": "https://packages.microsoft.com/keys/microsoft.asc"
+      },
+      "cloudAuth": null
+    },
+    {
+      "id": "zellij",
+      "label": "Zellij",
+      "kind": "companion",
+      "surface": "ubuntu-24.04-x64",
+      "version": "0.44.3-red.2",
+      "source": {
+        "kind": "github-release",
+        "coordinate": "reddb-io/zellij@v0.44.3-red.2",
+        "origin": "https://github.com/reddb-io/zellij/releases/download/v0.44.3-red.2/zellij-x86_64-unknown-linux-musl.tar.gz",
+        "publisher": "RedDB"
+      },
+      "artifact": {
+        "name": "zellij-x86_64-unknown-linux-musl.tar.gz",
+        "sha256": "2d6fccef0881bbdd7273751026c2a27a4f5de75779a82803f003bffa99c49946"
+      },
+      "provenance": {
+        "attestation": "github-attestation",
+        "reference": "https://github.com/reddb-io/zellij/attestations/v0.44.3-red.2"
+      },
+      "cloudAuth": null
+    }
+  ],
+  "lockDigest": "81383c7264a571b388251d3d451a34260c0e92a728c8febf0bca828369930642"
+}
