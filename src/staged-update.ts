@@ -505,6 +505,7 @@ function defaultAcquire(
           snapshot: null,
           candidate: null,
           active: activated.active,
+          staged: activated.staged,
           writes: activated.writes,
         };
       }
@@ -533,6 +534,7 @@ function defaultAcquire(
         active: active
           ? { version: active.version, digest: active.digest, sourceCommit: active.sourceCommit }
           : null,
+        staged: null,
         writes: [],
       };
     }
