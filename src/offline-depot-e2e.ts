@@ -1,5 +1,5 @@
 /**
- * The Ubuntu 24 offline journey, end to end, in one function.
+ * The offline journey for one Ubuntu desktop, end to end, in one function.
  *
  * Spec #201's first depot criterion is a sentence about two machines: a
  * connected one exports, a clean network-denied one imports, and the
@@ -10,6 +10,17 @@
  * `bun run e2e:offline-ubuntu24` call, and it returns the checks it made
  * rather than printing them, so the two callers cannot disagree about
  * what passed.
+ *
+ * ## One journey, two Ubuntus
+ *
+ * `target` is a parameter because #213 asks for the same journey on
+ * 26.04 without a second implementation of any of it. Everything below
+ * reads the target from the lock it resolved, so the Ubuntu 26 run is
+ * the Ubuntu 24 run with a different row of `WORKSTATION_TARGETS` — and
+ * the first check is the one that makes that safe: a target whose only
+ * difference from another is a version string would happily take its
+ * artifacts, so the journey proves the resolution refuses them before it
+ * proves anything else.
  *
  * ## What is real here, and what is rehearsed
  *
@@ -48,6 +59,9 @@ import { join } from "node:path";
 
 import {
   cleanUbuntu,
+  foreignPlatformResolver,
+  foreignSeriesResolver,
+  otherUbuntuSeries,
   rehearsalArtifact,
   rehearsalFetcher,
   rehearsalLock,
@@ -70,6 +84,8 @@ import {
 import { ACTIVATED_PLUGIN } from "./red-skills-plugins.ts";
 import {
   REQUIRED_WORKSTATION_APPS,
+  resolveWorkstationLock,
+  workstationTarget,
   type ObservedApp,
   type ObservedTarget,
 } from "./workstation-lock.ts";
@@ -98,12 +114,16 @@ export interface JourneyCheck {
 
 export interface JourneyResult {
   ok: boolean;
+  /** The workstation this run provisioned, so the lines can name it. */
+  target: string;
   checks: JourneyCheck[];
   /** Kept when `keep` was asked for, so a failure can be looked at. */
   root: string | null;
 }
 
 export interface JourneyOptions {
+  /** Which workstation is provisioned. Defaults to the Ubuntu 24 desktop. */
+  target?: string;
   /** Where the two machines are built. Defaults to a temporary directory. */
   root?: string;
   /** The export instant. Fixed by default: a journey never reads a clock. */
@@ -139,9 +159,10 @@ function denyEgress(): { attempts: string[]; restore: () => void } {
  * shape of what broke, and a journey that stops at the first `expect`
  * makes them re-run it once per fact.
  */
-export async function runUbuntu24OfflineJourney(
+export async function runOfflineDepotJourney(
   opts: JourneyOptions = {},
 ): Promise<JourneyResult> {
+  const target = opts.target ?? UBUNTU;
   const root = opts.root ?? mkdtempSync(join(tmpdir(), "red-depot-journey-"));
   const at = opts.at ?? "2026-08-19T00:00:00Z";
   const checks: JourneyCheck[] = [];
@@ -151,13 +172,45 @@ export async function runUbuntu24OfflineJourney(
   };
   const finish = (): JourneyResult => {
     if (!opts.keep) rmSync(root, { recursive: true, force: true });
-    return { ok: checks.every((c) => c.ok), checks, root: opts.keep ? root : null };
+    return { ok: checks.every((c) => c.ok), target, checks, root: opts.keep ? root : null };
   };
+
+  // ------------------------------------------------------- the wrong machine
+  // Before anything is exported: a resolution for this target that
+  // answered with another machine's builds has to be refused, or two
+  // Ubuntu desktops are one target with two names. Both probes hash
+  // honestly and name the publisher's own URL — the only thing wrong
+  // with them is where the bytes were built.
+  const other = otherUbuntuSeries(target);
+  const found = workstationTarget(target);
+  if (found === null || other === null) {
+    check("target-fit", false, `${target} is not an Ubuntu desktop this journey can provision`);
+    return finish();
+  }
+  const series = await resolveWorkstationLock(
+    found,
+    at,
+    foreignSeriesResolver(other.codename),
+    "resolved",
+  );
+  const platform = await resolveWorkstationLock(found, at, foreignPlatformResolver, "resolved");
+  const here = found.surfaces[0]?.version ?? "";
+  const seriesRefused =
+    !series.ok && series.reason.includes(`built for Ubuntu ${other.release}, not ${here}`);
+  const platformRefused =
+    !platform.ok && platform.reason.includes("built for windows, not linux");
+  check(
+    "target-fit",
+    seriesRefused && platformRefused,
+    seriesRefused && platformRefused
+      ? `${target} refuses an Ubuntu ${other.release} build and a Windows build, both with honest checksums`
+      : `${series.ok ? `an Ubuntu ${other.release} build resolved for ${target}` : series.reason}; ${platform.ok ? `a Windows build resolved for ${target}` : platform.reason}`,
+  );
 
   // ---------------------------------------------------- the connected machine
   const setDir = rehearsalPackageSet(join(root, "connected", "package-set"));
   const depotDir = join(root, "medium", "depot");
-  const lock = await rehearsalLock(at);
+  const lock = await rehearsalLock(at, "resolved", 0, target);
 
   const exported = await exportDepot({
     lock,
@@ -200,7 +253,7 @@ export async function runUbuntu24OfflineJourney(
 
   // ------------------------------------------------- the network-denied target
   const home = join(root, "target", "home");
-  const observed = cleanUbuntu();
+  const observed = cleanUbuntu(target);
   const installed: ObservedApp[] = [];
   const fromDepot: string[] = [];
 
@@ -334,16 +387,33 @@ export async function runUbuntu24OfflineJourney(
   return finish();
 }
 
-/** The journey as lines, for the command that runs it. PURE. */
-export function journeyLines(result: JourneyResult): string[] {
+/**
+ * The Ubuntu 24 journey, under the name its command and its test use.
+ *
+ * A one-line alias rather than a copy, so "the Ubuntu 24 journey" and
+ * "the Ubuntu 26 journey" cannot drift into two claims about one thing.
+ */
+export function runUbuntu24OfflineJourney(opts: JourneyOptions = {}): Promise<JourneyResult> {
+  return runOfflineDepotJourney({ ...opts, target: UBUNTU });
+}
+
+/**
+ * The journey as lines, for the command that runs it. PURE.
+ *
+ * `what` is the kind of journey, and the target comes off the result:
+ * one formatter for every journey in this area, so a person reading a
+ * failed run on any target reads the same shape.
+ */
+export function journeyLines(result: JourneyResult, what = "offline depot journey"): string[] {
   const lines = result.checks.map((c) => `${c.ok ? "ok  " : "FAIL"} ${c.name} — ${c.detail}`);
+  const failed = result.checks.filter((c) => !c.ok).length;
   lines.push(
     result.ok
-      ? `\nubuntu-24.04-x64 offline depot journey: ${result.checks.length} checks passed`
-      : `\nubuntu-24.04-x64 offline depot journey: ${result.checks.filter((c) => !c.ok).length} of ${result.checks.length} checks failed`,
+      ? `\n${result.target} ${what}: ${result.checks.length} checks passed`
+      : `\n${result.target} ${what}: ${failed} of ${result.checks.length} checks failed`,
   );
   return lines;
 }
 
-/** The target this journey provisions, named once. */
+/** The target the Ubuntu 24 journey provisions, named once. */
 export const JOURNEY_TARGET = UBUNTU;
