@@ -110,6 +110,12 @@ import {
  * one to go back to. A third would be a second rollback nobody asked
  * for, at the cost of a third copy of every artifact on a machine whose
  * whole depot arrived on a USB stick.
+ *
+ * Not a cap this module applies — the record has exactly two slots for a
+ * settled machine, so two is what it structurally holds. The one moment
+ * a third is protected is while an activation is `pending`, and that is
+ * the failure rule rather than the retention: nothing is pruned at all
+ * until something verifies.
  */
 export const WORKSTATION_REVISION_RETENTION = 2;
 
