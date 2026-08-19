@@ -55,6 +55,7 @@ function acquisition(outcome: Acquisition["outcome"], reason: string = outcome):
     snapshot: null,
     candidate: null,
     active: null,
+    staged: null,
     writes: [],
   };
 }
