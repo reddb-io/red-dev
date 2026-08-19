@@ -362,6 +362,23 @@ through an update that did not verify, the workstation rolled back with egress
 blocked, and a second rollback that writes nothing. The same function is what
 `bun test` asserts, so the command and the gate cannot disagree.
 
+`bun run e2e:offline-ubuntu26` runs both of those journeys again against
+`ubuntu-26.04-x64`, then takes the workstation off the machine entirely — every
+application the lock names, the revisions, the retained locks and the
+machine-owned depot copies, with the configuration nobody locked left exactly
+where it was. Its last check is the one the second Ubuntu exists to prove: the
+24.04 target answers the same checks the same way, from one implementation.
+Supporting a release costs a row of `WORKSTATION_TARGETS` and a committed
+fixture lock, and no acquisition, import or reconciliation path of its own.
+
+What keeps two Ubuntus from becoming one target with two names is that every
+locked artifact is held to the machine its own file name declares. A `~noble`
+package, a `.exe`, an `aarch64` build or an `.rpm` is refused at resolution
+with an exact sentence — before a depot is cut, and long before an air-gapped
+machine finds out from `dpkg` that the medium it was handed was built for
+somewhere else. A name that declares nothing, like an npm tarball, fits
+everywhere: silence is not a claim.
+
 `doctor` has an `[agents]` section holding the whole posture: which host is the
 Default agent, how long ago each installed host's copy on PATH last changed, and
 per-provider usage with the reset times the Redwall's one compact line has no
@@ -1221,7 +1238,7 @@ places to look — in this order.
 | Target | What does not work, and why |
 | --- | --- |
 | **Ubuntu desktop** | The `desktop` scope is implemented and **has never run on real hardware** — the GNOME keybindings included. GNOME extensions and dock settings are not ported at all. |
-| **Ubuntu 26.04** | The `u26` manifest column exists and **no 26.04 machine has exercised it**. Package-name drift is undiscovered. |
+| **Ubuntu 26.04** | The `u26` manifest column exists and **no 26.04 machine has exercised it**. Package-name drift is undiscovered. The workstation lock, the offline depot and the rollback do carry a 26.04 target, proved by `bun run e2e:offline-ubuntu26` — which is a hermetic journey, not a machine. |
 | **WSL** | Windows interop cannot work under `sudo -u <other-user>`: `WSL_INTEROP` points at a per-session socket that sudo drops. Real invocations run as you, so this affects test harnesses only. |
 | **Native Windows** | No switching to a *numbered* virtual desktop — Windows offers only sequential navigation, and reaching a specific one means an interface that changes between builds. No zellij session persistence across reboots. No `ble.sh`-style line editor. |
 | **All** | `red-ui` is a `desktop` app: it installs on Ubuntu desktop and native Windows, never inside WSL, where a Linux GUI has no display to draw on. |
