@@ -66,7 +66,7 @@ function interopBin(name: string): string {
 }
 
 /** Windows PowerShell, from either side of the boundary. */
-function powershellBin(): string {
+export function powershellBin(): string {
   if (process.platform === "win32") return "powershell.exe";
   return (
     Bun.which("powershell.exe") ??

@@ -1632,6 +1632,12 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
       if (pr.name === "shared-root") {
         const { ensureSharedRoot } = await import("./shared-root.ts");
         await ensureSharedRoot(ctx.platform);
+        // Beside it because both are "what a new terminal will find",
+        // and this one has no other home: mise's shims are on PATH
+        // through config/bash/path.sh everywhere else, and on Windows
+        // through nothing at all until now. See src/windows-path.ts.
+        const { ensureMiseShimsOnPath } = await import("./windows-path.ts");
+        await ensureMiseShimsOnPath(ctx.platform);
         return;
       }
       const wsl = await import("./wsl.ts");
