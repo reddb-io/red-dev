@@ -83,21 +83,27 @@
  * list written at the time rather than a guess made afterwards.
  */
 
-import {
-  cpSync,
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 
-import { sha256Hex } from "./checksum.ts";
 import { log } from "./log.ts";
-import { dropOwnedField, readOwnedField, setOwnedField } from "./owned-config.ts";
+import { dropOwnedField, readOwnedField } from "./owned-config.ts";
+import {
+  applyOwned,
+  dedupeOwned,
+  may,
+  missingOwned,
+  must,
+  ownedKey,
+  runSteps,
+  stateDigestOf,
+  type Applied,
+  type OwnedCopy,
+  type OwnedEntry,
+  type OwnedMerge,
+  type OwnedWrite,
+  type Step,
+} from "./owned-state.ts";
 import type { Platform } from "./platform.ts";
 import type { Tool } from "./manifest.ts";
 import { activatedPlugins } from "./red-skills-plugins.ts";
@@ -105,27 +111,11 @@ import { activatedPlugins } from "./red-skills-plugins.ts";
 /**
  * One command in a host's reconciliation.
  *
- * `optional` is what `try_run … || true` is in the shared installer, and
- * it is load-bearing rather than decorative: removing a plugin that was
- * never installed exits non-zero, and treating that as a failed host would
- * leave a machine permanently unrecorded and permanently rewalked.
+ * The vocabulary is src/owned-state.ts's, re-exported under the name this
+ * module's callers already use: a host step is a step, and two spellings
+ * of the same record would be one more thing to keep in agreement.
  */
-export interface HostStep {
-  /** The command, as argv. */
-  argv: string[];
-  /** A non-zero exit here is reported, and the host carries on. */
-  optional?: boolean;
-}
-
-/** A command whose failure fails the host. */
-function must(...argv: string[]): HostStep {
-  return { argv };
-}
-
-/** A command whose failure is reported and stepped over. */
-function may(...argv: string[]): HostStep {
-  return { argv, optional: true };
-}
+export type HostStep = Step;
 
 /**
  * The richest mechanism an adapter found on this machine for its host.
@@ -188,40 +178,7 @@ export interface AdapterContext {
   config: string;
 }
 
-/**
- * One piece of state a reconciliation owns.
- *
- * Three kinds, because there are three ways to be responsible for
- * something. A `path` is a file or directory red-dev created, and removing
- * it is removing it. A `field` is one entry inside a file the user owns,
- * and removing it must leave the rest of that file byte for byte. A `host`
- * entry is state inside an application's own store — a marketplace
- * registration in Codex's TOML — which only that application's CLI can
- * take out, and which red-dev records so it can say what it asked for.
- */
-export type OwnedEntry =
-  | { kind: "path"; path: string }
-  | { kind: "field"; file: string; pointer: string[]; onlyWhenEmpty?: boolean }
-  | { kind: "host"; what: string };
-
-/** A file red-dev writes in full. */
-export interface OwnedWrite {
-  path: string;
-  bytes: string;
-}
-
-/** A directory red-dev copies out of the package set in full. */
-export interface OwnedCopy {
-  from: string;
-  to: string;
-}
-
-/** One field red-dev owns inside a file the user owns. */
-export interface OwnedMerge {
-  file: string;
-  pointer: string[];
-  value: unknown;
-}
+export type { OwnedCopy, OwnedEntry, OwnedMerge, OwnedWrite };
 
 /** Everything an adapter would do, computed before anything is touched. */
 export interface HostPlan {
@@ -979,57 +936,12 @@ async function writeHostRegistry(home: string, registry: HostRegistry): Promise<
 
 // ------------------------------------------------------------ the ownership
 
-/** A stable key for one owned entry, so two records can be compared. */
-function ownedKey(entry: OwnedEntry): string {
-  if (entry.kind === "path") return `path:${entry.path}`;
-  if (entry.kind === "field") return `field:${entry.file}#${entry.pointer.join(".")}`;
-  return `host:${entry.what}`;
-}
-
-function dedupe(entries: readonly OwnedEntry[]): OwnedEntry[] {
-  const seen = new Map<string, OwnedEntry>();
-  for (const entry of entries) if (!seen.has(ownedKey(entry))) seen.set(ownedKey(entry), entry);
-  return [...seen.values()];
-}
-
 function listing(dir: string): string[] {
   try {
     return readdirSync(dir).sort();
   } catch {
     return [];
   }
-}
-
-/** The digest of one owned entry as it exists now, or `absent`. */
-async function observe(entry: OwnedEntry, witness: string): Promise<string> {
-  if (entry.kind === "host") return sha256Hex(`${entry.what}\0${witness}`);
-  if (entry.kind === "field") {
-    if (!existsSync(entry.file)) return "absent";
-    const value = readOwnedField(readFileSync(entry.file, "utf8"), entry.pointer);
-    return value === undefined ? "absent" : sha256Hex(JSON.stringify(value));
-  }
-  if (!existsSync(entry.path)) return "absent";
-  const stat = statSync(entry.path);
-  if (stat.isDirectory()) {
-    const { treeDigest } = await import("./red-skills-set.ts");
-    return treeDigest(entry.path);
-  }
-  return sha256Hex(readFileSync(entry.path));
-}
-
-/**
- * The digest of everything this host's reconciliation is responsible for.
- *
- * Sorted by owned key, so the same state hashes the same however the plan
- * happened to order it, and every absence is part of the digest rather than
- * invisible to it: a generated directory somebody deleted has to move this
- * number, or the next converge would skip the host that no longer has it.
- */
-async function stateDigestOf(entries: readonly OwnedEntry[], witness: string): Promise<string> {
-  const lines: string[] = [];
-  for (const entry of entries) lines.push(`${ownedKey(entry)}\0${await observe(entry, witness)}`);
-  lines.sort();
-  return sha256Hex(`${lines.join("\n")}\n`);
 }
 
 // -------------------------------------------------------------- the outcome
@@ -1293,76 +1205,25 @@ async function isCurrent(
   return (await stateDigestOf(record.owned, witness.witness)) === record.stateDigest;
 }
 
-interface Applied {
-  /** The first hard failure, or null. */
-  failure: string | null;
-  /** What the plan turned out to own, discovered as it ran. */
-  owned: OwnedEntry[];
-}
-
-/** Run one host's plan: its commands, its files, then its owned fields. */
+/**
+ * Run one host's plan, and find out what a generator inside it wrote.
+ *
+ * The commands, files, copies and fields are src/owned-state.ts's job.
+ * What is left here is the half only a host has: a generator records the
+ * paths it created in its own manifest, and reading that back is how
+ * removal takes those paths and not a guess made in this repo.
+ */
 async function applyPlan(desired: HostPlan, run: (cmd: string[]) => Promise<number>): Promise<Applied> {
-  const owned: OwnedEntry[] = [];
+  const applied = await applyOwned(desired, run);
+  if (applied.failure !== null) return applied;
 
-  const failure = await runSteps(desired.steps, run);
-  if (failure !== null) return { failure, owned };
-
-  try {
-    for (const write of desired.writes) {
-      mkdirSync(dirname(write.path), { recursive: true });
-      // Compare-then-write: a converge that rewrites an unchanged file is
-      // a converge claiming work, and its mtime is a lie told to whoever
-      // reads it next.
-      if (!existsSync(write.path) || readFileSync(write.path, "utf8") !== write.bytes) {
-        await Bun.write(write.path, write.bytes);
-      }
-      owned.push({ kind: "path", path: write.path });
-    }
-
-    for (const copy of desired.copies) {
-      rmSync(copy.to, { recursive: true, force: true });
-      mkdirSync(dirname(copy.to), { recursive: true });
-      cpSync(copy.from, copy.to, { recursive: true });
-      owned.push({ kind: "path", path: copy.to });
-    }
-
-    for (const merge of desired.merges) {
-      owned.push(...(await applyMerge(merge)));
-    }
-  } catch (error) {
-    return { failure: `${(error as Error).message}`, owned };
-  }
-
-  owned.push(...desired.expect);
+  const owned = [...applied.owned];
   for (const manifest of desired.manifests) {
     if (!existsSync(manifest)) continue;
     owned.push({ kind: "path", path: manifest });
     for (const path of manifestPaths(manifest)) owned.push({ kind: "path", path });
   }
-
-  return { failure: null, owned: dedupe(owned) };
-}
-
-/**
- * Splice one field into a file the user owns, and record what that cost.
- *
- * The parent object is recorded too, and only when this call had to create
- * it: removing `mcpServers` because our entry was all it ever held is
- * right, and removing it out from under a server the operator added later
- * is the exact failure the ownership manifest exists to prevent.
- */
-async function applyMerge(merge: OwnedMerge): Promise<OwnedEntry[]> {
-  const before = existsSync(merge.file) ? readFileSync(merge.file, "utf8") : "";
-  const parent = merge.pointer.slice(0, -1);
-  const madeParent = parent.length > 0 && readOwnedField(before, parent) === undefined;
-  const after = setOwnedField(before, merge.pointer, merge.value);
-  if (after !== before) {
-    mkdirSync(dirname(merge.file), { recursive: true });
-    await Bun.write(merge.file, after);
-  }
-  const entries: OwnedEntry[] = [{ kind: "field", file: merge.file, pointer: [...merge.pointer] }];
-  if (madeParent) entries.push({ kind: "field", file: merge.file, pointer: parent, onlyWhenEmpty: true });
-  return entries;
+  return { failure: null, owned: dedupeOwned(owned) };
 }
 
 /** Every path a generator recorded, one per line, blank lines ignored. */
@@ -1407,50 +1268,14 @@ async function verifyPlan(
   const check = adapter.check ? await adapter.check(ctx, desired) : ({ ok: true, witness: "" } as HostCheck);
   if (!check.ok) return { ...empty, reason: check.reason };
 
-  for (const entry of owned) {
-    if (entry.kind === "path" && !existsSync(entry.path)) {
-      return { ...empty, reason: `${entry.path} was not written` };
-    }
-    if (entry.kind === "field") {
-      const text = existsSync(entry.file) ? readFileSync(entry.file, "utf8") : "";
-      if (readOwnedField(text, entry.pointer) === undefined) {
-        return { ...empty, reason: `${entry.file} has no ${entry.pointer.join(".")}` };
-      }
-    }
-  }
+  const missing = missingOwned(owned);
+  if (missing !== null) return { ...empty, reason: missing };
 
   return {
     ok: true,
     stateDigest: await stateDigestOf(owned, check.witness),
     owned: [...owned],
   };
-}
-
-/** Runs one host's commands, and answers the first hard failure or null. */
-async function runSteps(
-  steps: readonly HostStep[],
-  run: (cmd: string[]) => Promise<number>,
-): Promise<string | null> {
-  for (const step of steps) {
-    const what = step.argv.join(" ");
-    let code: number;
-    try {
-      code = await run(step.argv);
-    } catch (error) {
-      if (step.optional) {
-        log.warn(`${what} could not be run: ${(error as Error).message}`);
-        continue;
-      }
-      return `${what} could not be run: ${(error as Error).message}`;
-    }
-    if (code === 0) continue;
-    if (step.optional) {
-      log.skip(`${what} exited ${code}, which this step is allowed to do`);
-      continue;
-    }
-    return `${what} exited ${code}`;
-  }
-  return null;
 }
 
 // -------------------------------------------------------------- the removal

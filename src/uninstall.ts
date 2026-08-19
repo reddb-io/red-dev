@@ -27,6 +27,14 @@ import type { Platform } from "./platform.ts";
 // run time.
 import { sshAccessRemoval } from "./ssh-access.ts";
 import { readRecord, uninstallHerdrPlugin, uninstallVscodeExtension } from "./red-skills-ext.ts";
+import {
+  COMPANION_ADAPTERS,
+  PLUGIN_ID,
+  readCompanionRegistry,
+  removeCompanions,
+  type CompanionAdapter,
+  type CompanionName,
+} from "./red-skills-companions.ts";
 
 export interface Removal {
   tool: string;
@@ -168,6 +176,16 @@ export function removableTools(p: Platform): { tool: Tool; removal: Removal }[] 
   return out;
 }
 
+/** One adapter, for a removal that speaks for one companion only. */
+function companionAdapter(name: CompanionName): readonly CompanionAdapter[] {
+  return COMPANION_ADAPTERS.filter((a) => a.name === name);
+}
+
+/** This user's home, as every record path in this repo spells it. */
+function homeForRecords(): string {
+  return (process.env["HOME"] ?? process.env["USERPROFILE"] ?? "").replace(/\\/g, "/");
+}
+
 /**
  * The removals the install record justifies, and only those.
  *
@@ -187,8 +205,28 @@ export function redSkillsExtensionRemovals(p: Platform): { tool: Tool; removal: 
   const out: { tool: Tool; removal: Removal }[] = [];
   const named = (name: string) => toolsInScope("optional").find((t) => t.name === name);
 
+  // The companion registry first, because it is what a machine converged
+  // since Spec #201 has: the artifacts come out of the package set now,
+  // and the ownership record the walk wrote is what says which editors
+  // took the extension and which block in herdr's config is red-dev's.
+  // The legacy record below still answers for a machine converged before
+  // it, and neither is offered twice.
+  const companions = readCompanionRegistry(homeForRecords());
+
   const vscode = named("red-skills-vscode");
-  if (vscode && record.vscode) {
+  if (vscode && companions.companions["vscode"]) {
+    const editors = companions.companions["vscode"]?.targets ?? [];
+    out.push({
+      tool: vscode,
+      removal: {
+        tool: vscode.name,
+        how: `uninstall the extension from ${editors.join(", ") || "the editors it went into"}`,
+        run: async () => {
+          await removeCompanions(p, { adapters: companionAdapter("vscode") });
+        },
+      },
+    });
+  } else if (vscode && record.vscode) {
     const editors = record.vscode.editors ?? [];
     out.push({
       tool: vscode,
@@ -203,7 +241,18 @@ export function redSkillsExtensionRemovals(p: Platform): { tool: Tool; removal: 
   }
 
   const herdr = named("red-skills-herdr");
-  if (herdr && record.herdr) {
+  if (herdr && companions.companions["herdr"]) {
+    out.push({
+      tool: herdr,
+      removal: {
+        tool: herdr.name,
+        how: `herdr plugin unlink ${PLUGIN_ID}`,
+        run: async () => {
+          await removeCompanions(p, { adapters: companionAdapter("herdr") });
+        },
+      },
+    });
+  } else if (herdr && record.herdr) {
     out.push({
       tool: herdr,
       removal: {
