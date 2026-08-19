@@ -27,6 +27,7 @@ import {
   readdirSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -175,6 +176,17 @@ interface SetOptions {
   mcp?: boolean | "dangling";
   /** Whether `dev` declares hooks, and whether their scripts are there. */
   hooks?: "declared" | "dangling";
+  /**
+   * Whether the first `dev` skill carries a payload beside its `SKILL.md`.
+   *
+   * A skill is a directory: the references it cites and the scripts it runs
+   * are as much of it as the entry point. `"dangling"` cites one the set
+   * does not carry — the shape a half-composed set has, and the one a
+   * skills-only host must refuse before it writes anything.
+   */
+  assets?: boolean | "dangling";
+  /** Whether `dev` carries agent definitions, which no skills-only host loads. */
+  agents?: boolean;
   /** Generators to leave out, for the hosts that then have none. */
   without?: string[];
 }
@@ -195,7 +207,14 @@ function packageSet(opts: SetOptions = {}): string {
     chmodSync(path, 0o755);
   }
 
-  for (const skill of opts.skills ?? ["shipped"]) addSkill(tree, "dev", skill);
+  const carried = opts.skills ?? ["shipped"];
+  for (const skill of carried) addSkill(tree, "dev", skill);
+  if (opts.assets !== undefined && carried[0] !== undefined) addAssets(tree, carried[0], opts.assets);
+  if (opts.agents === true) {
+    const dir = join(tree, "plugins", "dev", "agents");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "reviewer.md"), "---\nname: reviewer\n---\n");
+  }
   // A payload the set carries and nothing activates. Every assertion about
   // "only dev" is really an assertion that this one never lands.
   addSkill(tree, "memory", "memory-only");
@@ -248,6 +267,25 @@ function addSkill(tree: string, plugin: string, name: string): void {
   const dir = join(tree, "plugins", plugin, "skills", name);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "SKILL.md"), `---\nname: ${name}\ndescription: what ${name} does\n---\n`);
+}
+
+/**
+ * The payload one skill carries beside its entry point.
+ *
+ * The dangling variant is a link with nothing behind it, which is what a
+ * set composed against a tree that moved leaves: the copy still puts it on
+ * the machine, still pointing at nothing, and the skill that cites it fails
+ * in the middle of somebody's session rather than at install time.
+ */
+function addAssets(tree: string, skill: string, kind: boolean | "dangling"): void {
+  const root = join(tree, "plugins", "dev", "skills", skill);
+  mkdirSync(join(root, "references"), { recursive: true });
+  writeFileSync(join(root, "references", "guide.md"), "# the long form of it\n");
+  mkdirSync(join(root, "scripts"), { recursive: true });
+  const script = join(root, "scripts", "run.sh");
+  writeFileSync(script, "#!/usr/bin/env bash\nexit 0\n");
+  chmodSync(script, 0o755);
+  if (kind === "dangling") symlinkSync("./gone.md", join(root, "references", "cited.md"));
 }
 
 /** Claude's own store, with a marketplace of the operator's beside ours. */
@@ -747,8 +785,8 @@ describe("configuration the operator owns", () => {
 
 // ------------------------------------------------------------- the Gemini
 
-/** What the Gemini adapter is a function of, for the checks called directly. */
-function geminiContext(m: Machine): AdapterContext {
+/** What an adapter is a function of, for the plans and checks called directly. */
+function hostContext(m: Machine): AdapterContext {
   return {
     plugins: ACTIVATED,
     source: m.tree,
@@ -786,7 +824,7 @@ function snapshot(root: string, base = root): Record<string, string> {
 
 async function geminiCheck(m: Machine): Promise<{ ok: boolean; reason?: string }> {
   const adapter = adapterNamed("gemini");
-  const ctx = geminiContext(m);
+  const ctx = hostContext(m);
   const checked = await adapter.check?.(ctx, adapter.plan(ctx));
   if (!checked) throw new Error("the Gemini adapter answers no check");
   return checked.ok ? { ok: true } : { ok: false, reason: checked.reason };
@@ -971,6 +1009,251 @@ describe("the Gemini projection of the local dev set", () => {
     const row = redSkillsHostRows(redSkillsHostReport(m.home)).find((r) => r.detail.startsWith("gemini"));
     expect(row?.status).toBe("warn");
     expect(row?.detail).toContain("restart needed");
+  });
+});
+
+// ------------------------------------------------------------- the Hermes
+
+const HERMES_SKILLS = ["skills", "red-skills"] as const;
+
+function hermesDir(m: Machine): string {
+  return join(m.home, ".hermes", ...HERMES_SKILLS);
+}
+
+async function hermesCheck(m: Machine): Promise<{ ok: boolean; reason?: string }> {
+  const adapter = adapterNamed("hermes");
+  const ctx = hostContext(m);
+  const checked = await adapter.check?.(ctx, adapter.plan(ctx));
+  if (!checked) throw new Error("the Hermes adapter answers no check");
+  return checked.ok ? { ok: true } : { ok: false, reason: checked.reason };
+}
+
+function hermesOnly(m: Machine, opts: HostReconcileOptions = {}): Promise<HostOutcome[]> {
+  return reconcile(m, { run: runner(m).run, adapters: [adapterNamed("hermes")], ...opts });
+}
+
+describe("the user-global surface Hermes supports", () => {
+  test("is a skills tree of its own, and no command and no config file", () => {
+    // The contract, read off the plan rather than off the disk: everything
+    // this host is given lands under one directory red-dev made, nothing is
+    // spawned to put it there, and no field of anybody's file is ours.
+    const m = machine({ hooks: "declared", assets: true, agents: true });
+    const adapter = adapterNamed("hermes");
+    const desired = adapter.plan(hostContext(m));
+
+    expect(adapter.cmd).toBe("hermes");
+    expect(desired.mode).toBe("skills");
+    expect(desired.steps).toEqual([]);
+    expect(desired.merges).toEqual([]);
+    expect(desired.manifests).toEqual([]);
+
+    const owned = [
+      ...desired.writes.map((w) => w.path),
+      ...desired.copies.map((c) => c.to),
+      ...desired.expect.flatMap((e) => (e.kind === "path" ? [e.path] : [])),
+    ];
+    expect(owned.length).toBeGreaterThan(0);
+    for (const path of owned) expect(path, path).toStartWith(hermesDir(m));
+
+    // And the limits, named rather than left to be inferred from what is
+    // missing: three capabilities the set carries that this host has no
+    // mechanism for, in one list beside the one it does.
+    expect(desired.capabilities.map((c) => `${c.name}:${c.state}`)).toEqual([
+      "skills:projected",
+      "mcp:unsupported",
+      "hooks:unsupported",
+      "agents:unsupported",
+    ]);
+  });
+
+  test("a set that ships a generator for it stands the projection down", () => {
+    const m = machine();
+    const script = join(m.tree, "scripts", "install-hermes.sh");
+    writeFileSync(script, "#!/usr/bin/env bash\nexit 0\n");
+    chmodSync(script, 0o755);
+
+    const desired = adapterNamed("hermes").plan(hostContext(m));
+    expect(desired.mode).toBe("generator");
+    expect(lines(desired.steps.map((s) => s.argv))).toEqual([`${script} --source-dir ${m.tree} --user`]);
+    expect(desired.copies).toEqual([]);
+  });
+});
+
+describe("the Hermes projection of the local dev set", () => {
+  test("a valid set installs complete skills and their payload, with nothing spawned", async () => {
+    // A clean machine: no `~/.hermes` at all, and no command issued. The
+    // projection is a tree red-dev copies out of the set it already has,
+    // so it needs no CLI, no marketplace and no network.
+    const m = machine({ hooks: "declared", assets: true, agents: true });
+    expect(existsSync(join(m.home, ".hermes"))).toBe(false);
+
+    const { calls, run } = runner(m);
+    const out = await hermesOnly(m, { run });
+
+    expect(out[0]?.status).toBe("reconciled");
+    expect(out[0]?.mode).toBe("skills");
+    expect(calls).toEqual([]);
+
+    const shipped = join(hermesDir(m), "shipped");
+    expect(readFileSync(join(shipped, "SKILL.md"), "utf8")).toContain("name: shipped");
+    // The whole skill, not its entry point: a reference the model is sent
+    // to read and a script it is told to run are the skill as much as the
+    // page naming them.
+    expect(readFileSync(join(shipped, "references", "guide.md"), "utf8")).toContain("the long form");
+    expect(statSync(join(shipped, "scripts", "run.sh")).mode & 0o111).not.toBe(0);
+    // And nothing the set carries but nobody activated.
+    expect(existsSync(join(hermesDir(m), "memory-only"))).toBe(false);
+
+    expect(readFileSync(join(hermesDir(m), "REDSKILLS.md"), "utf8")).toContain("shipped");
+    expect(readHostRegistry(m.home).hosts["hermes"]?.mode).toBe("skills");
+  });
+
+  test("a skill citing a file the set does not carry never reaches the disk", async () => {
+    const m = machine({ assets: "dangling" });
+    const { calls, run } = runner(m);
+    const out = await hermesOnly(m, { run });
+
+    expect(out[0]?.status).toBe("blocked");
+    expect(out[0]?.reason).toContain("references/cited.md");
+    expect(calls).toEqual([]);
+    expect(existsSync(join(m.home, ".hermes"))).toBe(false);
+    expect(readHostRegistry(m.home).hosts["hermes"]).toBeUndefined();
+  });
+
+  test("verification reads the projected tree back, not the exit code", async () => {
+    const m = machine({ assets: true });
+
+    // Nothing projected yet: there is no skill for Hermes to read.
+    expect(await hermesCheck(m)).toMatchObject({ ok: false });
+
+    await hermesOnly(m);
+    expect(await hermesCheck(m)).toEqual({ ok: true });
+
+    // Every part of the surface, one at a time: the payload beside the
+    // entry point, the entry point itself, and the page that says what
+    // this host has and has not.
+    const asset = join(hermesDir(m), "shipped", "references", "guide.md");
+    rmSync(asset);
+    expect((await hermesCheck(m)).reason).toContain("references/guide.md");
+    writeFileSync(asset, "# the long form of it\n");
+
+    rmSync(join(hermesDir(m), "shipped"), { recursive: true, force: true });
+    expect((await hermesCheck(m)).reason).toContain("shipped/SKILL.md");
+
+    rmSync(join(hermesDir(m), "REDSKILLS.md"));
+    expect((await hermesCheck(m)).reason).toContain("REDSKILLS.md");
+  });
+
+  test("a projection that lost part of a skill is reconciled again, not skipped", async () => {
+    const m = machine({ assets: true });
+    await hermesOnly(m);
+
+    // The state the record described is not the state on disk any more.
+    rmSync(join(hermesDir(m), "shipped", "scripts"), { recursive: true, force: true });
+    const out = await hermesOnly(m);
+
+    expect(out[0]?.status).toBe("reconciled");
+    expect(existsSync(join(hermesDir(m), "shipped", "scripts", "run.sh"))).toBe(true);
+  });
+
+  test("and one that could not be written at all is recorded as nothing", async () => {
+    // An operator's stray file where the skills path has to be. The plan
+    // fails partway, which is the state a success record must never
+    // describe: the next converge has to ask this host again.
+    const m = machine({ assets: true });
+    mkdirSync(join(m.home, ".hermes"), { recursive: true });
+    writeFileSync(join(m.home, ".hermes", "skills"), "not a directory\n");
+
+    const out = await hermesOnly(m);
+
+    expect(out[0]?.status).toBe("failed");
+    expect(readHostRegistry(m.home).hosts["hermes"]).toBeUndefined();
+  });
+
+  test("re-running the install produces no drift at all", async () => {
+    const m = machine({ assets: true, hooks: "declared" });
+    expect((await hermesOnly(m))[0]?.status).toBe("reconciled");
+    const before = snapshot(join(m.home, ".hermes"));
+
+    const { calls, run } = runner(m);
+    const out = await hermesOnly(m, { run });
+
+    expect(out[0]?.status).toBe("current");
+    expect(calls).toEqual([]);
+    // Byte for byte and mtime for mtime: a converge that recopied an
+    // unchanged tree would be claiming work it did not do.
+    expect(snapshot(join(m.home, ".hermes"))).toEqual(before);
+  });
+
+  test("uninstall removes what it owns and leaves the rest of ~/.hermes", async () => {
+    const m = machine({ assets: true });
+    await hermesOnly(m);
+
+    const theirs = join(m.home, ".hermes", "skills", "hand-written");
+    mkdirSync(theirs, { recursive: true });
+    writeFileSync(join(theirs, "SKILL.md"), "---\nname: hand-written\n---\n");
+    const settings = join(m.home, ".hermes", "settings.json");
+    writeFileSync(settings, `{ "theme": "theirs" }\n`);
+
+    const out = await removeSkillHosts(UBUNTU, {
+      home: m.home,
+      config: m.config,
+      source: m.tree,
+      plugins: ACTIVATED,
+      present: () => true,
+      run: runner(m).run,
+      adapters: [adapterNamed("hermes")],
+    });
+
+    expect(out[0]?.removed).toBe(true);
+    expect(existsSync(hermesDir(m))).toBe(false);
+    expect(readFileSync(join(theirs, "SKILL.md"), "utf8")).toContain("hand-written");
+    expect(readFileSync(settings, "utf8")).toBe(`{ "theme": "theirs" }\n`);
+    expect(readHostRegistry(m.home).hosts["hermes"]).toBeUndefined();
+  });
+
+  test("what Hermes cannot be given is said, and its skills are installed anyway", async () => {
+    // The whole point of the capability vocabulary: a set carrying hooks,
+    // servers and agents is not a broken set for this host, and a host
+    // that takes none of the three is not a host with worse skills.
+    const m = machine({ hooks: "declared", agents: true, assets: true });
+    const first = await hermesOnly(m);
+
+    expect(first[0]?.status).toBe("reconciled");
+    const said = first[0]?.missing?.join("\n") ?? "";
+    for (const name of ["mcp", "hooks", "agents"]) expect(said, name).toContain(`no ${name}`);
+    expect(existsSync(join(hermesDir(m), "shipped", "SKILL.md"))).toBe(true);
+
+    // It survives into the record, so the converge that skips the host
+    // still says what the host does not have.
+    const second = await hermesOnly(m);
+    expect(second[0]?.status).toBe("current");
+    expect(second[0]?.missing?.join("\n")).toContain("no agents");
+
+    const report = redSkillsHostReport(m.home);
+    expect(report.hosts[0]?.capabilities).toContainEqual(
+      expect.objectContaining({ name: "agents", state: "unsupported" }),
+    );
+    const row = redSkillsHostRows(report).find((r) => r.detail.startsWith("hermes"));
+    // Converged, and poorer than its neighbour: both on the same line, and
+    // neither of them a warning about the host being broken.
+    expect(row?.status).toBe("ok");
+    expect(row?.detail).toContain("no hooks");
+    // And the same sentences on the page Hermes itself reads, so a model
+    // waiting for a hook to fire here is told nothing ever will.
+    expect(readFileSync(join(hermesDir(m), "REDSKILLS.md"), "utf8")).toContain("no hooks");
+  });
+
+  test("a set carrying none of them is reported as carrying none, not as refused", async () => {
+    const m = machine({ mcp: false });
+    const out = await hermesOnly(m);
+
+    expect(out[0]?.status).toBe("reconciled");
+    const said = out[0]?.missing?.join("\n") ?? "";
+    expect(said).toContain("the package set declares no MCP server");
+    expect(said).toContain("the package set declares no hook");
+    expect(said).toContain("the package set carries no agent");
+    expect(said).not.toContain("Hermes");
   });
 });
 
