@@ -110,6 +110,47 @@ export const REDSKILLS_RECONCILE_POSTINSTALL = "red-dev red-skills reconcile";
 const REDSKILLS_ALIAS = "red-skills";
 
 /**
+ * Where mise keeps everything it owns on this machine.
+ *
+ * `MISE_DATA_DIR` first, because a machine that moved it moved all of
+ * it. Then the platform default — and the two are *not* the same shape:
+ * mise follows XDG on unix and `%LOCALAPPDATA%\mise` on Windows, where
+ * there is no XDG anything. This resolved to `~/.local/share/mise` on
+ * every platform until 2026-08-19, which on Windows is a directory mise
+ * has never read. Two things were quietly wrong there for as long as
+ * they had existed:
+ *
+ *   - the local `red-skills-set` plugin (ADR 0010) was written to
+ *     `C:\Users\<me>\.local\share\mise\plugins`, so mise never saw
+ *     it and `mise upgrade red-skills` had nothing to dispatch into;
+ *   - `miseToolBin` found nothing, so the signature verifier fell back
+ *     to the bare name and a converge that had just installed cosign
+ *     reported `Executable not found in $PATH: "cosign"` — on a Windows
+ *     machine, every time, no matter how many times it was re-run.
+ *
+ * XDG is honoured on unix only. `XDG_DATA_HOME` set on Windows is
+ * somebody's WSL habit leaking through the environment, not a place
+ * mise will look.
+ */
+export function miseDataRoot(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: string = process.platform,
+): string {
+  const explicit = env["MISE_DATA_DIR"];
+  if (explicit) return explicit;
+
+  if (platform === "win32") {
+    const local = env["LOCALAPPDATA"];
+    if (local) return join(local, "mise");
+    return join(homedir(), "AppData", "Local", "mise");
+  }
+
+  const xdg = env["XDG_DATA_HOME"];
+  if (xdg) return join(xdg, "mise");
+  return join(homedir(), ".local", "share", "mise");
+}
+
+/**
  * The directory mise installs tools into.
  *
  * Used to tell a mise-managed copy of a command apart from the one
@@ -117,11 +158,7 @@ const REDSKILLS_ALIAS = "red-skills";
  * identical binaries an upgrade will actually move.
  */
 export function miseInstallRoot(env: NodeJS.ProcessEnv = process.env): string {
-  const explicit = env["MISE_DATA_DIR"];
-  if (explicit) return join(explicit, "installs");
-  const xdg = env["XDG_DATA_HOME"];
-  if (xdg) return join(xdg, "mise", "installs");
-  return join(homedir(), ".local", "share", "mise", "installs");
+  return join(miseDataRoot(env), "installs");
 }
 
 /**
@@ -196,11 +233,7 @@ function byVersionDesc(a: string, b: string): number {
  * directory ourselves the same act.
  */
 export function misePluginRoot(env: NodeJS.ProcessEnv = process.env): string {
-  const explicit = env["MISE_DATA_DIR"];
-  if (explicit) return join(explicit, "plugins");
-  const xdg = env["XDG_DATA_HOME"];
-  if (xdg) return join(xdg, "mise", "plugins");
-  return join(homedir(), ".local", "share", "mise", "plugins");
+  return join(miseDataRoot(env), "plugins");
 }
 
 /** Where the fragment lands. */

@@ -21,7 +21,9 @@
  */
 
 import { existsSync } from "node:fs";
+
 import { parseVersion, compareVersions, type Tool } from "./manifest.ts";
+import { miseDataRoot } from "./mise-config.ts";
 import { userBinDir, windowsBinDir } from "./providers.ts";
 
 /** Where an install can have put a binary that PATH does not know yet. */
@@ -39,11 +41,15 @@ function installDirs(): string[] {
   // installing is the exception: its PATH was inherited from a shell
   // that started before the shim existed, so a converge would install a
   // tool successfully and then report it missing on the very next line.
-  const home = process.env["HOME"] ?? process.env["USERPROFILE"];
-  if (home) {
-    const data = process.env["MISE_DATA_DIR"] ?? `${home}/.local/share/mise`;
-    dirs.push(`${data.replace(/\\/g, "/")}/shims`);
-  }
+  //
+  // Through miseDataRoot rather than spelled again here: mise's data
+  // directory is `%LOCALAPPDATA%\mise` on Windows and an XDG path
+  // everywhere else, and the copy of that rule this file used to carry
+  // knew only the unix half. The visible cost was a Windows converge
+  // that installed a tool and then said it was not on PATH yet — true
+  // of the directory it was looking in, which was one mise had never
+  // written to.
+  dirs.push(`${miseDataRoot().replace(/\\/g, "/")}/shims`);
   if (process.platform === "win32") {
     try {
       dirs.push(windowsBinDir().replace(/\\/g, "/"));

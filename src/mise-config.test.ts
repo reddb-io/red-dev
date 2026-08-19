@@ -24,7 +24,9 @@ import { dirname, join } from "node:path";
 import {
   miseConfigPath,
   miseEntries,
+  miseDataRoot,
   miseInstallRoot,
+  misePluginRoot,
   miseToolBin,
   releaseAgeExcludes,
   renderMiseConfig,
@@ -231,5 +233,36 @@ describe("the release-age exemption", () => {
     const bare = { ...WINDOWS, os: "linux", distro: "alpine" } as Platform;
     if (miseEntries(bare).length === 0) expect(miseReleaseAgeEnv(bare)).toEqual({});
     expect(releaseAgeExcludes([])).toEqual([]);
+  });
+});
+
+describe("where mise keeps what it owns", () => {
+  test("follows XDG on unix", () => {
+    expect(miseDataRoot({ XDG_DATA_HOME: "/home/me/.xdg" }, "linux")).toBe("/home/me/.xdg/mise");
+    expect(miseInstallRoot({ XDG_DATA_HOME: "/home/me/.xdg" })).toContain("mise");
+  });
+
+  test("is LOCALAPPDATA on Windows, where there is no XDG anything", () => {
+    // The bug this replaced: `~/.local/share/mise` on every platform.
+    // On Windows that is a directory mise has never read, so the local
+    // plugin was written where nothing looks and cosign was never found
+    // by path — see the comment on miseDataRoot.
+    const win = { LOCALAPPDATA: "C:\\Users\\me\\AppData\\Local" };
+    expect(miseDataRoot(win, "win32")).toBe(join("C:\\Users\\me\\AppData\\Local", "mise"));
+    expect(miseDataRoot({ ...win, XDG_DATA_HOME: "/home/me/.xdg" }, "win32")).toBe(
+      join("C:\\Users\\me\\AppData\\Local", "mise"),
+    );
+  });
+
+  test("lets MISE_DATA_DIR win everywhere, because a machine that moved it moved all of it", () => {
+    for (const platform of ["linux", "darwin", "win32"]) {
+      expect(miseDataRoot({ MISE_DATA_DIR: "/somewhere/else" }, platform)).toBe("/somewhere/else");
+    }
+  });
+
+  test("installs and plugins are two names under the one root", () => {
+    const env = { MISE_DATA_DIR: "/data/mise" };
+    expect(miseInstallRoot(env)).toBe(join("/data/mise", "installs"));
+    expect(misePluginRoot(env)).toBe(join("/data/mise", "plugins"));
   });
 });

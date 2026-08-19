@@ -120,3 +120,15 @@ describe("verificationLines", () => {
     expect(out).not.toContain("more");
   });
 });
+
+describe("where an install can have put a binary", () => {
+  test("includes mise's shims, resolved the way mise resolves them", async () => {
+    // A copy of the data-directory rule lived here and knew only the
+    // unix half, so on Windows this probed a directory mise has never
+    // written to — and a converge that had just installed a tool
+    // reported it missing on the next line.
+    const source = await Bun.file(new URL("./verify-install.ts", import.meta.url)).text();
+    expect(source).toContain("miseDataRoot()");
+    expect(source).not.toContain(".local/share/mise");
+  });
+});
