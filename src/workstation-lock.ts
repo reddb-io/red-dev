@@ -74,6 +74,7 @@
 
 import { readFileSync } from "node:fs";
 
+import { artifactFit } from "./artifact-fit.ts";
 import { sha256Hex } from "./checksum.ts";
 
 export const WORKSTATION_LOCK_SCHEMA = "red.workstation-lock.v1";
@@ -413,6 +414,14 @@ export function auditWorkstationLock(lock: WorkstationLock): string[] {
     }
     if (app.source.publisher.length === 0) problems.push(`${where}: no publisher recorded`);
     if (app.artifact.name.length === 0) problems.push(`${where}: no artifact recorded`);
+    else if (surface !== undefined) {
+      // The artifact is held to the machine its own name declares. Two
+      // Ubuntu targets are otherwise indistinguishable to a checksum,
+      // and an offline target discovers a build meant for the other
+      // release when `dpkg` refuses it — long after the medium is gone.
+      const unfit = artifactFit(surface, app.artifact.name);
+      if (unfit !== null) problems.push(`${where}: ${unfit}`);
+    }
     if (!HEX64.test(app.artifact.sha256)) problems.push(`${where}: artifact checksum is invalid`);
     if (!ATTESTATIONS.has(app.provenance.attestation)) {
       problems.push(`${where}: unknown attestation ${app.provenance.attestation}`);
@@ -601,6 +610,16 @@ const UBUNTU_24_X64: LockSurface = {
   role: "both",
 };
 
+const UBUNTU_26_X64: LockSurface = {
+  id: "ubuntu-26.04-x64",
+  os: "linux",
+  distro: "ubuntu",
+  version: "26.04",
+  arch: "x64",
+  env: "desktop",
+  role: "both",
+};
+
 const WINDOWS_11_X64: LockSurface = {
   id: "windows-11-x64",
   os: "windows",
@@ -624,17 +643,29 @@ const WSL_UBUNTU_24_X64: LockSurface = {
 /**
  * The targets a lock can be resolved for.
  *
- * Two, which is the pair Spec #201 names as initial support: the bare
- * Ubuntu 24.04 desktop, and the Windows workstation whose CLI half is a
- * WSL distro. Ubuntu 26.04 is the same shape as the first with a
- * different codename and arrives with its own journey in #213; adding it
- * is a surface and a fixture, not a change here.
+ * Three: the bare Ubuntu 24.04 desktop, the same desktop on 26.04, and
+ * the Windows workstation whose CLI half is a WSL distro. The second
+ * Ubuntu is deliberately nothing but a surface — same applications, same
+ * channels, same single surface that takes both the CLIs and the editor
+ * — because that is the claim #213 makes: a release this project has not
+ * shipped on yet costs a row here and a committed fixture, and no second
+ * acquisition or reconciliation path anywhere.
+ *
+ * What keeps that honest is `artifactFit` in the audit below: two Ubuntu
+ * targets that differ only in a version string would happily install each
+ * other's builds, and a `~noble` package on 26.04 is exactly the drift a
+ * lock exists to catch.
  */
 export const WORKSTATION_TARGETS: readonly LockTarget[] = [
   {
     id: "ubuntu-24.04-x64",
     label: "Ubuntu 24.04 desktop, x64",
     surfaces: [UBUNTU_24_X64],
+  },
+  {
+    id: "ubuntu-26.04-x64",
+    label: "Ubuntu 26.04 desktop, x64",
+    surfaces: [UBUNTU_26_X64],
   },
   {
     id: "windows-11-x64+wsl-ubuntu-24.04",
