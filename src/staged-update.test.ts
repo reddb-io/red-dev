@@ -43,7 +43,7 @@ import {
 const fakeHome = (): string => mkdtempSync(`${tmpdir()}/red-staged-`);
 
 /** One acquisition, in whichever of its five endings a case needs. */
-function acquisition(outcome: Acquisition["outcome"], reason = outcome): Acquisition {
+function acquisition(outcome: Acquisition["outcome"], reason: string = outcome): Acquisition {
   return {
     outcome,
     reason,
@@ -272,26 +272,26 @@ describe("an active Worker", () => {
   test("lets acquisition complete and holds every other surface", async () => {
     const home = fakeHome();
     record(home, machine(home));
-    let stagedOnly: boolean | null = null;
-    let converged = false;
+    const told: boolean[] = [];
+    const convergedCalls: string[] = [];
     const run = await walk(home, {
       workers: async () => 2,
       acquire: async (stageOnly) => {
-        stagedOnly = stageOnly;
+        told.push(stageOnly);
         return acquisition("acquired", "3.19.6 staged");
       },
       converge: async () => {
-        converged = true;
+        convergedCalls.push("converge");
         return { hosts: [], companions: [] };
       },
     });
     // The acquisition ran, and it was told not to activate what it verified.
-    expect(stagedOnly).toBe(true);
+    expect(told).toEqual([true]);
     expect(run.outcome).toBe("staged");
     expect(run.code).toBe(0);
     // Nothing else was even asked: the hosts, the companions and the
     // daemon stay on the lock the Worker is working against.
-    expect(converged).toBe(false);
+    expect(convergedCalls).toEqual([]);
     expect(stateOf(run)).toEqual({
       acquisition: "verified",
       hosts: "pending",
@@ -319,15 +319,15 @@ describe("an active Worker", () => {
     // never activate anything there at all.
     const home = fakeHome();
     record(home, machine(home));
-    let stagedOnly: boolean | null = null;
+    const told: boolean[] = [];
     const run = await walk(home, {
       workers: async () => null,
       acquire: async (stageOnly) => {
-        stagedOnly = stageOnly;
+        told.push(stageOnly);
         return acquisition("acquired");
       },
     });
-    expect(stagedOnly).toBe(false);
+    expect(told).toEqual([false]);
     expect(run.outcome).toBe("converged");
   });
 
