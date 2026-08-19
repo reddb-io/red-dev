@@ -858,14 +858,41 @@ async function cmdRedSkills(p: Platform, inv: Invocation): Promise<number> {
   // so nothing mise runs may advance one. See src/red-skills-checkout.ts.
   if (phase === "sync") return await cmdRedSkillsSync(p, inv);
 
+  // `adopt` is red-dev's own for the same kind of reason: it removes
+  // state, and nothing mise invokes on its own schedule may do that.
+  if (phase === "adopt") return await cmdRedSkillsAdopt();
+
   if (!isPluginPhase(phase)) {
-    log.err(`unknown phase '${phase}' (expected: ${[...PLUGIN_PHASES, "sync"].join(", ")})`);
+    log.err(`unknown phase '${phase}' (expected: ${[...PLUGIN_PHASES, "sync", "adopt"].join(", ")})`);
     return 1;
   }
   return await runPluginPhase(phase, {
     manifestPlatform: p,
     ...(inv.redSkillsSelector ? { selector: inv.redSkillsSelector } : {}),
   });
+}
+
+/**
+ * Adopt a workstation the standalone installer provisioned.
+ *
+ * Inventory, back up, and remove the obsolete half — in that order,
+ * with the gate between the backup and the removal. Gated on what this
+ * machine has *recorded*, which is what a reconciliation wrote down
+ * when it verified each surface: a machine that has never converged
+ * reports every host unverified and nothing is removed, which is the
+ * correct answer and the one that names the command to run first.
+ *
+ * Non-zero when the gate refused, because this was asked for by name.
+ * An operator who typed `adopt` and got a machine that adopted nothing
+ * needs the exit code to say so.
+ */
+async function cmdRedSkillsAdopt(): Promise<number> {
+  const { adoptLegacyWorkstation, announceAdoption } = await import("./red-skills-adopt.ts");
+  const adoption = await adoptLegacyWorkstation();
+  announceAdoption(adoption);
+  if (adoption.outcome !== "held") return 0;
+  log.plain("       run `red-dev red-skills reconcile` first, then this again");
+  return 1;
 }
 
 /**
