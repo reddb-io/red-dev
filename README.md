@@ -314,6 +314,23 @@ host that fails is named and the others still run. `red-dev update` runs it as
 one stage of updating the machine: system packages, RedSkills, mise's tools,
 the agents, then the converge.
 
+The RedSkills half of that stage is one staged reconciliation across four
+surfaces — the package set is acquired, the seven coder hosts are wired against
+it, the companions are built out of it, and the exact workstation lock pins
+everything none of them publishes. `mise upgrade red-skills` reaches the same
+walk through its own postinstall, so the two entry points end on one digest
+rather than two implementations that agree until they do not. It is truthful
+rather than falsely transactional: a surface that fails is named and the ones
+that already verified keep what they got, so the retry only re-attempts the
+failure. Two things it will not do. **A running coder session is never
+terminated** — the host is reconciled on disk and reported `restart needed`
+until a fresh session opens. And **an active Worker holds the activation**: the
+complete new revision is verified and staged under its own immutable name,
+`current`, the daemon, the hosts and the companions all stay on the revision
+that Worker is using, and the next update that finds the queue drained activates
+what is already on disk without acquiring it again. `doctor` names every one of
+those states — active, staged, pending, failed, partial, restart needed.
+
 `doctor` has an `[agents]` section holding the whole posture: which host is the
 Default agent, how long ago each installed host's copy on PATH last changed, and
 per-provider usage with the reset times the Redwall's one compact line has no
