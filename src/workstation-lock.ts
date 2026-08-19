@@ -72,6 +72,8 @@
  * nobody computed from bytes is not provenance.
  */
 
+import { readFileSync } from "node:fs";
+
 import { sha256Hex } from "./checksum.ts";
 
 export const WORKSTATION_LOCK_SCHEMA = "red.workstation-lock.v1";
@@ -440,6 +442,50 @@ export function missingFromLock(lock: WorkstationLock): string[] {
 export type LockParse =
   | { ok: true; lock: WorkstationLock }
   | { ok: false; reason: string };
+
+/**
+ * `~/.red-skills/workstation-lock.json` — the exact target this machine
+ * is provisioned against.
+ *
+ * One file, beside the package-set state, because the two are the same
+ * fact seen from two sides: the set is what RedSkills is on this
+ * machine, and the lock is what everything RedSkills does not publish is
+ * on it. A machine with no lock is a machine nobody has resolved one for
+ * yet, which is the ordinary state before the first depot import.
+ */
+export function workstationLockPath(home: string): string {
+  return `${home.replace(/\\/g, "/")}/.red-skills/workstation-lock.json`;
+}
+
+/**
+ * The lock this machine holds, or why it holds none. PURE of everything
+ * but the one read.
+ *
+ * Absent and unreadable are different answers: the first is a machine
+ * that was never given a lock, the second is one whose lock cannot be
+ * trusted. Both leave the caller with nothing to install from, and only
+ * the second is worth an operator's attention.
+ */
+export function readWorkstationLock(
+  home: string,
+  read: (path: string) => Uint8Array | null = readIfPresent,
+): { ok: true; lock: WorkstationLock } | { ok: false; present: boolean; reason: string } {
+  const path = workstationLockPath(home);
+  const bytes = read(path);
+  if (bytes === null) {
+    return { ok: false, present: false, reason: `no workstation lock at ${path}` };
+  }
+  const parsed = parseWorkstationLock(bytes);
+  return parsed.ok ? parsed : { ok: false, present: true, reason: parsed.reason };
+}
+
+function readIfPresent(path: string): Uint8Array | null {
+  try {
+    return readFileSync(path);
+  } catch {
+    return null;
+  }
+}
 
 function sameKeys(value: unknown, expected: readonly string[]): value is Record<string, unknown> {
   return (
