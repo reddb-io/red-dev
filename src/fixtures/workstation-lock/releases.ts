@@ -29,7 +29,7 @@ import type {
 } from "../../workstation-lock.ts";
 
 /** One row: the version, and the artifact name on each kind of surface. */
-interface FixtureRelease {
+export interface FixtureRelease {
   version: string;
   /** The artifact a surface takes. Windows differs wherever the shape does. */
   artifact: (surface: LockSurface) => string;
@@ -77,16 +77,80 @@ export function fixtureChecksum(id: string, version: string, artifact: string): 
   return sha256Hex(`fixture:${id}@${version}:${artifact}`);
 }
 
-/** A resolver over the table above, for tests and depot rehearsals. */
-export const fixtureResolver: ReleaseResolver = async (
-  app: WorkstationApp,
-  surface: LockSurface,
-): Promise<ResolvedRelease> => {
-  const release = FIXTURE_RELEASES[app.id];
-  if (release === undefined) throw new Error(`no fixture release for ${app.id}`);
-  const name = release.artifact(surface);
-  return {
-    version: release.version,
-    artifact: { name, sha256: fixtureChecksum(app.id, release.version, name) },
-  };
+/**
+ * What the revisions before the current one shipped, where they differ.
+ *
+ * A rollback needs more than one lock to be a rollback at all, and the
+ * honest shape of "the revision before this one" is not a whole second
+ * table: real workstations move a handful of applications at a time and
+ * leave the rest exactly where they were. So a generation is an override
+ * over the table above — generation 0 is it — and everything a
+ * generation does not name is deliberately identical, which is what
+ * makes a restored version worth asserting: the ones that moved moved
+ * back, and the ones that did not were not touched.
+ *
+ * The artifact names follow the versions, because a publisher's asset
+ * name carries the version wherever the publisher puts one in. That is
+ * also what keeps the fixture checksums distinct per generation, so a
+ * rollback that restored the wrong bytes cannot hash to the right ones.
+ */
+export const FIXTURE_RELEASE_HISTORY: Record<number, Record<string, string>> = {
+  1: {
+    "claude-code": "2.0.35",
+    codex: "0.54.0",
+    "red-dev": "1.0.55",
+    vscode: "1.104.1",
+    zellij: "0.44.3-red.1",
+  },
+  2: {
+    "claude-code": "2.0.34",
+    codex: "0.53.0",
+    "red-dev": "1.0.54",
+    vscode: "1.103.4",
+    zellij: "0.44.2-red.1",
+  },
 };
+
+/**
+ * The release table as it stood `generation` revisions ago. PURE.
+ *
+ * Generation 0 is `FIXTURE_RELEASES` itself, and an unknown generation
+ * is too: a caller asking for a revision nobody wrote down gets the
+ * current one rather than a table with holes in it.
+ */
+export function fixtureReleasesAt(generation: number): Record<string, FixtureRelease> {
+  const overrides = FIXTURE_RELEASE_HISTORY[generation] ?? {};
+  const out: Record<string, FixtureRelease> = {};
+  for (const [id, release] of Object.entries(FIXTURE_RELEASES)) {
+    const version = overrides[id];
+    out[id] =
+      version === undefined
+        ? release
+        : {
+            version,
+            // The publisher's own name, with its version moved back. An
+            // artifact that carries no version is unchanged, and its
+            // checksum still differs because the checksum is taken over
+            // the version as well as the name.
+            artifact: (surface) => release.artifact(surface).split(release.version).join(version),
+          };
+  }
+  return out;
+}
+
+/** A resolver over one generation of the table above. PURE. */
+export function fixtureResolverAt(generation: number): ReleaseResolver {
+  const table = fixtureReleasesAt(generation);
+  return async (app: WorkstationApp, surface: LockSurface): Promise<ResolvedRelease> => {
+    const release = table[app.id];
+    if (release === undefined) throw new Error(`no fixture release for ${app.id}`);
+    const name = release.artifact(surface);
+    return {
+      version: release.version,
+      artifact: { name, sha256: fixtureChecksum(app.id, release.version, name) },
+    };
+  };
+}
+
+/** A resolver over the table above, for tests and depot rehearsals. */
+export const fixtureResolver: ReleaseResolver = fixtureResolverAt(0);
