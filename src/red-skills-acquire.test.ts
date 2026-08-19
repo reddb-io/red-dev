@@ -782,6 +782,26 @@ describe("both entry points reach the same active digest", () => {
     expect(state.active).toBeNull();
     expect(state.staged?.sourceCommit).toBe(COMMIT_B);
 
+    // mise's receipt names the revision that was fetched, not the one
+    // the machine is still resolving.
+    const installPath = join(home, "mise-install");
+    await quiet(() =>
+      runPluginPhase("install", {
+        home,
+        run: git.run,
+        assets: assetsFor({ [COMMIT_B]: assetsDir(COMMIT_B) }),
+        verifier: accept,
+        plugins: ["dev"],
+        platform: "linux",
+        url: "https://example.invalid/red-skills.git",
+        workers: async () => 2,
+        env: { HOME: home, ASDF_INSTALL_VERSION: "stable", ASDF_INSTALL_PATH: installPath },
+      }),
+    );
+    const receipt = JSON.parse(readFileSync(join(installPath, "package-set.json"), "utf8"));
+    expect(receipt.sourceCommit).toBe(COMMIT_B);
+    expect(receipt.digest).toBe(state.staged?.digest as string);
+
     // And the run that finds the queue drained activates it, acquiring
     // nothing: the git fake would answer, and it is never asked.
     const activated = activateStagedPackageSet({ home, platform: "linux", env: { HOME: home } })!;
