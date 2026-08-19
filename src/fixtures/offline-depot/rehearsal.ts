@@ -41,18 +41,24 @@ import {
   type SignatureVerifier,
 } from "../../red-skills-set.ts";
 import type { DepotFetcher, DepotSigner } from "../../offline-depot.ts";
+import { UBUNTU_SERIES } from "../../artifact-fit.ts";
 import {
   resolveWorkstationLock,
   workstationTarget,
   type LockOrigin,
   type LockedApp,
+  type LockTarget,
   type ObservedTarget,
+  type ReleaseResolver,
   type WorkstationLock,
 } from "../../workstation-lock.ts";
-import { fixtureResolverAt } from "../workstation-lock/releases.ts";
+import { fixtureResolver, fixtureResolverAt } from "../workstation-lock/releases.ts";
 
-/** The one target Spec #201's first depot provisions. */
+/** The target Spec #201's first depot provisions. */
 export const UBUNTU = "ubuntu-24.04-x64";
+
+/** The second Ubuntu, which #213 provisions from the same code. */
+export const UBUNTU_26 = "ubuntu-26.04-x64";
 
 /** The RedSkills release the depot carries. */
 export const REHEARSAL_SET_VERSION = "3.20.0";
@@ -212,9 +218,9 @@ export async function rehearsalLock(
   at: string,
   origin: LockOrigin = "resolved",
   generation = 0,
+  targetId: string = UBUNTU,
 ): Promise<WorkstationLock> {
-  const target = workstationTarget(UBUNTU);
-  if (target === null) throw new Error(`no such target: ${UBUNTU}`);
+  const target = targetOf(targetId);
   const resolved = await resolveWorkstationLock(
     target,
     at,
@@ -225,10 +231,9 @@ export async function rehearsalLock(
   return resolved.lock;
 }
 
-/** A clean Ubuntu 24.04 target: the surfaces, and nothing installed. */
-export function cleanUbuntu(): ObservedTarget {
-  const target = workstationTarget(UBUNTU);
-  if (target === null) throw new Error(`no such target: ${UBUNTU}`);
+/** A clean Ubuntu desktop: the surfaces, and nothing installed. */
+export function cleanUbuntu(targetId: string = UBUNTU): ObservedTarget {
+  const target = targetOf(targetId);
   return {
     id: target.id,
     surfaces: target.surfaces.map((s) => s.id),
@@ -236,3 +241,63 @@ export function cleanUbuntu(): ObservedTarget {
     authenticated: [],
   };
 }
+
+/** The target, or a failure that names the one nobody has declared. */
+function targetOf(id: string): LockTarget {
+  const target = workstationTarget(id);
+  if (target === null) throw new Error(`no such target: ${id}`);
+  return target;
+}
+
+// ------------------------------------------- the artifacts built for elsewhere
+
+/**
+ * The Ubuntu release this target is not, and the codename that names it.
+ *
+ * Derived from the target rather than written down per journey, so the
+ * Ubuntu 24 journey probes with a 26.04 build and the Ubuntu 26 journey
+ * probes with a 24.04 one out of the same line of code. A target with no
+ * Ubuntu surface — the Windows workstation's GUI half — has no other
+ * release to be confused with, and answers null.
+ */
+export function otherUbuntuSeries(
+  targetId: string,
+): { codename: string; release: string } | null {
+  const surface = targetOf(targetId).surfaces.find((s) => s.distro === "ubuntu");
+  if (surface === undefined) return null;
+  const found = Object.entries(UBUNTU_SERIES).find(([, release]) => release !== surface.version);
+  return found === undefined ? null : { codename: found[0], release: found[1] };
+}
+
+/**
+ * A resolver whose Debian artifacts were built for another Ubuntu release.
+ *
+ * The mistake this imitates is the ordinary one: a publisher's apt
+ * repository serves one package per release, somebody points the
+ * resolution at the wrong suite, and every checksum is honest about
+ * bytes that will not install here. `~noble` is exactly how Debian
+ * revisions carry that fact, which is why reading it is enough.
+ */
+export function foreignSeriesResolver(codename: string): ReleaseResolver {
+  return async (app, surface) => {
+    const honest = await fixtureResolver(app, surface);
+    const name = honest.artifact.name.replace(/_([^_]+)\.deb$/, `~${codename}_$1.deb`);
+    return { version: honest.version, artifact: { ...honest.artifact, name } };
+  };
+}
+
+/**
+ * A resolver that answers one application with another platform's build.
+ *
+ * red-dev, because it is the one application in the catalogue that
+ * genuinely ships for both and therefore the one an export could most
+ * plausibly pick the wrong asset for.
+ */
+export const foreignPlatformResolver: ReleaseResolver = async (app, surface) => {
+  const honest = await fixtureResolver(app, surface);
+  if (app.id !== "red-dev") return honest;
+  return {
+    version: honest.version,
+    artifact: { ...honest.artifact, name: "red-dev-windows-x64.exe" },
+  };
+};
