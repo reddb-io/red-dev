@@ -71,10 +71,10 @@ async function oneRevision(
     home: dir,
     lock,
     packageSet,
-    depot: opts.depot === undefined ? join(dir, ".red-skills", "depots", `d${generation}`) : opts.depot,
+    depot: opts.depot === undefined ? join(dir, ".red", "skills", "depots", `d${generation}`) : opts.depot,
     activatedAt: AT,
   });
-  if (opts.setDir !== false) mkdirSync(join(dir, ".red-skills", "sets", packageSet.key), { recursive: true });
+  if (opts.setDir !== false) mkdirSync(join(dir, ".red", "skills", "sets", packageSet.key), { recursive: true });
   retainWorkstationLock(dir, lock);
   if (revision.depot !== null) {
     for (const app of lock.apps) {

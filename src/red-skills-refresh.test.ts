@@ -41,10 +41,10 @@ function machine(version: string): string {
 
 /** What the installer does when it lands a newer tarball. */
 function point(root: string, version: string): void {
-  const dir = `${root}/.red-skills/versions/${version}`;
+  const dir = `${root}/.red/skills/versions/${version}`;
   mkdirSync(dir, { recursive: true });
   writeFileSync(`${dir}/package.json`, JSON.stringify({ name: "red-skills", version }));
-  const link = `${root}/.red-skills/current`;
+  const link = `${root}/.red/skills/current`;
   try {
     unlinkSync(link);
   } catch {
@@ -58,7 +58,7 @@ const recordFile = (root: string) => `${root}/.local/share/red-dev/red-skills-ex
 describe("the checkout", () => {
   test("is found through the current symlink", () => {
     const root = machine("v3.3.0");
-    expect(sourceRoot()).toBe(`${root}/.red-skills/current`);
+    expect(sourceRoot()).toBe(`${root}/.red/skills/current`);
   });
 
   test("is absent when red-skills was never installed", () => {
@@ -72,7 +72,7 @@ describe("the checkout", () => {
     // it is immutable, so the resolved path is the whole freshness
     // question for anything that reads the tree.
     const root = machine("v3.3.0");
-    expect(resolvedSource()).toBe(`${root}/.red-skills/versions/v3.3.0`);
+    expect(resolvedSource()).toBe(`${root}/.red/skills/versions/v3.3.0`);
   });
 
   test("neither artifact needs it any more", async () => {

@@ -62,10 +62,10 @@ describe("Linux process observation", () => {
     const root = mkdtempSync(`${tmpdir()}/red-dev-redskilled-`);
     roots.push(root);
     mkdirSync(`${root}/.red/redskilled/bundles`, { recursive: true });
-    mkdirSync(`${root}/.red-skills/current/packaging/npm/bin`, { recursive: true });
+    mkdirSync(`${root}/.red/skills/current/packaging/npm/bin`, { recursive: true });
     writeFileSync(`${root}/.red/redskilled/bundles/redskilled-3.9.0.bundle.min.mjs`, "");
     writeFileSync(`${root}/.red/redskilled/bundles/redskilled-3.13.0.bundle.min.mjs`, "");
-    writeFileSync(`${root}/.red-skills/current/packaging/npm/bin/red-skills-redskilled.mjs`, "");
+    writeFileSync(`${root}/.red/skills/current/packaging/npm/bin/red-skills-redskilled.mjs`, "");
 
     expect(resolveRedskilledBin(root)).toBe(
       `${root}/.red/redskilled/bundles/redskilled-3.13.0.bundle.min.mjs`,

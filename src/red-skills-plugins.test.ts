@@ -181,7 +181,7 @@ function installedBy(calls: string[][]): string[] {
 }
 
 /** The source red-dev registers, which never has to exist for this. */
-const SOURCE = "/home/someone/.red-skills/current";
+const SOURCE = "/home/someone/.red/skills/current";
 
 /**
  * What one host is asked when red-dev declares its registration.

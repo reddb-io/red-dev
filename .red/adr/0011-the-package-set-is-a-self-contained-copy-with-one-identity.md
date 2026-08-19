@@ -11,7 +11,7 @@
 ## Context
 
 ADR 0008 resolved RedSkills as four mise `npm:` entries — the core and one package per
-plugin — and linked `~/.red-skills/versions/v<x>` into mise's install tree so the layout
+plugin — and linked `~/.red/skills/versions/v<x>` into mise's install tree so the layout
 would stay in step with mise. Two defects only showed on a machine that had actually
 converged: the core package carries the marketplace manifests but no `plugins/` for them to
 name, and no `.red/config.yaml` for the OpenCode generator to read, so a Directory
@@ -45,11 +45,11 @@ resolve `../dist/` through their real path and would find the core's `dist/`, ne
 plugin bundles; the OpenCode generator writes into `<tree>/dist/opencode`, which through a
 link is a write into a mise-owned tree; `mise prune` would collect the revision `previous`
 rolls back to; and a Windows file symlink needs a privilege a junction does not. A revision
-lives at `~/.red-skills/sets/<version>+<digest12>`, immutable and reused by name; only
+lives at `~/.red/skills/sets/<version>+<digest12>`, immutable and reused by name; only
 `current` and `previous` are links (junctions on Windows).
 
 **Identity is version + digest + source commit, never a path.** The machine keeps the active
-revision and the previous one, records both in `~/.red-skills/package-set.json` together
+revision and the previous one, records both in `~/.red/skills/package-set.json` together
 with why the last candidate was refused, and doctor reports exactly that. A second converge
 writes nothing.
 

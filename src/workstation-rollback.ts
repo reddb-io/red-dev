@@ -73,6 +73,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
+import { redSkillsRoot } from "./red-skills-root.ts";
 import { log } from "./log.ts";
 import { depotAppPath, readOfflineDepotState, type DepotRevision } from "./offline-depot.ts";
 import type { CompanionOutcome } from "./red-skills-companions.ts";
@@ -145,7 +146,7 @@ export interface WorkstationRevision {
   target: string;
   packageSet: DepotRevision;
   lockDigest: string;
-  /** The retained copy of the lock, under `~/.red-skills/locks`. */
+  /** The retained copy of the lock, under `~/.red/skills/locks`. */
   lockPath: string;
   /** Every locked application at its exact version, in lock order. */
   apps: RevisionApp[];
@@ -189,14 +190,14 @@ const EMPTY_REVISIONS: WorkstationRevisionState = {
   pending: null,
 };
 
-/** `~/.red-skills/workstation-revisions.json` — the complete revisions held. */
+/** `~/.red/skills/workstation-revisions.json` — the complete revisions held. */
 export function workstationRevisionsPath(home: string): string {
-  return join(home, ".red-skills", "workstation-revisions.json");
+  return join(redSkillsRoot(home), "workstation-revisions.json");
 }
 
-/** `~/.red-skills/locks/<digest12>.json` — one retained lock, by its digest. */
+/** `~/.red/skills/locks/<digest12>.json` — one retained lock, by its digest. */
 export function retainedLockPath(home: string, lockDigest: string): string {
-  return join(home, ".red-skills", "locks", `${lockDigest.slice(0, 12)}.json`);
+  return join(redSkillsRoot(home), "locks", `${lockDigest.slice(0, 12)}.json`);
 }
 
 /** The name one complete revision is addressable by. PURE. */
@@ -525,9 +526,9 @@ export function planWorkstationRetention(opts: RetentionOptions): WorkstationRet
       (by.length > 0 ? kept : prunable).push({ path, kind, requiredBy: by });
     }
   };
-  sweep(join(home, ".red-skills", "sets"), "package-set", setKeys);
-  sweep(join(home, ".red-skills", "locks"), "lock", locks);
-  sweep(join(home, ".red-skills", "depots"), "depot", depots);
+  sweep(join(redSkillsRoot(home), "sets"), "package-set", setKeys);
+  sweep(join(redSkillsRoot(home), "locks"), "lock", locks);
+  sweep(join(redSkillsRoot(home), "depots"), "depot", depots);
 
   return {
     revisions,

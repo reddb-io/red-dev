@@ -7,7 +7,7 @@
  * gets — never touched it. This machine carried claude, codex, redcode
  * and herdr with no marketplace registered in any of them.
  *
- * The readiness check is the other half. `~/.red-skills` had existed for
+ * The readiness check is the other half. `~/.red/skills` had existed for
  * two days: the installer had run, the source cache was there, and
  * nothing was wired. Testing for the directory would have reported
  * success on exactly the broken state that prompted this.
@@ -94,7 +94,7 @@ describe("red-skills as a converge step", () => {
 describe("the copied Windows current snapshot", () => {
   test("is removed only when RedSkills' managed markers are present", () => {
     const home = mkdtempSync(`${tmpdir()}/red-skills-current-`);
-    const current = `${home}/.red-skills/current`;
+    const current = `${home}/.red/skills/current`;
     mkdirSync(`${current}/.claude-plugin`, { recursive: true });
     writeFileSync(`${current}/.claude-plugin/marketplace.json`, "{}");
     writeFileSync(`${current}/.upstream`, "red-skills");
@@ -105,7 +105,7 @@ describe("the copied Windows current snapshot", () => {
 
   test("an unrelated current directory is never removed", () => {
     const home = mkdtempSync(`${tmpdir()}/red-skills-current-user-`);
-    const current = `${home}/.red-skills/current`;
+    const current = `${home}/.red/skills/current`;
     mkdirSync(current, { recursive: true });
     writeFileSync(`${current}/mine.txt`, "keep");
 
@@ -146,7 +146,7 @@ describe("how it decides it is already done", () => {
   });
 
   test("asks the CLI where the CLI can answer", () => {
-    // ~/.red-skills exists the moment the installer has ever run, and
+    // ~/.red/skills exists the moment the installer has ever run, and
     // it existed here for two days with nothing wired anywhere. What
     // the user sees is the marketplace list, so that is what is asked.
     expect(src).toContain('"marketplace", "list"');

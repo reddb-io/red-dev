@@ -443,7 +443,7 @@ describe("a sync with nothing to do does nothing", () => {
     expect(first.staged).toBe(true);
 
     const built = fakeBuild();
-    const stateBefore = readFileSync(join(home, ".red-skills", "package-set.json"), "utf8");
+    const stateBefore = readFileSync(join(home, ".red", "skills", "package-set.json"), "utf8");
     const stagingBefore = treeDigest(first.staging ?? "");
 
     const second = await quiet(() => sync(home, dir, { build: built.build }));
@@ -453,7 +453,7 @@ describe("a sync with nothing to do does nothing", () => {
     expect(built.calls).toEqual([]);
     expect(second.staging).toBe(first.staging);
     expect(treeDigest(second.staging ?? "")).toBe(stagingBefore);
-    expect(readFileSync(join(home, ".red-skills", "package-set.json"), "utf8")).toBe(stateBefore);
+    expect(readFileSync(join(home, ".red", "skills", "package-set.json"), "utf8")).toBe(stateBefore);
     expect(second.reused).toEqual(first.reused);
     expect(second.built).toEqual(first.built);
   });
@@ -531,7 +531,7 @@ describe("only an explicit sync advances a checkout", () => {
     const home = fakeHome();
     const dir = checkout();
     await quiet(() => sync(home, dir));
-    const before = readFileSync(join(home, ".red-skills", "package-set.json"), "utf8");
+    const before = readFileSync(join(home, ".red", "skills", "package-set.json"), "utf8");
 
     const { acquireRedSkills } = await import("./red-skills-acquire.ts");
     const result = await quiet(() =>
@@ -546,6 +546,6 @@ describe("only an explicit sync advances a checkout", () => {
 
     expect(result.outcome).toBe("current");
     expect(result.reason).toContain("development checkout");
-    expect(readFileSync(join(home, ".red-skills", "package-set.json"), "utf8")).toBe(before);
+    expect(readFileSync(join(home, ".red", "skills", "package-set.json"), "utf8")).toBe(before);
   });
 });

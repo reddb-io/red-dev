@@ -9,7 +9,7 @@
  * moved that directory.
  *
  * mise is a thing that moves it. Once the core is a manifest entry
- * resolved at `latest`, `~/.red-skills/current` advances with every other
+ * resolved at `latest`, `~/.red/skills/current` advances with every other
  * tool on the machine — so the directory is now the *only* source pinned
  * to the version this machine actually resolved. Registering from GitHub
  * instead would put the hosts back on a version nothing here chose.
@@ -39,7 +39,7 @@
  *
  * ## Registering `current`, not the version behind it
  *
- * `~/.red-skills/current` is the path red-dev repoints when mise installs
+ * `~/.red/skills/current` is the path red-dev repoints when mise installs
  * a newer core. A registration made against `versions/v3.3.0` names a
  * directory that is correct today and never moves again, so it is treated
  * as drift here even though it is directory-sourced.
@@ -47,7 +47,7 @@
  * ## And a machine without red-dev is untouched
  *
  * Ownership is claimed from having something to register: with no checkout
- * under `~/.red-skills/current` this does nothing at all — no commands, no
+ * under `~/.red/skills/current` this does nothing at all — no commands, no
  * files, no marker. The standalone one-liner stays first-class on machines
  * that only have it, which is the whole reason the arbitration is a
  * declaration rather than a fight.
@@ -237,7 +237,7 @@ export interface RegistrationOutcome {
 export interface RegistrationOptions {
   /** Defaults to this user's home. The host boundaries live under it. */
   home?: string;
-  /** The path to register. Defaults to `~/.red-skills/current`, or null. */
+  /** The path to register. Defaults to `~/.red/skills/current`, or null. */
   source?: string | null;
   /** The plugin set. Defaults to whatever the manifest declares. */
   plugins?: readonly string[];

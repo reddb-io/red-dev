@@ -402,7 +402,7 @@ describe("one mirror, and one snapshot per commit", () => {
 
     expect(existsSync(redSkillsSnapshotDir(home, COMMIT_A))).toBe(true);
     expect(existsSync(redSkillsSnapshotDir(home, COMMIT_B))).toBe(true);
-    expect(readdirSync(join(home, ".red-skills", "snapshots")).sort()).toEqual([COMMIT_A, COMMIT_B]);
+    expect(readdirSync(join(home, ".red", "skills", "snapshots")).sort()).toEqual([COMMIT_A, COMMIT_B]);
     // Source, and only source: an archive carries no repository with it.
     expect(existsSync(join(redSkillsSnapshotDir(home, COMMIT_A), ".git"))).toBe(false);
   });
@@ -437,7 +437,7 @@ describe("one mirror, and one snapshot per commit", () => {
     ensureMirror(git.run, { url: "u", dir: mirror });
     const missing = ensureSnapshot(git.run, { mirror, home, commit: "f".repeat(40) });
     expect(missing.ok).toBe(false);
-    expect(readdirSync(join(home, ".red-skills", "snapshots"))).toEqual([]);
+    expect(readdirSync(join(home, ".red", "skills", "snapshots"))).toEqual([]);
   });
 
   test("a failed listing is reported as the command that failed", () => {
@@ -509,7 +509,7 @@ describe("against the real git", () => {
         revision.version,
       );
     }
-    expect(readdirSync(join(home, ".red-skills", "snapshots"))).toHaveLength(2);
+    expect(readdirSync(join(home, ".red", "skills", "snapshots"))).toHaveLength(2);
   });
 });
 
@@ -552,7 +552,7 @@ describe("assets that do not belong to the resolved commit", () => {
     const git = fakeGit(RELEASES);
     await quiet(() => acquire(home, git, assetsFor({ [COMMIT_B]: assetsDir(COMMIT_B, { declares: COMMIT_A }) })));
     expect(git.clones).toBe(0);
-    expect(existsSync(join(home, ".red-skills", "snapshots"))).toBe(false);
+    expect(existsSync(join(home, ".red", "skills", "snapshots"))).toBe(false);
   });
 
   test("a release with no package set is unavailable, not refused", async () => {
@@ -633,11 +633,11 @@ describe("acquiring a revision, and then not acquiring it again", () => {
     });
     await quiet(() => acquire(home, git, assets, { selector: "3.19.4" }));
     await quiet(() => acquire(home, git, assets, { selector: "3.19.5" }));
-    expect(readdirSync(join(home, ".red-skills", "snapshots")).sort()).toEqual([COMMIT_A, COMMIT_B]);
+    expect(readdirSync(join(home, ".red", "skills", "snapshots")).sort()).toEqual([COMMIT_A, COMMIT_B]);
 
     await quiet(() => acquire(home, git, assets, { selector: "next" }));
-    expect(readdirSync(join(home, ".red-skills", "snapshots")).sort()).toEqual([COMMIT_B, COMMIT_C]);
-    expect(readdirSync(join(home, ".red-skills", "candidates")).sort()).toEqual([COMMIT_B, COMMIT_C]);
+    expect(readdirSync(join(home, ".red", "skills", "snapshots")).sort()).toEqual([COMMIT_B, COMMIT_C]);
+    expect(readdirSync(join(home, ".red", "skills", "candidates")).sort()).toEqual([COMMIT_B, COMMIT_C]);
   });
 });
 

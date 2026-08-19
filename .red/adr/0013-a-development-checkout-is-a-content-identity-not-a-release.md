@@ -19,7 +19,7 @@ release to resolve, frequently no tag, usually uncommitted edits, and never a
 signature — so the acquisition would refuse it four times over. Yet the tree a
 person is editing is precisely what they need this machine to resolve while they
 edit it, and the alternative they reach for otherwise is a symlink into
-`~/.red-skills/current`, which puts a mutable directory behind a pointer the
+`~/.red/skills/current`, which puts a mutable directory behind a pointer the
 whole machine treats as immutable.
 
 The other half of the context is what a checkout must not cost. The bytes belong
@@ -65,11 +65,11 @@ nothing — those bundles describe bytes that are no longer there, and overlayin
 them would produce a tree whose source says one thing and whose bundles say
 another, which is the cross-commit failure ADR 0012 refuses under a different
 name. Assets declaring some *other* commit are refused outright, exactly as they
-are online, and the refusal is recorded in `~/.red-skills/package-set.json` so
+are online, and the refusal is recorded in `~/.red/skills/package-set.json` so
 doctor can say why hours later.
 
 **The build runs in the staging, so the checkout never moves.** The source is
-copied into `~/.red-skills/checkouts/<key>/tree` and the checkout's own `build`
+copied into `~/.red/skills/checkouts/<key>/tree` and the checkout's own `build`
 script runs *there*. Its own script rather than one red-dev knows how to perform:
 red-dev has no opinion about how RedSkills is bundled, and one written here would
 be a second build to keep in step with the repository's. The content digest is
@@ -105,7 +105,7 @@ a person asking to go back.
   deliberately does not apply here. That guard exists so a set nobody asked for
   cannot displace a verified one; a checkout is the one candidate somebody asked
   for by name.
-- `~/.red-skills/checkouts/` grows with what a developer edits rather than with
+- `~/.red/skills/checkouts/` grows with what a developer edits rather than with
   what is released, so it is held to the same retention the revisions are: the
   active staging and its rollback.
 - A checkout that carries no `build` script, or whose build produces no bundles,

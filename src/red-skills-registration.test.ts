@@ -54,9 +54,9 @@ function home(): string {
   return mkdtempSync(join(tmpdir(), "red-registration-"));
 }
 
-/** `~/.red-skills/current` — the path red-dev registers, not the version behind it. */
+/** `~/.red/skills/current` — the path red-dev registers, not the version behind it. */
 function currentOf(root: string): string {
-  return `${root}/.red-skills/current`;
+  return `${root}/.red/skills/current`;
 }
 
 /** The entry Claude writes when the standalone one-liner registered from GitHub. */
@@ -324,8 +324,8 @@ describe("a converge that has nothing to do", () => {
     // The failure mode "directory-sourced" alone cannot see: registered
     // once against `versions/v3.3.0`, which never moves again.
     const root = home();
-    writeDirectoryRegistration(root, `${root}/.red-skills/versions/v3.3.0`);
-    writeCodexRegistration(root, "local", `${root}/.red-skills/versions/v3.3.0`);
+    writeDirectoryRegistration(root, `${root}/.red/skills/versions/v3.3.0`);
+    writeCodexRegistration(root, "local", `${root}/.red/skills/versions/v3.3.0`);
 
     const { calls, run } = hostSim(root);
     await converge(root, { run });

@@ -362,7 +362,7 @@ return {}
      * `mise prune` now runs at the end of every update, and it collects
      * the versions it installed. What it will never look at is the
      * shape the curled installer produced — extracted trees under
-     * ~/.red-skills/versions, the tarballs they were unpacked from, the
+     * ~/.red/skills/versions, the tarballs they were unpacked from, the
      * Git-sourced marketplaces, the generated OpenCode/RedCode and pi
      * surfaces, and the copy each agent host kept of every plugin
      * version it has ever carried. Measured on one developer machine:
@@ -405,6 +405,68 @@ return {}
         `       ${adoption.removed.length} left over, ${formatBytes(adoption.bytes)} back`,
       );
       log.plain(`       backed up to ${adoption.backup}`);
+    },
+  },
+  {
+    id: "2026-08-19-red-skills-under-red",
+    describe: "move RedSkills from ~/.red-skills into ~/.red/skills",
+    /**
+     * The package set used to live beside the `.red` namespace instead
+     * of inside it, while everything else red-dev keeps for a person —
+     * config.yaml, state, the redskilled daemon's files — was already
+     * under ~/.red. One directory to look in, one to remove: the root is
+     * now ~/.red/skills (src/red-skills-root.ts), and a machine
+     * provisioned under the old name is brought across here.
+     *
+     * This moves rather than copies — see relocateLegacyRedSkillsRoot
+     * for why a rename is the safer of the two for a tree this size —
+     * and removes exactly one file, the reconcile stamp, because it
+     * records a fact the move made false. Nothing is left at the old
+     * name — not even a symlink; one RedSkills directory per home is the
+     * point. The hosts are re-registered by the converge that runs right
+     * after the ledger, which compares each record against the new path
+     * and rewrites the ones naming the old one.
+     *
+     * The adoption above runs first and inventories under both names
+     * (red-skills-adopt.ts, standaloneRoots), so a Spec #185 machine
+     * that had done neither is adopted where its state still is; what
+     * the gate refuses to remove yet is carried across and adopted from
+     * the new root on a later run.
+     */
+    applies: async (p) => {
+      void p;
+      const { lstatSync } = await import("node:fs");
+      const { homedir } = await import("node:os");
+      const { legacyRedSkillsRoot } = await import("./red-skills-root.ts");
+      try {
+        const stat = lstatSync(legacyRedSkillsRoot(homedir()));
+        return stat.isDirectory() && !stat.isSymbolicLink();
+      } catch {
+        return false;
+      }
+    },
+    run: async (p) => {
+      void p;
+      const { homedir } = await import("node:os");
+      const { legacyRedSkillsRoot, redSkillsRoot, relocateLegacyRedSkillsRoot } = await import(
+        "./red-skills-root.ts"
+      );
+      const home = homedir();
+      const result = relocateLegacyRedSkillsRoot(home);
+      switch (result.outcome) {
+        case "nothing":
+          log.skip(`${legacyRedSkillsRoot(home)} holds no tree to move`);
+          return;
+        case "kept":
+          log.skip(`${redSkillsRoot(home)} already exists — ${legacyRedSkillsRoot(home)} is left as it is`);
+          log.plain(`       nothing reads the old root any more; remove it yourself once you have looked inside`);
+          return;
+        case "moved":
+          log.plain(`       ${legacyRedSkillsRoot(home)} -> ${redSkillsRoot(home)}`);
+          for (const link of result.relinked) log.plain(`       re-pointed ${link}`);
+          for (const file of result.cleared) log.plain(`       cleared ${file}; the hosts are re-registered at the new path below`);
+          return;
+      }
     },
   },
 ];

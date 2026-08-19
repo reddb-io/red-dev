@@ -42,7 +42,7 @@ resolved commit does nothing at all.** A channel is resolved with `git ls-remote
 which needs no clone. The release's package-set manifest is fetched next, because
 it is one request and it decides whether there is anything to acquire. Only then
 is the mirror cloned (once, and fetched every time after), the commit archived
-into `~/.red-skills/snapshots/<commit>`, and the candidate staged. An acquisition
+into `~/.red/skills/snapshots/<commit>`, and the candidate staged. An acquisition
 whose resolved commit is already the active revision's returns before any of it,
 which is what makes a no-op install produce no host writes.
 
@@ -50,7 +50,7 @@ which is what makes a no-op install produce no host writes.
 `sourceCommit` is not the resolved commit, an artifact whose SHA-256 or size does
 not match, a release publishing a manifest with no signature bundle beside it —
 each is refused before red-dev is asked to reconcile anything, and the refusal is
-recorded in `~/.red-skills/package-set.json` so doctor can say why hours later.
+recorded in `~/.red/skills/package-set.json` so doctor can say why hours later.
 Only `*.bundle.min.mjs` and `*.asset.cjs` overlay into the tree's `dist/`, which
 is the shape ADR 0011's composed set already produces; the rest of the release
 stays in `artifacts/` for the companion surfaces.
@@ -63,7 +63,7 @@ the other two leave the state file byte-identical, `current` naming the set it
 already named, and the machine exactly as it was.
 
 **Reconciliation is gated on the identity, not on being invoked.**
-`~/.red-skills/reconciled.json` records the revision key the hosts were last
+`~/.red/skills/reconciled.json` records the revision key the hosts were last
 converged against, and holds nothing else — no timestamp, no count — so an
 unchanged run leaves it byte-identical. mise runs the tool-level postinstall after
 every install it performs, including reinstalls of the same revision; the stamp is

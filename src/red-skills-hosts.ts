@@ -87,6 +87,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, wri
 import { dirname, isAbsolute, join } from "node:path";
 
 import { log } from "./log.ts";
+import { redSkillsCurrentPosix } from "./red-skills-root.ts";
 import { dropOwnedField, readOwnedField } from "./owned-config.ts";
 import {
   applyOwned,
@@ -164,7 +165,7 @@ export function missingCapabilities(capabilities: readonly HostCapability[] = []
 export interface AdapterContext {
   /** The plugins to activate — `dev` alone. */
   plugins: readonly string[];
-  /** The resolved package set: `~/.red-skills/current`, followed. */
+  /** The resolved package set: `~/.red/skills/current`, followed. */
   source: string;
   /** That set's whole-set digest, which is what a record is keyed on. */
   setDigest: string;
@@ -1192,7 +1193,7 @@ export interface HostReconcileOptions {
   config?: string;
   /** The resolved package set. Defaults to `resolvedSource()`. */
   source?: string | null;
-  /** The pointer the marketplace hosts register. Defaults to `~/.red-skills/current`. */
+  /** The pointer the marketplace hosts register. Defaults to `~/.red/skills/current`. */
   current?: string;
   /** The set's whole-set digest. Defaults to the recorded or computed one. */
   setDigest?: string;
@@ -1300,7 +1301,7 @@ export async function reconcileSkillHosts(
     source,
     setDigest: opts.setDigest ?? identity.digest,
     setVersion: opts.setVersion ?? identity.version,
-    current: opts.current ?? `${home}/.red-skills/current`,
+    current: opts.current ?? redSkillsCurrentPosix(home),
     home,
     config: opts.config ?? configOf(home),
   };
@@ -1538,7 +1539,7 @@ export async function removeSkillHosts(
         source,
         setDigest: record.setDigest,
         setVersion: record.setVersion,
-        current: opts.current ?? `${home}/.red-skills/current`,
+        current: opts.current ?? redSkillsCurrentPosix(home),
         home,
         config: opts.config ?? configOf(home),
       };

@@ -418,7 +418,7 @@ export async function runUbuntu24RollbackJourney(
     `${reconciled.length} host(s) and every companion were rebuilt against the restored set`,
   );
 
-  const lockNow = readFileSync(join(home, ".red-skills", "workstation-lock.json"), "utf8");
+  const lockNow = readFileSync(join(home, ".red", "skills", "workstation-lock.json"), "utf8");
   check(
     "lock",
     lockNow === readFileSync(retainedLockPath(home, previous.lock.lockDigest), "utf8"),

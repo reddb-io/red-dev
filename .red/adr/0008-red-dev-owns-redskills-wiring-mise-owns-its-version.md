@@ -9,7 +9,7 @@
 
 red-dev installs RedSkills by curling `install.sh` v3 (`agents.ts:667`) — a
 builtin that hands the entire job to a script — and then keeps
-`~/.red-skills/current` around as the tree it builds the VS Code extension and
+`~/.red/skills/current` around as the tree it builds the VS Code extension and
 the herdr plugin from. `mise-config.ts` already records that the agents were
 deliberately left out of the mise manifest, as a second migration. This is that
 migration.
@@ -39,14 +39,14 @@ of them resolve through `npm:` at `latest`. The `github:` backend is wrong for
 this payload: it scores release assets to put one executable on PATH, and what
 we install is a tree.
 
-**red-dev maintains the layout.** `~/.red-skills/versions/<v>` links each
+**red-dev maintains the layout.** `~/.red/skills/versions/<v>` links each
 installed package set, `current` names the newest, and both install modes
 produce the same shape so the launcher has one contract to resolve against.
 Windows uses junctions — the directory-copy path is the class of bug
 `repairCopiedRedSkillsCurrent` already exists to clean up after.
 
 Retention is mise's job: `mise prune` at the end of update. The first migration
-also removes the legacy `~/.red-skills/versions`, `~/.red-skills/cache` and the
+also removes the legacy `~/.red/skills/versions`, `~/.red/skills/cache` and the
 host plugin caches — 1.16 GB on the machine this was measured on, all of it
 derived state the hosts rebuild on demand.
 

@@ -7,7 +7,7 @@
  * overlaid from *that* commit, the published manifest verified, and
  * red-dev's reconciliation invoked from a tool-level postinstall. ADR
  * 0011 gives the other half: what a package set is, how it is verified,
- * and that `~/.red-skills/current` may only name a verified one.
+ * and that `~/.red/skills/current` may only name a verified one.
  *
  * This module is the acquisition itself, and it is deliberately not
  * written in shell inside the plugin. A plugin that cloned, snapshotted
@@ -82,6 +82,7 @@ import { sha256Hex } from "./checksum.ts";
 import { log } from "./log.ts";
 import type { Platform } from "./platform.ts";
 import { redSkillsPluginNames } from "./red-skills-plugins.ts";
+import { redSkillsRoot } from "./red-skills-root.ts";
 import {
   convergeRedSkillsPackageSet,
   cosignVerifier,
@@ -357,10 +358,9 @@ export const systemRunner: CommandRunner = (argv, opts = {}) => {
 
 // ------------------------------------------------------ mirror and snapshot
 
-/** `~/.red-skills` — the one directory this machine keeps RedSkills state in. */
-export function redSkillsRoot(home: string): string {
-  return join(home, ".red-skills");
-}
+// `~/.red/skills`, decided once in src/red-skills-root.ts and re-exported
+// here because this module was where every importer already looked for it.
+export { redSkillsRoot } from "./red-skills-root.ts";
 
 /**
  * The one bare mirror, shared by every revision this machine acquires.
@@ -374,12 +374,12 @@ export function redSkillsMirrorDir(home: string): string {
   return join(redSkillsRoot(home), "mirror", "red-skills.git");
 }
 
-/** `~/.red-skills/snapshots/<commit>` — immutable, and reused by name. */
+/** `~/.red/skills/snapshots/<commit>` — immutable, and reused by name. */
 export function redSkillsSnapshotDir(home: string, commit: string): string {
   return join(redSkillsRoot(home), "snapshots", commit);
 }
 
-/** `~/.red-skills/candidates/<commit>` — the manifest set staged for verification. */
+/** `~/.red/skills/candidates/<commit>` — the manifest set staged for verification. */
 export function redSkillsCandidateDir(home: string, commit: string): string {
   return join(redSkillsRoot(home), "candidates", commit);
 }
@@ -817,7 +817,7 @@ export interface Acquisition {
   mirror: { path: string; cloned: boolean } | null;
   snapshot: { path: string; created: boolean } | null;
   candidate: string | null;
-  /** What `~/.red-skills/current` names once this returns. */
+  /** What `~/.red/skills/current` names once this returns. */
   active: PackageSetIdentity | null;
   /**
    * The revision verified and staged rather than activated, or null.

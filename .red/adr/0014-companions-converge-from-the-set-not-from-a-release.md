@@ -28,7 +28,7 @@ to `src/red-skills-hosts.ts`.
 ## Decision
 
 **Companions are installed from artifacts inside the selected package set, and from nowhere
-else.** `~/.red-skills/current` is followed; the artifact is found under the set's `dist/` or
+else.** `~/.red/skills/current` is followed; the artifact is found under the set's `dist/` or
 `companions/<surface>/`, or it is not. Reconciliation resolves no release, reads no registry
 and downloads nothing. A set that does not yet carry an artifact reports `unavailable` — not
 a failure, because the remedy is a newer set rather than a retry, and not a fetch, because a
@@ -61,7 +61,7 @@ is not there.
 
 **The runtime launchers live in a directory red-dev owns outright, ahead of mise's shims.**
 `~/.local/share/red-dev/red-skills/bin` is prepended after the shims in `config/bash/path.sh`,
-so it is searched first. Each launcher execs the shim inside `~/.red-skills/current`, which
+so it is searched first. Each launcher execs the shim inside `~/.red/skills/current`, which
 is what makes it follow the active set without being rewritten and roll back with it.
 `~/.local/bin` would have lost to the shim mise made for the same npm package, which is
 precisely the drift this ADR removes.

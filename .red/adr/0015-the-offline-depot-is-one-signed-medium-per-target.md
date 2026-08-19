@@ -49,7 +49,7 @@ network would have to invent a URL nothing gave it. "Installed from the depot"
 is therefore a property of the code rather than a promise in a runbook.
 
 **Machine-owned storage, copied, never linked.** The depot is copied under
-`~/.red-skills/depots/<digest12>` before anything installs from it, for the
+`~/.red/skills/depots/<digest12>` before anything installs from it, for the
 reason ADR 0011 copies a package set rather than linking one: the medium is a
 USB stick somebody is about to unplug.
 

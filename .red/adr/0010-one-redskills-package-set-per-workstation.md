@@ -13,7 +13,7 @@ copy, or skills directory. The same revision is consequently cloned and cached
 several times, while the four mise/npm entries can advance independently. The
 current npm runtime package carries bundles and shims rather than the complete
 workstation distribution, and the standalone installer remains a competing
-owner of `~/.red-skills/current`.
+owner of `~/.red/skills/current`.
 
 The required outcome is one user-global local source for every integration, an
 online update through mise, and a complete offline bootstrap from a directory.

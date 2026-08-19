@@ -56,6 +56,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { log } from "./log.ts";
+import { redSkillsRoot } from "./red-skills-root.ts";
 import type { Platform } from "./platform.ts";
 import type { Acquisition } from "./red-skills-acquire.ts";
 import type { CompanionOutcome } from "./red-skills-companions.ts";
@@ -300,9 +301,9 @@ export interface StagedUpdateRecord {
   workers: number | null;
 }
 
-/** `~/.red-skills/update.json` — how the last staged reconciliation ended. */
+/** `~/.red/skills/update.json` — how the last staged reconciliation ended. */
 export function stagedUpdatePath(home: string): string {
-  return join(home, ".red-skills", "update.json");
+  return join(redSkillsRoot(home), "update.json");
 }
 
 /**

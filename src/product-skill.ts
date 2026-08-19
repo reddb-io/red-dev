@@ -170,7 +170,7 @@ two do not repeat each other.
 | --- | --- |
 | Managed configuration | \`${facts.config}\` |
 | State: transcripts, crash logs, cached observations | \`${facts.state}\` |
-| RedSkills source snapshot | \`~/.red-skills/current\` (a symlink into a versioned copy) |
+| RedSkills source snapshot | \`~/.red/skills/current\` (a symlink into a versioned copy) |
 
 Configuration under the managed root is rewritten by the next converge.
 Change it through the command that owns it — \`red-dev theme\`,

@@ -760,7 +760,7 @@ export async function misePruneSuite(platform: Platform): Promise<void> {
 
 /**
  * Compose the RedSkills package set from whatever mise has just installed,
- * and move ~/.red-skills/current onto it.
+ * and move ~/.red/skills/current onto it.
  *
  * Here rather than inside the mise calls above because both of them
  * reach the RedSkills packages: the suite pass installs them alongside
@@ -1446,7 +1446,7 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
       // mise puts a tool under its own installs tree and stops there,
       // which is the whole story for a binary it also shims onto PATH.
       // RedSkills is a tree the rest of the machine resolves through
-      // ~/.red-skills/current, composed from the core and the plugin
+      // ~/.red/skills/current, composed from the core and the plugin
       // packages together, so whichever of those just moved the set
       // they make up has to be recomposed and the link moved too.
       const { convergeSetAfterMise } = await import("./red-skills-set.ts");

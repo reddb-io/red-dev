@@ -1133,10 +1133,10 @@ export const TOOLS: Tool[] = [
     //
     // Half a migration on its own: mise installs into its own tree and
     // every consumer on the machine resolves through
-    // ~/.red-skills/current. src/red-skills-set.ts is the other half:
+    // ~/.red/skills/current. src/red-skills-set.ts is the other half:
     // it copies this core and every plugin row below — at the one
     // version present in all of them — into a self-contained package
-    // set under ~/.red-skills/sets and points current at it, straight
+    // set under ~/.red/skills/sets and points current at it, straight
     // after any of these entries has run.
     //
     // Before the marketplace row below rather than after it: the row

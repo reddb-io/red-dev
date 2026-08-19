@@ -10,7 +10,7 @@ _Avoid_: latest version (ambiguous without a channel and source)
 
 ## Revision identity
 
-What names one installed RedSkills revision anywhere: its version, its whole-set digest and its source commit — `3.19.5+3fcba9589ff0@626a284`. Never its path: two machines resolving the same identity through different paths are running the same software, and that is the fact worth being able to state. Recorded, with the previous revision and why the last candidate was refused, in `~/.red-skills/package-set.json` (ADR 0011).
+What names one installed RedSkills revision anywhere: its version, its whole-set digest and its source commit — `3.19.5+3fcba9589ff0@626a284`. Never its path: two machines resolving the same identity through different paths are running the same software, and that is the fact worth being able to state. Recorded, with the previous revision and why the last candidate was refused, in `~/.red/skills/package-set.json` (ADR 0011).
 
 _Avoid_: installed version (a version alone cannot tell a composed set from a published one, or one plugin payload from another)
 

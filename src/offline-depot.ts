@@ -78,6 +78,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 
+import { redSkillsRoot } from "./red-skills-root.ts";
 import { sha256Hex } from "./checksum.ts";
 import { ACTIVATED_PLUGIN, activatedPlugins } from "./red-skills-plugins.ts";
 import {
@@ -887,14 +888,14 @@ export type DepotImportResult =
   | { ok: true; report: DepotImportReport }
   | { ok: false; failure: DepotFailure; reason: string };
 
-/** `~/.red-skills/depots/<key>` — the machine's own copy of one depot. */
+/** `~/.red/skills/depots/<key>` — the machine's own copy of one depot. */
 export function importedDepotDir(home: string, key: string): string {
-  return join(home, ".red-skills", "depots", key);
+  return join(redSkillsRoot(home), "depots", key);
 }
 
-/** `~/.red-skills/offline-depot.json` — what this machine imported. */
+/** `~/.red/skills/offline-depot.json` — what this machine imported. */
 export function offlineDepotStatePath(home: string): string {
-  return join(home, ".red-skills", "offline-depot.json");
+  return join(redSkillsRoot(home), "offline-depot.json");
 }
 
 /** One depot this machine has imported, as the state records it. */

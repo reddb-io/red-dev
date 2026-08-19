@@ -27,6 +27,7 @@ import { tlsTrustFailure, unattendedEnvironment } from "./unattended.ts";
 import type { Platform } from "./platform.ts";
 import type { CompanionOutcome } from "./red-skills-companions.ts";
 import type { HostOutcome } from "./red-skills-hosts.ts";
+import { redSkillsCurrentPosix } from "./red-skills-root.ts";
 
 export interface AgentSpec {
   key: string;
@@ -715,7 +716,7 @@ export function repairCopiedRedSkillsCurrent(
 ): boolean {
   if (platform !== "win32") return false;
   const root = home.replace(/\\/g, "/");
-  const current = `${root}/.red-skills/current`;
+  const current = redSkillsCurrentPosix(root);
   try {
     const stat = lstatSync(current);
     if (!stat.isDirectory() || stat.isSymbolicLink()) return false;
@@ -734,7 +735,7 @@ export function repairCopiedRedSkillsCurrent(
  * convergeRedSkills asks whether red-skills is *wired*, and a wired
  * machine is one it has nothing left to do on — which is the right
  * answer for `install` and the wrong one for `update`. The checkout at
- * ~/.red-skills/current froze at the version that first wired this
+ * ~/.red/skills/current froze at the version that first wired this
  * machine and stayed there, while Claude's own plugin cache went on
  * updating through the marketplace. Two copies, and the one everything
  * resolved through was the stationary one.
@@ -837,7 +838,7 @@ async function cliNamesRedSkills(cmd: string[]): Promise<boolean> {
  * whether each host's marketplace pointed at GitHub, and a pair of
  * repairs that repointed a directory-registered host back at
  * `reddb-io/red-skills`. That was right while nothing on the machine
- * moved `~/.red-skills/current` — a directory source meant a host frozen
+ * moved `~/.red/skills/current` — a directory source meant a host frozen
  * at its install-day snapshot, reporting "Updated today" against a
  * version a week behind.
  *

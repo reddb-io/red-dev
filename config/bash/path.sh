@@ -87,7 +87,7 @@ _red_path_prepend "${MISE_DATA_DIR:-$HOME/.local/share/mise}/shims"
 # otherwise be on PATH with mise's winning, which is how a machine ends
 # up running a runtime from one revision while its hosts read another.
 # This directory is red-dev's alone — nothing else writes into it — and
-# each launcher execs the shim inside ~/.red-skills/current, so it
+# each launcher execs the shim inside ~/.red/skills/current, so it
 # follows the active set and a rollback takes it back.
 _red_path_prepend "$HOME/.local/share/red-dev/red-skills/bin"
 

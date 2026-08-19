@@ -54,7 +54,7 @@
  *
  * ## The build runs in the staging, so the checkout never moves
  *
- * The source is copied into `~/.red-skills/checkouts/<key>/tree` first
+ * The source is copied into `~/.red/skills/checkouts/<key>/tree` first
  * and the build runs there. A build in the checkout would write `dist/`
  * into a directory Git is tracking, which is the other half of the
  * acceptance criterion — and it would also change the content the
@@ -253,12 +253,12 @@ export function checkoutPackageIdentity(identity: CheckoutIdentity): PackageSetI
 
 // -------------------------------------------------------------- the staging
 
-/** `~/.red-skills/checkouts` — where a checkout's built trees are keyed by digest. */
+/** `~/.red/skills/checkouts` — where a checkout's built trees are keyed by digest. */
 export function redSkillsCheckoutRoot(home: string): string {
   return join(redSkillsRoot(home), "checkouts");
 }
 
-/** `~/.red-skills/checkouts/<version>+<content12>` — one staged checkout. */
+/** `~/.red/skills/checkouts/<version>+<content12>` — one staged checkout. */
 export function redSkillsCheckoutDir(home: string, key: string): string {
   return join(redSkillsCheckoutRoot(home), key);
 }

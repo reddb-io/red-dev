@@ -13,7 +13,7 @@
  *
  * So every companion is installed from the artifact inside the selected
  * package set, and from nowhere else. Reconciliation never resolves a
- * release, never reads npm and never downloads anything: `~/.red-skills/
+ * release, never reads npm and never downloads anything: `~/.red/skills/
  * current` is followed, the artifact is found inside it or it is not, and
  * a set that does not carry one yet is reported `unavailable` rather than
  * fetched from somewhere the digest cannot speak for. That is what makes
@@ -54,6 +54,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:f
 import { join } from "node:path";
 
 import { log } from "./log.ts";
+import { redSkillsCurrentPosix } from "./red-skills-root.ts";
 import {
   applyOwned,
   may,
@@ -79,7 +80,7 @@ export type CompanionName = "runtimes" | "redskilled" | "herdr" | "vscode" | "ze
 /** What every companion adapter is a function of. */
 export interface CompanionContext {
   platform: Platform;
-  /** The resolved package set: `~/.red-skills/current`, followed. */
+  /** The resolved package set: `~/.red/skills/current`, followed. */
   source: string;
   /** That set's whole-set digest, which is what a record is keyed on. */
   setDigest: string;
@@ -744,7 +745,7 @@ export interface CompanionReconcileOptions {
   config?: string;
   /** The resolved package set. Defaults to `resolvedSource()`. */
   source?: string | null;
-  /** The pointer launchers resolve through. Defaults to `~/.red-skills/current`. */
+  /** The pointer launchers resolve through. Defaults to `~/.red/skills/current`. */
   current?: string;
   setDigest?: string;
   setVersion?: string;
@@ -820,7 +821,7 @@ export async function reconcileCompanions(
     source,
     setDigest: opts.setDigest ?? identity.digest,
     setVersion: opts.setVersion ?? identity.version,
-    current: opts.current ?? `${home}/.red-skills/current`,
+    current: opts.current ?? redSkillsCurrentPosix(home),
     home,
     config: opts.config ?? configOf(home),
     herdrDir: opts.herdrDir !== undefined ? opts.herdrDir : await herdrDirOf(p),
@@ -1057,7 +1058,7 @@ export async function removeCompanions(
     source: source ?? "",
     setDigest: opts.setDigest ?? "",
     setVersion: opts.setVersion ?? "",
-    current: opts.current ?? `${home}/.red-skills/current`,
+    current: opts.current ?? redSkillsCurrentPosix(home),
     home,
     config: opts.config ?? configOf(home),
     herdrDir: opts.herdrDir !== undefined ? opts.herdrDir : await herdrDirOf(p),

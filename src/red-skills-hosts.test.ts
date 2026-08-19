@@ -338,7 +338,7 @@ function machine(opts: SetOptions = {}): Machine {
   const home = mkdtempSync(join(tmpdir(), "red-hosts-home-"));
   const config = join(home, ".config");
   const tree = packageSet(opts);
-  const current = `${home}/.red-skills/current`;
+  const current = `${home}/.red/skills/current`;
 
   mkdirSync(join(home, ".claude", "plugins"), { recursive: true });
   writeFileSync(join(home, ".claude", "plugins", "known_marketplaces.json"), knownMarketplaces(current));

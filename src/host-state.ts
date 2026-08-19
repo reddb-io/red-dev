@@ -46,6 +46,7 @@ import {
   type BoundedCommandOptions,
   type BoundedCommandResult,
 } from "./bounded-command.ts";
+import { redSkillsCurrentPosix } from "./red-skills-root.ts";
 
 /** The document shape this build reads. Not a floor: an exact match. */
 export const HOST_STATE_VERSION = 1;
@@ -259,7 +260,7 @@ export function resolveRedskilledBin(home = homedir()): string | null {
   if (resident) return resident;
   const cached = latestResidentBundle(`${root}/.cache/red-skills/bundles`);
   if (cached) return cached;
-  const packaged = `${root}/.red-skills/current/packaging/npm/bin/red-skills-redskilled.mjs`;
+  const packaged = `${redSkillsCurrentPosix(root)}/packaging/npm/bin/red-skills-redskilled.mjs`;
   if (existsSync(packaged)) return packaged;
   // The same client, one directory up, when the core came from mise.
   // The published npm package *is* packaging/npm — that is the
@@ -267,7 +268,7 @@ export function resolveRedskilledBin(home = homedir()): string | null {
   // package rather than a source checkout carries bin/ at its root.
   // Checked after the checkout path rather than before it: a machine
   // with both should prefer the tree it can also build from.
-  const packagedCore = `${root}/.red-skills/current/bin/red-skills-redskilled.mjs`;
+  const packagedCore = `${redSkillsCurrentPosix(root)}/bin/red-skills-redskilled.mjs`;
   return existsSync(packagedCore) ? packagedCore : null;
 }
 
@@ -373,10 +374,10 @@ export async function readHostState(
 
 const WSL_HOST_STATE_PROGRAM = [
   'b=$(ls -1 "$HOME"/.red/redskilled/bundles/redskilled-*.bundle.min.mjs "$HOME"/.cache/red-skills/bundles/redskilled-*.bundle.min.mjs 2>/dev/null | sort -V | tail -1)',
-  '[ -n "$b" ] || b="$HOME/.red-skills/current/packaging/npm/bin/red-skills-redskilled.mjs"',
+  '[ -n "$b" ] || b="$HOME/.red/skills/current/packaging/npm/bin/red-skills-redskilled.mjs"',
   // The mise-installed core is the published packaging/npm package, so
   // its bin/ sits at the root of `current` instead of under it.
-  '[ -f "$b" ] || b="$HOME/.red-skills/current/bin/red-skills-redskilled.mjs"',
+  '[ -f "$b" ] || b="$HOME/.red/skills/current/bin/red-skills-redskilled.mjs"',
   '[ -f "$b" ] || exit 3',
   'n=$(command -v node 2>/dev/null || ls -1 /usr/local/bin/node /usr/bin/node "$HOME"/.local/share/mise/installs/node/*/bin/node "$HOME"/.volta/bin/node "$HOME"/.asdf/shims/node "$HOME"/.nodenv/shims/node "$HOME"/.nvm/versions/node/*/bin/node "$HOME"/.local/share/fnm/node-versions/*/installation/bin/node 2>/dev/null | sort -V | tail -1)',
   '[ -n "$n" ] || exit 3',

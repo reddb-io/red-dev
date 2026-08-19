@@ -75,6 +75,7 @@
 import { readFileSync } from "node:fs";
 
 import { sha256Hex } from "./checksum.ts";
+import { redSkillsRootPosix } from "./red-skills-root.ts";
 
 export const WORKSTATION_LOCK_SCHEMA = "red.workstation-lock.v1";
 
@@ -444,7 +445,7 @@ export type LockParse =
   | { ok: false; reason: string };
 
 /**
- * `~/.red-skills/workstation-lock.json` — the exact target this machine
+ * `~/.red/skills/workstation-lock.json` — the exact target this machine
  * is provisioned against.
  *
  * One file, beside the package-set state, because the two are the same
@@ -454,7 +455,7 @@ export type LockParse =
  * yet, which is the ordinary state before the first depot import.
  */
 export function workstationLockPath(home: string): string {
-  return `${home.replace(/\\/g, "/")}/.red-skills/workstation-lock.json`;
+  return `${redSkillsRootPosix(home)}/workstation-lock.json`;
 }
 
 /**

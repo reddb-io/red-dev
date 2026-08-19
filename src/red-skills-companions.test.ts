@@ -157,7 +157,7 @@ function machine(opts: SetOptions = {}): Machine {
     config,
     bin: join(home, ".local", "bin"),
     tree: packageSet(opts),
-    current: `${home}/.red-skills/current`,
+    current: `${home}/.red/skills/current`,
     installed: new Map<string, string[]>([["code", []]]),
   };
 }

@@ -29,6 +29,7 @@ import {
   LEGACY_EXTENSION_ID,
   PLUGIN_ID,
 } from "./red-skills-companions.ts";
+import { redSkillsCurrentPosix } from "./red-skills-root.ts";
 
 export { EXTENSION_ID, LEGACY_EXTENSION_ID, PLUGIN_ID };
 
@@ -40,7 +41,7 @@ function home(): string {
 
 /** The red-skills checkout, or null when red-skills was never installed. */
 export function sourceRoot(): string | null {
-  const root = `${home()}/.red-skills/current`;
+  const root = redSkillsCurrentPosix(home());
   return existsSync(`${root}/package.json`) ? root : null;
 }
 

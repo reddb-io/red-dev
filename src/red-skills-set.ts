@@ -4,7 +4,7 @@
  * Until now RedSkills reached this machine as four independently
  * resolved mise entries — the core payload plus one npm package per
  * plugin — and the layout step (`red-skills-core.ts`, which this file
- * retires) pointed `~/.red-skills/current` at the bare core tree mise
+ * retires) pointed `~/.red/skills/current` at the bare core tree mise
  * had installed. Two things were wrong with that, and both were only
  * visible on a machine that had actually converged: the core package
  * carries the marketplace manifests but no `plugins/` for them to name,
@@ -60,7 +60,7 @@
  *
  * ## Verification happens before the pointer moves
  *
- * `~/.red-skills/current` is what every consumer on this machine reads —
+ * `~/.red/skills/current` is what every consumer on this machine reads —
  * the agent hosts, the marketplace registration, the host census, the
  * WSL rescue shim. Moving it is the one irreversible act here, and it
  * happens last: a candidate is parsed, hashed, checked against the trust
@@ -109,6 +109,7 @@ import { basename, dirname, join } from "node:path";
 
 import trustedRootFile from "../vendor/sigstore/trusted_root.embedded" with { type: "file" };
 
+import { redSkillsRoot } from "./red-skills-root.ts";
 import { sha256Hex } from "./checksum.ts";
 import { log } from "./log.ts";
 import { miseInstallRoot } from "./mise-config.ts";
@@ -960,9 +961,9 @@ const EMPTY_STATE: PackageSetState = {
   staged: null,
 };
 
-/** `~/.red-skills/package-set.json` — what the machine believes it has. */
+/** `~/.red/skills/package-set.json` — what the machine believes it has. */
 export function packageSetStatePath(home: string): string {
-  return join(home, ".red-skills", "package-set.json");
+  return join(redSkillsRoot(home), "package-set.json");
 }
 
 /**
@@ -1015,19 +1016,19 @@ export function formatPackageSetIdentity(id: PackageSetIdentity): string {
 
 // --------------------------------------------------------------- the layout
 
-/** `~/.red-skills/sets/<key>` — one immutable revision, addressable by name. */
+/** `~/.red/skills/sets/<key>` — one immutable revision, addressable by name. */
 export function redSkillsSetDir(home: string, key: string): string {
-  return join(home, ".red-skills", "sets", key);
+  return join(redSkillsRoot(home), "sets", key);
 }
 
-/** `~/.red-skills/current` — the stable pointer everything else reads. */
+/** `~/.red/skills/current` — the stable pointer everything else reads. */
 export function redSkillsCurrentLink(home: string): string {
-  return join(home, ".red-skills", "current");
+  return join(redSkillsRoot(home), "current");
 }
 
-/** `~/.red-skills/previous` — the revision a rollback restores. */
+/** `~/.red/skills/previous` — the revision a rollback restores. */
 export function redSkillsPreviousLink(home: string): string {
-  return join(home, ".red-skills", "previous");
+  return join(redSkillsRoot(home), "previous");
 }
 
 /**
@@ -1534,7 +1535,7 @@ export function recordPackageSetRefusal(home: string, refusal: PackageSetRefusal
 function retire(home: string, retained: readonly PackageSetRevision[]): string[] {
   const keep = new Set(retained.map((r) => realpathOrSelf(r.path)));
   const removed: string[] = [];
-  const sets = join(home, ".red-skills", "sets");
+  const sets = join(redSkillsRoot(home), "sets");
   for (const name of listing(sets)) {
     const path = join(sets, name);
     if (keep.has(realpathOrSelf(path))) continue;
@@ -1542,7 +1543,7 @@ function retire(home: string, retained: readonly PackageSetRevision[]): string[]
     rmSync(path, { recursive: true, force: true });
     removed.push(path);
   }
-  const versions = join(home, ".red-skills", "versions");
+  const versions = join(redSkillsRoot(home), "versions");
   for (const name of listing(versions)) {
     const path = join(versions, name);
     const stat = statOf(path);

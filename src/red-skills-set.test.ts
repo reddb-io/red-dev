@@ -1,6 +1,6 @@
 /**
  * The RedSkills package set: composed from mise, or verified from a
- * published manifest, and the one thing ~/.red-skills/current may name.
+ * published manifest, and the one thing ~/.red/skills/current may name.
  *
  * Everything below runs against a fabricated mise installs tree and a
  * temporary HOME, so it holds on a machine with no mise, no network and
@@ -518,7 +518,7 @@ describe("the composed set", () => {
     const current = redSkillsCurrentLink(home);
     const tree = realpathSync(current);
     expect(tree).toBe(realpathSync(result.revisionDir!));
-    expect(tree.startsWith(realpathSync(join(home, ".red-skills", "sets")))).toBe(true);
+    expect(tree.startsWith(realpathSync(join(home, ".red", "skills", "sets")))).toBe(true);
 
     // The core at the root, as `sourceRoot()` and the shims expect.
     expect(existsSync(join(tree, "package.json"))).toBe(true);
@@ -614,11 +614,11 @@ describe("the composed set", () => {
     // a refused candidate must leave it exactly there, so the
     // registration that runs next still finds a marketplace to register.
     const home = fakeHome();
-    const legacy = join(home, ".red-skills", "versions", "v3.19.5");
+    const legacy = join(home, ".red", "skills", "versions", "v3.19.5");
     mkdirSync(join(legacy, ".claude-plugin"), { recursive: true });
     writeFileSync(join(legacy, "package.json"), "{}\n");
     writeFileSync(join(legacy, ".claude-plugin", "marketplace.json"), "{}\n");
-    mkdirSync(join(home, ".red-skills"), { recursive: true });
+    mkdirSync(join(home, ".red", "skills"), { recursive: true });
     symlinkSync(legacy, redSkillsCurrentLink(home));
 
     const result = converge(home, aligned(["3.18.12"], { legacyCore: ["3.18.12"] }));
@@ -627,7 +627,7 @@ describe("the composed set", () => {
     expect(result.active).toBeNull();
     expect(realpathSync(redSkillsCurrentLink(home))).toBe(realpathSync(legacy));
     expect(existsSync(join(realpathSync(redSkillsCurrentLink(home)), ".claude-plugin", "marketplace.json"))).toBe(true);
-    expect(existsSync(join(home, ".red-skills", "sets"))).toBe(false);
+    expect(existsSync(join(home, ".red", "skills", "sets"))).toBe(false);
     const rows = redSkillsSetRows(redSkillsSetReport(home));
     expect(rows.at(-1)!.detail).toStartWith("last candidate refused (payload): core 3.18.12 carries no");
   });
@@ -639,7 +639,7 @@ describe("the composed set", () => {
     expect(result.refused?.failure).toBe("skew");
     expect(result.active).toBeNull();
     expect(existsSync(redSkillsCurrentLink(home))).toBe(false);
-    expect(existsSync(join(home, ".red-skills", "sets"))).toBe(false);
+    expect(existsSync(join(home, ".red", "skills", "sets"))).toBe(false);
   });
 
   test("a runtime plugin whose package carries no bundle is refused before anything is written", () => {
@@ -652,7 +652,7 @@ describe("the composed set", () => {
     expect(result.refused?.failure).toBe("artifact");
     expect(result.refused?.reason).toContain("dev");
     expect(existsSync(redSkillsCurrentLink(home))).toBe(false);
-    expect(existsSync(join(home, ".red-skills", "sets"))).toBe(false);
+    expect(existsSync(join(home, ".red", "skills", "sets"))).toBe(false);
   });
 
   test("a tool not installed yet is waited for, quietly", () => {
@@ -661,14 +661,14 @@ describe("the composed set", () => {
     expect(result.refused).toBeNull();
     expect(result.active).toBeNull();
     expect(result.writes).toEqual([]);
-    expect(existsSync(join(home, ".red-skills"))).toBe(false);
+    expect(existsSync(join(home, ".red", "skills"))).toBe(false);
   });
 
   test("mise having installed nothing leaves the machine alone", () => {
     const home = fakeHome();
     const result = converge(home, mkdtempSync(join(tmpdir(), "red-set-empty-")));
     expect(result.writes).toEqual([]);
-    expect(existsSync(join(home, ".red-skills"))).toBe(false);
+    expect(existsSync(join(home, ".red", "skills"))).toBe(false);
   });
 
   test("an existing revision directory is reused, never recomposed", () => {
@@ -691,7 +691,7 @@ describe("the composed set", () => {
     const home = fakeHome();
     const root = aligned(["3.19.5"]);
     expect(convergeSetAfterMise("github:reddb-io/reddb", { home, installsRoot: root, plugins: PLUGINS, platform: "linux" })).toBeNull();
-    expect(existsSync(join(home, ".red-skills"))).toBe(false);
+    expect(existsSync(join(home, ".red", "skills"))).toBe(false);
     for (const spec of ["npm:@reddb-io/red-skills-dev", "npm:@reddb-io/red-skills"]) {
       const result = convergeSetAfterMise(spec, { home, installsRoot: root, plugins: PLUGINS, platform: "linux" });
       expect(result, spec).not.toBeNull();
@@ -917,7 +917,7 @@ describe("activating a published set", () => {
       expect(result.active).toEqual(good.active);
       expect(readlinkSync(current)).toBe(link);
       expect(lstatSync(current).ino).toBe(ino);
-      expect(readdirSync(join(home, ".red-skills", "sets")).filter((n) => !n.startsWith("."))).toEqual([good.retained[0]!.key]);
+      expect(readdirSync(join(home, ".red", "skills", "sets")).filter((n) => !n.startsWith("."))).toEqual([good.retained[0]!.key]);
     });
   }
 
@@ -1076,7 +1076,7 @@ describe("rollback and a converge that has nothing to do", () => {
 
   test("with nothing to roll back to, a stale previous is removed", () => {
     const home = fakeHome();
-    mkdirSync(join(home, ".red-skills"), { recursive: true });
+    mkdirSync(join(home, ".red", "skills"), { recursive: true });
     symlinkSync(join(home, "nowhere"), redSkillsPreviousLink(home));
     converge(home, aligned(["3.19.5"]));
     expect(existsSync(redSkillsPreviousLink(home))).toBe(false);
@@ -1085,7 +1085,7 @@ describe("rollback and a converge that has nothing to do", () => {
 
   test("a dangling link the old layout left under versions/ is cleaned up, a real tree there is not", () => {
     const home = fakeHome();
-    const versions = join(home, ".red-skills", "versions");
+    const versions = join(home, ".red", "skills", "versions");
     mkdirSync(join(versions, "v3.18.12"), { recursive: true });
     writeFileSync(join(versions, "v3.18.12", "package.json"), "{}\n");
     symlinkSync(join(home, "pruned-mise-tree"), join(versions, "v3.19.0"));
@@ -1147,7 +1147,7 @@ describe("the consumers that resolve through current", () => {
     const result = converge(home, aligned(["3.19.5"]));
     const { resolvedSource, sourceRoot } = await import("./red-skills-ext.ts");
     await withHome(home, () => {
-      expect(sourceRoot()).toBe(`${home}/.red-skills/current`);
+      expect(sourceRoot()).toBe(`${home}/.red/skills/current`);
       expect(resolvedSource()).toBe(realpathSync(result.revisionDir!));
     });
   });
@@ -1156,13 +1156,13 @@ describe("the consumers that resolve through current", () => {
     const home = fakeHome();
     converge(home, aligned(["3.19.5"]));
     const { resolveRedskilledBin } = await import("./host-state.ts");
-    expect(resolveRedskilledBin(home)).toBe(`${home}/.red-skills/current/bin/red-skills-redskilled.mjs`);
+    expect(resolveRedskilledBin(home)).toBe(`${home}/.red/skills/current/bin/red-skills-redskilled.mjs`);
   });
 
   test("the WSL rescue shim looks in both places too", () => {
     const hostState = readFileSync(`${import.meta.dir}/host-state.ts`, "utf8");
-    expect(hostState).toContain(".red-skills/current/packaging/npm/bin/red-skills-redskilled.mjs");
-    expect(hostState).toContain(".red-skills/current/bin/red-skills-redskilled.mjs");
+    expect(hostState).toContain(".red/skills/current/packaging/npm/bin/red-skills-redskilled.mjs");
+    expect(hostState).toContain(".red/skills/current/bin/red-skills-redskilled.mjs");
   });
 });
 
@@ -1191,11 +1191,11 @@ describe("what doctor says", () => {
         sourceCommit: "",
         kind: "composed",
         trust: "unsigned",
-        path: "<home>/.red-skills/sets/3.19.5+<digest12>",
+        path: "<home>/.red/skills/sets/3.19.5+<digest12>",
       },
       retained: [
-        { key: "3.19.5+<digest12>", version: "3.19.5", digest: "<digest>", sourceCommit: "", kind: "composed", trust: "unsigned", path: "<home>/.red-skills/sets/3.19.5+<digest12>", addressable: true },
-        { key: "3.19.4+<digest12>", version: "3.19.4", digest: "<digest>", sourceCommit: "", kind: "composed", trust: "unsigned", path: "<home>/.red-skills/sets/3.19.4+<digest12>", addressable: true },
+        { key: "3.19.5+<digest12>", version: "3.19.5", digest: "<digest>", sourceCommit: "", kind: "composed", trust: "unsigned", path: "<home>/.red/skills/sets/3.19.5+<digest12>", addressable: true },
+        { key: "3.19.4+<digest12>", version: "3.19.4", digest: "<digest>", sourceCommit: "", kind: "composed", trust: "unsigned", path: "<home>/.red/skills/sets/3.19.4+<digest12>", addressable: true },
       ],
       refused: null,
       staged: null,

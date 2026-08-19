@@ -333,7 +333,7 @@ export async function runPluginPhase(
 
   // mise treats an empty install directory as a failed install, and the
   // package set is not what lives there anyway: the tree is at
-  // ~/.red-skills/sets/<version>+<digest12> and every consumer resolves
+  // ~/.red/skills/sets/<version>+<digest12> and every consumer resolves
   // it through `current`. What goes here is the receipt saying which
   // revision this mise version *is* — the identity ADR 0011 defines,
   // rather than a copy of 25 MB that would then have two owners.

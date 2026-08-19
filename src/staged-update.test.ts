@@ -79,7 +79,7 @@ function machine(home: string, over: Partial<PackageSetState> = {}): PackageSetS
     sourceCommit: "626a28473edeee992fcf6425dedbca84448343fd",
     kind: "manifest",
     trust: "trusted",
-    path: `${home}/.red-skills/sets/3.19.5+0123456789ab`,
+    path: `${home}/.red/skills/sets/3.19.5+0123456789ab`,
   };
   const state: PackageSetState = {
     schema: 1,
@@ -95,7 +95,7 @@ function machine(home: string, over: Partial<PackageSetState> = {}): PackageSetS
 /** Put a package-set state on disk, creating its directory. */
 function record(home: string, state: PackageSetState): void {
   const path = packageSetStatePath(home);
-  mkdirSync(`${home}/.red-skills`, { recursive: true });
+  mkdirSync(`${home}/.red/skills`, { recursive: true });
   writeFileSync(path, `${JSON.stringify(state, null, 2)}\n`, "utf8");
 }
 
@@ -376,7 +376,7 @@ describe("completing the Worker", () => {
       sourceCommit: "f".repeat(40),
       kind: "manifest",
       trust: "trusted",
-      path: `${home}/.red-skills/sets/3.19.6+abcdefabcdef`,
+      path: `${home}/.red/skills/sets/3.19.6+abcdefabcdef`,
     };
     record(home, machine(home, { staged }));
 
@@ -444,17 +444,17 @@ describe("what doctor reads", () => {
     const home = fakeHome();
     record(home, machine(home));
     await walk(home);
-    const first = readFileSync(`${home}/.red-skills/update.json`, "utf8");
+    const first = readFileSync(`${home}/.red/skills/update.json`, "utf8");
     await walk(home);
-    expect(readFileSync(`${home}/.red-skills/update.json`, "utf8")).toBe(first);
+    expect(readFileSync(`${home}/.red/skills/update.json`, "utf8")).toBe(first);
     expect(readStagedUpdate(home)?.outcome).toBe("converged");
   });
 
   test("a record this build cannot read is no record rather than an error", () => {
     const home = fakeHome();
     record(home, machine(home));
-    mkdirSync(`${home}/.red-skills`, { recursive: true });
-    writeFileSync(`${home}/.red-skills/update.json`, "{ not json", "utf8");
+    mkdirSync(`${home}/.red/skills`, { recursive: true });
+    writeFileSync(`${home}/.red/skills/update.json`, "{ not json", "utf8");
     expect(readStagedUpdate(home)).toBeNull();
     expect(stagedUpdateReport(home).outcome).toBeNull();
   });
