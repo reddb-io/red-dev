@@ -359,6 +359,18 @@ export interface StagedUpdateOptions {
    * daemon to ask whether a daemon is busy has changed the answer.
    */
   workers?: () => Promise<number | null>;
+  /** The channel, version or commit to acquire. Defaults to the channel env. */
+  selector?: string;
+  /**
+   * Whether this run has an acquisition to perform at all.
+   *
+   * `installed` is the postinstall's answer: mise has just put the set
+   * on the machine through the plugin's own install phase, and asking
+   * the remote again would be a second acquisition for one upgrade.
+   * The surface is still reported — what it reports is the revision
+   * this machine now resolves.
+   */
+  acquisition?: "acquire" | "installed";
   /**
    * The acquisition, told whether it may activate what it verifies.
    * Defaults to the staged activation, then src/red-skills-acquire.ts.
@@ -498,10 +510,38 @@ function defaultAcquire(
       }
     }
 
+    // mise's postinstall: the set is already on the machine, and the
+    // only honest thing to report is which revision that is.
+    if (opts.acquisition === "installed") {
+      const { readPackageSetState } = await import("./red-skills-set.ts");
+      const { formatPackageSetIdentity } = await import("./red-skills-set.ts");
+      const state = readPackageSetState(home);
+      const active = state.revisions.find((r) => r.key === state.active) ?? null;
+      return {
+        outcome: active === null ? "unavailable" : "current",
+        reason:
+          active === null
+            ? "no package set is active on this machine"
+            : `${formatPackageSetIdentity(active)} was installed by mise`,
+        failure: null,
+        selector: null,
+        commit: active?.sourceCommit ?? null,
+        version: active?.version ?? null,
+        mirror: null,
+        snapshot: null,
+        candidate: null,
+        active: active
+          ? { version: active.version, digest: active.digest, sourceCommit: active.sourceCommit }
+          : null,
+        writes: [],
+      };
+    }
+
     const { acquireRedSkills, announce } = await import("./red-skills-acquire.ts");
     const acquisition = await acquireRedSkills({
       home,
       stageOnly,
+      ...(opts.selector ? { selector: opts.selector } : {}),
       ...(opts.manifestPlatform ? { manifestPlatform: opts.manifestPlatform } : {}),
       ...(opts.env ? { env: opts.env } : {}),
     });
