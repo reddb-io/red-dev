@@ -74,7 +74,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import { dirname, join } from "node:path";
 
 import { log } from "./log.ts";
-import { depotAppPath, type DepotRevision } from "./offline-depot.ts";
+import { depotAppPath, readOfflineDepotState, type DepotRevision } from "./offline-depot.ts";
 import type { CompanionOutcome } from "./red-skills-companions.ts";
 import type { HostOutcome } from "./red-skills-hosts.ts";
 import {
@@ -496,6 +496,12 @@ export function planWorkstationRetention(opts: RetentionOptions): WorkstationRet
 
   const locks = new Map<string, string[]>();
   const depots = new Map<string, string[]>();
+  // The depot this machine says it was provisioned from, folded in the
+  // same way the set state is: doctor reports it by path, and a prune
+  // that removed it would turn a healthy air-gapped workstation red for
+  // having tidied up after itself.
+  const importedDepot = readOfflineDepotState(home).imported?.path;
+  if (importedDepot !== undefined) depots.set(importedDepot, ["offline depot state"]);
   for (const revision of revisions) {
     need(redSkillsSetDir(home, revision.packageSet.key), revision.key);
     const lock = locks.get(revision.lockPath) ?? [];
