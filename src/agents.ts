@@ -944,4 +944,14 @@ export async function convergeRedSkills(p: Platform): Promise<void> {
     log.warn(`red-skills: not reconciled into ${stuck.map((h) => h.host).join(", ")}`);
     for (const h of stuck) log.plain(`       ${h.host}: ${h.reason ?? "no reason given"}`);
   }
+
+  // A host can converge and still have less than the one beside it —
+  // Gemini has no hook runner, and a set may declare no MCP for anybody.
+  // Said out loud on the converge that observed it, not only in doctor:
+  // "seven hosts reconciled" read without this is a claim that all seven
+  // got the same thing, which is the misdescription the record exists to
+  // prevent. Skipped hosts say it too, out of what they recorded.
+  for (const h of hosts) {
+    for (const gap of h.missing ?? []) log.skip(`${h.host}: ${gap}`);
+  }
 }
