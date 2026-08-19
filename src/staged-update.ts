@@ -60,7 +60,11 @@ import type { Platform } from "./platform.ts";
 import type { Acquisition } from "./red-skills-acquire.ts";
 import type { CompanionOutcome } from "./red-skills-companions.ts";
 import type { HostOutcome } from "./red-skills-hosts.ts";
-import { readPackageSetState, type PackageSetIdentity } from "./red-skills-set.ts";
+import {
+  readPackageSetState,
+  type PackageSetIdentity,
+  type PackageSetRevision,
+} from "./red-skills-set.ts";
 import type { LockInstallReport } from "./workstation-lock.ts";
 
 /** The surfaces one revision has to reach, in the order it reaches them. */
@@ -380,6 +384,14 @@ export interface StagedUpdateOptions {
   converge?: () => Promise<{ hosts: HostOutcome[]; companions: CompanionOutcome[] }>;
   /** The exact workstation lock. Defaults to the one this machine holds. */
   lock?: () => Promise<LockResult>;
+  /**
+   * The instant this run activated, ISO 8601 to the second.
+   *
+   * Defaults to now. It exists so the revision record a rollback reads
+   * back is reproducible in a test, and so this module keeps its one
+   * reason to look at a clock in a place a caller can take away.
+   */
+  at?: string;
 }
 
 /**
@@ -428,6 +440,7 @@ export async function runStagedUpdate(opts: StagedUpdateOptions = {}): Promise<S
   const restartNeeded = [...new Set(surfaces.flatMap((s) => s.restartNeeded))];
 
   writeStagedUpdate(home, { schema: 1, outcome, surfaces, workers });
+  await recordRevision(home, outcome, active, opts.at ?? nowSeconds());
   announceStagedUpdate({ outcome, surfaces, restartNeeded });
 
   return {
@@ -447,6 +460,52 @@ export async function runStagedUpdate(opts: StagedUpdateOptions = {}): Promise<S
     workers,
     code: outcome === "converged" || outcome === "staged" ? 0 : 1,
   };
+}
+
+/**
+ * Bind what this run left the machine on into one complete revision.
+ *
+ * The pair src/workstation-rollback.ts retains: the package set and the
+ * exact lock, named together, with the local artifact store they were
+ * provisioned from. Only a `converged` run rotates it — everything else
+ * records the attempt and leaves the last verified revision exactly
+ * where it was, which is the state a rollback restores.
+ *
+ * Silent on a machine with no lock resolved yet, which is every machine
+ * before its first depot import: there is no complete revision to name,
+ * and inventing one from half of it would give a rollback a target it
+ * could not restore.
+ */
+async function recordRevision(
+  home: string,
+  outcome: UpdateOutcome,
+  active: PackageSetRevision | null,
+  at: string,
+): Promise<void> {
+  if (active === null) return;
+  const { readWorkstationLock } = await import("./workstation-lock.ts");
+  const read = readWorkstationLock(home);
+  if (!read.ok) return;
+  const { readOfflineDepotState } = await import("./offline-depot.ts");
+  const { activateWorkstationRevision } = await import("./workstation-rollback.ts");
+  activateWorkstationRevision({
+    home,
+    lock: read.lock,
+    packageSet: {
+      key: active.key,
+      version: active.version,
+      digest: active.digest,
+      sourceCommit: active.sourceCommit,
+    },
+    depot: readOfflineDepotState(home).imported?.path ?? null,
+    activatedAt: at,
+    verified: outcome === "converged",
+  });
+}
+
+/** Now, to the second, in the one encoding every record here uses. */
+function nowSeconds(): string {
+  return `${new Date().toISOString().slice(0, 19)}Z`;
 }
 
 /** One line per surface, in the voice the rest of a converge speaks. */
