@@ -337,8 +337,13 @@ export async function runPluginPhase(
   // it through `current`. What goes here is the receipt saying which
   // revision this mise version *is* — the identity ADR 0011 defines,
   // rather than a copy of 25 MB that would then have two owners.
+  //
+  // The staged identity first, where there is one: under a running
+  // Worker the machine deliberately stays on its previous revision, and
+  // a receipt naming that one would tell mise it installed the version
+  // it replaced rather than the version it fetched.
   const installPath = env["ASDF_INSTALL_PATH"];
-  if (installPath) writeReceipt(installPath, acquired.active, acquired.commit);
+  if (installPath) writeReceipt(installPath, acquired.staged ?? acquired.active, acquired.commit);
   return 0;
 }
 
