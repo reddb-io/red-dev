@@ -331,6 +331,37 @@ that Worker is using, and the next update that finds the queue drained activates
 what is already on disk without acquiring it again. `doctor` names every one of
 those states — active, staged, pending, failed, partial, restart needed.
 
+Every verified activation is recorded as one **complete workstation revision**:
+the package set and the exact lock, named together, with the local depot copy
+the applications were installed from. That record is what makes a rollback one
+operation rather than four — downgrading the set without the lock leaves seven
+CLIs from one revision wired against the tree of another, and downgrading the
+lock without the artifacts means fetching them, which is the one thing the
+machine that most needs a rollback cannot do. So a rollback restores all of it
+out of what is already on disk: no network request, and nothing terminated —
+the hosts are reconciled and the ones that cannot observe the change without a
+fresh process are reported `restart needed`, exactly as an update reports them,
+while running Workers are counted and left completely alone. It does not swap:
+once restored, the revision it left is retained and named, and going forward
+again is an update rather than a second rollback that undoes the first.
+
+Retention is two complete revisions and the host caches either of them needs,
+and it is deliberately conditional on verification. An update that half-applied
+or that a Worker held records its attempt as `pending` and rotates nothing, and
+while anything is pending **nothing at all is pruned** — the last verified state
+stays exactly where it was, because it is the state a rollback restores. On such
+a machine the rollback target is the active record itself rather than the one
+behind it: the machine has already drifted forward into a revision nothing
+vouched for. `doctor` reports both halves — which lock this machine is
+provisioned against, what a rollback would restore, whether all of it is still
+addressable, and how much derived state the retention is holding.
+
+`bun run e2e:rollback-ubuntu24` is the whole of it as a command: three complete
+revisions provisioned onto a network-denied Ubuntu 24.04 target, a prune held
+through an update that did not verify, the workstation rolled back with egress
+blocked, and a second rollback that writes nothing. The same function is what
+`bun test` asserts, so the command and the gate cannot disagree.
+
 `doctor` has an `[agents]` section holding the whole posture: which host is the
 Default agent, how long ago each installed host's copy on PATH last changed, and
 per-provider usage with the reset times the Redwall's one compact line has no
