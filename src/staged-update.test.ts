@@ -233,6 +233,28 @@ describe("a forced failure", () => {
 });
 
 describe("running coder sessions", () => {
+  test("nothing on the update path can signal a process", () => {
+    // Structural, not behavioural, because the guarantee is an absence:
+    // no test that runs the walk can prove that a path it did not take
+    // holds no `kill`. The three modules an update advances surfaces
+    // through are read instead, and none of them may carry one.
+    for (const file of [
+      "./staged-update.ts",
+      "./red-skills-hosts.ts",
+      "./red-skills-companions.ts",
+    ]) {
+      const source = readFileSync(new URL(file, import.meta.url), "utf8")
+        .split("\n")
+        // Prose is allowed to say "never a kill"; code is not allowed to
+        // issue one.
+        .filter((line) => !line.trimStart().startsWith("*") && !line.trimStart().startsWith("//"))
+        .join("\n");
+      expect(source).not.toMatch(/\b(?:pkill|taskkill|SIGKILL|SIGTERM)\b/);
+      expect(source).not.toMatch(/\.kill\(|process\.kill\b/);
+    }
+  });
+
+
   test("are never terminated: the host is reconciled and owed a restart", async () => {
     const home = fakeHome();
     record(home, machine(home));
