@@ -20,7 +20,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { rehearsalLock } from "./fixtures/offline-depot/rehearsal.ts";
-import { depotAppPath } from "./offline-depot.ts";
+import { depotAppPath, offlineDepotStatePath } from "./offline-depot.ts";
 import { encodeWorkstationLock, type WorkstationLock } from "./workstation-lock.ts";
 import {
   activateWorkstationRevision,
@@ -418,6 +418,33 @@ describe("the retention", () => {
       expect(plan.held).toBeNull();
       expect(plan.prunable).toEqual([]);
       expect(plan.revisions.map((r) => r.key)).toEqual([newer.revision.key, older.revision.key]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("and never the depot copy this machine says it was provisioned from", async () => {
+    const dir = home();
+    try {
+      const [oldest] = await activateInOrder(dir, [2]);
+      if (oldest === undefined) throw new Error("no");
+      // doctor reports the imported depot by path, so a prune that took
+      // it would turn a healthy air-gapped workstation red for having
+      // tidied up after itself.
+      const statePath = offlineDepotStatePath(dir);
+      mkdirSync(join(statePath, ".."), { recursive: true });
+      writeFileSync(
+        statePath,
+        `${JSON.stringify({ schema: 1, imported: { path: oldest.revision.depot } }, null, 2)}\n`,
+      );
+      await activateInOrder(dir, [1, 0]);
+
+      expect(existsSync(oldest.revision.depot ?? "")).toBe(true);
+      const plan = planWorkstationRetention({ home: dir });
+      expect(plan.kept.some((entry) => entry.requiredBy.includes("offline depot state"))).toBe(true);
+      // Its lock is another matter: no revision needs it, and doctor
+      // never reports one by path.
+      expect(existsSync(retainedLockPath(dir, oldest.lock.lockDigest))).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
