@@ -1313,6 +1313,53 @@ export function activateStagedPackageSet(
 }
 
 /**
+ * Activate a revision this machine already retains, acquiring nothing.
+ *
+ * The rollback's half of the move `activateStagedPackageSet` makes
+ * forwards, and it exists for the same reason: the revision was verified
+ * when it arrived, its tree is still under its immutable name, and the
+ * one step left is moving `current`. A rollback that re-acquired the
+ * revision it is rolling back to would need the network — which is the
+ * one thing the machine being rolled back may not have.
+ *
+ * `null` when this machine retains no such revision, which the caller
+ * has to distinguish from a refusal: nothing to roll back to is not the
+ * same fact as a rollback that could not be performed.
+ */
+export function activateRetainedPackageSet(
+  key: string,
+  opts: Pick<PackageSetConvergeOptions, "home" | "platform" | "env"> = {},
+): PackageSetConverge | null {
+  const env = opts.env ?? process.env;
+  const home = opts.home ?? homeOf(env);
+  const platform = opts.platform ?? process.platform;
+  const state = readPackageSetState(home);
+  const revision = state.revisions.find((r) => r.key === key) ?? null;
+  if (revision === null) return null;
+
+  // Recorded and gone: the same failure a staged revision has, and the
+  // same answer. Pointing `current` at a directory that is not there
+  // would break the machine in the act of repairing it.
+  if (!existsSync(revision.path)) {
+    const reason = `the retained revision ${formatPackageSetIdentity(revision)} is recorded but its tree is gone`;
+    log.err(`red-skills package set refused (tree): ${reason}`);
+    const writes = recordRefusal(home, state, { failure: "tree", reason });
+    return {
+      changed: writes.length > 0,
+      writes,
+      active: activeIdentity(state),
+      retained: state.revisions,
+      refused: { failure: "tree", reason },
+      staged: identityOf(state.staged),
+      current: redSkillsCurrentLink(home),
+      revisionDir: activeRevision(state)?.path ?? null,
+    };
+  }
+
+  return activate(home, platform, state, revision, () => {}, false);
+}
+
+/**
  * Point the machine at one verified revision, writing only what differs.
  *
  * Every write is recorded and every one of them is conditional. That is

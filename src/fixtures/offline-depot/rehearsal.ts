@@ -49,7 +49,7 @@ import {
   type ObservedTarget,
   type WorkstationLock,
 } from "../../workstation-lock.ts";
-import { fixtureResolver } from "../workstation-lock/releases.ts";
+import { fixtureResolverAt } from "../workstation-lock/releases.ts";
 
 /** The one target Spec #201's first depot provisions. */
 export const UBUNTU = "ubuntu-24.04-x64";
@@ -70,23 +70,36 @@ export const REHEARSAL_SET_COMMIT = "626a28473edeee992fcf6425dedbca84448343fd";
  * the depot verifies bytes, and a rehearsal that carried twenty-five
  * megabytes would verify the same bytes more slowly.
  */
-export const REHEARSAL_SET_ARTIFACTS: Record<string, string> = {
-  "plugin-dev.payload.tgz": "// dev payload\n",
-  "plugin-memory.payload.tgz": "// memory payload\n",
-  "plugin-brain.payload.tgz": "// brain payload\n",
-  "plugin-internal.payload.tgz": "// internal payload\n",
-  "marketplace-manifests.tgz": "// marketplace manifests\n",
-  "build-gemini-extension.mjs": "// gemini extension generator\n",
-  "install-hermes-skills.mjs": "// hermes skills generator\n",
-  "expand-package-set.mjs": "// package set expander\n",
-  "workstation-package-set.mjs": "// workstation package set\n",
-  "opencode-host.generated.tgz": "// opencode host\n",
-  "gemini-extension.tgz": "// gemini extension\n",
-  "zellij-dashboard.tgz": "// zellij dashboard\n",
-  "herdr-plugin.tgz": "// herdr plugin\n",
-  "dev.bundle.min.mjs": "// dev bundle\n",
-  [`vscode-extension-red-skills-${REHEARSAL_SET_VERSION}.vsix`]: "// vsix\n",
-};
+export const REHEARSAL_SET_ARTIFACTS: Record<string, string> = setArtifacts(REHEARSAL_SET_VERSION);
+
+/**
+ * The same table, for one release of the set. PURE.
+ *
+ * A rollback needs two package sets that differ, and the honest way for
+ * two releases of one set to differ is the version they carry: the
+ * extension's `.vsix` is named after it, `tree/package.json` declares it,
+ * and the whole-set digest is taken over both. So a generation is the
+ * version, and everything else about the layout is deliberately the same.
+ */
+export function setArtifacts(version: string): Record<string, string> {
+  return {
+    "plugin-dev.payload.tgz": "// dev payload\n",
+    "plugin-memory.payload.tgz": "// memory payload\n",
+    "plugin-brain.payload.tgz": "// brain payload\n",
+    "plugin-internal.payload.tgz": "// internal payload\n",
+    "marketplace-manifests.tgz": "// marketplace manifests\n",
+    "build-gemini-extension.mjs": "// gemini extension generator\n",
+    "install-hermes-skills.mjs": "// hermes skills generator\n",
+    "expand-package-set.mjs": "// package set expander\n",
+    "workstation-package-set.mjs": "// workstation package set\n",
+    "opencode-host.generated.tgz": "// opencode host\n",
+    "gemini-extension.tgz": "// gemini extension\n",
+    "zellij-dashboard.tgz": "// zellij dashboard\n",
+    "herdr-plugin.tgz": "// herdr plugin\n",
+    "dev.bundle.min.mjs": "// dev bundle\n",
+    [`vscode-extension-red-skills-${version}.vsix`]: `// vsix ${version}\n`,
+  };
+}
 
 /**
  * A verified manifest set at `dest`, in the layout the verifier reads.
@@ -94,14 +107,21 @@ export const REHEARSAL_SET_ARTIFACTS: Record<string, string> = {
  * Manifest, signature bundle, `artifacts/` and the `tree/` that gets
  * activated — the same four things `verifyPackageSet` walks, so the
  * export's "this set verifies here" gate is a real gate.
+ *
+ * `release` names which one: a rollback rehearsal builds two or three of
+ * these and needs them to be genuinely different sets, which they are —
+ * the version reaches the manifest's artifacts, the tree's package.json
+ * and therefore the whole-set digest the identity is taken from.
  */
-export function rehearsalPackageSet(dest: string): string {
+export function rehearsalPackageSet(dest: string, release: SetRelease = {}): string {
+  const version = release.version ?? REHEARSAL_SET_VERSION;
+  const commit = release.commit ?? REHEARSAL_SET_COMMIT;
   mkdirSync(join(dest, "artifacts"), { recursive: true });
-  const declared = Object.entries(REHEARSAL_SET_ARTIFACTS).map(([name, bytes]) => {
+  const declared = Object.entries(setArtifacts(version)).map(([name, bytes]) => {
     writeFileSync(join(dest, "artifacts", name), bytes);
     return { name, size: Buffer.byteLength(bytes), sha256: sha256Hex(bytes) };
   });
-  const manifest = createPackageSetManifest(REHEARSAL_SET_COMMIT, declared);
+  const manifest = createPackageSetManifest(commit, declared);
   writeFileSync(join(dest, SET_MANIFEST_NAME), encodePackageSet(manifest));
   writeFileSync(
     join(dest, SET_BUNDLE_NAME),
@@ -115,12 +135,18 @@ export function rehearsalPackageSet(dest: string): string {
   mkdirSync(join(tree, ".red"), { recursive: true });
   writeFileSync(
     join(tree, "package.json"),
-    `${JSON.stringify({ name: "@reddb-io/red-skills", version: REHEARSAL_SET_VERSION })}\n`,
+    `${JSON.stringify({ name: "@reddb-io/red-skills", version })}\n`,
   );
   writeFileSync(join(tree, "bin", "red-skills-redskilled.mjs"), "// redskilled\n");
   writeFileSync(join(tree, "plugins", "dev", "skills", "SKILL.md"), "# dev\n");
   writeFileSync(join(tree, "scripts", "install-opencode.sh"), "#!/bin/bash\n", { mode: 0o644 });
   return dest;
+}
+
+/** Which release of the set to build. Defaults to the one the depot carries. */
+export interface SetRelease {
+  version?: string;
+  commit?: string;
 }
 
 /** The exact bytes the lock's checksum for one application was taken over. */
@@ -173,14 +199,28 @@ export const rehearsalVerifier: SignatureVerifier = (manifestPath, bundlePath) =
   return { ok: true, by: "red-dev depot rehearsal" };
 };
 
-/** A lock for the Ubuntu target, resolved through the fixture table. */
+/**
+ * A lock for the Ubuntu target, resolved through the fixture table.
+ *
+ * `generation` is how many revisions back to resolve: 0 is the current
+ * table, and anything `FIXTURE_RELEASE_HISTORY` names is the workstation
+ * as it stood before that. Two generations of one target are what makes a
+ * rollback assertable — the versions that moved are named, and the ones
+ * that did not are identical in both locks.
+ */
 export async function rehearsalLock(
   at: string,
   origin: LockOrigin = "resolved",
+  generation = 0,
 ): Promise<WorkstationLock> {
   const target = workstationTarget(UBUNTU);
   if (target === null) throw new Error(`no such target: ${UBUNTU}`);
-  const resolved = await resolveWorkstationLock(target, at, fixtureResolver, origin);
+  const resolved = await resolveWorkstationLock(
+    target,
+    at,
+    fixtureResolverAt(generation),
+    origin,
+  );
   if (!resolved.ok) throw new Error(`resolution refused: ${resolved.reason}`);
   return resolved.lock;
 }

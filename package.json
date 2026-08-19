@@ -14,7 +14,8 @@
     "build": "bun run build:linux && bun run build:windows",
     "build:debug": "bun build src/main.ts --compile --target=bun-linux-x64 --outfile dist/red-dev-debug",
     "smoke": "bun build scripts/tui-smoke.ts --compile --target=bun-linux-x64 --outfile dist/tui-smoke && ./dist/tui-smoke",
-    "e2e:offline-ubuntu24": "bun run scripts/offline-depot-e2e.ts"
+    "e2e:offline-ubuntu24": "bun run scripts/offline-depot-e2e.ts",
+    "e2e:rollback-ubuntu24": "bun run scripts/rollback-e2e.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",

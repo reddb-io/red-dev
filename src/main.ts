@@ -373,6 +373,27 @@ async function cmdDoctor(p: Platform, inv: Invocation): Promise<number> {
     }
   }
 
+  // And what this machine could go back to, which is the one question the
+  // reports above cannot answer between them: which complete revision is
+  // active — the package set and the exact lock, named as one thing —
+  // what a rollback would restore, whether all of it is still on disk,
+  // and how much derived state the retention is holding to keep that
+  // true. An unrestorable rollback target is an error rather than a
+  // warning: the machine still works, and the promise that it can be put
+  // back does not.
+  const { workstationRollbackReport, workstationRollbackRows } = await import(
+    "./workstation-rollback.ts"
+  );
+  for (const row of workstationRollbackRows(workstationRollbackReport(setHome))) {
+    if (row.status === "ok") log.ok(row.detail);
+    else if (row.status === "n/a") log.skip(row.detail);
+    else if (row.status === "warn") log.warn(row.detail);
+    else {
+      log.err(row.detail);
+      setProblems++;
+    }
+  }
+
   // The machine's agent posture, in the one place that already answers
   // "is this machine ready": which host red-dev hands work to, how old
   // each installed host's copy is, and the per-provider allowance detail
