@@ -1147,29 +1147,15 @@ export async function reconcileRedSkills(opts: ReconcileOptions = {}): Promise<R
   return { reconciled: true, reason: `hosts reconciled against ${key}`, identity: active, writes: [stamp] };
 }
 
-/**
- * Acquire, then reconcile: the whole operation, from either entry point.
- *
- * `mise upgrade red-skills` reaches this through the plugin's install
- * script and the tool's postinstall; `red-dev update` calls it
- * directly. Both therefore end on the same active digest, and neither
- * has an acquisition of its own to drift.
+/*
+ * There used to be an `updateRedSkillsPackageSet` here — acquire, then
+ * reconcile, as the whole operation both entry points ran. It is gone,
+ * and deliberately: the whole operation is now four surfaces rather
+ * than two, and src/staged-update.ts is the one place that walks them.
+ * Keeping a second composition of the same two halves beside it would
+ * be exactly the drift the acquisition was consolidated to end — the
+ * two would agree until one of them learned about Workers.
  */
-export async function updateRedSkillsPackageSet(
-  opts: AcquireOptions & Pick<ReconcileOptions, "reconcile"> = {},
-): Promise<{ acquired: Acquisition; reconciliation: Reconciliation }> {
-  const acquired = await acquireRedSkills(opts);
-  announce(acquired);
-
-  const home = opts.home ?? homeOf(opts.env ?? process.env);
-  const reconciliation = await reconcileRedSkills({
-    home,
-    ...(opts.reconcile ? { reconcile: opts.reconcile } : {}),
-    ...(opts.manifestPlatform ? { manifestPlatform: opts.manifestPlatform } : {}),
-    ...(opts.env ? { env: opts.env } : {}),
-  });
-  return { acquired, reconciliation };
-}
 
 /** One line for each outcome, in the voice the rest of a converge speaks. */
 export function announce(a: Acquisition): void {
