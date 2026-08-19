@@ -16,8 +16,7 @@
  * records sit beside them exactly as they did under the old name. Only
  * the root moved. See `2026-08-19-red-skills-under-red` in
  * src/migrations.ts for how a machine provisioned under the old root is
- * brought across, and why `~/.red-skills` is left behind as a symlink
- * rather than removed.
+ * brought across, and why nothing is left behind at `~/.red-skills`.
  *
  * This is red-dev's directory, not mise's. mise keeps the npm payloads
  * it installs under its own `installs/` tree and red-dev composes the
@@ -73,8 +72,6 @@ export interface RootRelocation {
   outcome: "moved" | "kept" | "nothing";
   /** Symlinks whose absolute targets were rewritten from the old root to the new one. */
   relinked: string[];
-  /** Whether `~/.red-skills` now points at the new root. */
-  aliased: boolean;
   /** Records removed because they described the old location. */
   cleared: string[];
 }
@@ -87,8 +84,8 @@ export interface RootRelocation {
  * sets and depots, and a rename either happens or does not — there is
  * no half-copied state to reason about. Where the filesystem refuses
  * (a home split across mounts), the old tree is left exactly where it
- * was and nothing is aliased, so the machine keeps running from the new
- * code's empty root and the next `red-dev update` acquires into it.
+ * was, so the machine keeps running from the new code's empty root and
+ * the next `red-dev update` acquires into it.
  *
  * Three things are absolute paths into the old root and have to be told
  * it moved. `current` and `previous` are symlinks whose targets were
@@ -102,12 +99,15 @@ export interface RootRelocation {
  * red-skills-hosts.ts owns them, compares each against the path red-dev
  * wants, and rewrites the ones that differ.
  *
- * And the old name is left behind as a symlink rather than removed.
- * RedSkills itself falls back to `~/.red-skills` when
- * RED_SKILLS_INSTALL_ROOT is unset, hosts that have not been converged
- * yet still resolve through it, and a shell alias someone wrote last
- * month does too. None of those are red-dev's to break; the alias costs
- * one inode and resolves to the same bytes.
+ * Nothing is left at the old name — no symlink for whatever might still
+ * spell it. The point of the move is that a home has one RedSkills
+ * directory, and an alias is a second entry that looks exactly like the
+ * thing it replaced. Anything red-dev wrote that named the old path is
+ * rewritten by the converge (hosts, launchers); anything a person wired
+ * by hand says so the first time it fails, which is how it should be.
+ * RedSkills' own fallback for RED_SKILLS_INSTALL_ROOT still spells
+ * `~/.red-skills`; that default is upstream's to move, and it is not
+ * read through red-dev's root.
  */
 export function relocateLegacyRedSkillsRoot(
   home: string,
@@ -126,7 +126,7 @@ export function relocateLegacyRedSkillsRoot(
 ): RootRelocation {
   const legacy = legacyRedSkillsRoot(home);
   const root = redSkillsRoot(home);
-  const none: RootRelocation = { outcome: "nothing", relinked: [], aliased: false, cleared: [] };
+  const none: RootRelocation = { outcome: "nothing", relinked: [], cleared: [] };
 
   let legacyStat: nodeFs.Stats;
   try {
@@ -134,8 +134,7 @@ export function relocateLegacyRedSkillsRoot(
   } catch {
     return none;
   }
-  // A symlink at the old name is this migration's own leftover, or a
-  // person's; either way there is no tree there to move.
+  // A symlink at the old name is a person's; there is no tree there to move.
   if (!legacyStat.isDirectory() || legacyStat.isSymbolicLink()) return none;
 
   if (fs.existsSync(root)) {
@@ -195,13 +194,5 @@ export function relocateLegacyRedSkillsRoot(
     cleared.push(stamp);
   }
 
-  let aliased = false;
-  try {
-    fs.symlinkSync(root, legacy, "dir");
-    aliased = true;
-  } catch {
-    // Not having the alias is survivable; having moved is the point.
-  }
-
-  return { outcome: "moved", relinked, aliased, cleared };
+  return { outcome: "moved", relinked, cleared };
 }

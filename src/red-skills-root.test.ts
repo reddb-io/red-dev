@@ -5,9 +5,8 @@
  * The move is pinned on a fake home: the tree is renamed rather than
  * copied, the absolute `current`/`previous` pointers are re-pointed into
  * the new root, the reconcile stamp is cleared so the hosts are wired
- * again at the new path, and the old name is left as a symlink to the
- * new root. A home that already has the new root keeps both untouched,
- * and a home with only the alias has nothing to do.
+ * again at the new path, and nothing is left at the old name. A home
+ * that already has the new root keeps both untouched.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -65,7 +64,7 @@ describe("the root", () => {
 });
 
 describe("relocating the old root", () => {
-  test("renames the tree, re-points the pointers, clears the stamp and leaves an alias", () => {
+  test("renames the tree, re-points the pointers, clears the stamp and leaves nothing behind", () => {
     const home = fakeHome();
     legacyTree(home);
 
@@ -86,14 +85,11 @@ describe("relocating the old root", () => {
     expect(existsSync(join(root, "reconciled.json"))).toBe(false);
     expect(result.cleared).toEqual([join(root, "reconciled.json")]);
 
-    // The old name survives as a symlink, so ~/.red-skills/current still resolves.
-    const legacy = legacyRedSkillsRoot(home);
-    expect(lstatSync(legacy).isSymbolicLink()).toBe(true);
-    expect(result.aliased).toBe(true);
-    expect(realpathSync(join(legacy, "current"))).toBe(realpathSync(redSkillsCurrent(home)));
+    // One RedSkills directory per home: the old name is gone, not aliased.
+    expect(existsSync(legacyRedSkillsRoot(home))).toBe(false);
   });
 
-  test("is a no-op once the alias is in place, and on a home that never had the old root", () => {
+  test("is a no-op a second time, and on a home that never had the old root", () => {
     const home = fakeHome();
     legacyTree(home);
     relocateLegacyRedSkillsRoot(home);
@@ -144,8 +140,7 @@ describe("the legacy retention and the move", () => {
 
     relocateLegacyRedSkillsRoot(home);
 
-    // Moved, the same two are under the new root — once, not again
-    // through the alias the old name became.
+    // Moved, the same two are under the new root.
     const root = redSkillsRoot(home);
     const after = planLegacyRedSkillsCleanup({ home }).map((i) => i.path).sort();
     expect(after).toEqual([join(root, "cache", "v3.17.1.tar.gz"), join(root, "versions", "v3.17.1")].sort());
