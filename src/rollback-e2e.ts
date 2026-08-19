@@ -409,7 +409,7 @@ export async function runUbuntu24RollbackJourney(
     "uninterrupted",
     rolled.workers === 2 && reconciled.every((host) => owed.has(host)),
     rolled.workers === 2
-      ? `${rolled.workers} Worker(s) were counted and left running, and all ${owed.size} reconciled host(s) are owed a restart rather than having been given one`
+      ? `${rolled.workers} Worker(s) were counted and left running, and all ${reconciled.length} reconciled host(s) plus ${owed.size - reconciled.length} companion(s) are owed a restart rather than having been given one`
       : `the rollback reported ${rolled.workers} Worker(s) instead of the 2 that were running`,
   );
   check(
