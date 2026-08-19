@@ -189,8 +189,17 @@ export function convergeRedSkillsMisePlugin(
 }
 
 export interface PluginPhaseOptions extends AcquireOptions {
-  /** The host wiring `reconcile` invokes. Defaults to red-dev's converge. */
-  reconcile?: () => Promise<void> | void;
+  /**
+   * The host wiring `reconcile` invokes, and the narrow path it selects.
+   *
+   * Given, `reconcile` wires the hosts and nothing else. Absent, the
+   * phase runs the whole staged reconciliation — which is what mise's
+   * postinstall wants and what makes it the same operation as `red-dev
+   * update`.
+   */
+  reconcile?: () => Promise<boolean | void> | boolean | void;
+  /** Active Workers on this machine. Defaults to asking the daemon. */
+  workers?: () => Promise<number | null>;
   /** mise's own variables: ASDF_INSTALL_VERSION, ASDF_INSTALL_PATH. */
   env?: NodeJS.ProcessEnv;
   run?: CommandRunner;
@@ -223,16 +232,38 @@ export async function runPluginPhase(
   const run = opts.run ?? systemRunner;
   const url = opts.url ?? REDSKILLS_GIT_URL;
 
+  // The tool-level postinstall, and the second half of the acceptance
+  // criterion the install phase below carries the first half of: `mise
+  // upgrade red-skills` and `red-dev update` reach the same staged
+  // reconciliation, so they advance the same surfaces under the same
+  // Workers rule and end on the same digest. The acquisition is
+  // `installed` here because mise has just performed it — asking the
+  // remote a second time for one upgrade would be the drift this
+  // consolidation exists to prevent.
+  //
+  // An injected `reconcile` keeps the narrow path: it is what the tests
+  // and `red-skills sync` hand in, and it means "wire the hosts, and
+  // nothing else".
   if (phase === "reconcile") {
-    const result = await reconcileRedSkills({
+    if (opts.reconcile) {
+      const result = await reconcileRedSkills({
+        ...(opts.home ? { home: opts.home } : {}),
+        reconcile: opts.reconcile,
+        ...(opts.manifestPlatform ? { manifestPlatform: opts.manifestPlatform } : {}),
+        env,
+      });
+      if (result.reconciled) log.ok(`red-skills: ${result.reason}`);
+      else log.skip(`red-skills: ${result.reason}`);
+      return 0;
+    }
+    const { runStagedUpdate } = await import("./staged-update.ts");
+    const run = await runStagedUpdate({
+      acquisition: "installed",
       ...(opts.home ? { home: opts.home } : {}),
-      ...(opts.reconcile ? { reconcile: opts.reconcile } : {}),
       ...(opts.manifestPlatform ? { manifestPlatform: opts.manifestPlatform } : {}),
       env,
     });
-    if (result.reconciled) log.ok(`red-skills: ${result.reason}`);
-    else log.skip(`red-skills: ${result.reason}`);
-    return 0;
+    return run.code;
   }
 
   if (phase === "list-all" || phase === "latest-stable") {
@@ -280,8 +311,21 @@ export async function runPluginPhase(
     return 1;
   }
 
-  const acquired = await acquireRedSkills({ ...opts, env, run, url, selector });
+  // ADR 0010's Workers rule reaches the mise entry point too. `mise
+  // upgrade red-skills` on a machine with Workers running verifies and
+  // stages the complete revision and leaves `current` where it is; the
+  // postinstall above then reports every other surface as pending, and
+  // the next update that finds the queue drained activates what is
+  // already on disk.
+  const held = await (opts.workers ?? activeWorkers)();
+  const stageOnly = (held ?? 0) > 0;
+  const acquired = await acquireRedSkills({ ...opts, env, run, url, selector, stageOnly });
   announce(acquired);
+  if (stageOnly) {
+    log.skip(
+      `red-skills: ${held} Worker(s) are running — the revision is staged and activated by the next update that finds none`,
+    );
+  }
   // mise records a version only for an install that produced one. A
   // refusal, a release with no package set, and a remote that could not
   // be read are all "this version is not on this machine".
@@ -293,8 +337,13 @@ export async function runPluginPhase(
   // it through `current`. What goes here is the receipt saying which
   // revision this mise version *is* — the identity ADR 0011 defines,
   // rather than a copy of 25 MB that would then have two owners.
+  //
+  // The staged identity first, where there is one: under a running
+  // Worker the machine deliberately stays on its previous revision, and
+  // a receipt naming that one would tell mise it installed the version
+  // it replaced rather than the version it fetched.
   const installPath = env["ASDF_INSTALL_PATH"];
-  if (installPath) writeReceipt(installPath, acquired.active, acquired.commit);
+  if (installPath) writeReceipt(installPath, acquired.staged ?? acquired.active, acquired.commit);
   return 0;
 }
 
@@ -331,6 +380,21 @@ function writeReceipt(
     )}\n`,
     "utf8",
   );
+}
+
+/**
+ * Active Workers, over the daemon's existing socket and never a new one.
+ *
+ * Duplicated from src/staged-update.ts rather than imported, for the
+ * reason the postinstall string is duplicated in mise-config.ts: this
+ * module is what mise's scripts dispatch into, and it must not pull the
+ * whole update walk in to answer one number. Both read the same
+ * document through the same function.
+ */
+async function activeWorkers(): Promise<number | null> {
+  const { readHostInventoryNoStart } = await import("./host-state.ts");
+  const inventory = await readHostInventoryNoStart();
+  return inventory === null ? null : inventory.workers.length;
 }
 
 /** Where a plugin script would look for red-dev, for a report that says so. */

@@ -338,6 +338,23 @@ async function cmdDoctor(p: Platform, inv: Invocation): Promise<number> {
     else log.warn(row.detail);
   }
 
+  // And how the last update across all of them ended. The three reports
+  // above each answer for one surface; this answers for the operation,
+  // which is the only place two facts can be said at all: which surfaces
+  // were held back because a Worker was using the active revision, and
+  // whether a run that failed left this machine between two revisions
+  // rather than on neither.
+  const { stagedUpdateReport, stagedUpdateRows } = await import("./staged-update.ts");
+  for (const row of stagedUpdateRows(stagedUpdateReport(setHome))) {
+    if (row.status === "ok") log.ok(row.detail);
+    else if (row.status === "n/a") log.skip(row.detail);
+    else if (row.status === "warn") log.warn(row.detail);
+    else {
+      log.err(row.detail);
+      setProblems++;
+    }
+  }
+
   // The machine's agent posture, in the one place that already answers
   // "is this machine ready": which host red-dev hands work to, how old
   // each installed host's copy is, and the per-provider allowance detail
@@ -862,15 +879,21 @@ async function cmdUpdate(p: Platform, inv: Invocation): Promise<number> {
     "red-skills": async () => {
       if (inv.dryRun) return;
 
-      // The online acquisition first, and through the same functions the
-      // mise plugin dispatches into — that is what makes `mise upgrade
-      // red-skills` and `red-dev update` reach one active digest instead
-      // of two implementations that agree until they do not. It reports
-      // `unavailable` and changes nothing until red-skills publishes the
-      // complete set (reddb-io/red-skills#3977), so the composed set the
-      // npm entries produce is what the stages below still advance.
-      const { updateRedSkillsPackageSet } = await import("./red-skills-acquire.ts");
-      await updateRedSkillsPackageSet({ manifestPlatform: p });
+      // One staged reconciliation across acquisition, the seven hosts,
+      // the companions and the exact workstation lock — and the same
+      // one `mise upgrade red-skills` reaches through its postinstall.
+      // That is what makes the two entry points end on one active
+      // digest instead of two implementations that agree until they do
+      // not, and it is where ADR 0010's Workers rule is applied: an
+      // update that meets a running Worker stages the complete revision
+      // and leaves this machine on the one that Worker is using.
+      //
+      // Its exit code is deliberately not this stage's. A partial
+      // reconciliation is reported by the converge stage below, which
+      // is the one stage `red-dev update` answers with; a stage that
+      // returned a number here would give the run two verdicts.
+      const { runStagedUpdate } = await import("./staged-update.ts");
+      await runStagedUpdate({ manifestPlatform: p });
 
       const { updateRedSkills } = await import("./agents.ts");
       await updateRedSkills(p);

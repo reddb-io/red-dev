@@ -819,6 +819,15 @@ export interface Acquisition {
   candidate: string | null;
   /** What `~/.red-skills/current` names once this returns. */
   active: PackageSetIdentity | null;
+  /**
+   * The revision verified and staged rather than activated, or null.
+   *
+   * Non-null exactly when a Worker held the activation. `active` still
+   * names what the machine resolves, so a caller writing down "which
+   * revision is this" — mise's install receipt, most of all — can say
+   * the one that was actually acquired instead of the one it replaced.
+   */
+  staged: PackageSetIdentity | null;
   writes: string[];
 }
 
@@ -871,6 +880,7 @@ export async function acquireRedSkills(opts: AcquireOptions = {}): Promise<Acqui
     snapshot: null,
     candidate: null,
     active: activeIdentityOf(home),
+    staged: null,
     writes:
       outcome === "refused" && failure !== null
         ? recordPackageSetRefusal(home, { failure, reason })
@@ -1025,6 +1035,7 @@ export async function acquireRedSkills(opts: AcquireOptions = {}): Promise<Acqui
     snapshot: { path: snapshot.path, created: snapshot.created },
     candidate,
     active: converged.active,
+    staged: converged.staged,
     writes: converged.writes,
   };
 }
@@ -1071,8 +1082,17 @@ export interface Reconciliation {
 
 export interface ReconcileOptions {
   home?: string;
-  /** The host wiring. Defaults to red-dev's own converge over every installed host. */
-  reconcile?: () => Promise<void> | void;
+  /**
+   * The host wiring. Defaults to red-dev's own converge over every
+   * installed host.
+   *
+   * Returning `false` means "this did not fully converge, do not stamp
+   * it". Without that, one blocked host would leave a stamp saying the
+   * machine was reconciled against these bytes, and the retry that is
+   * supposed to fix it would be skipped as already done — the surface
+   * would stay broken until the *next* revision moved.
+   */
+  reconcile?: () => Promise<boolean | void> | boolean | void;
   /** Reconcile even when the stamp already names the active revision. */
   force?: boolean;
   env?: NodeJS.ProcessEnv;
@@ -1115,38 +1135,38 @@ export async function reconcileRedSkills(opts: ReconcileOptions = {}): Promise<R
     (async () => {
       const { convergeRedSkills } = await import("./agents.ts");
       const { detect } = await import("./platform.ts");
-      await convergeRedSkills(opts.manifestPlatform ?? detect());
+      const { reconciliationFailed } = await import("./red-skills-hosts.ts");
+      const { companionReconciliationFailed } = await import("./red-skills-companions.ts");
+      const converged = await convergeRedSkills(opts.manifestPlatform ?? detect());
+      return (
+        !reconciliationFailed(converged.hosts) &&
+        !companionReconciliationFailed(converged.companions)
+      );
     });
-  await reconcile();
+  const converged = await reconcile();
+  if (converged === false) {
+    return {
+      reconciled: true,
+      reason: `hosts reconciled against ${key} with surfaces still to converge`,
+      identity: active,
+      writes: [],
+    };
+  }
 
   mkdirSync(dirname(stamp), { recursive: true });
   writeFileSync(stamp, `${JSON.stringify({ schema: 1, key }, null, 2)}\n`, "utf8");
   return { reconciled: true, reason: `hosts reconciled against ${key}`, identity: active, writes: [stamp] };
 }
 
-/**
- * Acquire, then reconcile: the whole operation, from either entry point.
- *
- * `mise upgrade red-skills` reaches this through the plugin's install
- * script and the tool's postinstall; `red-dev update` calls it
- * directly. Both therefore end on the same active digest, and neither
- * has an acquisition of its own to drift.
+/*
+ * There used to be an `updateRedSkillsPackageSet` here — acquire, then
+ * reconcile, as the whole operation both entry points ran. It is gone,
+ * and deliberately: the whole operation is now four surfaces rather
+ * than two, and src/staged-update.ts is the one place that walks them.
+ * Keeping a second composition of the same two halves beside it would
+ * be exactly the drift the acquisition was consolidated to end — the
+ * two would agree until one of them learned about Workers.
  */
-export async function updateRedSkillsPackageSet(
-  opts: AcquireOptions & Pick<ReconcileOptions, "reconcile"> = {},
-): Promise<{ acquired: Acquisition; reconciliation: Reconciliation }> {
-  const acquired = await acquireRedSkills(opts);
-  announce(acquired);
-
-  const home = opts.home ?? homeOf(opts.env ?? process.env);
-  const reconciliation = await reconcileRedSkills({
-    home,
-    ...(opts.reconcile ? { reconcile: opts.reconcile } : {}),
-    ...(opts.manifestPlatform ? { manifestPlatform: opts.manifestPlatform } : {}),
-    ...(opts.env ? { env: opts.env } : {}),
-  });
-  return { acquired, reconciliation };
-}
 
 /** One line for each outcome, in the voice the rest of a converge speaks. */
 export function announce(a: Acquisition): void {

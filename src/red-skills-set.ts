@@ -938,9 +938,27 @@ export interface PackageSetState {
   /** Newest first, capped at REDSKILLS_SET_RETENTION. */
   revisions: PackageSetRevision[];
   refused: PackageSetRefusal | null;
+  /**
+   * A verified revision on disk that `current` does not name yet.
+   *
+   * ADR 0010's Workers rule: an update that arrives while Workers are
+   * running stages the complete revision and leaves the machine on the
+   * one it is working against. Recorded rather than kept in the process
+   * that staged it, because the activation happens in a later run —
+   * after the Worker finishes — and a staged revision nothing wrote
+   * down would have to be acquired a second time to be activated, which
+   * is the reacquisition the criterion forbids.
+   */
+  staged: PackageSetRevision | null;
 }
 
-const EMPTY_STATE: PackageSetState = { schema: 1, active: null, revisions: [], refused: null };
+const EMPTY_STATE: PackageSetState = {
+  schema: 1,
+  active: null,
+  revisions: [],
+  refused: null,
+  staged: null,
+};
 
 /** `~/.red-skills/package-set.json` — what the machine believes it has. */
 export function packageSetStatePath(home: string): string {
@@ -965,6 +983,10 @@ export function readPackageSetState(home: string): PackageSetState {
       active: typeof parsed.active === "string" ? parsed.active : null,
       revisions: parsed.revisions,
       refused: parsed.refused ?? null,
+      // Absent in every state file written before staging existed, and
+      // that is the same fact as "nothing is staged" rather than a
+      // reason to discard a record this build can otherwise read.
+      staged: parsed.staged ?? null,
     };
   } catch {
     return EMPTY_STATE;
@@ -1076,6 +1098,15 @@ export interface PackageSetConverge {
   retained: PackageSetRevision[];
   /** Why the candidate was refused, or null when it was not. */
   refused: PackageSetRefusal | null;
+  /**
+   * The revision staged and awaiting activation, or null.
+   *
+   * Non-null exactly when this converge verified a revision it was told
+   * not to activate. `active` still names what the machine resolves, so
+   * the two together are the whole answer to "what is this machine on,
+   * and what is it about to be on".
+   */
+  staged: PackageSetIdentity | null;
   current: string;
   /** The immutable directory `current` resolves to, or null. */
   revisionDir: string | null;
@@ -1107,6 +1138,7 @@ export function convergeRedSkillsPackageSet(
     active: activeIdentity(state),
     retained: state.revisions,
     refused: state.refused,
+    staged: identityOf(state.staged),
     current,
     revisionDir: activeRevision(state)?.path ?? null,
   });
@@ -1236,6 +1268,51 @@ export function convergeSetAfterMise(
 }
 
 /**
+ * Activate the revision a previous run staged, acquiring nothing.
+ *
+ * The other half of ADR 0010's Workers rule. The staged revision was
+ * verified when it was staged — the signature was checked, the tree was
+ * copied under its immutable name — and none of that is worth doing
+ * twice. So this reads the record, confirms the directory is still
+ * there, and performs the one step staging left out: moving `current`.
+ *
+ * `null` when nothing is staged, which is the ordinary case and not a
+ * failure: a machine with no pending revision is a machine that is
+ * already on the one it should be on.
+ */
+export function activateStagedPackageSet(
+  opts: Pick<PackageSetConvergeOptions, "home" | "platform" | "env"> = {},
+): PackageSetConverge | null {
+  const env = opts.env ?? process.env;
+  const home = opts.home ?? homeOf(env);
+  const platform = opts.platform ?? process.platform;
+  const state = readPackageSetState(home);
+  const staged = state.staged;
+  if (staged === null) return null;
+
+  // The directory is the revision. One that is gone — retired by a
+  // converge that overtook it, removed by hand — cannot be activated,
+  // and saying so is better than pointing `current` at nothing.
+  if (!existsSync(staged.path)) {
+    const reason = `the staged revision ${formatPackageSetIdentity(staged)} is recorded but its tree is gone`;
+    log.err(`red-skills package set refused (tree): ${reason}`);
+    const writes = writeState(home, { ...state, staged: null, refused: { failure: "tree", reason } });
+    return {
+      changed: writes.length > 0,
+      writes,
+      active: activeIdentity(state),
+      retained: state.revisions,
+      refused: { failure: "tree", reason },
+      staged: null,
+      current: redSkillsCurrentLink(home),
+      revisionDir: activeRevision(state)?.path ?? null,
+    };
+  }
+
+  return activate(home, platform, state, staged, () => {}, false);
+}
+
+/**
  * Point the machine at one verified revision, writing only what differs.
  *
  * Every write is recorded and every one of them is conditional. That is
@@ -1272,13 +1349,30 @@ function activate(
   if (stageOnly) {
     // Staged, and reported as such: the directory is there, the state
     // file does not name it active, and `current` was not touched.
-    log.ok(`red-skills package set ${formatPackageSetIdentity(revision)} staged at ${revision.path}`);
+    //
+    // The one thing that *is* recorded is which revision was staged.
+    // Activation happens in a later process — the run that finds the
+    // Workers finished — and it must not have to acquire the revision
+    // again to perform it. Written through the same conditional write
+    // as everything else, so staging the revision that is already
+    // staged is free.
+    // A revision that is already active is not staged: the machine is
+    // on it, and recording it as pending would make doctor promise an
+    // activation that has nothing to activate.
+    const pending = revision.key === state.active ? null : { ...revision };
+    log.ok(
+      pending === null
+        ? `red-skills package set ${formatPackageSetIdentity(revision)} is already active`
+        : `red-skills package set ${formatPackageSetIdentity(revision)} staged at ${revision.path}`,
+    );
+    writes.push(...writeState(home, { ...state, staged: pending }));
     return {
       changed: writes.length > 0,
       writes,
       active: activeIdentity(state),
       retained: state.revisions,
       refused: state.refused,
+      staged: identityOf(pending),
       current,
       revisionDir: activeRevision(state)?.path ?? null,
     };
@@ -1294,6 +1388,7 @@ function activate(
         active: activeIdentity(state),
         retained: state.revisions,
         refused: state.refused,
+        staged: identityOf(state.staged),
         current,
         revisionDir: null,
       };
@@ -1312,7 +1407,16 @@ function activate(
     if (linkDirectory(rollback.path, previous, platform)) writes.push(previous);
   }
 
-  const desired: PackageSetState = { schema: 1, active: revision.key, revisions: retained, refused: null };
+  // `staged: null`, always. Whatever was pending is either the revision
+  // just activated or one this activation has overtaken, and in both
+  // cases there is no longer an activation waiting on a Worker.
+  const desired: PackageSetState = {
+    schema: 1,
+    active: revision.key,
+    revisions: retained,
+    refused: null,
+    staged: null,
+  };
   writes.push(...writeState(home, desired));
   writes.push(...retire(home, retained));
 
@@ -1328,9 +1432,17 @@ function activate(
     active: { version: revision.version, digest: revision.digest, sourceCommit: revision.sourceCommit },
     retained,
     refused: null,
+    staged: null,
     current,
     revisionDir: revision.path,
   };
+}
+
+/** The identity of a recorded revision, or null. PURE. */
+function identityOf(revision: PackageSetRevision | null): PackageSetIdentity | null {
+  return revision === null
+    ? null
+    : { version: revision.version, digest: revision.digest, sourceCommit: revision.sourceCommit };
 }
 
 /** Write the state file, if it differs. Returns the paths written. */
@@ -1422,6 +1534,16 @@ export interface SetDoctorReport {
     addressable: boolean;
   })[];
   refused: PackageSetRefusal | null;
+  /**
+   * A complete revision on disk that `current` does not name yet.
+   *
+   * Non-null is the whole visible half of the Workers rule: the update
+   * ran, the revision verified, and the machine deliberately stayed
+   * where it was. `addressable` is false when the tree behind the
+   * record is gone, which is the one way a pending activation can
+   * become a thing that will never happen.
+   */
+  staged: (PackageSetRevision & { addressable: boolean }) | null;
 }
 
 /**
@@ -1449,6 +1571,7 @@ export function redSkillsSetReport(home: string): SetDoctorReport {
       : null,
     retained: state.revisions.map((r) => ({ ...r, addressable: existsSync(r.path) })),
     refused: state.refused,
+    staged: state.staged ? { ...state.staged, addressable: existsSync(state.staged.path) } : null,
   };
 }
 
@@ -1492,6 +1615,18 @@ export function redSkillsSetRows(report: SetDoctorReport): SetDoctorRow[] {
           : `rollback revision ${formatPackageSetIdentity(rollback)} is recorded but gone`,
       });
     }
+  }
+  if (report.staged) {
+    // A warning rather than an error: nothing is wrong with a machine
+    // that held an activation back, but "staged" is not "installed" and
+    // a report that said `ok` would read as the latter.
+    rows.push({
+      status: report.staged.addressable ? "warn" : "err",
+      detail: report.staged.addressable
+        ? `${formatPackageSetIdentity(report.staged)} is staged and pending — ` +
+          "activated by the next converge that finds no Worker running"
+        : `staged revision ${formatPackageSetIdentity(report.staged)} is recorded but its tree is gone`,
+    });
   }
   if (report.refused) {
     rows.push({

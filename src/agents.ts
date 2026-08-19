@@ -25,6 +25,8 @@ import {
 import { log, RedError } from "./log.ts";
 import { tlsTrustFailure, unattendedEnvironment } from "./unattended.ts";
 import type { Platform } from "./platform.ts";
+import type { CompanionOutcome } from "./red-skills-companions.ts";
+import type { HostOutcome } from "./red-skills-hosts.ts";
 
 export interface AgentSpec {
   key: string;
@@ -878,18 +880,25 @@ export async function unwiredSkillHosts(): Promise<SkillHost[]> {
  * Skipped loudly with no host installed: red-skills configures agents,
  * and with no agent to configure it has nothing to do.
  */
-export async function convergeRedSkills(p: Platform): Promise<void> {
+export interface RedSkillsConverge {
+  /** One outcome per host in table order, including the ones left alone. */
+  hosts: HostOutcome[];
+  /** The same, per companion. */
+  companions: CompanionOutcome[];
+}
+
+export async function convergeRedSkills(p: Platform): Promise<RedSkillsConverge> {
   // The companions first, and deliberately above the guard below: the
   // runtimes, the daemon, herdr, the editor extension and zellij's
   // dashboard are RedSkills on this workstation whether or not a coding
   // agent is installed on it, and gating them on one would leave a
   // machine with an editor and no coder holding none of them.
-  await convergeRedSkillsCompanions(p);
+  const companions = await convergeRedSkillsCompanions(p);
 
   const present = SKILL_HOSTS.filter((h) => commandPath(h.cmd));
   if (present.length === 0) {
     log.skip("red-skills: no coding agent installed to configure");
-    return;
+    return { hosts: [], companions };
   }
 
   // Ahead of every early return under it. red-dev owns this file, so it
@@ -960,6 +969,11 @@ export async function convergeRedSkills(p: Platform): Promise<void> {
   for (const h of hosts) {
     for (const gap of h.missing ?? []) log.skip(`${h.host}: ${gap}`);
   }
+
+  // Both halves, to whoever asked. The converge is what observed them,
+  // and a caller that has to re-probe to learn what just happened is a
+  // caller that can be told something different from what was done.
+  return { hosts, companions };
 }
 
 /**
@@ -977,7 +991,7 @@ export async function convergeRedSkills(p: Platform): Promise<void> {
  * failure; one that refused is, and is said out loud without taking the
  * artifact the machine was already using with it.
  */
-export async function convergeRedSkillsCompanions(p: Platform): Promise<void> {
+export async function convergeRedSkillsCompanions(p: Platform): Promise<CompanionOutcome[]> {
   const { reconcileCompanions, companionReconciliationFailed } = await import(
     "./red-skills-companions.ts"
   );
@@ -987,4 +1001,5 @@ export async function convergeRedSkillsCompanions(p: Platform): Promise<void> {
     log.warn(`red-skills: companions not converged: ${stuck.map((c) => c.companion).join(", ")}`);
     for (const c of stuck) log.plain(`       ${c.companion}: ${c.reason ?? "no reason given"}`);
   }
+  return companions;
 }

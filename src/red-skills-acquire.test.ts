@@ -37,6 +37,7 @@ import { sha256Hex } from "./checksum.ts";
 import { captureTo } from "./log.ts";
 import {
   acquireRedSkills,
+  announce,
   compareVersions,
   directoryAssetProvider,
   ensureMirror,
@@ -55,15 +56,20 @@ import {
   redSkillsSnapshotDir,
   resolveRevision,
   selectorLabel,
-  updateRedSkillsPackageSet,
+  type Acquisition,
+  type AcquireOptions,
   type AssetProvider,
   type CommandRunner,
+  type Reconciliation,
+  type ReconcileOptions,
   type RemoteRevision,
 } from "./red-skills-acquire.ts";
 import { runPluginPhase } from "./red-skills-mise-plugin.ts";
+import { runStagedUpdate } from "./staged-update.ts";
 import {
   createPackageSetManifest,
   encodePackageSet,
+  activateStagedPackageSet,
   readPackageSetState,
   redSkillsCurrentLink,
   SET_BUNDLE_NAME,
@@ -646,14 +652,14 @@ describe("reconciliation runs once per revision that moved", () => {
     const reconcile = () => void reconciled++;
 
     const first = await quiet(() =>
-      updateRedSkillsPackageSet({ ...acquireArgs(home, git, assets), reconcile }),
+      acquireAndReconcile({ ...acquireArgs(home, git, assets), reconcile }),
     );
     expect(first.acquired.outcome).toBe("acquired");
     expect(first.reconciliation.reconciled).toBe(true);
     expect(reconciled).toBe(1);
 
     const second = await quiet(() =>
-      updateRedSkillsPackageSet({ ...acquireArgs(home, git, assets), reconcile }),
+      acquireAndReconcile({ ...acquireArgs(home, git, assets), reconcile }),
     );
     expect(second.acquired.outcome).toBe("current");
     expect(second.acquired.writes).toEqual([]);
@@ -662,7 +668,7 @@ describe("reconciliation runs once per revision that moved", () => {
     expect(reconciled).toBe(1);
 
     const moved = await quiet(() =>
-      updateRedSkillsPackageSet({ ...acquireArgs(home, git, assets), selector: "next", reconcile }),
+      acquireAndReconcile({ ...acquireArgs(home, git, assets), selector: "next", reconcile }),
     );
     expect(moved.acquired.outcome).toBe("acquired");
     expect(reconciled).toBe(2);
@@ -672,9 +678,9 @@ describe("reconciliation runs once per revision that moved", () => {
     const home = fakeHome();
     const git = fakeGit(RELEASES);
     const assets = assetsFor({ [COMMIT_B]: assetsDir(COMMIT_B) });
-    await quiet(() => updateRedSkillsPackageSet({ ...acquireArgs(home, git, assets), reconcile: () => {} }));
+    await quiet(() => acquireAndReconcile({ ...acquireArgs(home, git, assets), reconcile: () => {} }));
     const stamp = readFileSync(reconciledStampPath(home), "utf8");
-    await quiet(() => updateRedSkillsPackageSet({ ...acquireArgs(home, git, assets), reconcile: () => {} }));
+    await quiet(() => acquireAndReconcile({ ...acquireArgs(home, git, assets), reconcile: () => {} }));
     expect(readFileSync(reconciledStampPath(home), "utf8")).toBe(stamp);
     expect(stamp).not.toContain("at");
   });
@@ -694,6 +700,7 @@ describe("both entry points reach the same active digest", () => {
     const viaUpdate = fakeHome();
     const assets = { [COMMIT_B]: assetsDir(COMMIT_B) };
     let reconciled = 0;
+    const idle = async () => 0;
 
     const install = fakeGit(RELEASES);
     const installPath = join(viaPlugin, "mise-install");
@@ -706,6 +713,7 @@ describe("both entry points reach the same active digest", () => {
         plugins: ["dev"],
         platform: "linux",
         url: "https://example.invalid/red-skills.git",
+        workers: idle,
         env: { HOME: viaPlugin, ASDF_INSTALL_VERSION: "stable", ASDF_INSTALL_PATH: installPath },
       }),
     );
@@ -718,11 +726,21 @@ describe("both entry points reach the same active digest", () => {
       }),
     );
 
+    // The other entry point, through the state machine `red-dev update`
+    // runs: same acquisition, same surfaces, same Workers rule.
     const update = fakeGit(RELEASES);
     await quiet(() =>
-      updateRedSkillsPackageSet({
-        ...acquireArgs(viaUpdate, update, assetsFor(assets)),
-        reconcile: () => void reconciled++,
+      runStagedUpdate({
+        home: viaUpdate,
+        env: { HOME: viaUpdate },
+        workers: idle,
+        acquire: (stageOnly) =>
+          acquireRedSkills({ ...acquireArgs(viaUpdate, update, assetsFor(assets)), stageOnly }),
+        converge: async () => {
+          reconciled++;
+          return { hosts: [], companions: [] };
+        },
+        lock: async () => ({ ok: false, present: false, reason: "no workstation lock" }),
       }),
     );
 
@@ -738,6 +756,57 @@ describe("both entry points reach the same active digest", () => {
     const receipt = JSON.parse(readFileSync(join(installPath, "package-set.json"), "utf8"));
     expect(receipt.sourceCommit).toBe(COMMIT_B);
     expect(receipt.digest).toBe(left.revisions[0]?.digest as string);
+  });
+
+  test("mise's own upgrade stages rather than activates while a Worker runs", async () => {
+    // The Workers rule has to hold at the entry point a person did not
+    // type. `mise upgrade red-skills` on a busy machine verifies the
+    // complete revision and leaves `current` where it is.
+    const home = fakeHome();
+    const git = fakeGit(RELEASES);
+    const code = await quiet(() =>
+      runPluginPhase("install", {
+        home,
+        run: git.run,
+        assets: assetsFor({ [COMMIT_B]: assetsDir(COMMIT_B) }),
+        verifier: accept,
+        plugins: ["dev"],
+        platform: "linux",
+        url: "https://example.invalid/red-skills.git",
+        workers: async () => 2,
+        env: { HOME: home, ASDF_INSTALL_VERSION: "stable" },
+      }),
+    );
+    expect(code).toBe(0);
+    const state = readPackageSetState(home);
+    expect(state.active).toBeNull();
+    expect(state.staged?.sourceCommit).toBe(COMMIT_B);
+
+    // mise's receipt names the revision that was fetched, not the one
+    // the machine is still resolving.
+    const installPath = join(home, "mise-install");
+    await quiet(() =>
+      runPluginPhase("install", {
+        home,
+        run: git.run,
+        assets: assetsFor({ [COMMIT_B]: assetsDir(COMMIT_B) }),
+        verifier: accept,
+        plugins: ["dev"],
+        platform: "linux",
+        url: "https://example.invalid/red-skills.git",
+        workers: async () => 2,
+        env: { HOME: home, ASDF_INSTALL_VERSION: "stable", ASDF_INSTALL_PATH: installPath },
+      }),
+    );
+    const receipt = JSON.parse(readFileSync(join(installPath, "package-set.json"), "utf8"));
+    expect(receipt.sourceCommit).toBe(COMMIT_B);
+    expect(receipt.digest).toBe(state.staged?.digest as string);
+
+    // And the run that finds the queue drained activates it, acquiring
+    // nothing: the git fake would answer, and it is never asked.
+    const activated = activateStagedPackageSet({ home, platform: "linux", env: { HOME: home } })!;
+    expect(activated.active?.sourceCommit).toBe(COMMIT_B);
+    expect(readPackageSetState(home).active).toBe(state.staged?.key as string);
   });
 
   test("the plugin lists the channels beside the versions, and answers latest-stable", async () => {
@@ -853,6 +922,30 @@ describe("the release assets, over a fake GitHub", () => {
 });
 
 /** The shared arguments of an acquisition, for the tests that spread them. */
+/**
+ * Acquire, then reconcile — the two halves in the order the staged
+ * update walks them.
+ *
+ * A helper here rather than a function in the module, because the
+ * composition itself moved: src/staged-update.ts walks four surfaces
+ * now, and a second acquire-then-reconcile pair beside it would be free
+ * to drift from the one that runs. What is worth pinning is that the
+ * two halves still compose — which is what these tests do.
+ */
+async function acquireAndReconcile(
+  opts: AcquireOptions & { reconcile?: ReconcileOptions["reconcile"] },
+): Promise<{ acquired: Acquisition; reconciliation: Reconciliation }> {
+  const acquired = await acquireRedSkills(opts);
+  announce(acquired);
+  const home = opts.home ?? "";
+  const reconciliation = await reconcileRedSkills({
+    home,
+    ...(opts.reconcile ? { reconcile: opts.reconcile } : {}),
+    ...(opts.env ? { env: opts.env } : {}),
+  });
+  return { acquired, reconciliation };
+}
+
 function acquireArgs(home: string, git: ReturnType<typeof fakeGit>, assets: AssetProvider) {
   return {
     home,
