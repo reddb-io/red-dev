@@ -83,7 +83,7 @@
  * list written at the time rather than a guess made afterwards.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 
 import { log } from "./log.ts";
@@ -767,11 +767,26 @@ async function geminiCheck(ctx: AdapterContext, desired: HostPlan): Promise<Host
  * Hermes, which has skills and nothing else.
  *
  * The skills-only fallback Spec #201 names: no marketplace, no extension
- * manifest, no MCP surface to project into, so the adapter writes the
- * activated plugin's skills into a directory of its own under the host's
- * skills path and stops there. Less than the other six get, and saying so
- * in the record is the point — a mode of `skills` is how doctor reports a
- * host that is genuinely converged and genuinely has less.
+ * manifest, no MCP surface, no hook runner and no agent loader, so the
+ * adapter writes the activated plugin's skills into a directory of its own
+ * under the host's skills path and stops there. Less than the other six
+ * get, and saying so is the point — a mode of `skills` and three
+ * `unsupported` capabilities are how doctor reports a host that is
+ * genuinely converged and genuinely has less.
+ *
+ * A skill is a directory rather than a file, and the whole of it is what
+ * makes it work: the references a skill cites, the scripts it runs, the
+ * templates it renders. So the projection is the tree, verification is
+ * every file of that tree read back, and the plan stands down before it
+ * writes anything when the set carries a skill whose own payload does not
+ * resolve — a half-composed set installs nothing here rather than a skill
+ * Hermes loads and then fails partway through.
+ *
+ * What it cannot take is reported and never blocks. A set that ships hooks,
+ * MCP servers or agent definitions is not a broken set for this host and
+ * does not make its skills any less installed: those capabilities are named
+ * as `unsupported` in the outcome, in the record, in doctor and in the page
+ * Hermes itself reads, and the skills are verified on their own terms.
  */
 const hermes: HostAdapter = {
   name: "hermes",
@@ -779,6 +794,8 @@ const hermes: HostAdapter = {
   plan: (ctx) => {
     const script = generator(ctx.source, "install-hermes.sh");
     if (existsSync(script)) {
+      // The day RedSkills ships one, it wins, for the reason Gemini's does:
+      // a generator lives beside the skills it renders, and this does not.
       return plan({
         mode: "generator",
         steps: [must(script, "--source-dir", ctx.source, "--user")],
@@ -790,18 +807,205 @@ const hermes: HostAdapter = {
     if (skills.length === 0) {
       return plan({ mode: "skills", blocked: "the package set carries no skills to project" });
     }
-    const dir = join(ctx.home, ".hermes", "skills", MARKETPLACE);
+
+    // Before a byte is written: a skill missing the file it tells the model
+    // to read is a skill that fails in the middle of somebody's session,
+    // and a home holding half of one is worse than a host left unwired.
+    const dangling = danglingAsset(skills);
+    if (dangling !== undefined) {
+      return plan({
+        mode: "skills",
+        blocked: `the ${dangling.what} names ${dangling.path}, which the package set does not carry`,
+      });
+    }
+
+    const dir = hermesSkillsDir(ctx);
+    const capabilities = hermesCapabilities(ctx);
     return plan({
       mode: "skills",
+      // The one file red-dev writes rather than copies: what this host has
+      // and, as importantly, what it does not. A model told it has skills
+      // and nothing else stops waiting for a hook that will never fire.
+      writes: [{ path: join(dir, "REDSKILLS.md"), bytes: hermesContext(ctx, skills, capabilities) }],
       copies: skills.map((skill) => ({ from: skill.path, to: join(dir, skill.name) })),
+      // The directory itself, not only what is in it: red-dev made it, so
+      // removing RedSkills has to leave `~/.hermes/skills` the way it found
+      // it rather than with our empty shell still sitting in it.
       expect: [{ kind: "path", path: dir }],
+      capabilities,
     });
   },
+  check: (ctx, desired) => hermesCheck(ctx, desired),
   remove: (ctx) => {
     const script = generator(ctx.source, "install-hermes.sh");
     return existsSync(script) ? [must(script, "--uninstall", "--user")] : [];
   },
 };
+
+/** The directory red-dev owns outright under Hermes's skills path. */
+function hermesSkillsDir(ctx: AdapterContext): string {
+  return join(ctx.home, ".hermes", "skills", MARKETPLACE);
+}
+
+/**
+ * What the set carries, and what a skills-only host does with each of it.
+ *
+ * Three of the four are the same shape — carried by the set, refused by the
+ * host — and the distinction that matters in every one of them is between
+ * a capability this host cannot be given and one nobody was given, because
+ * only the second is fixed by shipping a better set.
+ */
+function hermesCapabilities(ctx: AdapterContext): HostCapability[] {
+  return [
+    { name: "skills", state: "projected" },
+    beyondHermes(
+      "mcp",
+      Object.keys(declaredMcp(ctx)).length,
+      "Hermes starts no MCP server of its own",
+      "the package set declares no MCP server",
+    ),
+    beyondHermes(
+      "hooks",
+      ctx.plugins.flatMap((p) => pluginHooks(pluginDir(ctx, p))).length,
+      "Hermes runs no hook of its own",
+      "the package set declares no hook",
+    ),
+    beyondHermes(
+      "agents",
+      setAgents(ctx).length,
+      "Hermes loads no agent of its own",
+      "the package set carries no agent",
+    ),
+  ];
+}
+
+/** One capability this host cannot take: unsupported if carried, absent if not. */
+function beyondHermes(name: string, carried: number, cannot: string, none: string): HostCapability {
+  if (carried === 0) return { name, state: "absent", reason: none };
+  const what = carried === 1 ? "the one the set carries is" : `the ${carried} the set carries are`;
+  return { name, state: "unsupported", reason: `${cannot}, so ${what} not projected` };
+}
+
+/** Every agent definition the activated plugins carry, in a stable order. */
+function setAgents(ctx: AdapterContext): string[] {
+  const out: string[] = [];
+  for (const plugin of ctx.plugins) {
+    for (const name of listing(join(pluginDir(ctx, plugin), "agents"))) {
+      if (name.endsWith(".md")) out.push(`${plugin}/${name}`);
+    }
+  }
+  return out.sort();
+}
+
+/**
+ * Every file one skill carries, relative to it, in a stable order.
+ *
+ * A skill is its whole directory: `SKILL.md` is the entry point and the
+ * references, scripts and templates beside it are what the entry point
+ * sends a model to. Listing them is how a projection can be checked for
+ * being complete rather than for having started.
+ *
+ * A link with nothing behind it is listed rather than followed. It is a
+ * file as far as the copy is concerned — it arrives on the machine, still
+ * pointing at nothing — and that is exactly the thing worth catching.
+ */
+function carriedAssets(root: string, prefix = ""): string[] {
+  const out: string[] = [];
+  for (const name of listing(root)) {
+    const path = join(root, name);
+    const relative = prefix === "" ? name : `${prefix}/${name}`;
+    if (existsSync(path) && statSync(path).isDirectory()) {
+      out.push(...carriedAssets(path, relative));
+      continue;
+    }
+    out.push(relative);
+  }
+  return out;
+}
+
+/** The first file an activated skill carries that resolves to nothing. */
+function danglingAsset(skills: readonly SetSkill[]): DeclaredPath | undefined {
+  for (const skill of skills) {
+    for (const asset of carriedAssets(skill.path)) {
+      const path = join(skill.path, asset);
+      if (!existsSync(path)) return { what: `${skill.name} skill`, path };
+    }
+  }
+  return undefined;
+}
+
+/**
+ * What Hermes has, read back the way Hermes reads it.
+ *
+ * Nothing was spawned, so there is no exit code to believe. What can be
+ * wrong is everything between the plan and the load: a copy that ran out
+ * of disk partway through a tree, a skill an operator deleted out of the
+ * projected directory, a reference the set carries that never arrived.
+ * Each of those is a skill Hermes lists and cannot complete, and each is a
+ * reason to reconcile rather than a reason to record — which is also what
+ * a skipped converge asks, so a projection that lost a file stops being
+ * current the moment it does.
+ *
+ * A generator in the tree answers for its own tree, so this stands down
+ * for it: its install manifest is what verification reads, generically.
+ */
+async function hermesCheck(ctx: AdapterContext, desired: HostPlan): Promise<HostCheck> {
+  if (desired.mode !== "skills") return { ok: true, witness: "" };
+
+  const dir = hermesSkillsDir(ctx);
+  const index = join(dir, "REDSKILLS.md");
+  if (!existsSync(index)) return { ok: false, reason: `${index} is not there` };
+
+  const projected: string[] = [];
+  for (const skill of setSkills(ctx)) {
+    const into = join(dir, skill.name);
+    const entry = join(into, "SKILL.md");
+    if (!existsSync(entry)) return { ok: false, reason: `${entry} is not there` };
+    for (const asset of carriedAssets(skill.path)) {
+      const path = join(into, asset);
+      if (!existsSync(path)) {
+        return { ok: false, reason: `${path} is not there, and the ${skill.name} skill carries it` };
+      }
+    }
+    projected.push(skill.name);
+  }
+
+  return { ok: true, witness: JSON.stringify({ skills: projected }) };
+}
+
+/**
+ * The page Hermes reads beside the skills: the set, and this host's limits.
+ *
+ * The limits are the record's own sentences rather than a second wording of
+ * them, because a host describing itself one way to a person and another
+ * way to the model reading its skills path is two answers to one question.
+ */
+function hermesContext(
+  ctx: AdapterContext,
+  skills: readonly SetSkill[],
+  capabilities: readonly HostCapability[],
+): string {
+  const limits = missingCapabilities(capabilities);
+  const lines = [
+    `# RedSkills ${ctx.setVersion}`,
+    "",
+    `Projected by red-dev from ${ctx.current}. Do not edit: this file is`,
+    "rewritten whenever the package set moves.",
+    "",
+    "## Skills",
+    "",
+    ...skills.map((skill) =>
+      skill.description ? `- **${skill.name}** — ${skill.description}` : `- **${skill.name}**`
+    ),
+    "",
+    "## What this host does not have",
+    "",
+    ...(limits.length > 0
+      ? limits.map((limit) => `- ${limit}`)
+      : ["Everything the package set carries reached this host."]),
+  ];
+  return `${lines.join("\n")}\n`;
+}
 
 /**
  * What Gemini reads when it loads the extension: the set, as one page.
