@@ -354,7 +354,7 @@ return {}
   },
   {
     id: "2026-08-16-red-skills-legacy-retention",
-    describe: "clear the RedSkills state the old install mode left behind",
+    describe: "adopt the RedSkills state the old install mode left behind",
     /**
      * The second half of handing RedSkills to mise, and the half mise
      * cannot do.
@@ -362,45 +362,49 @@ return {}
      * `mise prune` now runs at the end of every update, and it collects
      * the versions it installed. What it will never look at is the
      * shape the curled installer produced — extracted trees under
-     * ~/.red-skills/versions, the tarballs they were unpacked from, and
-     * the copy each agent host kept of every plugin version it has ever
-     * carried. Measured on one developer machine: about 1.16 GB, none
-     * of it collected by anything, because the only thing that could
-     * have was the same install script.
+     * ~/.red-skills/versions, the tarballs they were unpacked from, the
+     * Git-sourced marketplaces, the generated OpenCode/RedCode and pi
+     * surfaces, and the copy each agent host kept of every plugin
+     * version it has ever carried. Measured on one developer machine:
+     * about 1.16 GB, none of it collected by anything, because the only
+     * thing that could have was the same install script.
      *
-     * This removes, which the rule at the top of this file says a
-     * migration must not — the same exception the release-binary
-     * handover above pays for, and drawn as narrowly. Everything it
-     * takes is derived: a published artifact extracted a second time, a
-     * tarball already unpacked, a plugin copy the host rebuilds on
-     * demand. What anything resolves through is protected by name in
-     * red-skills-retention.ts rather than by not being reached, and the
-     * plan is empty on a machine that has nothing left over — which is
-     * what makes a second run a no-op instead of a second deletion.
+     * This used to remove all of it here, ungated, in the same pass
+     * that planned it — which on a machine where the package set had
+     * not landed took the only RedSkills there was. ADR 0010 draws the
+     * line the other way: adopt and back up first, and remove obsolete
+     * ownership **only after the new source and every managed surface
+     * verify**. So the removal is no longer this migration's; the
+     * gated adoption in src/red-skills-adopt.ts owns it, and the
+     * migration is what asks it to run.
+     *
+     * Still safe under the rule at the top of this file for the reason
+     * it always was — everything it can take is derived state, and what
+     * anything resolves through is protected by name — and now safe for
+     * a second reason: on a machine that has not converged, the gate
+     * refuses and nothing is removed at all.
      */
     applies: async (p) => {
       void p;
-      const { planLegacyRedSkillsCleanup } = await import("./red-skills-retention.ts");
-      return planLegacyRedSkillsCleanup().length > 0;
+      const { inventoryLegacyWorkstation } = await import("./red-skills-adopt.ts");
+      return (await inventoryLegacyWorkstation()).items.length > 0;
     },
     run: async (p) => {
       void p;
-      const { clearLegacyRedSkills } = await import("./red-skills-retention.ts");
+      const { adoptLegacyWorkstation, announceAdoption } = await import("./red-skills-adopt.ts");
       const { formatBytes } = await import("./reclaim.ts");
 
-      const { removed, bytes } = clearLegacyRedSkills();
-      if (removed.length === 0) {
-        log.skip("nothing left behind — mise owns every version on this machine");
-        return;
-      }
+      const adoption = await adoptLegacyWorkstation();
+      announceAdoption(adoption);
+      if (adoption.removed.length === 0) return;
 
       // Named one by one, and then totalled. A deletion that reports
       // only a number is one nobody can check afterwards, and this is
       // the single migration in the ledger that takes a gigabyte.
-      for (const item of removed) {
-        log.plain(`       removed ${item.path} (${formatBytes(item.bytes)})`);
-      }
-      log.plain(`       ${removed.length} left over, ${formatBytes(bytes)} back`);
+      log.plain(
+        `       ${adoption.removed.length} left over, ${formatBytes(adoption.bytes)} back`,
+      );
+      log.plain(`       backed up to ${adoption.backup}`);
     },
   },
 ];

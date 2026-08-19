@@ -356,6 +356,32 @@ vouched for. `doctor` reports both halves — which lock this machine is
 provisioned against, what a rollback would restore, whether all of it is still
 addressable, and how much derived state the retention is holding.
 
+A machine that was provisioned by the standalone `install.sh` is **adopted**
+rather than overwritten. It carries an entire second RedSkills — extracted trees
+under `~/.red-skills/versions`, the tarballs they came out of, Git-sourced
+marketplaces in Claude and Codex, generated OpenCode/RedCode and pi surfaces
+recorded in their own manifests, the per-version plugin copy each host kept, and
+the release-driven companion record — and the whole of it is inventoried and
+backed up before anything is removed. The backup goes under
+`~/.local/state/red-dev/adoption/<stamp>`, deliberately outside the directory an
+uninstall sweeps, because a backup an uninstall takes with it is not a backup.
+
+Then the gate. **Nothing is removed until the new package set is active, all
+seven hosts have reported and none is blocked or failed, and every companion has
+converged** — on the outcomes the converge that ran just observed, not on a
+record from an earlier one and not on the existence of a `current` link. A run
+interrupted anywhere above that gate leaves the previous source exactly where it
+was and the machine still usable; the next run starts again from the same
+inventory. When the gate does open, what comes off is scoped item by item: a
+registration only once the host itself reports red-dev's directory source on
+re-read, a generated path only when the legacy manifest names it and the host
+registry does not own it, a plugin copy or a companion artifact only when its
+version is neither active nor previous and nothing records resolving through it.
+Files the operator wrote are never in the inventory at all. Re-running it on an
+adopted machine reports `clean` and writes nothing, and everything red-dev took
+is listed in a record an uninstall reads rather than guessed at from paths that
+look like ours.
+
 `bun run e2e:rollback-ubuntu24` is the whole of it as a command: three complete
 revisions provisioned onto a network-denied Ubuntu 24.04 target, a prune held
 through an update that did not verify, the workstation rolled back with egress
@@ -529,6 +555,7 @@ red-dev agents update        # refresh each host by its publisher's mechanism
 red-dev red-skills install [selector] # acquire the package set: stable | next | version | commit
 red-dev red-skills sync <path> # run a development checkout, built into staging, never a release
 red-dev red-skills reconcile # wire the hosts against the active package set, once
+red-dev red-skills adopt     # take a standalone-installed machine into the package set
 red-dev share [path]         # one directory both WSL and Windows read
 red-dev share adopt <tool>   # move that tool's configuration into it
 red-dev uninstall            # remove tools, or red-dev's own config

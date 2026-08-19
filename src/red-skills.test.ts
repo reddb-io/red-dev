@@ -36,10 +36,27 @@ function platform(over: Partial<Platform>): Platform {
 const tool = TOOLS.find((t) => t.name === "red-skills");
 
 describe("red-skills as a converge step", () => {
-  test("uses the current v3 installer contract", () => {
+  test("acquires the package set, and downloads no standalone installer", () => {
+    // ADR 0010 leaves one acquisition on the machine. red-dev used to
+    // curl `scripts/install.sh` from the repo's v3 branch and hand it
+    // the whole job — a second owner of `~/.red-skills/current` that
+    // registered its own marketplaces and generated its own host
+    // surfaces, which is how the hosts and the editor extension came to
+    // be on different revisions of the same product.
     const src = readFileSync("src/agents.ts", "utf8");
-    expect(src).toContain("red-skills/v3/scripts/install.sh");
-    expect(src).not.toContain("red-skills/v2/scripts/install.sh");
+    expect(src).toContain("acquireRedSkills");
+    expect(src).not.toContain("scripts/install.sh");
+  });
+
+  test("and nothing anywhere in red-dev reaches for it", () => {
+    // Asserted across the whole source tree rather than in agents.ts
+    // alone: the criterion is that red-dev no longer downloads or
+    // invokes standalone RedSkills acquisition, and a second caller
+    // added in another module would satisfy the test above.
+    const offenders = [...new Bun.Glob("src/**/*.ts").scanSync(".")]
+      .filter((path) => !path.endsWith("red-skills.test.ts"))
+      .filter((path) => readFileSync(path, "utf8").includes("red-skills/v3/scripts/install.sh"));
+    expect(offenders).toEqual([]);
   });
 
   test("is in the manifest", () => {
@@ -96,13 +113,19 @@ describe("the copied Windows current snapshot", () => {
     expect(existsSync(`${current}/mine.txt`)).toBe(true);
   });
 
-  test("a first-run copy made before release assets arrive gets one retry", () => {
+  test("is cleared before the package set tries to link over it", () => {
+    // The set activates by putting a link at `~/.red-skills/current` and
+    // refuses to remove a real directory standing there. The copy is
+    // the one such directory red-dev can prove it owns, so clearing it
+    // has to happen above the acquisition rather than after it fails.
     const src = readFileSync("src/agents.ts", "utf8");
     const start = src.indexOf("export async function installRedSkills");
     const end = src.indexOf("export async function updateRedSkills", start);
     const body = src.slice(start, end);
-    expect(body.match(/repairCopiedRedSkillsCurrent/g)?.length).toBeGreaterThanOrEqual(2);
-    expect(body).toContain("retrying with the release assets now cached");
+    expect(body.indexOf("repairCopiedRedSkillsCurrent")).toBeGreaterThan(-1);
+    expect(body.indexOf("repairCopiedRedSkillsCurrent")).toBeLessThan(
+      body.indexOf("acquireRedSkills("),
+    );
   });
 });
 
@@ -166,16 +189,26 @@ describe("which registration a converge leaves behind", () => {
     expect(src).toContain("convergeMarketplaceOwnership");
   });
 
-  test("red-dev declares its registration after the installer, never before", () => {
-    // `install.sh` registers from GitHub wherever it runs, including from
-    // the line above this one. Declaring first would leave the
-    // installer's registration standing until the next converge — which
-    // is the eviction seen from inside a single run.
+  test("red-dev declares its registration after the source exists, never before", () => {
+    // The directory red-dev registers is `~/.red-skills/current`, so a
+    // converge that declared before acquiring would point both hosts at
+    // a path with nothing behind it. The acquisition is now conditional
+    // — only a machine with no source at all reaches it — and the
+    // declaration still comes after.
     const converge = src.slice(src.indexOf("export async function convergeRedSkills"));
-    const installed = converge.indexOf("await installRedSkills()");
+    const acquired = converge.indexOf("await installRedSkills(p)");
     const declared = converge.indexOf("convergeMarketplaceOwnership");
-    expect(installed).toBeGreaterThan(-1);
-    expect(declared).toBeGreaterThan(installed);
+    expect(acquired).toBeGreaterThan(-1);
+    expect(declared).toBeGreaterThan(acquired);
+  });
+
+  test("and a machine that already resolves a set acquires nothing", () => {
+    // The old converge re-ran the installer whenever a host looked
+    // unwired, which meant a marketplace registration cost a download.
+    // Wiring is the host reconciliation; an absent source is the only
+    // thing an acquisition answers.
+    const converge = src.slice(src.indexOf("export async function convergeRedSkills"));
+    expect(converge).toContain("if (sourceRoot() === null) await installRedSkills(p)");
   });
 
   test("and nothing here heals a registration back to GitHub", () => {

@@ -92,12 +92,20 @@ describe("resolving npm", () => {
     expect(agents).toContain('["cmd.exe", "/c", npm, ...args]');
   });
 
-  test("red-skills receives the Node directory mise resolved in this run", () => {
+  test("red-skills needs no resolved Node at all any more", () => {
+    // It used to: the acquisition was a shell installer, and handing it
+    // a PATH without mise's Node was how a converge produced a
+    // half-installed RedSkills on a machine with no system node. The
+    // package set is acquired in this process — a git mirror, a
+    // snapshot, a signature and a copy — so there is no child to hand a
+    // runtime to, and the question stops existing rather than being
+    // answered more carefully.
     const start = agents.indexOf("export async function installRedSkills");
     const end = agents.indexOf("export async function updateRedSkills", start);
     const body = agents.slice(start, end);
-    expect(body).toContain('runtimeTool("node")');
-    expect(body).toContain("executableEnvironment(node)");
+    expect(body).toContain("acquireRedSkills");
+    expect(body).not.toContain('runtimeTool("node")');
+    expect(body).not.toContain("installerInstall");
   });
 
   test("Git Bash keeps its own utilities when red-skills receives a runtime PATH", () => {
