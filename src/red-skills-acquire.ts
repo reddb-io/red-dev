@@ -1071,8 +1071,17 @@ export interface Reconciliation {
 
 export interface ReconcileOptions {
   home?: string;
-  /** The host wiring. Defaults to red-dev's own converge over every installed host. */
-  reconcile?: () => Promise<void> | void;
+  /**
+   * The host wiring. Defaults to red-dev's own converge over every
+   * installed host.
+   *
+   * Returning `false` means "this did not fully converge, do not stamp
+   * it". Without that, one blocked host would leave a stamp saying the
+   * machine was reconciled against these bytes, and the retry that is
+   * supposed to fix it would be skipped as already done — the surface
+   * would stay broken until the *next* revision moved.
+   */
+  reconcile?: () => Promise<boolean | void> | boolean | void;
   /** Reconcile even when the stamp already names the active revision. */
   force?: boolean;
   env?: NodeJS.ProcessEnv;
@@ -1115,9 +1124,23 @@ export async function reconcileRedSkills(opts: ReconcileOptions = {}): Promise<R
     (async () => {
       const { convergeRedSkills } = await import("./agents.ts");
       const { detect } = await import("./platform.ts");
-      await convergeRedSkills(opts.manifestPlatform ?? detect());
+      const { reconciliationFailed } = await import("./red-skills-hosts.ts");
+      const { companionReconciliationFailed } = await import("./red-skills-companions.ts");
+      const converged = await convergeRedSkills(opts.manifestPlatform ?? detect());
+      return (
+        !reconciliationFailed(converged.hosts) &&
+        !companionReconciliationFailed(converged.companions)
+      );
     });
-  await reconcile();
+  const converged = await reconcile();
+  if (converged === false) {
+    return {
+      reconciled: true,
+      reason: `hosts reconciled against ${key} with surfaces still to converge`,
+      identity: active,
+      writes: [],
+    };
+  }
 
   mkdirSync(dirname(stamp), { recursive: true });
   writeFileSync(stamp, `${JSON.stringify({ schema: 1, key }, null, 2)}\n`, "utf8");
