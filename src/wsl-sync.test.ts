@@ -16,16 +16,21 @@ import { TOOLS, applicableScopes, providerFor } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
 
 describe("what the distro needs", () => {
-  test("installs when the distro has no red-dev at all", () => {
+  test("bootstraps when the distro has no red-dev at all", () => {
     const plan = planFor(null, "0.11.1");
     expect(plan.install).toBe(true);
+    // Nothing to upgrade: boot.sh is the only way into an empty distro.
+    expect(plan.how).toBe("bootstrap");
     expect(plan.reason).toContain("no red-dev");
   });
 
-  test("installs when the distro is behind", () => {
-    // The case that was actually on the machine.
+  test("upgrades through the distro's own mise when it is behind", () => {
+    // The case that was actually on the machine. Re-bootstrapping here
+    // writes ~/.local/bin, which mise's shim shadows — so the distro
+    // reports the new version through no path anything executes.
     const plan = planFor("0.2.2", "0.11.1");
     expect(plan.install).toBe(true);
+    expect(plan.how).toBe("upgrade");
     expect(plan.reason).toContain("0.2.2");
     expect(plan.reason).toContain("0.11.1");
   });
@@ -35,6 +40,7 @@ describe("what the distro needs", () => {
     // machine running different builds is the condition being fixed,
     // and which way round it is does not change that.
     expect(planFor("0.12.0", "0.11.1").install).toBe(true);
+    expect(planFor("0.12.0", "0.11.1").how).toBe("upgrade");
   });
 
   test("does not download 99 MB to arrive where it already is", () => {
@@ -101,5 +107,35 @@ describe("where the step runs", () => {
     const linux = platform({});
     expect(applicableScopes(linux)).toContain(tool!.scope);
     expect(providerFor(tool!, linux).kind).toBe("skip");
+  });
+});
+
+describe("advancing a distro that already has red-dev", () => {
+  test("asks its mise, and falls back to the bootstrap only when that did not land", async () => {
+    const source = await Bun.file(new URL("./wsl-sync.ts", import.meta.url)).text();
+    const ensure = source.slice(source.indexOf("async function ensureDistroRedDev"));
+
+    // mise by name, for the one tool — not a bare `mise upgrade`, which
+    // would reach every runtime the person installed themselves.
+    expect(source).toContain("mise upgrade red-dev");
+
+    // The exit code is not the evidence: a release-age gate makes
+    // `mise upgrade` succeed without moving anything.
+    expect(ensure).toContain("await distroVersion(distro)");
+    expect(ensure).toContain("bootstrapArgv(distro)");
+  });
+
+  test("the suite is exempt from a release-age gate, or the upgrade above cannot land", async () => {
+    const { renderMiseConfig, miseEntries } = await import("./mise-config.ts");
+    const rendered = renderMiseConfig(
+      miseEntries(platform({ os: "windows", env: "windows", distro: null, version: null, codename: null })),
+    );
+
+    expect(rendered).toContain("minimum_release_age_excludes");
+    expect(rendered).toContain('"github:reddb-io/red-dev"');
+    // Narrow: the gate a person set still covers everything else they
+    // installed, which is what it was set for.
+    expect(rendered).not.toContain('"node"');
+    expect(rendered).not.toContain("minimum_release_age =");
   });
 });

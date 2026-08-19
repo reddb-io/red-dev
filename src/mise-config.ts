@@ -228,10 +228,50 @@ const HEADER = [
  * stable order is the difference between "nothing to do" and a write
  * plus a log line on every single run.
  */
+/**
+ * The suite is exempt from a `minimum_release_age` gate.
+ *
+ * mise can hold a tool back until a release has been public for some
+ * time — a good default against a compromised or hastily-yanked
+ * upstream, and one a person sets globally for everything they install.
+ * Applied to this organisation it produces a machine that cannot be
+ * fixed: red-dev cut 1.0.64 to move a directory, a WSL distro with a
+ * 24h gate kept resolving `latest` to 1.0.51, and the older binary
+ * recreated the directory the newer one had just moved, on every run.
+ * The updater being subject to the delay means the delay outlives
+ * whatever it was protecting against.
+ *
+ * The exemption is narrow on purpose: it names the reddb-io specs this
+ * fragment declares and nothing else, so the gate a person set still
+ * covers node, python, every tool they added themselves. It is written
+ * here rather than asked of the person because the fragment is what
+ * red-dev owns; their own `config.toml` is theirs, and mise merges the
+ * two.
+ */
+function releaseAgeExcludes(entries: MiseEntry[]): string[] {
+  return [...new Set(entries.filter((e) => isOurs(e.spec)).map((e) => e.spec))].sort();
+}
+
+/** A spec this organisation publishes, by backend and owner rather than by name. */
+function isOurs(spec: string): boolean {
+  return /^(github|npm):@?reddb-io[/-]/.test(spec);
+}
+
 export function renderMiseConfig(entries: MiseEntry[]): string {
   const sorted = [...entries].sort((a, b) => key(a).localeCompare(key(b)));
 
   const out: string[] = [HEADER];
+
+  const excludes = releaseAgeExcludes(sorted);
+  if (excludes.length > 0) {
+    out.push(
+      "",
+      "# A release-age gate must not reach the tools that carry the fix.",
+      "# See releaseAgeExcludes in src/mise-config.ts.",
+      "[settings]",
+      `minimum_release_age_excludes = [${excludes.map((s) => str(s)).join(", ")}]`,
+    );
+  }
 
   const aliased = sorted.filter((e) => e.alias);
   if (aliased.length > 0) {

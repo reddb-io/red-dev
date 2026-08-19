@@ -169,6 +169,14 @@ export async function distroVersion(distro: string): Promise<string | null> {
 export interface SyncPlan {
   /** Bring the distro's binary up to this one's version first. */
   install: boolean;
+  /**
+   * How: `bootstrap` curls boot.sh, `upgrade` advances the distro's own
+   * mise. A distro with no red-dev has nothing to upgrade; one that has
+   * a red-dev has a mise that owns it (the manifest declares red-dev as
+   * a mise tool), and going round mise is what produced the split this
+   * whole step exists to end — see ensureDistroRedDev.
+   */
+  how: "bootstrap" | "upgrade";
   /** Why, in one line, for the log. */
   reason: string;
 }
@@ -183,12 +191,50 @@ export interface SyncPlan {
  */
 export function planFor(distroVersion: string | null, ours: string = VERSION): SyncPlan {
   if (distroVersion === null) {
-    return { install: true, reason: "no red-dev in the distro" };
+    return { install: true, how: "bootstrap", reason: "no red-dev in the distro" };
   }
   if (distroVersion !== ours) {
-    return { install: true, reason: `distro has ${distroVersion}, this is ${ours}` };
+    return { install: true, how: "upgrade", reason: `distro has ${distroVersion}, this is ${ours}` };
   }
-  return { install: false, reason: `distro already on ${ours}` };
+  return { install: false, how: "upgrade", reason: `distro already on ${ours}` };
+}
+
+/** boot.sh, unattended: the only way into a distro that has no red-dev yet. */
+function bootstrapArgv(distro: string): string[] {
+  // The env prefix goes on `sh`, not on curl: it is the script that
+  // must not hand over to the interface, and there is nobody inside
+  // the distro to hand over to.
+  return [
+    "wsl.exe",
+    "-d",
+    distro,
+    "--",
+    "bash",
+    "-lc",
+    `curl -fsSL ${BOOT_URL} | ${unattendedShellCommand("sh", { RED_DEV_NO_LAUNCH: "1" })}`,
+  ];
+}
+
+/**
+ * Advance a distro that already has red-dev, through its own mise.
+ *
+ * boot.sh drops a binary in `~/.local/bin`, and the manifest then
+ * declares red-dev as a mise tool — so a converged distro has both, and
+ * mise's shim wins on PATH. Re-running the bootstrap to "update" the
+ * distro therefore updated the copy nobody executes: 1.0.64 landed in
+ * `~/.local/bin`, the shim went on serving mise's 1.0.51, and the older
+ * binary undid the newer one's work on the next run. The distro's mise
+ * is the owner; this asks it, by name, for the one tool.
+ *
+ * `mise upgrade` reaches today's release because red-dev's own config
+ * fragment exempts the suite from `minimum_release_age`
+ * (src/mise-config.ts) — without that, a person's global release-age
+ * gate holds the distro on yesterday's build and this reports success
+ * while nothing moved. Which is why the caller re-reads the version
+ * rather than trusting the exit code.
+ */
+function upgradeArgv(distro: string): string[] {
+  return ["wsl.exe", "-d", distro, "--", "bash", "-lc", "mise upgrade red-dev"];
 }
 
 /** Ensure a child distro understands the same contracts as its Windows host. */
@@ -197,18 +243,23 @@ async function ensureDistroRedDev(distro: string): Promise<number> {
   log.step(`wsl sync: ${distro} — ${plan.reason}`);
   if (!plan.install) return 0;
 
-  // The env prefix goes on `sh`, not on curl: it is the script that
-  // must not hand over to the interface, and there is nobody inside
-  // the distro to hand over to.
-  return spawnLogged([
-    "wsl.exe",
-    "-d",
-    distro,
-    "--",
-    "bash",
-    "-lc",
-    `curl -fsSL ${BOOT_URL} | ${unattendedShellCommand("sh", { RED_DEV_NO_LAUNCH: "1" })}`,
-  ]);
+  if (plan.how === "upgrade") {
+    const code = await spawnLogged(upgradeArgv(distro));
+    const now = code === 0 ? await distroVersion(distro) : null;
+    if (now === VERSION) {
+      log.ok(`wsl sync: ${distro} upgraded to ${now} through its own mise`);
+      return 0;
+    }
+    // Not fatal, and not silent. A distro whose mise cannot reach the
+    // release — offline, a gate red-dev does not own, a backend that
+    // refused — still gets the bootstrap, because a distro on the wrong
+    // version is the condition this step exists to end.
+    log.warn(
+      `wsl sync: ${distro} is on ${now ?? "an unknown version"} after mise upgrade — bootstrapping instead`,
+    );
+  }
+
+  return spawnLogged(bootstrapArgv(distro));
 }
 
 /**
