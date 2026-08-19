@@ -659,45 +659,55 @@ export async function installAgent(a: AgentSpec, p: Platform): Promise<void> {
 }
 
 /**
- * Install red-skills, which configures whichever agents are present.
+ * Put the RedSkills package set on this machine.
  *
- * Run after the agents rather than before: its installer detects what
- * exists and wires each one up, so running it first would configure
- * nothing and report success.
+ * There used to be a `curl | sh` here: the standalone `install.sh`,
+ * downloaded from the repo's `v3` branch on every run, which registered
+ * its own marketplaces, generated its own host surfaces and owned
+ * `~/.red-skills/current`. ADR 0010 ends it. The set is one acquisition
+ * — a verified, signed, immutable revision staged under its own name —
+ * and this is a call into it rather than a second implementation beside
+ * it, because two acquisition paths on one machine is exactly how the
+ * hosts and the editor extension came to be on different revisions.
+ *
+ * A refusal throws, because the caller asked for a source and there
+ * isn't one. Everything else — already current, nothing published,
+ * a remote that could not be reached — is a machine that still resolves
+ * whatever it resolved before, and is reported rather than raised.
  */
-export async function installRedSkills(): Promise<void> {
-  const url = "https://raw.githubusercontent.com/reddb-io/red-skills/v3/scripts/install.sh";
-  const { installerInstall } = await import("./providers.ts");
-  const { runtimeTool } = await import("./runtimes.ts");
-  const node = await runtimeTool("node");
+export async function installRedSkills(p?: Platform): Promise<void> {
+  const { acquireRedSkills, announce } = await import("./red-skills-acquire.ts");
   log.step("red-skills");
-  log.plain("     Registers the RedSkills marketplace in Claude Code and Codex,");
-  log.plain("     and generates plugin modules for RedCode/OpenCode. User-level, global.");
+  log.plain("     Acquires the complete RedSkills package set: the plugin payloads,");
+  log.plain("     the host generators and every companion artifact, from one revision.");
+
+  // Before the acquisition, because the acquisition cannot get past it.
+  // A package set activates by putting a link at `~/.red-skills/current`
+  // and src/red-skills-set.ts refuses to remove a real directory sitting
+  // there — correctly, since deleting a directory it did not create is
+  // not its business. Spec #185's Git Bash copy is exactly such a
+  // directory, and it is the one shape of that blockage red-dev can
+  // prove it owns, from the two markers the standalone tarball carries.
   const home = process.env["USERPROFILE"] ?? process.env["HOME"];
   if (home && repairCopiedRedSkillsCurrent(home)) {
-    log.plain("       replacing Git Bash's copied current snapshot with the managed source");
+    log.plain("       replacing Git Bash's copied current snapshot with the package set link");
   }
-  const install = async () =>
-    await installerInstall(
-      url,
-      "reddb-io/red-skills",
-      [],
-      node ? executableEnvironment(node) : undefined,
-    );
-  try {
-    await install();
-  } catch (error) {
-    if (!home || !repairCopiedRedSkillsCurrent(home)) throw error;
-    log.plain("       retrying with the release assets now cached");
-    await install();
-  }
+
+  const acquisition = await acquireRedSkills(p ? { manifestPlatform: p } : {});
+  announce(acquisition);
+  if (acquisition.outcome === "refused") throw new RedError(acquisition.reason);
 }
 
 /**
  * Remove Git Bash's directory-copy emulation of the RedSkills `current` link.
  *
- * Its installer owns this path and recreates it immediately. The two markers
- * keep a similarly named user directory out of scope.
+ * A Spec #185 leftover, and the only one the adoption in
+ * src/red-skills-adopt.ts cannot reach: its walk covers
+ * `~/.red-skills/versions`, and this is a copy of one of those trees
+ * standing on the path the package set has to link. The two markers the
+ * standalone tarball carries are what keep a similarly named user
+ * directory out of scope — without both of them this declines, and the
+ * package set declines too, and the machine keeps what it has.
  */
 export function repairCopiedRedSkillsCurrent(
   home: string,
@@ -729,8 +739,15 @@ export function repairCopiedRedSkillsCurrent(
  * updating through the marketplace. Two copies, and the one everything
  * resolved through was the stationary one.
  *
- * So this is update's business, not converge's: the installer is re-run,
- * which is what fetches the newest tarball and repoints `current`.
+ * So this is update's business, not converge's. What it does about it
+ * has changed, though: the acquisition now belongs to the staged
+ * reconciliation in src/staged-update.ts, which runs immediately before
+ * this on the same `red-dev update` and has already put the machine on
+ * one revision under ADR 0010's Workers rule. Re-acquiring here would
+ * be a second network round trip for one update, and — worse — a second
+ * chance for the two paths to land on different revisions. So this
+ * refreshes what the staged update does not own and then *reports*
+ * which revision the machine ended on, rather than fetching one.
  */
 export async function updateRedSkills(p: Platform): Promise<void> {
   // Before the early return below, not after it. The Product skill is
@@ -755,12 +772,19 @@ export async function updateRedSkills(p: Platform): Promise<void> {
     return;
   }
 
-  const { realpathSync } = await import("node:fs");
-  const before = realpathSync(sourceRoot() as string);
-  await installRedSkills();
-  const after = realpathSync(sourceRoot() as string);
-  if (before === after) log.skip(`red-skills already at ${after.split("/").pop()}`);
-  else log.ok(`red-skills ${before.split("/").pop()} → ${after.split("/").pop()}`);
+  // Read off the package-set state rather than off the link, because
+  // the identity of a revision is its version and whole-set digest and
+  // never just the directory it happens to sit in (ADR 0011).
+  const { formatPackageSetIdentity, readPackageSetState } = await import("./red-skills-set.ts");
+  const state = readPackageSetState(homeDir());
+  const active = state.revisions.find((r) => r.key === state.active) ?? null;
+  if (active === null) log.skip("red-skills: no package set is active on this machine");
+  else log.ok(`red-skills at ${formatPackageSetIdentity(active)}`);
+}
+
+/** This user's home, in the one spelling every path here is built from. */
+function homeDir(): string {
+  return (process.env["HOME"] ?? process.env["USERPROFILE"] ?? "").replace(/\\/g, "/");
 }
 
 /**
@@ -913,14 +937,23 @@ export async function convergeRedSkills(p: Platform): Promise<RedSkillsConverge>
     log.skip(`red-skills already wired into ${present.map((h) => h.cmd).join(", ")}`);
   } else {
     log.step(`red-skills: not wired into ${missing.map((h) => h.cmd).join(", ")}`);
-    await installRedSkills();
+  }
+
+  // A source, where this machine has none — and the package set, never
+  // the standalone installer. This used to run whenever a host looked
+  // unwired, which meant re-downloading and re-running an installer to
+  // fix a marketplace registration; the wiring is the reconciliation
+  // below, and the only thing an absent source is a reason to do is
+  // acquire one.
+  const { sourceRoot } = await import("./red-skills-ext.ts");
+  if (sourceRoot() === null) await installRedSkills(p);
+
+  if (missing.length > 0 && commandPath("redcode")) {
     // The RedSkills generator owns the provider/MCP portions of opencode.json;
     // red-dev owns terminal-following theme/input defaults. Re-apply our small
     // merge after generation so a first RedCode migration converges in one run.
-    if (commandPath("redcode")) {
-      const { applyRedcode } = await import("./terminal-surfaces.ts");
-      await applyRedcode(p);
-    }
+    const { applyRedcode } = await import("./terminal-surfaces.ts");
+    await applyRedcode(p);
   }
 
   // After the installer, never before it, because red-dev has the last
@@ -970,10 +1003,57 @@ export async function convergeRedSkills(p: Platform): Promise<RedSkillsConverge>
     for (const gap of h.missing ?? []) log.skip(`${h.host}: ${gap}`);
   }
 
+  // Last, and gated on everything above it. A machine provisioned by
+  // Spec #185 carries a whole second RedSkills, and ADR 0010 says it is
+  // adopted and backed up first and its obsolete ownership removed only
+  // once the package set, every host and every companion have verified.
+  // The outcomes this run just observed are what it is gated on — not a
+  // record from an earlier converge, and not the mere existence of a
+  // `current` link, which is what an ungated cleanup mistook for a
+  // working workstation.
+  await adoptSpec185Workstation(hosts, companions);
+
   // Both halves, to whoever asked. The converge is what observed them,
   // and a caller that has to re-probe to learn what just happened is a
   // caller that can be told something different from what was done.
   return { hosts, companions };
+}
+
+/**
+ * Adopt whatever Spec #185 left, on the evidence of this converge.
+ *
+ * Isolated and never allowed to fail the converge: the machine that has
+ * just verified seven hosts and five companions is a working machine
+ * whether or not a gigabyte of leftovers came off it, and a throw here
+ * would report the whole reconciliation as broken over a directory that
+ * could not be unlinked.
+ */
+async function adoptSpec185Workstation(
+  hosts: readonly HostOutcome[],
+  companions: readonly CompanionOutcome[],
+): Promise<void> {
+  try {
+    const { adoptLegacyWorkstation, announceAdoption } = await import("./red-skills-adopt.ts");
+    const { readPackageSetState } = await import("./red-skills-set.ts");
+    const home = homeDir();
+    const state = readPackageSetState(home);
+    const active = state.revisions.find((r) => r.key === state.active) ?? null;
+    const adoption = await adoptLegacyWorkstation({
+      home,
+      verify: async () => ({
+        active: active
+          ? { version: active.version, digest: active.digest, sourceCommit: active.sourceCommit }
+          : null,
+        hosts,
+        companions,
+      }),
+    });
+    // Silent on the machine that has nothing to adopt, which is every
+    // machine provisioned after Spec #185 and every one already adopted.
+    if (adoption.outcome !== "clean") announceAdoption(adoption);
+  } catch (err) {
+    log.warn(`red-skills adoption: ${(err as Error).message}`);
+  }
 }
 
 /**
