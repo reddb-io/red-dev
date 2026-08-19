@@ -355,6 +355,24 @@ async function cmdDoctor(p: Platform, inv: Invocation): Promise<number> {
     }
   }
 
+  // And, on a machine that was provisioned from a USB stick rather than
+  // from the network, which depot it came off: the digest, the target it
+  // was cut for, who signed it, whether its machine-owned copy is still
+  // addressable, and the accounts nobody could have configured without
+  // egress. That last group is reported and never counted — an air-gapped
+  // workstation with seven CLIs installed and seven logins outstanding has
+  // succeeded, and doctor that said otherwise would be ignored.
+  const { offlineDepotReport, offlineDepotRows } = await import("./offline-depot.ts");
+  for (const row of offlineDepotRows(offlineDepotReport(setHome))) {
+    if (row.status === "ok") log.ok(row.detail);
+    else if (row.status === "n/a") log.skip(row.detail);
+    else if (row.status === "warn") log.warn(row.detail);
+    else {
+      log.err(row.detail);
+      setProblems++;
+    }
+  }
+
   // The machine's agent posture, in the one place that already answers
   // "is this machine ready": which host red-dev hands work to, how old
   // each installed host's copy is, and the per-provider allowance detail
