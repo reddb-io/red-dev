@@ -26,6 +26,7 @@ import {
   miseEntries,
   miseInstallRoot,
   miseToolBin,
+  releaseAgeExcludes,
   renderMiseConfig,
   type MiseEntry,
 } from "./mise-config.ts";
@@ -196,5 +197,39 @@ describe("the binary of a mise-installed tool", () => {
     const root = installs();
     const path = tool(root, "cosign", "3.1.3", ["cosign"]);
     expect(path.startsWith(miseInstallRoot({ MISE_DATA_DIR: root }))).toBe(true);
+  });
+});
+
+describe("the release-age exemption", () => {
+  const entries = miseEntries(WINDOWS);
+
+  test("names every reddb-io spec the fragment declares, and only those", () => {
+    const excludes = releaseAgeExcludes(entries);
+    expect(excludes).toContain("github:reddb-io/red-dev");
+    expect(excludes).toContain("npm:@reddb-io/red-skills");
+    // The plugin packages especially: a composed set is the oldest
+    // version common to core and all of them, so a gate that holds one
+    // back holds the whole set back and the newer one is then refused
+    // as a downgrade.
+    expect(excludes).toContain("npm:@reddb-io/red-skills-dev");
+    expect(excludes).toContain("npm:@reddb-io/red-skills-memory");
+    expect(excludes).toContain("npm:@reddb-io/red-skills-brain");
+    for (const spec of excludes) expect(spec).toMatch(/reddb-io/);
+  });
+
+  test("goes on red-dev's own mise invocations, where it outranks a config file", async () => {
+    // The fragment's list loses to the person's own config.toml — mise
+    // resolves a list setting by precedence, not by union — so this
+    // variable is what actually carries the exemption on their machine.
+    const { miseReleaseAgeEnv } = await import("./providers.ts");
+    const env = miseReleaseAgeEnv(WINDOWS);
+    expect(env["MISE_MINIMUM_RELEASE_AGE_EXCLUDES"]?.split(",")).toEqual(releaseAgeExcludes(entries));
+  });
+
+  test("declares nothing on a platform that gets nothing from mise", async () => {
+    const { miseReleaseAgeEnv } = await import("./providers.ts");
+    const bare = { ...WINDOWS, os: "linux", distro: "alpine" } as Platform;
+    if (miseEntries(bare).length === 0) expect(miseReleaseAgeEnv(bare)).toEqual({});
+    expect(releaseAgeExcludes([])).toEqual([]);
   });
 });

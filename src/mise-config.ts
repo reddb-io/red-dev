@@ -241,14 +241,32 @@ const HEADER = [
  * The updater being subject to the delay means the delay outlives
  * whatever it was protecting against.
  *
- * The exemption is narrow on purpose: it names the reddb-io specs this
+ * The exemption is narrow on purpose: it names the reddb-io specs the
  * fragment declares and nothing else, so the gate a person set still
- * covers node, python, every tool they added themselves. It is written
- * here rather than asked of the person because the fragment is what
- * red-dev owns; their own `config.toml` is theirs, and mise merges the
- * two.
+ * covers node, python, every tool they added themselves.
+ *
+ * ## Written twice, because the fragment alone does not carry it
+ *
+ * mise resolves a *list* setting by precedence rather than by union:
+ * the value in the person's own `config.toml` replaces the fragment's
+ * outright, it does not extend it. A machine with
+ * `minimum_release_age_excludes = ["npm:@reddb-io/red-skills"]` in
+ * their global config therefore excluded the core and nothing else —
+ * the fragment's longer list lost silently, and the plugin packages sat
+ * a release behind the core until somebody looked. Measured on the
+ * machine that found it: core at 3.22.0, all three plugins at 3.19.5,
+ * and a package set refused as a downgrade because a composed set is
+ * the *oldest* version common to all of them.
+ *
+ * So the fragment keeps this block — it is the right answer for a
+ * machine with no list of its own, and it is readable — and red-dev
+ * additionally passes the same list as `MISE_MINIMUM_RELEASE_AGE_EXCLUDES`
+ * on its own invocations of mise (`runMise` in src/providers.ts), where
+ * the environment outranks every config file. Those invocations name
+ * suite tools one at a time, so replacing the list for the length of
+ * one `mise install` reaches nothing else the person owns.
  */
-function releaseAgeExcludes(entries: MiseEntry[]): string[] {
+export function releaseAgeExcludes(entries: MiseEntry[]): string[] {
   return [...new Set(entries.filter((e) => isOurs(e.spec)).map((e) => e.spec))].sort();
 }
 

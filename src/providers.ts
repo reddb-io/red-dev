@@ -13,7 +13,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } f
 import { formatBytes, formatDuration, log, logIsCaptured, RedError } from "./log.ts";
 import { parseChecksums, pickChecksumAsset, sha256Hex, verifyChecksum } from "./checksum.ts";
 import type { Provider } from "./manifest.ts";
-import { convergeMiseConfig } from "./mise-config.ts";
+import { convergeMiseConfig, miseEntries, releaseAgeExcludes } from "./mise-config.ts";
 import type { Platform } from "./platform.ts";
 import { startProcessHeartbeat } from "./process-heartbeat.ts";
 import { missingRights } from "./rights.ts";
@@ -660,7 +660,7 @@ async function miseInstall(
   log.step(`mise: ${pr.spec}`);
   log.info(`installing ${selector} — mise resolves the asset and verifies it`);
 
-  const code = await runMise([mise, "install", selector]);
+  const code = await runMise([mise, "install", selector], platform);
   if (code !== 0) {
     throw new RedError(`mise could not install ${selector} (exit ${code})`);
   }
@@ -682,7 +682,7 @@ export async function miseInstallSuite(platform: Platform): Promise<void> {
   if (entries === 0) return;
 
   log.step(`mise: installing ${entries} tools`);
-  const code = await runMise([mise, "install"]);
+  const code = await runMise([mise, "install"], platform);
   if (code !== 0) throw new RedError(`mise could not install the suite (exit ${code})`);
 
   await linkRedSkillsCore(platform);
@@ -708,7 +708,7 @@ export async function miseUpgradeSuite(platform: Platform): Promise<void> {
   const { miseToolNames } = await import("./mise-config.ts");
   const names = miseToolNames(platform);
   log.step(`mise: upgrading ${names.length} tools`);
-  const code = await runMise([mise, "upgrade", "--yes", ...names]);
+  const code = await runMise([mise, "upgrade", "--yes", ...names], platform);
   if (code !== 0) log.err(`mise upgrade exited ${code}`);
 
   // Even when the upgrade reported a failure: it names several tools at
@@ -754,7 +754,7 @@ export async function misePruneSuite(platform: Platform): Promise<void> {
   if (names.length === 0) return;
 
   log.step(`mise: pruning unused versions of ${names.length} tools`);
-  const code = await runMise(misePruneCommand(mise, names));
+  const code = await runMise(misePruneCommand(mise, names), platform);
   if (code !== 0) log.warn(`mise prune exited ${code}`);
 }
 
@@ -772,14 +772,37 @@ async function linkRedSkillsCore(platform: Platform): Promise<void> {
   convergeRedSkillsPackageSet({ manifestPlatform: platform });
 }
 
-async function runMise(cmd: string[]): Promise<number> {
+/**
+ * The one environment variable that makes the exemption hold.
+ *
+ * Empty when this platform gets nothing from mise, so a machine with no
+ * suite declares no exemption at all rather than an empty list that
+ * would replace the person's own.
+ */
+export function miseReleaseAgeEnv(platform: Platform): Record<string, string> {
+  const specs = releaseAgeExcludes(miseEntries(platform));
+  return specs.length > 0 ? { MISE_MINIMUM_RELEASE_AGE_EXCLUDES: specs.join(",") } : {};
+}
+
+async function runMise(cmd: string[], platform: Platform): Promise<number> {
   const proc = Bun.spawn(cmd, {
     stdout: "inherit",
     stderr: "inherit",
     stdin: "ignore",
     // mise prompts before installing a tool it has not seen; a converge
     // runs unattended and a prompt here is a hang, not a question.
-    env: unattendedEnvironment(process.env, { MISE_YES: "1" }),
+    //
+    // And the suite is exempt from a release-age gate for the length of
+    // this call. The environment outranks every config file, which is
+    // the only place the exemption holds on a machine whose own
+    // `config.toml` sets the list — see releaseAgeExcludes in
+    // src/mise-config.ts for why the fragment is not enough. Every
+    // command that reaches here names suite tools explicitly, so
+    // nothing else the person owns is inside this exemption.
+    env: unattendedEnvironment(process.env, {
+      MISE_YES: "1",
+      ...miseReleaseAgeEnv(platform),
+    }),
   });
   const heartbeat = startProcessHeartbeat(cmd);
   try {
