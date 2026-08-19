@@ -42,14 +42,21 @@
  * matters to a rollback: that a host which cannot observe the change
  * without a fresh process is *reported* rather than restarted.
  *
- * ## Egress is denied, and so is termination
+ * ## Egress is denied, and nothing is stopped
  *
  * The rollback half runs with `globalThis.fetch` replaced by a stub that
- * records the attempt and throws, exactly as the depot journey does. It
- * also runs with a converge that records every host it was asked to
- * reconcile and would record any request to stop one — there is no such
- * request to make, which is the point: the assertion is that the count of
- * terminated sessions and Workers is zero while two Workers are running.
+ * records the attempt and throws, exactly as the depot journey does. If
+ * any code under `rollbackWorkstation` reached for the network the
+ * journey would fail with the URL it asked for, instead of passing on a
+ * laptop that happened to be online.
+ *
+ * Termination is asserted the only way it can honestly be asserted: the
+ * rollback is handed two running Workers and a converge whose hosts all
+ * answer `restart-needed`, and what comes back is a report that counts
+ * both and stops neither. There is no termination hook to spy on because
+ * there is nothing in the module that could call one — so the check is
+ * that every host the rollback reconciled is *owed* a restart rather
+ * than having been given one, and that the two Workers are still two.
  */
 
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -191,8 +198,8 @@ export async function runUbuntu24RollbackJourney(
       packageSet: exported.report.depot.packageSet.active,
     });
   }
-  const [older, previousDepot, currentDepot] = depots;
-  if (older === undefined || previousDepot === undefined || currentDepot === undefined) {
+  const currentDepot = depots[depots.length - 1];
+  if (depots.length !== SET_RELEASES.length || currentDepot === undefined) {
     return finish_(check, finish, "export", "the journey did not build three depots");
   }
   check(
@@ -332,7 +339,6 @@ export async function runUbuntu24RollbackJourney(
   // --------------------------------------------------------------- the rollback
   const before = installed.map((app) => `${app.id}@${app.version}`).sort();
   const reconciled: string[] = [];
-  const terminated: string[] = [];
   const converge = async (): Promise<{ hosts: HostOutcome[]; companions: CompanionOutcome[] }> => {
     // Every host is reconciled on disk and none is stopped. A host whose
     // CLI is running answers `restart-needed`, which is the whole of the
@@ -398,12 +404,13 @@ export async function runUbuntu24RollbackJourney(
       ? "the rollback made no JavaScript network request; every artifact came out of the machine's own depot copy"
       : `the rollback reached for ${egress.attempts.join(", ")}`,
   );
+  const owed = new Set(rolled.restartNeeded);
   check(
     "uninterrupted",
-    terminated.length === 0 && rolled.workers === 2 && rolled.restartNeeded.length > 0,
-    terminated.length === 0
-      ? `${rolled.workers} Worker(s) and every running session were left alone; ${rolled.restartNeeded.length} host(s) are owed a restart`
-      : `${terminated.join(", ")} were terminated`,
+    rolled.workers === 2 && reconciled.every((host) => owed.has(host)),
+    rolled.workers === 2
+      ? `${rolled.workers} Worker(s) were counted and left running, and all ${owed.size} reconciled host(s) are owed a restart rather than having been given one`
+      : `the rollback reported ${rolled.workers} Worker(s) instead of the 2 that were running`,
   );
   check(
     "reconciled",
