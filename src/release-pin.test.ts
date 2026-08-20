@@ -21,8 +21,7 @@ import {
   isPresent,
   parseVersion,
   TOOLS,
-  type Tool,
-} from "./manifest.ts";
+  type Tool, REDSKILLS_MAJOR } from "./manifest.ts";
 import { releaseApiUrl } from "./providers.ts";
 
 describe("releaseApiUrl", () => {
@@ -161,14 +160,33 @@ describe("every other release provider", () => {
     // Both provider kinds can hold a version now, so both are counted:
     // asking only about `gh` would have gone quietly to zero when
     // zellij moved to mise, and stopped guarding anything.
-    const pinned = TOOLS.flatMap((t) => [t.u24, t.u26, t.win]).filter(
-      (pr) =>
-        (pr?.kind === "gh" && pr.version !== undefined) ||
-        (pr?.kind === "mise" && pr.version !== undefined && pr.version !== "latest"),
-    ).length;
-    // One column, one tool. A second entry here means a pin arrived
-    // without the comment that has to justify it.
-    expect(pinned).toBe(1);
+    //
+    // Named rather than counted. A count said "one" and would have said
+    // "nine" just as happily once the RedSkills rows were pinned, which
+    // is a guard that reports arithmetic instead of intent. Every pin in
+    // this list is one somebody argued for in a comment beside it; a pin
+    // that appears here without being added to this table is the case
+    // this test exists to catch.
+    const pinned = TOOLS.flatMap((t) =>
+      [t.u24, t.u26, t.win]
+        .filter(
+          (pr) =>
+            (pr?.kind === "gh" && pr.version !== undefined) ||
+            (pr?.kind === "mise" && pr.version !== undefined && pr.version !== "latest"),
+        )
+        .map((pr) => `${t.name}@${(pr as { version?: string }).version}`),
+    );
+
+    expect([...new Set(pinned)].sort()).toEqual([
+      // The fork build, for the OSC-reply leak.
+      "zellij@0.44.3-red.2",
+      // The suite crosses a major together, and only when a person says
+      // so: a major moves the package-set manifest schema.
+      `red-skills-brain@${REDSKILLS_MAJOR}`,
+      `red-skills-dev@${REDSKILLS_MAJOR}`,
+      `red-skills-memory@${REDSKILLS_MAJOR}`,
+      `red-skills-core@${REDSKILLS_MAJOR}`,
+    ].sort());
   });
 
   test("no tool declares a floor and a pin at once", () => {

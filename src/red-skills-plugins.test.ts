@@ -23,7 +23,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { TOOLS, type Tool } from "./manifest.ts";
+import { TOOLS, type Tool, REDSKILLS_MAJOR } from "./manifest.ts";
 import { convergeMiseConfig, miseConfigPath, miseEntries, miseToolNames } from "./mise-config.ts";
 import type { Platform } from "./platform.ts";
 import { REDSKILLS_CORE_SPEC } from "./red-skills-set.ts";
@@ -100,7 +100,10 @@ describe("the plugin set comes from the manifest", () => {
     expect(DECLARED.length).toBeGreaterThan(0);
     for (const entry of redSkillsPluginEntries(UBUNTU)) {
       expect(entry.spec.startsWith("npm:")).toBe(true);
-      expect(entry.version).toBe("latest");
+      // The major, not `latest`: the four packages compose one set, so
+      // they cross a major boundary together or the set sits at the
+      // oldest version common to all of them.
+      expect(entry.version).toBe(REDSKILLS_MAJOR);
       expect(entry.alias).toBeDefined();
     }
   });

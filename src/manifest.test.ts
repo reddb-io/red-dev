@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "node:fs";
 import {
+  REDSKILLS_MAJOR,
   TOOLS,
   applicableScopes,
   describeProvider,
@@ -357,5 +358,27 @@ describe("items that need administrator", () => {
       expect(tool).toBeDefined();
       expect([file, needsAdmin(tool!.win)]).toEqual([file, true]);
     }
+  });
+});
+
+describe("the RedSkills major", () => {
+  test("is pinned on all four packages, so the set crosses a major together", () => {
+    // A composed set is the version present in every package. If one of
+    // the four followed `latest` across a major while the others did
+    // not, the set would sit at the older common version — which is the
+    // silent half of what went wrong on 2026-08-19.
+    const rows = TOOLS.filter((t) => t.name.startsWith("red-skills"));
+    const mise = rows
+      .map((t) => providerFor(t, platform()))
+      .filter((p): p is Extract<typeof p, { kind: "mise" }> => p.kind === "mise");
+
+    expect(mise.length).toBe(4);
+    for (const provider of mise) {
+      expect(provider.version, provider.spec).toBe(REDSKILLS_MAJOR);
+    }
+  });
+
+  test("is a major, not a full version — patches still arrive without a commit here", () => {
+    expect(REDSKILLS_MAJOR).toMatch(/^\d+$/);
   });
 });

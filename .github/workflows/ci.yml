@@ -12,6 +12,13 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # The contract job below asks a question about somebody else's
+  # repository, so it has to be asked when they change rather than only
+  # when we do. red-skills 4.0 moved the package-set schema on a day
+  # red-dev published nothing, and the first thing to notice was a
+  # workstation.
+  schedule:
+    - cron: "17 6 * * *"
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -21,6 +28,43 @@ permissions:
   contents: read
 
 jobs:
+  # Does this red-dev still read what red-skills actually publishes?
+  #
+  # Separate from `check` because it is the one job that can fail
+  # without anything in this repository having changed, and because it
+  # needs the network while the rest deliberately does not. See
+  # scripts/check-package-set-contract.ts for why the contract is
+  # transcribed rather than imported, and why that needs an alarm.
+  package-set-contract:
+    name: red-skills package-set contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: The newest published manifest parses
+        run: |
+          set -euo pipefail
+          set +e
+          bun scripts/check-package-set-contract.ts
+          status=$?
+          set -e
+          # 2 is "could not reach the release", which is a runner
+          # problem and not a contract that broke. Reported, not failed:
+          # a red here must mean the publisher moved.
+          if [[ "$status" == "2" ]]; then
+            echo "::warning::the red-skills release could not be reached; the contract was not checked"
+            exit 0
+          fi
+          exit "$status"
+
   check:
     name: typecheck, test, build
     runs-on: ubuntu-24.04

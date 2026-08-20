@@ -346,6 +346,25 @@ const gh = (repo: string, asset: string, bin?: string): Provider => ({
  * a call site reading mise("github:reddb-io/toon", "tq") gives no clue
  * which of the two that string is.
  */
+/**
+ * The RedSkills major this red-dev knows how to read.
+ *
+ * `latest` was the pin, which means npm's dist-tag decided when every
+ * machine crossed a major boundary — including at 03:00, including for
+ * a major whose manifest schema this binary has never seen. red-skills
+ * 4.0 did exactly that: the package set moved to `red.package-set.v2`,
+ * every red-dev in the field refused every 4.x set, and no human had
+ * decided anything.
+ *
+ * A major is a decision, so it is spelled here and moves in a commit,
+ * beside the parser that has to be able to read it (`red-skills-set.ts`)
+ * and the contract check that proves it can (`scripts/check-package-set-contract.ts`).
+ * Minors and patches still arrive on their own — mise resolves the
+ * newest release inside the major, which is the part that should not
+ * need a person.
+ */
+export const REDSKILLS_MAJOR = "4";
+
 const mise = (
   spec: string,
   opts: { alias?: string; version?: string } = {},
@@ -1147,8 +1166,8 @@ export const TOOLS: Tool[] = [
     about: "the RedSkills runtime bundles, resolved and kept current by mise",
     scope: "core",
     managed: true,
-    u24: mise("npm:@reddb-io/red-skills", { alias: "red-skills" }),
-    win: mise("npm:@reddb-io/red-skills", { alias: "red-skills" }),
+    u24: mise("npm:@reddb-io/red-skills", { alias: "red-skills", version: REDSKILLS_MAJOR }),
+    win: mise("npm:@reddb-io/red-skills", { alias: "red-skills", version: REDSKILLS_MAJOR }),
   },
   // The plugins, one row each, and that is the point of them being here.
   //
@@ -1172,24 +1191,24 @@ export const TOOLS: Tool[] = [
     about: "RedSkills dev plugin — engineering skills for coding agents",
     scope: "core",
     managed: true,
-    u24: mise("npm:@reddb-io/red-skills-dev", { alias: "red-skills-dev" }),
-    win: mise("npm:@reddb-io/red-skills-dev", { alias: "red-skills-dev" }),
+    u24: mise("npm:@reddb-io/red-skills-dev", { alias: "red-skills-dev", version: REDSKILLS_MAJOR }),
+    win: mise("npm:@reddb-io/red-skills-dev", { alias: "red-skills-dev", version: REDSKILLS_MAJOR }),
   },
   {
     name: "red-skills-memory",
     about: "RedSkills memory plugin — governed operational memory, on top of dev",
     scope: "core",
     managed: true,
-    u24: mise("npm:@reddb-io/red-skills-memory", { alias: "red-skills-memory" }),
-    win: mise("npm:@reddb-io/red-skills-memory", { alias: "red-skills-memory" }),
+    u24: mise("npm:@reddb-io/red-skills-memory", { alias: "red-skills-memory", version: REDSKILLS_MAJOR }),
+    win: mise("npm:@reddb-io/red-skills-memory", { alias: "red-skills-memory", version: REDSKILLS_MAJOR }),
   },
   {
     name: "red-skills-brain",
     about: "RedSkills brain plugin — a project-local knowledge repository",
     scope: "core",
     managed: true,
-    u24: mise("npm:@reddb-io/red-skills-brain", { alias: "red-skills-brain" }),
-    win: mise("npm:@reddb-io/red-skills-brain", { alias: "red-skills-brain" }),
+    u24: mise("npm:@reddb-io/red-skills-brain", { alias: "red-skills-brain", version: REDSKILLS_MAJOR }),
+    win: mise("npm:@reddb-io/red-skills-brain", { alias: "red-skills-brain", version: REDSKILLS_MAJOR }),
   },
   {
     // After the agents, never before: the installer detects which CLIs

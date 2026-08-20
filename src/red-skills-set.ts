@@ -370,7 +370,16 @@ export function parsePackageSetManifest(bytes: Uint8Array | string): ManifestPar
   // for what it declares, which is what every 4.x set was told.
   const declared = (raw as Record<string, unknown> | null)?.["schema"];
   if (declared !== PACKAGE_SET_SCHEMA_V1 && declared !== PACKAGE_SET_SCHEMA_V2) {
-    return { ok: false, reason: `unsupported manifest schema: ${String(declared)}` };
+    // Named with the cure. A publisher that moves the schema forward
+    // makes every older red-dev refuse every set it publishes, and the
+    // machine reading this message is the one that cannot tell a new
+    // contract from a corrupt download. This red-dev knows these two.
+    return {
+      ok: false,
+      reason:
+        `unsupported manifest schema: ${String(declared)} — ` +
+        `this red-dev reads ${PACKAGE_SET_SCHEMA_V1} and ${PACKAGE_SET_SCHEMA_V2}, so update red-dev`,
+    };
   }
   const v2 = declared === PACKAGE_SET_SCHEMA_V2;
   if (!sameKeys(raw, v2 ? MANIFEST_KEYS_V2 : MANIFEST_KEYS_V1)) {
@@ -791,7 +800,26 @@ export function installedCoreVersion(installsDir: string): string | null {
 
 /** What mise has, read as one candidate rather than as four tools. */
 export type MiseCandidate =
-  | { kind: "ready"; version: string; core: string; plugins: Record<string, string> }
+  | {
+      kind: "ready";
+      version: string;
+      core: string;
+      plugins: Record<string, string>;
+      /**
+       * Tools that have something newer than `version`, and the newest
+       * they have.
+       *
+       * A composed set is the version present in *every* tool, so one
+       * package left behind holds the whole set there. That is the right
+       * answer and it used to be a silent one: on 2026-08-19 the core
+       * was at 3.22.0, the three plugin packages at 3.19.5 because a
+       * release-age gate had held them, and the machine composed 3.19.5
+       * and said nothing about the four months of core it was declining
+       * to use. Named here so the converge can say which package is
+       * holding the set, which is the one fact that makes it fixable.
+       */
+      behind: { tool: string; newest: string }[];
+    }
   /** Every tool is installed, but no single version is present in all of them. */
   | { kind: "skew"; versions: Record<string, string[]> }
   /** Some tool has not been installed at all yet — mid-converge, not a fault. */
@@ -878,6 +906,12 @@ export function candidateFromMise(installsRoot: string, plugins: readonly string
   const version = common.at(-1);
   if (version === undefined) return { kind: "skew", versions };
 
+  const behind: { tool: string; newest: string }[] = [];
+  for (const [tool, list] of Object.entries(versions)) {
+    const newest = list.at(-1);
+    if (newest !== undefined && newest !== version) behind.push({ tool, newest });
+  }
+
   const out: Record<string, string> = {};
   for (const name of plugins) {
     out[name] = payloadDir(pluginInstallsDir(installsRoot, name), version, `@reddb-io/red-skills-${name}`);
@@ -885,6 +919,7 @@ export function candidateFromMise(installsRoot: string, plugins: readonly string
   return {
     kind: "ready",
     version,
+    behind,
     core: payloadDir(coreInstallsDir(installsRoot), version, CORE_PACKAGE),
     plugins: out,
   };
@@ -1344,6 +1379,17 @@ export function convergeRedSkillsPackageSet(
       .join("; ");
     return refuse("skew", `no version is installed for every RedSkills tool (${detail})`);
   }
+  // Said before anything is composed, because it is true whether or not
+  // the composition then goes ahead: the set this machine is about to
+  // resolve is older than what one of its packages already holds.
+  if (candidate.behind.length > 0) {
+    const held = candidate.behind.map((b) => `${b.tool} has ${b.newest}`).join(", ");
+    log.warn(
+      `red-skills: composing ${candidate.version} — the version every package shares (${held})`,
+    );
+    log.plain("       upgrade the packages that lag, or the set stays here");
+  }
+
   if (activeTrusted) {
     return refuse(
       "downgrade",

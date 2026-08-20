@@ -36,7 +36,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { sha256Hex } from "./checksum.ts";
-import { providerFor, TOOLS } from "./manifest.ts";
+import { providerFor, REDSKILLS_MAJOR, TOOLS } from "./manifest.ts";
 import {
   miseEntries,
   miseToolNames,
@@ -324,6 +324,8 @@ describe("the manifest entries mise resolves", () => {
         kind: "mise",
         spec: REDSKILLS_CORE_SPEC,
         alias: REDSKILLS_CORE_ALIAS,
+        // Pinned to a major: see REDSKILLS_MAJOR in src/manifest.ts.
+        version: REDSKILLS_MAJOR,
       });
     }
   });
@@ -332,13 +334,17 @@ describe("the manifest entries mise resolves", () => {
     expect(REDSKILLS_CORE_SPEC.startsWith("npm:")).toBe(true);
   });
 
-  test("the fragment projects it at latest, under the name people type", () => {
+  test("the fragment pins the major, under the name people type", () => {
+    // Not `latest`: a major moves the manifest schema, and npm's
+    // dist-tag deciding when every machine crosses that boundary is how
+    // red-skills 4.0 made every red-dev in the field refuse every set
+    // it published. Minors and patches still arrive on their own.
     for (const p of [UBUNTU, WINDOWS]) {
       const entry = miseEntries(p).find((e) => e.spec === REDSKILLS_CORE_SPEC);
       expect(entry, `${p.os}`).toEqual({
         spec: REDSKILLS_CORE_SPEC,
         alias: REDSKILLS_CORE_ALIAS,
-        version: "latest",
+        version: REDSKILLS_MAJOR,
         // The seam ADR 0010 asks for: mise tells red-dev that the set
         // moved. Asserted as a whole entry rather than a field, so a
         // postinstall appearing on some *other* tool would fail here.
@@ -351,7 +357,7 @@ describe("the manifest entries mise resolves", () => {
     const out = renderMiseConfig(miseEntries(UBUNTU));
     expect(out).toContain('red-skills = "npm:@reddb-io/red-skills"');
     expect(out).toContain(
-      `red-skills = { version = "latest", postinstall = "${REDSKILLS_RECONCILE_POSTINSTALL}" }`,
+      `red-skills = { version = "${REDSKILLS_MAJOR}", postinstall = "${REDSKILLS_RECONCILE_POSTINSTALL}" }`,
     );
   });
 
@@ -1461,5 +1467,59 @@ describe("the manifest schema red-skills 4.0 publishes", () => {
     const parsed = parsePackageSetManifest(`${JSON.stringify(orphan, null, 2)}\n`);
     expect(parsed.ok).toBe(false);
     if (!parsed.ok) expect(parsed.reason).toContain("not canonical");
+  });
+});
+
+describe("the version every RedSkills package shares", () => {
+  test("names the packages that are ahead, so a set held back is not held back in silence", () => {
+    // The machine on 2026-08-19: core at 3.22.0, the three plugin
+    // packages still at 3.19.5 because a release-age gate had held
+    // them. Composing 3.19.5 was correct; saying nothing was not.
+    const installs = fakeInstalls({
+      core: ["3.19.5", "3.22.0"],
+      dev: ["3.19.5"],
+      memory: ["3.19.5"],
+      brain: ["3.19.5"],
+    });
+
+    const candidate = candidateFromMise(installs, PLUGINS);
+    expect(candidate.kind).toBe("ready");
+    if (candidate.kind !== "ready") return;
+    expect(candidate.version).toBe("3.19.5");
+    expect(candidate.behind).toEqual([{ tool: "red-skills", newest: "3.22.0" }]);
+  });
+
+  test("is quiet when every package holds the same version", () => {
+    const installs = fakeInstalls({
+      core: ["4.0.1"],
+      dev: ["4.0.1"],
+      memory: ["4.0.1"],
+      brain: ["4.0.1"],
+    });
+
+    const candidate = candidateFromMise(installs, PLUGINS);
+    expect(candidate.kind).toBe("ready");
+    if (candidate.kind !== "ready") return;
+    expect(candidate.version).toBe("4.0.1");
+    expect(candidate.behind).toEqual([]);
+  });
+});
+
+describe("a schema this red-dev has never seen", () => {
+  test("is refused by name, and the message says what to do about it", () => {
+    // "manifest shape or key order is not canonical" is what a 4.x set
+    // told every machine, and it reads like a corrupt download. A
+    // contract that moved forward must say so, and say the cure.
+    const future = {
+      schema: "red.package-set.v3",
+      sourceCommit: "a".repeat(40),
+      artifacts: [{ name: "x", sourceCommit: "a".repeat(40), size: 1, sha256: "0".repeat(64) }],
+      wholeSetDigest: "0".repeat(64),
+    };
+    const parsed = parsePackageSetManifest(`${JSON.stringify(future, null, 2)}\n`);
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.reason).toContain("red.package-set.v3");
+    expect(parsed.reason).toContain("update red-dev");
   });
 });
