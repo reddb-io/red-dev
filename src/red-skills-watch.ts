@@ -38,7 +38,16 @@
  * willing to accept.
  */
 
-import { closeSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname } from "node:path";
 
 import { log } from "./log.ts";
@@ -179,7 +188,7 @@ export interface WatchOptions {
   /** The take, injected for the tests. Defaults to the staged update. */
   take?: () => Promise<WatchResult>;
   /** The crossing, injected for the tests. Defaults to crossToWindows. */
-  cross?: (p: Platform) => Promise<"kicked" | "skipped">;
+  cross?: (p: Platform) => Promise<Crossing>;
 }
 
 /**
@@ -210,7 +219,13 @@ export async function watchRedSkills(opts: WatchOptions = {}): Promise<WatchResu
     // Windows side keeps its own stamp, so asking it costs nothing when
     // it asked recently and is the only trigger it has when it did not.
     if (opts.manifestPlatform) {
-      await (opts.cross ?? crossToWindows)(opts.manifestPlatform);
+      const crossing = await (opts.cross ?? crossToWindows)(opts.manifestPlatform);
+      // Said out loud only to a person who typed the command. A skip is
+      // the ordinary answer on a machine with one half, and the first
+      // version of this could not explain itself at all.
+      if (opts.force && opts.manifestPlatform.env === "wsl") {
+        log.plain(`       windows: ${crossing.reason}`);
+      }
     }
 
     // Stamped after the ask, not before: a run that could not reach the
@@ -268,27 +283,127 @@ async function defaultTake(opts: WatchOptions): Promise<WatchResult> {
  * Windows process, and the far side keeps its own stamp and its own
  * lock, so this is free whenever that side asked recently.
  */
-export async function crossToWindows(p: Platform): Promise<"kicked" | "skipped"> {
-  if (p.env !== "wsl") return "skipped";
+/**
+ * The red-devs a Windows side can be asked through, newest first.
+ *
+ * **Not the mise shim.** A shim is a small program that re-enters mise
+ * to find the real one, and mise cannot do that when it is started from
+ * inside a distro: it answers `mise ERROR Version:` and exits, which is
+ * exactly what the first version of this crossing asked it to do — the
+ * kick was sent, wscript started, and nothing on the far side ever
+ * moved. So the crossing names real executables: mise's installed
+ * copies, newest version first, then boot.ps1's.
+ *
+ * A directory read rather than a glob, so this stays one function with
+ * one failure mode. A Windows side mise has never touched has no
+ * installs tree and answers with the bootstrap copy alone.
+ */
+export function windowsRedDevCandidates(
+  localAppData: string,
+  readdir: (dir: string) => string[] = defaultReaddir,
+): string[] {
+  const root = localAppData.replace(/[\\/]+$/, "");
+  const installs = `${root}/mise/installs/red-dev`;
+  const versions = readdir(installs)
+    // Selector links (`1`, `1.0`, `latest`) sit beside the real versions
+    // and point at one of them. Taking a link is taking the same binary
+    // under a name that moves, so only full versions count.
+    .filter((name) => /^\d+\.\d+\.\d+/.test(name))
+    .sort(byVersionDesc)
+    .map((name) => `${installs}/${name}/red-dev.exe`);
+
+  return [...versions, `${root}/red-dev/bin/red-dev.exe`];
+}
+
+function defaultReaddir(dir: string): string[] {
+  try {
+    return readdirSync(dir);
+  } catch {
+    return [];
+  }
+}
+
+/** Newest first, numerically, so 1.0.10 sorts above 1.0.9. PURE. */
+function byVersionDesc(a: string, b: string): number {
+  const parts = (v: string) => v.split(/[.+-]/).map((n) => Number.parseInt(n, 10) || 0);
+  const x = parts(a);
+  const y = parts(b);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    if ((x[i] ?? -1) !== (y[i] ?? -1)) return (y[i] ?? -1) - (x[i] ?? -1);
+  }
+  return 0;
+}
+
+/** Why a crossing did not happen, or that it did. */
+export type Crossing = { outcome: "kicked" | "skipped"; reason: string };
+
+/**
+ * Ask the Windows side to look too, from inside a distro.
+ *
+ * A WSL machine is two machines: two roots, two package sets, two
+ * red-devs. The distro's watch moves the distro and nothing else, and
+ * the Windows half has no trigger of its own — a shell profile is
+ * bash's and PowerShell reads none of it, and the daemon's host hook
+ * execs inside the distro and cannot reach across (see reportBoundary
+ * in src/redwall-hook.ts, which says the same about Worker events).
+ *
+ * So the crossing is the remedy the Redwall already ships: the distro's
+ * red-dev reaches the Windows side through interop. Through the hidden
+ * runner, because red-dev.exe is a console program and a console
+ * program started from a process without one draws a black rectangle on
+ * somebody's desktop — the whole reason windows-hidden.ts exists.
+ *
+ * Every path is asked of Windows rather than assembled here.
+ * `LOCALAPPDATA` does not exist inside a distro, and the first version
+ * of this function called `windowsBinDir()` anyway, threw, caught its
+ * own exception and reported "skipped" — so the crossing never once
+ * happened and nothing said so. Hence both the lookup below and the
+ * reason strings: a skip that cannot explain itself is how this stayed
+ * broken for exactly as long as nobody checked.
+ *
+ * Detached and never awaited: a shell starting must not wait for a
+ * Windows process, and the far side keeps its own stamp and its own
+ * lock, so this costs nothing whenever that side asked recently.
+ */
+export async function crossToWindows(p: Platform): Promise<Crossing> {
+  if (p.env !== "wsl") return { outcome: "skipped", reason: "not a distro; nothing to cross to" };
+
+  const { existsSync } = await import("node:fs");
+  const { windowsLocalAppData } = await import("./wsl.ts");
+  const { windowsPathFor } = await import("./windows-hidden.ts");
+  const { hiddenRunnerPath } = await import("./redwall-hook.ts");
+
+  let local: string;
+  try {
+    // The WSL spelling, asked of Windows and cached: a redirected
+    // profile or a second drive defeats every guess about /mnt/c.
+    local = await windowsLocalAppData();
+  } catch (err) {
+    return { outcome: "skipped", reason: `could not read %LOCALAPPDATA%: ${(err as Error).message}` };
+  }
+
+  const here = windowsRedDevCandidates(local).find((path) => existsSync(path));
+  if (here === undefined) {
+    return { outcome: "skipped", reason: `no red-dev.exe under ${local}` };
+  }
+
+  const binary = await windowsPathFor(here, p);
+  if (binary === null) return { outcome: "skipped", reason: `wslpath could not spell ${here}` };
+
+  const runner = await hiddenRunnerPath(p);
+  if (runner === null) {
+    return { outcome: "skipped", reason: "the hidden runner could not be installed" };
+  }
 
   try {
-    const { windowsBinDir } = await import("./providers.ts");
-    const { hiddenRunnerPath } = await import("./redwall-hook.ts");
-    const binary = `${windowsBinDir()}\\red-dev.exe`;
-    const runner = await hiddenRunnerPath(p);
-    if (runner === null) return "skipped";
-
     const proc = Bun.spawn(
       ["wscript.exe", "//B", "//Nologo", runner, `"${binary}" red-skills watch due`],
       { stdout: "ignore", stderr: "ignore", stdin: "ignore" },
     );
     proc.unref();
-    return "kicked";
-  } catch {
-    // A distro with no interop, no LOCALAPPDATA answer or no runner is a
-    // distro that updates itself and leaves the other half to a person.
-    // Not an error: the half this run is on is already done.
-    return "skipped";
+    return { outcome: "kicked", reason: `asked ${binary}` };
+  } catch (err) {
+    return { outcome: "skipped", reason: `wscript could not start: ${(err as Error).message}` };
   }
 }
 

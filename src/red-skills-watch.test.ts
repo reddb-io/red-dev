@@ -22,6 +22,7 @@ import {
   watchRedSkills,
   watchStampPath,
   type WatchResult,
+  windowsRedDevCandidates,
 } from "./red-skills-watch.ts";
 
 function home(): string {
@@ -217,7 +218,7 @@ describe("the other half of a WSL machine", () => {
       manifestPlatform: { env: "wsl" } as never,
       cross: async () => {
         crossed.push("kicked");
-        return "kicked";
+        return { outcome: "kicked" as const, reason: "asked C:\\red-dev.exe" };
       },
     });
     // Current on this side says nothing about the other one.
@@ -233,7 +234,7 @@ describe("the other half of a WSL machine", () => {
       take: async () => took,
       cross: async () => {
         crossed++;
-        return "kicked";
+        return { outcome: "kicked" as const, reason: "asked C:\\red-dev.exe" };
       },
     });
     // No platform, no crossing: a plain Linux machine is one machine.
@@ -246,11 +247,64 @@ describe("the other half of a WSL machine", () => {
     expect(fn).toContain("wscript.exe");
     expect(fn).toContain("//B");
     expect(fn).toContain("hiddenRunnerPath");
+    // Never `windowsBinDir`: it reads %LOCALAPPDATA%, which a distro
+    // does not have — the first version called it, threw, caught itself
+    // and reported "skipped", so the crossing never once happened.
+    expect(fn).not.toContain("windowsBinDir");
+    expect(fn).toContain("windowsRedDevCandidates");
+    expect(fn).toContain("windowsLocalAppData");
     // Detached: a shell starting must not wait for a Windows process.
     expect(fn).toContain("proc.unref()");
     // `due`, so the far side's own interval decides.
     expect(fn).toContain("red-skills watch due");
     // Only from inside a distro.
     expect(fn).toContain('p.env !== "wsl"');
+  });
+});
+
+describe("which red-dev the Windows half is asked through", () => {
+  const listing = (names: string[]) => () => names;
+
+  test("mise's newest installed version first, the bootstrap copy last", () => {
+    expect(
+      windowsRedDevCandidates("/mnt/c/Users/me/AppData/Local", listing(["1.0.9", "1.0.10", "1.0.2"])),
+    ).toEqual([
+      // Numerically, so 1.0.10 is newer than 1.0.9.
+      "/mnt/c/Users/me/AppData/Local/mise/installs/red-dev/1.0.10/red-dev.exe",
+      "/mnt/c/Users/me/AppData/Local/mise/installs/red-dev/1.0.9/red-dev.exe",
+      "/mnt/c/Users/me/AppData/Local/mise/installs/red-dev/1.0.2/red-dev.exe",
+      "/mnt/c/Users/me/AppData/Local/red-dev/bin/red-dev.exe",
+    ]);
+  });
+
+  test("never the shim: mise cannot re-enter itself from inside a distro", () => {
+    // The first crossing asked the shim. wscript started, mise answered
+    // `mise ERROR Version:`, and nothing on the far side ever moved —
+    // a kick that was sent and did nothing, which is the worst kind.
+    const all = windowsRedDevCandidates("/mnt/c/Users/me/AppData/Local", listing(["1.0.10"]));
+    for (const path of all) expect(path).not.toContain("/shims/");
+  });
+
+  test("selector links are not versions, because they move", () => {
+    const all = windowsRedDevCandidates(
+      "/mnt/c/Users/me/AppData/Local",
+      listing(["1", "1.0", "latest", "1.0.10"]),
+    );
+    expect(all.filter((p) => p.includes("/installs/"))).toEqual([
+      "/mnt/c/Users/me/AppData/Local/mise/installs/red-dev/1.0.10/red-dev.exe",
+    ]);
+  });
+
+  test("a Windows side mise never touched still answers with the bootstrap copy", () => {
+    expect(windowsRedDevCandidates("/mnt/c/Users/me/AppData/Local/", listing([]))).toEqual([
+      "/mnt/c/Users/me/AppData/Local/red-dev/bin/red-dev.exe",
+    ]);
+  });
+
+  test("a skip says why, because a silent one is how this stayed broken", async () => {
+    const { crossToWindows } = await import("./red-skills-watch.ts");
+    const onLinux = await crossToWindows({ env: "desktop" } as never);
+    expect(onLinux.outcome).toBe("skipped");
+    expect(onLinux.reason).toContain("nothing to cross to");
   });
 });
