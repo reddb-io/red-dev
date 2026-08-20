@@ -46,6 +46,7 @@ import {
   removeCompanions,
   type CompanionOutcome,
   type CompanionReconcileOptions,
+  setVsix,
 } from "./red-skills-companions.ts";
 import { ZELLIJ_COMPANION_FILE, ZELLIJ_LAYER_FILE } from "./zellij-layer.ts";
 
@@ -718,5 +719,43 @@ describe("removing the companions", () => {
     });
 
     expect(readFileSync(path, "utf8")).toBe(mine);
+  });
+});
+
+describe("finding the extension inside a set", () => {
+  function setWith(layout: Record<string, string>): string {
+    const root = mkdtempSync(join(tmpdir(), "red-vsix-"));
+    for (const [path, name] of Object.entries(layout)) {
+      mkdirSync(join(root, path), { recursive: true });
+      writeFileSync(join(root, path, name), "PK");
+    }
+    return root;
+  }
+
+  test("a published set keeps it in artifacts/, which is where it now looks", () => {
+    // The bug this closes had three halves and none of them met: the
+    // `.vsix` is deliberately not overlaid into the tree, activation
+    // did not carry `artifacts/` across, and the companion searched the
+    // tree only. So doctor reported "the package set carries no .vsix"
+    // about a set whose signed manifest declares one.
+    const source = setWith({ artifacts: "vscode-extension-red-skills-4.0.4.vsix" });
+    expect(setVsix(source)).toBe(join(source, "artifacts", "vscode-extension-red-skills-4.0.4.vsix"));
+  });
+
+  test("a set that groups its companions still wins over artifacts/", () => {
+    const source = setWith({
+      "companions/vscode": "vscode-extension-red-skills-4.0.4.vsix",
+      artifacts: "vscode-extension-red-skills-4.0.4.vsix",
+    });
+    expect(setVsix(source)).toContain(join("companions", "vscode"));
+  });
+
+  test("dist/ still answers, which is what a composed set has", () => {
+    const source = setWith({ dist: "vscode-extension-red-skills-3.22.0.vsix" });
+    expect(setVsix(source)).toContain("dist");
+  });
+
+  test("a set with no extension anywhere is still null, not a guess", () => {
+    expect(setVsix(setWith({ dist: "something-else.txt" }))).toBeNull();
   });
 });

@@ -643,6 +643,17 @@ export type SetVerification =
       trust: { kind: "trusted"; by: string };
       /** The workstation tree the set carries, to be activated. */
       tree: string;
+      /**
+       * The verified artifacts beside it.
+       *
+       * Not everything a release publishes belongs in the tree — the
+       * VS Code extension, the verifier, the checksums stay in
+       * `artifacts/` (see overlaysIntoTree in red-skills-acquire.ts).
+       * Named here so activation can take them along; a set that
+       * arrived without them is a set whose companions have nothing to
+       * install from.
+       */
+      artifacts: string;
     }
   | { ok: false; failure: SetFailure; reason: string };
 
@@ -718,6 +729,7 @@ export function verifyPackageSet(
     identity: { version, digest: manifest.wholeSetDigest, sourceCommit: manifest.sourceCommit },
     trust: { kind: "trusted", by: signature.by },
     tree,
+    artifacts: setArtifactsDir(dir),
   };
 }
 
@@ -1359,7 +1371,7 @@ export function convergeRedSkillsPackageSet(
         trust: "trusted",
         path,
       },
-      () => copyTree(verification.tree, path),
+      () => copySet(verification.tree, verification.artifacts, path),
       opts.stageOnly === true,
     );
   }
@@ -1737,6 +1749,35 @@ function copyTree(from: string, to: string): void {
   rmSync(staging, { recursive: true, force: true });
   mkdirSync(dirname(to), { recursive: true });
   cpSync(from, staging, { recursive: true, dereference: true });
+  restoreScriptModes(staging);
+  renameSync(staging, to);
+}
+
+/**
+ * A published set is its tree *and* the artifacts that never enter it.
+ *
+ * ADR 0011 calls a package set "a self-contained copy with one
+ * identity", and this is where that stopped being true: activation took
+ * the tree and left `artifacts/` behind in the candidate. Everything the
+ * hosts need lives in the tree, so nothing complained — but the VS Code
+ * extension does not. The `.vsix` is deliberately kept out of the tree
+ * (`overlaysIntoTree`), the companion looks for it under the active
+ * set, and the two halves have therefore never met: the extension could
+ * not install from a published set on any machine.
+ *
+ * Copied under the tree as `artifacts/`, which is where
+ * `setArtifactsDir` already says a set keeps them, so the set a
+ * companion is handed answers for its own contents.
+ */
+function copySet(tree: string, artifacts: string, to: string): void {
+  if (existsSync(to)) return;
+  const staging = join(dirname(to), `.tmp-${basename(to)}`);
+  rmSync(staging, { recursive: true, force: true });
+  mkdirSync(dirname(to), { recursive: true });
+  cpSync(tree, staging, { recursive: true, dereference: true });
+  if (existsSync(artifacts)) {
+    cpSync(artifacts, setArtifactsDir(staging), { recursive: true, dereference: true });
+  }
   restoreScriptModes(staging);
   renameSync(staging, to);
 }

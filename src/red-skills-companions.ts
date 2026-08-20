@@ -233,11 +233,27 @@ export function setBinMap(source: string): Record<string, string> {
  * own is exactly the guess that lets a machine name a file that is not
  * there. The per-surface directories are searched first, so a set that
  * groups its companions wins over one that leaves them flat in `dist/`.
+ *
+ * `artifacts/` is searched too, and until 2026-08-20 it was not: a
+ * published set keeps the extension there, activation did not carry the
+ * directory across at all, and the companion looked only inside the
+ * tree. Three halves of one path, none of which met — so the VS Code
+ * extension has never installed from a published set on any machine,
+ * and doctor said "the package set carries no .vsix" about a set whose
+ * signed manifest declares one.
  */
 export function setVsix(source: string): string | null {
   const roots = [
     ...COMPANION_ROOTS.map((root) => join(source, root, "vscode")),
     ...COMPANION_ROOTS.map((root) => join(source, root)),
+    // Where a published set actually keeps it. The `.vsix` is
+    // deliberately not overlaid into the tree (`overlaysIntoTree` in
+    // red-skills-acquire.ts) — it is not source and nothing in the tree
+    // resolves it — so `dist/` and `companions/` are the right places
+    // to look for a *composed* set and the wrong ones for a published
+    // one. Searched last, so a set that does group its companions still
+    // wins.
+    join(source, "artifacts"),
   ];
   for (const root of roots) {
     const file = listing(root).find((name) => /^vscode-extension-red-skills-.*\.vsix$/.test(name));
