@@ -937,7 +937,7 @@ async function cmdUpdate(p: Platform, inv: Invocation): Promise<number> {
   const { runUpdate } = await import("./update-order.ts");
 
   const stages: Record<UpdateStage, () => Promise<number | void>> = {
-    system: () => systemUpdate(p),
+    system: () => systemUpdate(p, { whole: inv.system }),
 
     // Before the converge, because the converge builds out of this tree:
     // convergeRedSkills stops at "already wired", which is correct for

@@ -484,8 +484,9 @@ leaves alone: the tag cut minutes ago is the one nobody has run yet.
 Three deliberately stay behind. `tldr` ships a binary called `tealdeer` and
 mise will not rename it. `red-ui` ships a .deb whose desktop integration a bare
 binary would shadow, and `red-request` ships a Windows installer rather than a
-binary. On Windows nothing moved: `winget upgrade --all` is already an updater,
-and replacing a working one buys nothing.
+binary. On Windows nothing moved: winget is already an updater, and replacing a
+working one buys nothing — though what red-dev asks it to upgrade is now the
+list red-dev declares rather than every app on the machine (below).
 
 Anything mise owns lands on PATH through its shims, which — unlike `mise
 activate` — also work in a script, a systemd unit and over SSH. A machine
@@ -534,7 +535,8 @@ red-dev platform             # what red-dev thinks this machine is
 red-dev plan [scope]         # what would change, changes nothing
 red-dev install [scope]      # converge toward the manifest
 red-dev install --dry-run    # print the plan, touch nothing
-red-dev update               # package managers, RedSkills, mise's tools, the agents, then converge
+red-dev update               # the tools red-dev declares, RedSkills, mise's tools, the agents, then converge
+red-dev update --system      # and every other package apt or winget owns
 red-dev theme [name]         # dark | light | obsidian | marble | cobalt | flare
 red-dev wallpaper [source]   # theme | Red artwork | absolute PNG path | HTTPS URL
 red-dev redwall              # redraw the wallpaper carrying this machine's state

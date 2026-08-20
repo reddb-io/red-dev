@@ -88,7 +88,14 @@ export function buildCli(): CLI {
         },
       },
       update: {
-        description: "upgrade what the package managers own, then converge",
+        description: "upgrade the tools red-dev declares, then converge",
+        options: {
+          system: {
+            type: "boolean",
+            description: "upgrade every package on this machine, not only red-dev's",
+            default: false,
+          },
+        },
       },
       privileged: {
         // No positional and no flags, for the same reason `redwall` has
@@ -336,6 +343,12 @@ export interface Invocation {
   apply: boolean;
   /** Reclaim only touches Windows CrashDumps when explicitly selected. */
   crashDumps: boolean;
+  /**
+   * `update --system`: upgrade the whole machine rather than the tools
+   * red-dev declares. Off by default — see systemUpdate in providers.ts
+   * for why an implied whole-machine upgrade was the wrong default.
+   */
+  system: boolean;
   /** --yes: take defaults instead of asking on a first run. */
   yes: boolean;
   /** `share <target> [tool]` — its own positionals, see the note in buildCli. */
@@ -482,6 +495,7 @@ export function parseArgs(cli: CLI, argv: string[]): Invocation {
     dryRun: opts["dry-run"] === true,
     apply: opts["apply"] === true,
     crashDumps: opts["crash-dumps"] === true,
+    system: opts["system"] === true,
     yes: opts["yes"] === true,
     shareTarget: typeof pos["target"] === "string" ? pos["target"] : undefined,
     shareTool: typeof pos["tool"] === "string" ? pos["tool"] : undefined,

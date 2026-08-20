@@ -12,7 +12,7 @@ import { removeTemp, tempDir, tempFile } from "./temp.ts";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { formatBytes, formatDuration, log, logIsCaptured, RedError } from "./log.ts";
 import { parseChecksums, pickChecksumAsset, sha256Hex, verifyChecksum } from "./checksum.ts";
-import type { Provider } from "./manifest.ts";
+import { providerFor, TOOLS, type Provider, type Tool } from "./manifest.ts";
 import { convergeMiseConfig, miseEntries, releaseAgeExcludes } from "./mise-config.ts";
 import type { Platform } from "./platform.ts";
 import { startProcessHeartbeat } from "./process-heartbeat.ts";
@@ -1357,36 +1357,107 @@ export async function aptRepoInstall(
 // -------------------------------------------------------- updates
 
 /**
- * Update everything the platform's own package manager owns. Kept
- * separate from `install` because upgrading and converging are
- * different intents: converge makes the manifest true, update moves
- * already-installed things forward.
+ * The packages this platform gets from apt, by name. PURE.
+ *
+ * Every apt-shaped provider the manifest declares for this platform:
+ * plain `apt`, the ones that come with a repository, and the ones from
+ * a PPA. Their names, and nothing else on the machine.
  */
-export async function systemUpdate(p: Platform): Promise<void> {
+export function declaredAptPackages(p: Platform, tools: readonly Tool[] = TOOLS): string[] {
+  const names = new Set<string>();
+  for (const tool of tools) {
+    const pr = providerFor(tool, p);
+    if (pr.kind === "apt") names.add(pr.pkg);
+    else if (pr.kind === "aptrepo" || pr.kind === "ppa") for (const pkg of pr.pkgs) names.add(pkg);
+  }
+  return [...names].sort();
+}
+
+/** The winget ids this platform declares. PURE. */
+export function declaredWingetIds(p: Platform, tools: readonly Tool[] = TOOLS): string[] {
+  const ids = new Set<string>();
+  for (const tool of tools) {
+    const pr = providerFor(tool, p);
+    if (pr.kind === "winget") ids.add(pr.id);
+  }
+  return [...ids].sort();
+}
+
+/**
+ * Move what red-dev installed forward. Nothing else on the machine.
+ *
+ * This used to be `apt full-upgrade -y` and `winget upgrade --all`,
+ * which is not "update red-dev's tools" — it is "update this computer".
+ * Someone who typed `red-dev update` to get a newer `rg` had Audacity
+ * upgraded underneath them, and on the apt side a full-upgrade can pull
+ * a new kernel. A tool that manages 47 named things has no business
+ * being the thing that decides when everything *else* moves, and the
+ * surprise is worst exactly where the machine matters most.
+ *
+ * So the named packages, from the manifest, on both platforms — the
+ * same list `red-dev install` would converge, upgraded rather than
+ * installed. mise's own tools are advanced by `miseUpgradeSuite`, which
+ * has always named them one at a time for this same reason (the comment
+ * there says so: "the user's runtimes are not ours to bump").
+ *
+ * `--system` is how somebody asks for the old behaviour, and it is a
+ * different sentence: `red-dev update --system` says update the
+ * machine. Kept, because on a workstation somebody set up entirely
+ * through red-dev it is genuinely convenient — but typed, not implied.
+ */
+export async function systemUpdate(p: Platform, opts: { whole?: boolean } = {}): Promise<void> {
+  const whole = opts.whole === true;
+
   if (p.caps.apt) {
     await aptRefreshOnce();
-    log.step("apt full-upgrade");
     const env = { ...process.env, DEBIAN_FRONTEND: "noninteractive" };
-    const upgrade = await spawnLogged(["sudo", "-E", "apt-get", "full-upgrade", "-y"], { env });
-    if (upgrade !== 0) throw new RedError("apt full-upgrade failed");
 
-    log.step("apt autoremove");
-    await run(["sudo", "-E", "apt-get", "autoremove", "-y"], { allowFailure: true });
+    if (whole) {
+      log.step("apt full-upgrade — every package on this machine, because --system was asked for");
+      const upgrade = await spawnLogged(["sudo", "-E", "apt-get", "full-upgrade", "-y"], { env });
+      if (upgrade !== 0) throw new RedError("apt full-upgrade failed");
+      log.step("apt autoremove");
+      await run(["sudo", "-E", "apt-get", "autoremove", "-y"], { allowFailure: true });
+    } else {
+      const pkgs = declaredAptPackages(p);
+      if (pkgs.length > 0) {
+        log.step(`apt upgrade — ${pkgs.length} package(s) red-dev declares`);
+        // `install --only-upgrade` rather than `upgrade`: it names the
+        // packages, and it will not install one that is absent, so a
+        // tool this machine deliberately does not have stays absent.
+        const upgrade = await spawnLogged(
+          ["sudo", "-E", "apt-get", "install", "--only-upgrade", "-y", ...pkgs],
+          { env },
+        );
+        if (upgrade !== 0) throw new RedError("apt upgrade failed");
+      }
+      log.plain("       everything else apt owns is left where you have it — `--system` upgrades it all");
+    }
   }
 
   if (p.caps.winget) {
-    log.step("winget upgrade --all");
-    await run(
-      wingetArgv([
-        "upgrade",
-        "--all",
-        "--silent",
-        "--accept-package-agreements",
-        "--accept-source-agreements",
-        "--disable-interactivity",
-      ]),
-      { allowFailure: true },
-    );
+    const flags = [
+      "--silent",
+      "--accept-package-agreements",
+      "--accept-source-agreements",
+      "--disable-interactivity",
+    ];
+
+    if (whole) {
+      log.step("winget upgrade --all — every app on this machine, because --system was asked for");
+      await run(wingetArgv(["upgrade", "--all", ...flags]), { allowFailure: true });
+      return;
+    }
+
+    const ids = declaredWingetIds(p);
+    log.step(`winget upgrade — ${ids.length} package(s) red-dev declares`);
+    for (const id of ids) {
+      // One at a time, and a failure is not fatal: winget exits
+      // non-zero for "no applicable upgrade found", which is the
+      // ordinary answer for most of the list on most runs.
+      await run(wingetArgv(["upgrade", "--id", id, "--exact", ...flags]), { allowFailure: true });
+    }
+    log.plain("       every other app stays on the version you installed — `--system` upgrades them all");
   }
 }
 
