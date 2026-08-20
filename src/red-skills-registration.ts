@@ -398,13 +398,20 @@ async function runSteps(
 /** Two paths naming one directory, whether or not either resolves today. */
 function samePath(a: string | null, b: string): boolean {
   if (a === null) return false;
-  // `\\?\` is Windows' extended-length prefix. Codex records it; nothing
-  // else on this side writes it, and it names the same file either way,
-  // so it comes off before two paths are compared as text.
-  const trim = (s: string) => normalise(s.replace(/^\\\\\?\\/, "")).replace(/\/+$/, "");
-  if (trim(a) === trim(b)) return true;
+
+  // `\\?\` is Windows' extended-length prefix. Codex records it and
+  // nothing else on this side writes it, so it comes off *first* —
+  // before the text comparison and before `realpathSync`, which keeps
+  // whichever form it was given. Stripped only inside the text
+  // comparison, the two paths still differed by the prefix once both
+  // had been resolved, and a Codex that had just registered the right
+  // directory read as registered against somebody else's.
+  const bare = (s: string) => s.replace(/^\\\\\?\\/, "");
+  const left = bare(a);
+  const trim = (s: string) => normalise(s).replace(/\/+$/, "");
+  if (trim(left) === trim(b)) return true;
   try {
-    return realpathSync(a) === realpathSync(b);
+    return trim(bare(realpathSync(left))) === trim(bare(realpathSync(b)));
   } catch {
     return false;
   }

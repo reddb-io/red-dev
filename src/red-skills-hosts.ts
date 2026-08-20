@@ -217,6 +217,11 @@ export interface HostPlan {
   manifests: string[];
   /** Why this adapter cannot act here at all. Reported, never recorded. */
   blocked?: string;
+  /**
+   * True when `blocked` names a condition no later run can clear — this
+   * platform, not this moment. See reconciliationFailed.
+   */
+  permanent?: boolean;
 }
 
 /** A plan with every empty part spelled out once, here instead of seven times. */
@@ -321,6 +326,7 @@ function opencodeCompatible(host: string): HostAdapter {
         return plan({
           mode: "generator",
           blocked: `${host}: its generator is a shell script and this is Windows`,
+          permanent: true,
         });
       }
       return plan({
@@ -1283,11 +1289,37 @@ export interface HostOutcome {
    * of the record — a host is no richer on the day nothing happened to it.
    */
   missing?: string[];
+  /**
+   * True when this host cannot converge on this machine at all, ever.
+   *
+   * Not "not yet": a platform this host has no implementation for. It
+   * is reported the same way and excluded from the verdict, so one
+   * impossible surface does not make a converged machine look broken.
+   */
+  permanent?: boolean;
 }
 
-/** Whether every required host converged. */
+/**
+ * Whether every host that *could* converge did.
+ *
+ * `blocked` used to count as a failure, and for most of the reasons a
+ * host is blocked that is right: the set carries no generator, the CLI
+ * is mid-install, something is missing that should be there. But it is
+ * also the answer for a host that cannot work on this platform at all —
+ * opencode's generator is a shell script and Windows has no shebang —
+ * and that is a permanent condition. Counting it as failure made every
+ * `red-dev update` on Windows end "partial" forever, and held the Spec
+ * #185 adoption, which removes nothing until every surface verifies, on
+ * a machine where one surface can never verify.
+ *
+ * So a permanent block is not a failure; a blocking condition that a
+ * later run could clear still is. The distinction is the adapter's to
+ * declare, because only it knows which of its own blocks are which.
+ */
 export function reconciliationFailed(outcomes: readonly HostOutcome[]): boolean {
-  return outcomes.some((o) => o.status === "blocked" || o.status === "failed");
+  return outcomes.some(
+    (o) => o.status === "failed" || (o.status === "blocked" && o.permanent !== true),
+  );
 }
 
 /**
@@ -1441,7 +1473,13 @@ export async function reconcileSkillHosts(
     const desired = adapter.plan(ctx);
     if (desired.blocked !== undefined) {
       log.warn(`${adapter.name}: ${desired.blocked}`);
-      out.push({ host: adapter.name, status: "blocked", mode: desired.mode, reason: desired.blocked });
+      out.push({
+        host: adapter.name,
+        status: "blocked",
+        mode: desired.mode,
+        reason: desired.blocked,
+        ...(desired.permanent === true ? { permanent: true } : {}),
+      });
       continue;
     }
 

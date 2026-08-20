@@ -47,6 +47,7 @@ import {
   type HostAdapter,
   type HostOutcome,
   type HostReconcileOptions,
+  reconciliationFailed,
 } from "./red-skills-hosts.ts";
 
 const UBUNTU: Platform = {
@@ -1547,5 +1548,40 @@ describe("a generator that cannot run on this platform", () => {
     const onLinux = opencode.plan(hostContext(m, "linux"));
     expect(onLinux.blocked).toBeUndefined();
     expect(onLinux.steps.length).toBeGreaterThan(0);
+  });
+});
+
+describe("a host that cannot converge on this platform", () => {
+  test("is blocked permanently, and a permanent block is not a failed reconciliation", () => {
+    // The verdict is what `red-dev update` answers with and what the
+    // Spec #185 adoption gates on. Counting "no implementation on this
+    // OS" as failure made every Windows update partial forever and held
+    // the adoption on every machine there.
+    const permanent: HostOutcome[] = [
+      { host: "claude", status: "current", mode: "marketplace" },
+      { host: "opencode", status: "blocked", mode: "generator", reason: "shell script", permanent: true },
+    ];
+    expect(reconciliationFailed(permanent)).toBe(false);
+
+    // A block a later run could clear still is a failure: the set may
+    // simply not have finished installing yet.
+    const temporary: HostOutcome[] = [
+      { host: "claude", status: "current", mode: "marketplace" },
+      { host: "opencode", status: "blocked", mode: "generator", reason: "no install-opencode.sh" },
+    ];
+    expect(reconciliationFailed(temporary)).toBe(true);
+
+    const failed: HostOutcome[] = [{ host: "codex", status: "failed", mode: "marketplace" }];
+    expect(reconciliationFailed(failed)).toBe(true);
+  });
+
+  test("opencode declares its Windows block permanent, and nothing else does", () => {
+    const m = machine();
+    const onWindows = HOST_ADAPTERS.find((a) => a.name === "opencode")!.plan(
+      hostContext(m, "windows"),
+    );
+    expect(onWindows.permanent).toBe(true);
+    expect(HOST_ADAPTERS.find((a) => a.name === "opencode")!.plan(hostContext(m, "linux")).permanent)
+      .toBeUndefined();
   });
 });
