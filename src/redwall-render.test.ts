@@ -472,3 +472,42 @@ describe("the lines", () => {
     expect(redwallBox({ width: 100, height: 100 }, font, [], YEAR)).toBeNull();
   });
 });
+
+describe("the revision on the card", () => {
+  test("is drawn beside the name, in every state the card has", () => {
+    // Which is the daemon's version by construction: redskilled is
+    // installed out of the package set, so naming the set names the
+    // thing the rest of the card reports on. The wallpaper answers
+    // "which revision is this machine" without opening a terminal.
+    const at = (over: Record<string, unknown>) =>
+      redwallLines({ address: null, version: "4.0.11", ...over } as never)[0];
+
+    expect(at({ workers: 0, queued: 0 })).toBe("redskilled 4.0.11 standing by");
+    expect(at({ workers: 2, capacity: 5, queued: 1 })).toBe("redskilled 4.0.11 at work");
+    expect(at({ workers: 5, capacity: 5, queued: 3 })).toBe("redskilled 4.0.11 at capacity");
+    expect(at({ workers: null })).toBe("redskilled 4.0.11 unavailable");
+    expect(at({ workers: 1, attention: { kind: "births-paused" } })).toBe(
+      "redskilled 4.0.11 needs attention",
+    );
+  });
+
+  test("a machine with no set draws the name alone, which is true", () => {
+    const lines = redwallLines({ workers: 0, queued: 0, address: null } as never);
+    expect(lines[0]).toBe("redskilled standing by");
+    expect(lines[0]).not.toContain("undefined");
+    expect(lines[0]).not.toContain("null");
+  });
+
+  test("a revision the face cannot set is dropped, not drawn as boxes", () => {
+    // The same rule the address and the agent windows already follow: a
+    // line the embedded face cannot set drops every other line with it,
+    // so nothing unsettable is allowed into one.
+    const lines = redwallLines({
+      workers: 0,
+      queued: 0,
+      address: null,
+      version: "4.0.11-日本語",
+    } as never);
+    expect(lines[0]).toBe("redskilled standing by");
+  });
+});

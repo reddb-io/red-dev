@@ -74,6 +74,7 @@ import { resolveRedwallAddress, spawnCapture } from "./lan-address.ts";
 import type { Platform } from "./platform.ts";
 import { readPreferences, resolveRedwall } from "./preferences.ts";
 import { REDWALL_SUBSET } from "./redwall-font.ts";
+import { readPackageSetState } from "./red-skills-set.ts";
 import { renderRedwall, yearProgress, type RedwallState } from "./redwall-render.ts";
 import { resolveThemeSlug } from "./themes.ts";
 import { hiddenCapture, hiddenPowershell } from "./windows-hidden.ts";
@@ -251,8 +252,32 @@ export async function redwallState(p: Platform): Promise<RedwallState> {
     // none. Omitting it on a machine with no snapshot would be a Redwall
     // that looks the same whether the allowance is untouched or unknown.
     agent: redwallAgentUsage(),
+    // This machine's own set, not a merged one. On Windows the card
+    // reports Workers from every distro together, and that is right for
+    // a count — but a *version* is a fact about one installation, and
+    // averaging two of them would name a revision that exists nowhere.
+    version: activeSetVersion(),
     address,
   };
+}
+
+/**
+ * The RedSkills version this machine resolves, or null.
+ *
+ * Read from the package-set state rather than asked of the daemon: the
+ * daemon reports what it is *doing*, and `redskilled` is installed out
+ * of the set, so red-dev already knows which revision it came from. One
+ * file read, no subprocess — this runs on every repaint.
+ */
+function activeSetVersion(): string | null {
+  try {
+    const home = (process.env["HOME"] ?? process.env["USERPROFILE"] ?? "").replace(/\\/g, "/");
+    const state = readPackageSetState(home);
+    return state.revisions.find((revision) => revision.key === state.active)?.version ?? null;
+  } catch {
+    // A machine with no set yet draws the name alone, which is true.
+    return null;
+  }
 }
 
 /**

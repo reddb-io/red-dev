@@ -63,6 +63,22 @@ import { typeset, type Mask } from "./typeset.ts";
 export interface RedwallState {
   /** Workers running here. Zero is a real answer; null is no answer. */
   readonly workers: number | null;
+  /**
+   * The RedSkills revision this machine resolves, drawn beside the name.
+   *
+   * Which is the daemon's version by construction: `redskilled` is
+   * installed out of the package set, so the set's version *is* the
+   * version of the thing the rest of this card is reporting on. Naming
+   * it here means the wallpaper answers "which revision is this
+   * machine" without anybody opening a terminal — the question that
+   * costs a `red-dev doctor` today, and the one worth asking when two
+   * machines disagree.
+   *
+   * Optional rather than nullable, the way `agent` is: absent means
+   * nobody asked and the name is drawn alone, which is what keeps every
+   * caller written before this rendering exactly what it did.
+   */
+  readonly version?: string | null;
   /** Scheduler capacity, absent when multiple execution domains were merged. */
   readonly capacity?: number | null;
   /** Work waiting across registered projects. */
@@ -209,8 +225,17 @@ export function redwallLines(state: RedwallState): string[] {
     : null;
   const github = githubLines(state.github);
   const agent = agentLines(state.agent);
+
+  // The subject of every headline below, named once. A revision this
+  // face cannot set is dropped rather than drawn as boxes — the same
+  // rule the address and the agent windows already follow.
+  const name =
+    typeof state.version === "string" && state.version.length > 0 && drawable(state.version)
+      ? `redskilled ${state.version}`
+      : "redskilled";
+
   if (state.workers === null) {
-    return ["redskilled unavailable", ...github, ...agent, address]
+    return [`${name} unavailable`, ...github, ...agent, address]
       .filter((line): line is string => line !== null);
   }
   if (!Number.isSafeInteger(state.workers) || state.workers < 0) return [];
@@ -221,19 +246,19 @@ export function redwallLines(state: RedwallState): string[] {
   let headline: string;
   let detail: string;
   if (state.attention) {
-    headline = "redskilled needs attention";
+    headline = `${name} needs attention`;
     detail = attentionLine(state.attention);
     if (queued !== null && queued > 0) detail += ` · ${queued} queued`;
   } else if (capacity !== null && capacity > 0 && workers >= capacity && (queued ?? 0) > 0) {
-    headline = "redskilled at capacity";
+    headline = `${name} at capacity`;
     detail = workerLine(workers, capacity);
     if (queued !== null) detail += ` · ${queued} queued`;
   } else if (workers > 0) {
-    headline = "redskilled at work";
+    headline = `${name} at work`;
     detail = workerLine(workers, capacity);
     if (queued !== null) detail += queued === 0 ? " · nothing queued" : ` · ${queued} queued`;
   } else {
-    headline = "redskilled standing by";
+    headline = `${name} standing by`;
     detail = queued === 0 ? "nothing queued" : queued === null ? "0 workers" : `${queued} queued`;
   }
 
