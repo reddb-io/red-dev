@@ -1385,3 +1385,81 @@ describe("the converge path that runs the layout step", () => {
     expect(readdirSync(join(dest, "plugins")).sort()).toEqual([...PLUGINS].sort());
   });
 });
+
+describe("the manifest schema red-skills 4.0 publishes", () => {
+  test("the real 4.0.1 manifest is accepted, bytes as published", async () => {
+    // Vendored from the v4.0.1 release rather than hand-written: the
+    // whole failure was red-dev judging a v2 manifest by v1's key list
+    // and reporting "not canonical" about bytes that are canonical.
+    // A fixture somebody typed here could agree with the wrong list.
+    const bytes = await Bun.file(
+      new URL("./fixtures/red-skills-4.0.1.package-set.manifest.json", import.meta.url),
+    ).text();
+
+    const parsed = parsePackageSetManifest(bytes);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.manifest.schema).toBe("red.package-set.v2");
+    expect(parsed.manifest.version).toBe("4.0.1");
+    expect(parsed.manifest.channel).toBe("stable");
+    expect(parsed.manifest.targets).toEqual(["linux-x64", "windows-x64"]);
+  });
+
+  test("v1 is still read, because it is what every machine already has on disk", () => {
+    const v1 = createPackageSetManifest("a".repeat(40), [
+      { name: "dev.bundle.min.mjs", size: 1, sha256: "0".repeat(64) },
+    ]);
+    expect(v1.schema).toBe("red.package-set.v1");
+    expect(v1.version).toBeUndefined();
+    const parsed = parsePackageSetManifest(encodePackageSet(v1));
+    expect(parsed.ok).toBe(true);
+  });
+
+  test("the two schemas identify differently, so a v2 set cannot borrow a v1 digest", () => {
+    const artifacts = [{ name: "dev.bundle.min.mjs", size: 1, sha256: "0".repeat(64) }];
+    const v1 = createPackageSetManifest("a".repeat(40), artifacts);
+    const v2 = createPackageSetManifest("a".repeat(40), artifacts, {
+      version: "4.0.1",
+      channel: "stable",
+      targets: ["windows-x64", "linux-x64"],
+    });
+    expect(v2.schema).toBe("red.package-set.v2");
+    // Sorted on the way in, as the publisher's verifier requires.
+    expect(v2.targets).toEqual(["linux-x64", "windows-x64"]);
+    expect(v2.wholeSetDigest).not.toBe(v1.wholeSetDigest);
+    expect(parsePackageSetManifest(encodePackageSet(v2)).ok).toBe(true);
+  });
+
+  test("each v2 field is checked the way the publisher's verifier checks it", () => {
+    const good = createPackageSetManifest("a".repeat(40), [
+      { name: "dev.bundle.min.mjs", size: 1, sha256: "0".repeat(64) },
+    ], { version: "4.0.1", channel: "stable", targets: ["linux-x64"] });
+
+    const broken = (edit: (m: Record<string, unknown>) => void, reason: string) => {
+      const m = JSON.parse(encodePackageSet(good)) as Record<string, unknown>;
+      edit(m);
+      const parsed = parsePackageSetManifest(`${JSON.stringify(m, null, 2)}\n`);
+      expect(parsed.ok).toBe(false);
+      if (!parsed.ok) expect(parsed.reason).toContain(reason);
+    };
+
+    broken((m) => (m["version"] = "four"), "version is invalid");
+    broken((m) => (m["channel"] = "nightly"), "not a known channel");
+    broken((m) => (m["targets"] = []), "at least one target");
+    broken((m) => (m["targets"] = ["solaris-sparc"]), "unknown target");
+    broken((m) => (m["targets"] = ["windows-x64", "linux-x64"]), "unique and sorted");
+    broken((m) => (m["schema"] = "red.package-set.v3"), "unsupported manifest schema");
+  });
+
+  test("a v2 manifest missing the v2 fields is refused as shape, not silently read as v1", () => {
+    const orphan = {
+      schema: "red.package-set.v2",
+      sourceCommit: "a".repeat(40),
+      artifacts: [{ name: "x", sourceCommit: "a".repeat(40), size: 1, sha256: "0".repeat(64) }],
+      wholeSetDigest: "0".repeat(64),
+    };
+    const parsed = parsePackageSetManifest(`${JSON.stringify(orphan, null, 2)}\n`);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.reason).toContain("not canonical");
+  });
+});

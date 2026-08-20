@@ -151,7 +151,36 @@ export const SET_MANIFEST_NAME = "package-set.manifest.json";
 export const SET_BUNDLE_NAME = "package-set.manifest.sigstore.json";
 
 /** The one schema this module knows. Anything else is refused. */
-export const PACKAGE_SET_SCHEMA = "red.package-set.v1";
+/**
+ * The schema a published set declares, and the one before it.
+ *
+ * red-skills 4.0 extended the manifest: `version`, `channel` and
+ * `targets` joined the identity the whole-set digest is taken over
+ * (reddb-io/red-skills#4005 — a depot is target-specific, so the set has
+ * to *say* what it was built for rather than leave the reader to guess).
+ * red-dev transcribed v1 and refused every 4.x set on every machine with
+ * `manifest shape or key order is not canonical`, which reads like a
+ * corrupt download and is in fact a contract that moved.
+ *
+ * Both are accepted. v2 is what a release publishes now; v1 is what is
+ * already on disk on every machine provisioned before today, and
+ * refusing to *read* one would retire a verified set that is still the
+ * best thing the machine has. Neither is tolerated loosely: each is the
+ * publisher's own `scripts/verify-package-set.mjs` for that schema,
+ * transcribed, and a manifest is measured against exactly the one it
+ * declares.
+ */
+export const PACKAGE_SET_SCHEMA_V1 = "red.package-set.v1";
+export const PACKAGE_SET_SCHEMA_V2 = "red.package-set.v2";
+
+/** What `createPackageSetManifest` emits and a release publishes. */
+export const PACKAGE_SET_SCHEMA = PACKAGE_SET_SCHEMA_V2;
+
+/** The channels a set may declare, from the publisher's verifier. */
+export const PACKAGE_SET_CHANNELS = ["stable", "canary", "next", "pinned"] as const;
+
+/** The targets a set may declare, from the publisher's verifier. */
+export const PACKAGE_SET_TARGETS = ["linux-x64", "windows-x64"] as const;
 
 /**
  * How many revisions a machine keeps.
@@ -198,9 +227,33 @@ export interface PackageSetManifest {
   schema: string;
   /** The commit the whole set was built from, as 40 hex characters. */
   sourceCommit: string;
+  /** v2 only: the release version, as semver. */
+  version?: string;
+  /** v2 only: one of PACKAGE_SET_CHANNELS. */
+  channel?: string;
+  /** v2 only: what the set was built for, sorted and unique. */
+  targets?: string[];
   /** Sorted by name, unique. */
   artifacts: PackageSetArtifact[];
   wholeSetDigest: string;
+}
+
+/**
+ * The fields declared in the order the canonical encoding needs them.
+ *
+ * `JSON.stringify` drops a key whose value is undefined, so one shape
+ * serialises both schemas: a v1 manifest carries no version, channel or
+ * targets and its bytes are exactly what they always were.
+ */
+function manifestIdentity(m: Pick<PackageSetManifest, "schema" | "sourceCommit" | "version" | "channel" | "targets" | "artifacts">) {
+  return {
+    schema: m.schema,
+    sourceCommit: m.sourceCommit,
+    version: m.version,
+    channel: m.channel,
+    targets: m.targets,
+    artifacts: m.artifacts,
+  };
 }
 
 /** The three facts that name one revision anywhere. */
@@ -211,18 +264,32 @@ export interface PackageSetIdentity {
   sourceCommit: string;
 }
 
-const MANIFEST_KEYS = ["schema", "sourceCommit", "artifacts", "wholeSetDigest"] as const;
+const MANIFEST_KEYS_V1 = ["schema", "sourceCommit", "artifacts", "wholeSetDigest"] as const;
+const MANIFEST_KEYS_V2 = [
+  "schema",
+  "sourceCommit",
+  "version",
+  "channel",
+  "targets",
+  "artifacts",
+  "wholeSetDigest",
+] as const;
+const SEMVER = /^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/;
 const ARTIFACT_KEYS = ["name", "sourceCommit", "size", "sha256"] as const;
 const HEX40 = /^[0-9a-f]{40}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
 
 /** The bytes the whole-set digest is taken over. PURE. */
-export function packageSetIdentityBytes(m: Pick<PackageSetManifest, "schema" | "sourceCommit" | "artifacts">): string {
-  return `${JSON.stringify({ schema: m.schema, sourceCommit: m.sourceCommit, artifacts: m.artifacts })}\n`;
+export function packageSetIdentityBytes(
+  m: Pick<PackageSetManifest, "schema" | "sourceCommit" | "version" | "channel" | "targets" | "artifacts">,
+): string {
+  return `${JSON.stringify(manifestIdentity(m))}\n`;
 }
 
 /** The digest a manifest must declare for its own contents. PURE. */
-export function packageSetDigest(m: Pick<PackageSetManifest, "schema" | "sourceCommit" | "artifacts">): string {
+export function packageSetDigest(
+  m: Pick<PackageSetManifest, "schema" | "sourceCommit" | "version" | "channel" | "targets" | "artifacts">,
+): string {
   return sha256Hex(packageSetIdentityBytes(m));
 }
 
@@ -240,11 +307,28 @@ export function encodePackageSet(m: PackageSetManifest): string {
 export function createPackageSetManifest(
   sourceCommit: string,
   artifacts: readonly Omit<PackageSetArtifact, "sourceCommit">[],
+  /**
+   * The v2 fields. Omitted, this builds a v1 manifest — which is what an
+   * offline depot exported before today still contains, and what a test
+   * that says nothing about version or targets means.
+   */
+  release?: { version: string; channel: string; targets: readonly string[] },
 ): PackageSetManifest {
   const declared: PackageSetArtifact[] = [...artifacts]
     .map((a) => ({ name: a.name, sourceCommit, size: a.size, sha256: a.sha256 }))
     .sort((a, b) => a.name.localeCompare(b.name, "en"));
-  const identity = { schema: PACKAGE_SET_SCHEMA, sourceCommit, artifacts: declared };
+  const identity = manifestIdentity({
+    schema: release ? PACKAGE_SET_SCHEMA_V2 : PACKAGE_SET_SCHEMA_V1,
+    sourceCommit,
+    ...(release
+      ? {
+          version: release.version,
+          channel: release.channel,
+          targets: [...release.targets].sort((a, b) => a.localeCompare(b, "en")),
+        }
+      : {}),
+    artifacts: declared,
+  });
   return { ...identity, wholeSetDigest: packageSetDigest(identity) };
 }
 
@@ -280,16 +364,55 @@ export function parsePackageSetManifest(bytes: Uint8Array | string): ManifestPar
   } catch {
     return { ok: false, reason: "manifest is not valid JSON" };
   }
-  if (!sameKeys(raw, MANIFEST_KEYS)) {
-    return { ok: false, reason: "manifest shape or key order is not canonical" };
+  // The schema decides which shape is canonical, so it is read before
+  // the shape is judged: measuring a v2 manifest against v1's key list
+  // reports "not canonical" about a manifest that is perfectly canonical
+  // for what it declares, which is what every 4.x set was told.
+  const declared = (raw as Record<string, unknown> | null)?.["schema"];
+  if (declared !== PACKAGE_SET_SCHEMA_V1 && declared !== PACKAGE_SET_SCHEMA_V2) {
+    return { ok: false, reason: `unsupported manifest schema: ${String(declared)}` };
   }
-  if (raw["schema"] !== PACKAGE_SET_SCHEMA) {
-    return { ok: false, reason: `unsupported manifest schema: ${String(raw["schema"])}` };
+  const v2 = declared === PACKAGE_SET_SCHEMA_V2;
+  if (!sameKeys(raw, v2 ? MANIFEST_KEYS_V2 : MANIFEST_KEYS_V1)) {
+    return { ok: false, reason: "manifest shape or key order is not canonical" };
   }
   const sourceCommit = raw["sourceCommit"];
   if (typeof sourceCommit !== "string" || !HEX40.test(sourceCommit)) {
     return { ok: false, reason: "manifest source commit is invalid" };
   }
+  let version: string | undefined;
+  let channel: string | undefined;
+  let targets: string[] | undefined;
+  if (v2) {
+    const declaredVersion = raw["version"];
+    if (typeof declaredVersion !== "string" || !SEMVER.test(declaredVersion)) {
+      return { ok: false, reason: "manifest version is invalid" };
+    }
+    version = declaredVersion;
+
+    const declaredChannel = raw["channel"];
+    if (typeof declaredChannel !== "string" || !PACKAGE_SET_CHANNELS.includes(declaredChannel as never)) {
+      return { ok: false, reason: `manifest channel is not a known channel: ${String(declaredChannel)}` };
+    }
+    channel = declaredChannel;
+
+    const declaredTargets = raw["targets"];
+    if (!Array.isArray(declaredTargets) || declaredTargets.length === 0) {
+      return { ok: false, reason: "manifest must declare at least one target" };
+    }
+    let priorTarget = "";
+    for (const target of declaredTargets) {
+      if (typeof target !== "string" || !PACKAGE_SET_TARGETS.includes(target as never)) {
+        return { ok: false, reason: `manifest declares an unknown target: ${String(target)}` };
+      }
+      if (priorTarget && priorTarget.localeCompare(target, "en") >= 0) {
+        return { ok: false, reason: "targets must be unique and sorted" };
+      }
+      priorTarget = target;
+    }
+    targets = declaredTargets as string[];
+  }
+
   const list = raw["artifacts"];
   if (!Array.isArray(list) || list.length === 0) {
     return { ok: false, reason: "manifest must declare at least one artifact" };
@@ -334,8 +457,11 @@ export function parsePackageSetManifest(bytes: Uint8Array | string): ManifestPar
   }
 
   const manifest: PackageSetManifest = {
-    schema: PACKAGE_SET_SCHEMA,
+    schema: declared,
     sourceCommit,
+    ...(version !== undefined ? { version } : {}),
+    ...(channel !== undefined ? { channel } : {}),
+    ...(targets !== undefined ? { targets } : {}),
     artifacts,
     wholeSetDigest,
   };

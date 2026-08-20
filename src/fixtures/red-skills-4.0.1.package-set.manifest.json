@@ -1,0 +1,187 @@
+{
+  "schema": "red.package-set.v2",
+  "sourceCommit": "e0dea944979cf41c5f70fec5350b94c56a2a2792",
+  "version": "4.0.1",
+  "channel": "stable",
+  "targets": [
+    "linux-x64",
+    "windows-x64"
+  ],
+  "artifacts": [
+    {
+      "name": "brain-mcp.bundle.min.mjs",
+      "sourceCommit": "e0dea944979cf41c5f70fec5350b94c56a2a2792",
+      "size": 995215,
+      "sha256": "6987cd86b9de4fa5866b259677f472bacede2aeddea1546b667b29712c8b4ca9"
+    },
+    {
+      "name": "brain-runtime-manifest.json",
+      "sourceCommit": "e0dea944979cf41c5f70fec5350b94c56a2a2792",
+      "size": 1384,
+      "sha256": "d29139d9cc4a972d5e85b629ddd86a2a3af0b39835166d6e7ea651f2f322d16b"
+    },
+    {
+      "name": "brain.bundle.min.mjs",
+      "sourceCommit": "e0dea944979cf41c5f70fec5350b94c56a2a2792",
+      "size": 403527,
+      "sha256": "ca38713259aabcbb95f5a62e0d6234c99841b911095b45b79a257c4811d9263e"
+    },
+    {
+      "name": "build-gemini-extension.mjs",
+      "sourceCommit": "e0dea944979cf41c5f70fec5350b94c56a2a2792",
+      "size": 6271,
+      "sha256": "9d19f331e216d66b9406388e3b4eea87894f2d06902e772f516848ac84f968c2"
+    },
+    {
+      "name": "code-nav.bundle.min.mjs",
+      "sourceCommit": "e0dea944979cf41c5f70fec5350b94c56a2a2792",
+      "size": 503351,
+      "sha256": "2b70ff0e88601094dcb63b54ad688f1adc97f562d4cc7ba00fa352ff2b98449e"
+    },
+    {
+      "name": "code-nav.manifest.json",
+      "sourceCommit": "e0dea944979cf41c5f70fec5350b94c56a2a2792",
+      "size": 128,
+      "sha256": "76eb41a6ad7582cd50820a467c93759420ee901d9c23eb0d39b0b179f0eeaf37"
+    },
+    {
+      "name": "expand-package-set.mjs",
+      "sourceCommit": "e0dea944979cf41c5f70fec5350b94c56a2a2792",
+      "size": 7388,
+      "sha256": "97f5c0ed8d5076e3d7ce93d6bf3373a5a47367c92286deed5f453abe88ab4922"
+    },
+    {
+      "name": "gemini-extension.tgz",
+      "sourceCommit": "e0dea944979cf41c5f70fec5350b94c56a2a2792",
+      "size": 904717,
+      "sha256": "3c369a69a95ea734689c81eff124a5fdb23bdaa793d7c389b48c1d44a19a7e9a"
+    },
+    {
+      "name": "herdr-plugin-red-skills.bundle.min.mjs",
+      "sourceCommit": "e0dea944979cf41c5f70fec5350b94c56a2a2792",
+      "size": 108056,
+      "sha256": "52dada2aeb29c82def8172190cc45027527822fcf5e4cf345391bbd373dfcb4a"
+    },
+    {
+      "name": "install-hermes-skills.mjs",
+      "sourceCommit": "e0dea944979cf41c5f70fec5350b94c56a2a2792",
+      "size": 8128,
+      "sha256": "cef526bb510354648026dbcdc016ccbd24e611bb0366255a47ff6e8e685ba9f7"
+    },
+    {
+      "name": "marketplace-manifests.tgz",
+      "sourceCommit": "e0dea944979cf41c5f70fec5350b94c56a2a2792",
+      "size": 952,
+      "sha256": "2c91018d205630618bc5be7a0eca0b33c0e3f99b9567f7a6d41ae54940009bf5"
+    },
+    {
+      "name": "memory-mcp.bundle.min.mjs",
+      "sourceCommit": "e0dea944979cf41c5f70fec5350b94c56a2a2792",
+      "size": 948571,
+      "sha256": "c7bb9b2dccf6d45cd8601d4668e846aedccad1b07658dc545c11f68fb5ce4db7"
+    },
+    {
+      "name": "memory-runtime-manifest.json",
+      "sourceCommit": "e0dea944979cf41c5f70fec5350b94c56a2a2792",
+      "size": 1387,
+      "sha256": "9e3ffbad7cbbcdc5a5f25497f1eafd1ea7320dfe357017c487905726742c0f42"
+    },
+    {
+      "name": "memory.bundle.min.mjs",
+      "sourceCommit": "e0dea944979cf41c5f70fec5350b94c56a2a2792",
+      "size": 5096584,
+      "sha256": "c4344e8509ba06006421c743c8533949b6c760afa5d64148fb7c55e4f733360f"
+    },
+    {
+      "name": "opencode-host.bundle.min.mjs",
+      "sourceCommit": "e0dea944979cf41c5f70fec5350b94c56a2a2792",
+      "size": 49306,
+      "sha256": "54743787e55a2a7144287d75cd9c8486c83117545c76956a7bac962fc48a964c"
+    },
+    {
+      "name": "opencode-host.generated.tgz",
+      "sourceCommit": "e0dea944979cf41c5f70fec5350b94c56a2a2792",
+      "size": 178497,
+      "sha256": "590aba6cd872e3a5a3c0a19f822e65c01241e5963c13439016540be5b89c799d"
+    },
+    {
+      "name": "plugin-brain.payload.tgz",
+      "sourceCommit": "e0dea944979cf41c5f70fec5350b94c56a2a2792",
+      "size": 19553,
+      "sha256": "8d5e6d48c76bb111e15ed8124f2f3005d2f24aa202a0e4e94c1b43f8a62d7f5d"
+    },
+    {
+      "name": "plugin-dev.payload.tgz",
+      "sourceCommit": "e0dea944979cf41c5f70fec5350b94c56a2a2792",
+      "size": 436469,
+      "sha256": "b78696a38a389ef5ab0ed6de8500f21918fcf3820495d242222da0b3e2dcc76b"
+    },
+    {
+      "name": "plugin-internal.payload.tgz",
+      "sourceCommit": "e0dea944979cf41c5f70fec5350b94c56a2a2792",
+      "size": 5075,
+      "sha256": "b4d93dd9eaf87d63174ff2d934817c93412c30aa741e0074910775fd1e7ef4a6"
+    },
+    {
+      "name": "plugin-memory.payload.tgz",
+      "sourceCommit": "e0dea944979cf41c5f70fec5350b94c56a2a2792",
+      "size": 67659,
+      "sha256": "abcbe1a646ad70ff282b8b0e1cdcec22c2c774808df0c2f8744ef48e199bb00e"
+    },
+    {
+      "name": "redskilled-mcp.bundle.min.mjs",
+      "sourceCommit": "e0dea944979cf41c5f70fec5350b94c56a2a2792",
+      "size": 1848535,
+      "sha256": "b7b90bb08d0b86eaa63ce9ec069caace859e1638250f89b551e53732a7d5f583"
+    },
+    {
+      "name": "redskilled.bundle.min.mjs",
+      "sourceCommit": "e0dea944979cf41c5f70fec5350b94c56a2a2792",
+      "size": 1778040,
+      "sha256": "45ac11e7074e3ac5ee2f42dae83f94dcaae2968818973b52f0d4644a88a9a19f"
+    },
+    {
+      "name": "rsp-core.bundle.min.mjs",
+      "sourceCommit": "e0dea944979cf41c5f70fec5350b94c56a2a2792",
+      "size": 703681,
+      "sha256": "d302f741a89edf5abc8f2fc0bacdf3e2486dec0e4a080adfb048fc0a091f26d5"
+    },
+    {
+      "name": "rsp.bundle.min.mjs",
+      "sourceCommit": "e0dea944979cf41c5f70fec5350b94c56a2a2792",
+      "size": 23818,
+      "sha256": "62b964ca8cb9f2972ea9f416338aee75888334964d6e1ff17682c0c817b8a357"
+    },
+    {
+      "name": "validate-gemini-extension.mjs",
+      "sourceCommit": "e0dea944979cf41c5f70fec5350b94c56a2a2792",
+      "size": 7842,
+      "sha256": "fcfc90b4f78c91e97ad312d3ed4e194ed65261b8ca4b11183cae92c77e9e6a1a"
+    },
+    {
+      "name": "verify-package-set.mjs",
+      "sourceCommit": "e0dea944979cf41c5f70fec5350b94c56a2a2792",
+      "size": 9024,
+      "sha256": "64ef57e466c8481d7b3d7fee6c992d27b527438690b5d0715786e66fc4832d32"
+    },
+    {
+      "name": "vscode-extension-red-skills-4.0.1.vsix",
+      "sourceCommit": "e0dea944979cf41c5f70fec5350b94c56a2a2792",
+      "size": 79964,
+      "sha256": "b88abdcadae3fced04ed2fcc7e6b367eade3c92fb3b13757165b6c136b6cb8c1"
+    },
+    {
+      "name": "workstation-package-set.mjs",
+      "sourceCommit": "e0dea944979cf41c5f70fec5350b94c56a2a2792",
+      "size": 9657,
+      "sha256": "c3ce0d541c4b5441ebdce6124f2a819299edab43dafac1033e0792e9c611e901"
+    },
+    {
+      "name": "zellij-dashboard.tgz",
+      "sourceCommit": "e0dea944979cf41c5f70fec5350b94c56a2a2792",
+      "size": 3812,
+      "sha256": "f01d4dbc02298e3d6bfecaec4b010b5d145aac61195c3dce899c80778e818e2e"
+    }
+  ],
+  "wholeSetDigest": "41a32e805372f236411b3d566bba310cafcd98e6c9616ac3b51c59210d5b10b4"
+}
