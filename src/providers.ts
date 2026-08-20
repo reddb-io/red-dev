@@ -784,11 +784,30 @@ export function miseReleaseAgeEnv(platform: Platform): Record<string, string> {
   return specs.length > 0 ? { MISE_MINIMUM_RELEASE_AGE_EXCLUDES: specs.join(",") } : {};
 }
 
+/**
+ * Run mise, with its output wherever log output is going.
+ *
+ * Through `spawnLogged` and not a `Bun.spawn` of its own, which is the
+ * whole of this: inheriting stdout is right when the terminal *is* the
+ * interface and wrong inside the fullscreen one, where the renderer
+ * believes it owns the frame. mise redraws progress with carriage
+ * returns and colour, several lines a second, straight onto a screen
+ * red-dev was painting — so an install looked like two programs
+ * fighting over one window, because it was.
+ *
+ * `logIsCaptured()` has answered this question since the interface
+ * existed and `spawnLogged` has honoured it for every other provider;
+ * mise was spawned through a bespoke path that never asked. Now its
+ * output lands in the scroll area with everything else, and on a plain
+ * terminal it still inherits, so a person watching a download still
+ * sees it live.
+ *
+ * `pumpToLog` already publishes only the newest state of a carriage
+ * return redraw, so a 1.4 MiB download is one moving line rather than
+ * a hundred of 10/11/12%.
+ */
 async function runMise(cmd: string[], platform: Platform): Promise<number> {
-  const proc = Bun.spawn(cmd, {
-    stdout: "inherit",
-    stderr: "inherit",
-    stdin: "ignore",
+  return await spawnLogged(cmd, {
     // mise prompts before installing a tool it has not seen; a converge
     // runs unattended and a prompt here is a hang, not a question.
     //
@@ -799,17 +818,11 @@ async function runMise(cmd: string[], platform: Platform): Promise<number> {
     // src/mise-config.ts for why the fragment is not enough. Every
     // command that reaches here names suite tools explicitly, so
     // nothing else the person owns is inside this exemption.
-    env: unattendedEnvironment(process.env, {
+    env: {
       MISE_YES: "1",
       ...miseReleaseAgeEnv(platform),
-    }),
+    },
   });
-  const heartbeat = startProcessHeartbeat(cmd);
-  try {
-    return await proc.exited;
-  } finally {
-    heartbeat?.stop();
-  }
 }
 
 /**
