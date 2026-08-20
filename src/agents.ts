@@ -979,7 +979,9 @@ export async function convergeRedSkills(p: Platform): Promise<RedSkillsConverge>
   // issues no host commands at all. It is not free the moment any of them
   // stops holding, which is the whole difference from the path-only stamp
   // this replaced: a checkout edited in place keeps its path.
-  const { reconcileSkillHosts, reconciliationFailed } = await import("./red-skills-hosts.ts");
+  const { reconcileSkillHosts, reconciliationFailed, stuckHosts } = await import(
+    "./red-skills-hosts.ts"
+  );
   const hosts = await reconcileSkillHosts(p);
 
   // A host that did not converge does not roll back the ones that did —
@@ -989,7 +991,7 @@ export async function convergeRedSkills(p: Platform): Promise<RedSkillsConverge>
   // is visible and retryable, and silence is what turns it into a machine
   // nobody knows is half-wired.
   if (reconciliationFailed(hosts)) {
-    const stuck = hosts.filter((h) => h.status === "blocked" || h.status === "failed");
+    const stuck = stuckHosts(hosts);
     log.warn(`red-skills: not reconciled into ${stuck.map((h) => h.host).join(", ")}`);
     for (const h of stuck) log.plain(`       ${h.host}: ${h.reason ?? "no reason given"}`);
   }
@@ -1073,12 +1075,12 @@ async function adoptSpec185Workstation(
  * artifact the machine was already using with it.
  */
 export async function convergeRedSkillsCompanions(p: Platform): Promise<CompanionOutcome[]> {
-  const { reconcileCompanions, companionReconciliationFailed } = await import(
+  const { reconcileCompanions, companionReconciliationFailed, stuckCompanions } = await import(
     "./red-skills-companions.ts"
   );
   const companions = await reconcileCompanions(p);
   if (companionReconciliationFailed(companions)) {
-    const stuck = companions.filter((c) => c.status === "blocked" || c.status === "failed");
+    const stuck = stuckCompanions(companions);
     log.warn(`red-skills: companions not converged: ${stuck.map((c) => c.companion).join(", ")}`);
     for (const c of stuck) log.plain(`       ${c.companion}: ${c.reason ?? "no reason given"}`);
   }

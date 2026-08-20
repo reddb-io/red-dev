@@ -48,6 +48,7 @@ import {
   type HostOutcome,
   type HostReconcileOptions,
   reconciliationFailed,
+  stuckHosts,
 } from "./red-skills-hosts.ts";
 
 const UBUNTU: Platform = {
@@ -1583,5 +1584,31 @@ describe("a host that cannot converge on this platform", () => {
     expect(onWindows.permanent).toBe(true);
     expect(HOST_ADAPTERS.find((a) => a.name === "opencode")!.plan(hostContext(m, "linux")).permanent)
       .toBeUndefined();
+  });
+});
+
+describe("one predicate for a stuck host", () => {
+  test("every place that judges outcomes asks the same function", async () => {
+    // There were four hand-written copies of `blocked || failed`, so
+    // teaching one of them that a permanent block is not a failure
+    // taught only that one: the machine reported "hosts: 6 on the
+    // active revision" and "not reconciled into opencode" in the same
+    // run, and the adoption stayed shut on the second sentence.
+    for (const file of ["agents.ts", "staged-update.ts", "red-skills-adopt.ts"]) {
+      const source = await Bun.file(new URL(`./${file}`, import.meta.url)).text();
+      expect(source, file).toContain("stuckHosts(");
+      expect(source, file).toContain("stuckCompanions(");
+      // Not one hand-written copy left, for either kind.
+      expect(source, file).not.toMatch(/status === "blocked" \|\| \w\.status === "failed"/);
+    }
+  });
+
+  test("names the hosts, so the reason survives the verdict", () => {
+    const outcomes: HostOutcome[] = [
+      { host: "claude", status: "current", mode: "marketplace" },
+      { host: "opencode", status: "blocked", mode: "generator", reason: "shell", permanent: true },
+      { host: "codex", status: "failed", mode: "marketplace", reason: "boom" },
+    ];
+    expect(stuckHosts(outcomes).map((h) => h.host)).toEqual(["codex"]);
   });
 });

@@ -1317,7 +1317,22 @@ export interface HostOutcome {
  * declare, because only it knows which of its own blocks are which.
  */
 export function reconciliationFailed(outcomes: readonly HostOutcome[]): boolean {
-  return outcomes.some(
+  return stuckHosts(outcomes).length > 0;
+}
+
+/**
+ * The hosts standing between this machine and a converged one.
+ *
+ * One predicate, exported, because there were four: this module's
+ * verdict, the warning agents.ts prints, the surface staged-update.ts
+ * reports and the gate red-skills-adopt.ts opens on. Each spelled
+ * `blocked || failed` by hand, so teaching one of them that a permanent
+ * block is not a failure taught only that one — the machine then said
+ * "hosts: 6 on the active revision" and "not reconciled into opencode"
+ * in the same breath, and the adoption stayed shut.
+ */
+export function stuckHosts(outcomes: readonly HostOutcome[]): HostOutcome[] {
+  return outcomes.filter(
     (o) => o.status === "failed" || (o.status === "blocked" && o.permanent !== true),
   );
 }

@@ -73,8 +73,13 @@ import { dirname, join, relative } from "node:path";
 
 import { log } from "./log.ts";
 import { legacyRedSkillsRoot, redSkillsRoot } from "./red-skills-root.ts";
-import { readCompanionRegistry, retainedVersions, type CompanionOutcome } from "./red-skills-companions.ts";
-import { HOST_ADAPTERS, readHostRegistry, type HostOutcome } from "./red-skills-hosts.ts";
+import {
+  readCompanionRegistry,
+  retainedVersions,
+  stuckCompanions,
+  type CompanionOutcome,
+} from "./red-skills-companions.ts";
+import { HOST_ADAPTERS, readHostRegistry, stuckHosts, type HostOutcome } from "./red-skills-hosts.ts";
 import {
   claudeRegistration,
   codexRegistration,
@@ -558,7 +563,7 @@ export function adoptionGate(verification: AdoptionVerification): AdoptionGate {
   if (unreported.length > 0) {
     return { ok: false, reason: `nothing verified ${unreported.join(", ")}` };
   }
-  const stuck = verification.hosts.filter((h) => h.status === "blocked" || h.status === "failed");
+  const stuck = stuckHosts(verification.hosts);
   if (stuck.length > 0) {
     return { ok: false, reason: `not reconciled into ${stuck.map((h) => h.host).join(", ")}` };
   }
@@ -568,9 +573,7 @@ export function adoptionGate(verification: AdoptionVerification): AdoptionGate {
   if (missing.length > 0) {
     return { ok: false, reason: `nothing verified ${missing.join(", ")}` };
   }
-  const refused = verification.companions.filter(
-    (c) => c.status === "blocked" || c.status === "failed",
-  );
+  const refused = stuckCompanions(verification.companions);
   if (refused.length > 0) {
     return { ok: false, reason: `companions did not converge: ${refused.map((c) => c.companion).join(", ")}` };
   }

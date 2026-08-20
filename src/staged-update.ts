@@ -59,8 +59,8 @@ import { log } from "./log.ts";
 import { redSkillsRoot } from "./red-skills-root.ts";
 import type { Platform } from "./platform.ts";
 import type { Acquisition } from "./red-skills-acquire.ts";
-import type { CompanionOutcome } from "./red-skills-companions.ts";
-import type { HostOutcome } from "./red-skills-hosts.ts";
+import { stuckCompanions, type CompanionOutcome } from "./red-skills-companions.ts";
+import { stuckHosts, type HostOutcome } from "./red-skills-hosts.ts";
 import {
   readPackageSetState,
   type PackageSetIdentity,
@@ -158,7 +158,7 @@ export function acquisitionSurface(a: Acquisition): SurfaceOutcome {
  * the new revision is a session nobody has opened yet.
  */
 export function hostSurface(outcomes: readonly HostOutcome[]): SurfaceOutcome {
-  const stuck = outcomes.filter((o) => o.status === "blocked" || o.status === "failed");
+  const stuck = stuckHosts(outcomes);
   const restartNeeded = outcomes.filter((o) => o.reload === "restart-needed").map((o) => o.host);
   if (outcomes.length === 0) {
     return {
@@ -192,7 +192,7 @@ export function hostSurface(outcomes: readonly HostOutcome[]): SurfaceOutcome {
  * broken machine, and the remedy is a newer set rather than a retry.
  */
 export function companionSurface(outcomes: readonly CompanionOutcome[]): SurfaceOutcome {
-  const stuck = outcomes.filter((o) => o.status === "blocked" || o.status === "failed");
+  const stuck = stuckCompanions(outcomes);
   const restartNeeded = outcomes
     .filter((o) => o.reload === "restart-needed")
     .map((o) => o.companion as string);

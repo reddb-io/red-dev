@@ -727,7 +727,19 @@ export interface CompanionOutcome {
 
 /** Whether every companion this machine can hold converged. */
 export function companionReconciliationFailed(outcomes: readonly CompanionOutcome[]): boolean {
-  return outcomes.some((o) => o.status === "blocked" || o.status === "failed");
+  return stuckCompanions(outcomes).length > 0;
+}
+
+/**
+ * The companions standing between this machine and a converged one.
+ *
+ * Exported for the same reason `stuckHosts` is: three callers were
+ * spelling this by hand, which is how the host side ended up with four
+ * predicates that could disagree. One place to change if a companion
+ * ever gains a block that no run can clear.
+ */
+export function stuckCompanions(outcomes: readonly CompanionOutcome[]): CompanionOutcome[] {
+  return outcomes.filter((o) => o.status === "blocked" || o.status === "failed");
 }
 
 // ---------------------------------------------------------------- the walk
