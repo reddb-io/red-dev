@@ -404,9 +404,53 @@ export function snapshotArchiveArgv(mirror: string, commit: string, tar: string)
   return ["git", "--git-dir", mirror, "archive", "--format=tar", `--output=${tar}`, commit];
 }
 
-/** PURE. */
-export function extractArgv(tar: string, dest: string): string[] {
-  return ["tar", "-xf", tar, "-C", dest];
+/**
+ * PURE. `exclude` names paths tar must not attempt to create.
+ *
+ * The excludes come first, before `-f`: GNU tar applies an option to
+ * everything after it and bsdtar does not care, so this ordering is the
+ * one both agree on.
+ */
+export function extractArgv(tar: string, dest: string, exclude: readonly string[] = []): string[] {
+  return ["tar", ...exclude.map((path) => `--exclude=${path}`), "-xf", tar, "-C", dest];
+}
+
+/** PURE. Every path in a commit, with its mode, from the bare mirror. */
+export function lsTreeArgv(mirror: string, commit: string): string[] {
+  return ["git", "--git-dir", mirror, "ls-tree", "-r", "-z", commit];
+}
+
+/** PURE. One blob's bytes — for a symlink, the path it points at. */
+export function catBlobArgv(mirror: string, blob: string): string[] {
+  return ["git", "--git-dir", mirror, "cat-file", "blob", blob];
+}
+
+/**
+ * The symlinks in a commit, read from git rather than from the tarball.
+ *
+ * `git ls-tree -r -z` records mode `120000` for a symlink and gives the
+ * blob whose content is the target. Asking git is exact; parsing `tar
+ * -tv` output would be a guess about two different tar implementations'
+ * column formats, and getting it wrong here means silently dropping a
+ * file from a verified revision.
+ *
+ * NUL-separated (`-z`) because a path may contain anything, including a
+ * newline, and a revision that extracted differently depending on
+ * somebody's filename would be a revision with two identities.
+ */
+export function parseSymlinkEntries(stdout: string): { path: string; blob: string }[] {
+  const out: { path: string; blob: string }[] = [];
+  for (const record of stdout.split("\0")) {
+    if (record.length === 0) continue;
+    // `<mode> SP <type> SP <object> TAB <path>`
+    const tab = record.indexOf("\t");
+    if (tab === -1) continue;
+    const meta = record.slice(0, tab).split(/\s+/);
+    const [mode, type, object] = meta;
+    if (mode !== "120000" || type !== "blob" || !object) continue;
+    out.push({ path: record.slice(tab + 1), blob: object });
+  }
+  return out;
 }
 
 /** Ask the remote what it publishes, without cloning anything. */
@@ -460,10 +504,45 @@ export function ensureMirror(
  * recorded an identity for. Staged under a `.staging-` name and renamed,
  * so a snapshot directory either does not exist or is complete; an
  * interrupted extract can never be mistaken for a revision.
+ *
+ * ## Symlinks, and why Windows never had a verified set
+ *
+ * Creating a symlink on Windows needs a privilege an ordinary process
+ * does not have — Developer Mode or an elevated shell grants it, a
+ * converge has neither. So `tar -xf` aborted on the first one it met,
+ * the whole acquisition was refused with `tree`, and the only RedSkills
+ * that ever reached a Windows machine was the *composed* one built from
+ * npm payloads, which carry no symlinks. Measured on the machine that
+ * found it: one symlink in the entire 4.0.1 tree
+ * (`packages/worker/AGENTS.md` -> `CLAUDE.md`), and it cost that side
+ * every signed set red-skills has ever published.
+ *
+ * Where a symlink cannot be created, it is written as a regular file
+ * holding the path it pointed at — which is exactly what `git clone`
+ * does on Windows when `core.symlinks` is false, so a snapshot and a
+ * clone of the same commit agree. Copying the *target's contents*
+ * instead was the alternative and is rejected: it makes the snapshot
+ * disagree with the repository, and it has no answer for a link that
+ * points at a directory or outside the tree.
+ *
+ * This changes nothing about what is verified. The signature covers the
+ * release's artifacts, not the source tree, and the source's identity
+ * is the commit — see the note at the top of this file.
  */
 export function ensureSnapshot(
   run: CommandRunner,
-  opts: { mirror: string; home: string; commit: string },
+  opts: {
+    mirror: string;
+    home: string;
+    commit: string;
+    /**
+     * `native` creates real symlinks; `as-file` writes the target path
+     * as a regular file. Defaults to what this platform can actually
+     * do, and is named here so the Windows behaviour is testable on a
+     * machine that is not Windows.
+     */
+    symlinks?: "native" | "as-file";
+  },
 ): { ok: true; path: string; created: boolean } | { ok: false; reason: string } {
   const path = redSkillsSnapshotDir(opts.home, opts.commit);
   if (existsSync(path)) return { ok: true, path, created: false };
@@ -483,11 +562,44 @@ export function ensureSnapshot(
       reason: `git archive ${opts.commit.slice(0, 12)} exited ${archived.code}: ${firstLine(archived.stderr)}`,
     };
   }
-  const extracted = run(extractArgv(tar, staging));
+  // Which entries tar must be told to skip, and what to write in their
+  // place. Empty everywhere a symlink is an ordinary thing to create.
+  const asFile = (opts.symlinks ?? (process.platform === "win32" ? "as-file" : "native")) === "as-file";
+  let links: { path: string; blob: string }[] = [];
+  if (asFile) {
+    const listed = run(lsTreeArgv(opts.mirror, opts.commit));
+    if (listed.code !== 0) {
+      rmSync(staging, { recursive: true, force: true });
+      rmSync(tar, { force: true });
+      return {
+        ok: false,
+        reason: `git ls-tree ${opts.commit.slice(0, 12)} exited ${listed.code}: ${firstLine(listed.stderr)}`,
+      };
+    }
+    links = parseSymlinkEntries(listed.stdout);
+  }
+
+  const extracted = run(extractArgv(tar, staging, links.map((l) => l.path)));
   rmSync(tar, { force: true });
   if (extracted.code !== 0) {
     rmSync(staging, { recursive: true, force: true });
     return { ok: false, reason: `tar -xf exited ${extracted.code}: ${firstLine(extracted.stderr)}` };
+  }
+
+  for (const link of links) {
+    const target = run(catBlobArgv(opts.mirror, link.blob));
+    if (target.code !== 0) {
+      rmSync(staging, { recursive: true, force: true });
+      return {
+        ok: false,
+        reason: `git cat-file ${link.blob.slice(0, 12)} exited ${target.code}: ${firstLine(target.stderr)}`,
+      };
+    }
+    const dest = join(staging, link.path);
+    mkdirSync(dirname(dest), { recursive: true });
+    // No trailing newline: the file *is* the target path, the way git
+    // writes it, not a line of text about it.
+    writeFileSync(dest, target.stdout);
   }
 
   if (existsSync(path)) {

@@ -20,14 +20,17 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -42,6 +45,7 @@ import {
   directoryAssetProvider,
   ensureMirror,
   ensureSnapshot,
+  extractArgv,
   githubAssetProvider,
   listRemoteRevisions,
   lsRemoteArgv,
@@ -49,6 +53,7 @@ import {
   overlaysIntoTree,
   parseRemoteRevisions,
   parseSelector,
+  parseSymlinkEntries,
   reconcileRedSkills,
   reconciledStampPath,
   redSkillsCandidateDir,
@@ -959,3 +964,102 @@ function acquireArgs(home: string, git: ReturnType<typeof fakeGit>, assets: Asse
     env: { HOME: home },
   };
 }
+
+describe("a commit that carries a symlink", () => {
+  /** A real bare repository, because this is about what git and tar do. */
+  function repoWithSymlink(): { mirror: string; commit: string; home: string } {
+    const root = mkdtempSync(join(tmpdir(), "red-symlink-"));
+    const work = join(root, "work");
+    mkdirSync(join(work, "packages", "worker"), { recursive: true });
+    writeFileSync(join(work, "packages", "worker", "CLAUDE.md"), "# the real file\n");
+    symlinkSync("CLAUDE.md", join(work, "packages", "worker", "AGENTS.md"));
+    writeFileSync(join(work, "package.json"), '{"name":"x"}\n');
+
+    const git = (...args: string[]) =>
+      spawnSync("git", ["-C", work, ...args], { encoding: "utf8", stdio: "pipe" });
+    git("init", "-q", "-b", "main");
+    git("config", "user.email", "t@example.com");
+    git("config", "user.name", "t");
+    git("add", "-A");
+    git("commit", "-qm", "one");
+    const commit = spawnSync("git", ["-C", work, "rev-parse", "HEAD"], { encoding: "utf8" })
+      .stdout.trim();
+
+    const mirror = join(root, "mirror.git");
+    spawnSync("git", ["clone", "-q", "--bare", work, mirror], { encoding: "utf8" });
+    return { mirror, commit, home: join(root, "home") };
+  }
+
+  const realGit: CommandRunner = (argv) => {
+    const r = spawnSync(argv[0] as string, argv.slice(1), { encoding: "utf8" });
+    return { code: r.status ?? 1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+  };
+
+  test("extracts as a real symlink where the platform can make one", () => {
+    const { mirror, commit, home } = repoWithSymlink();
+    const result = ensureSnapshot(realGit, { mirror, home, commit, symlinks: "native" });
+    expect(result).toMatchObject({ ok: true, created: true });
+    if (!result.ok) return;
+
+    const link = join(result.path, "packages", "worker", "AGENTS.md");
+    expect(lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(readFileSync(link, "utf8")).toBe("# the real file\n");
+  });
+
+  test("writes the target path as a regular file where it cannot — the Windows case", () => {
+    // Windows cannot create a symlink without a privilege a converge
+    // does not have, so `tar -xf` aborted and the whole acquisition was
+    // refused. One file in the tree cost that side every signed set
+    // red-skills has published.
+    const { mirror, commit, home } = repoWithSymlink();
+    const result = ensureSnapshot(realGit, { mirror, home, commit, symlinks: "as-file" });
+    expect(result).toMatchObject({ ok: true, created: true });
+    if (!result.ok) return;
+
+    const link = join(result.path, "packages", "worker", "AGENTS.md");
+    expect(lstatSync(link).isSymbolicLink()).toBe(false);
+    // The path it pointed at, with no newline — what `git clone` writes
+    // on Windows with core.symlinks false.
+    expect(readFileSync(link, "utf8")).toBe("CLAUDE.md");
+    // And the rest of the tree is all there.
+    expect(readFileSync(join(result.path, "packages", "worker", "CLAUDE.md"), "utf8")).toBe(
+      "# the real file\n",
+    );
+    expect(existsSync(join(result.path, "package.json"))).toBe(true);
+  });
+});
+
+describe("reading symlinks out of a commit", () => {
+  test("takes only mode 120000, from NUL-separated records", () => {
+    const stdout =
+      "100644 blob aaa1\tpackage.json\0" +
+      "120000 blob bbb2\tpackages/worker/AGENTS.md\0" +
+      "040000 tree ccc3\tdocs\0";
+    expect(parseSymlinkEntries(stdout)).toEqual([
+      { path: "packages/worker/AGENTS.md", blob: "bbb2" },
+    ]);
+  });
+
+  test("survives a path with a newline in it, which is why -z is asked for", () => {
+    const stdout = "120000 blob d4\tweird\nname.md\0";
+    expect(parseSymlinkEntries(stdout)).toEqual([{ path: "weird\nname.md", blob: "d4" }]);
+  });
+
+  test("the excludes go before -f, the ordering both tars agree on", () => {
+    expect(extractArgv("/tmp/a.tar", "/tmp/dest", ["x/y.md"])).toEqual([
+      "tar",
+      "--exclude=x/y.md",
+      "-xf",
+      "/tmp/a.tar",
+      "-C",
+      "/tmp/dest",
+    ]);
+    expect(extractArgv("/tmp/a.tar", "/tmp/dest")).toEqual([
+      "tar",
+      "-xf",
+      "/tmp/a.tar",
+      "-C",
+      "/tmp/dest",
+    ]);
+  });
+});
