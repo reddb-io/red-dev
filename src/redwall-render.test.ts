@@ -33,6 +33,7 @@ import {
   yearProgressLabel,
   type RedwallState,
   type RedwallYear,
+  redwallVersionLabel,
 } from "./redwall-render.ts";
 import { THEMES, THEME_SLUGS, type ThemeSlug } from "./themes.ts";
 import { readFont } from "./ttf.ts";
@@ -474,40 +475,45 @@ describe("the lines", () => {
 });
 
 describe("the revision on the card", () => {
-  test("is drawn beside the name, in every state the card has", () => {
-    // Which is the daemon's version by construction: redskilled is
-    // installed out of the package set, so naming the set names the
-    // thing the rest of the card reports on. The wallpaper answers
-    // "which revision is this machine" without opening a terminal.
+  test("is its own label, and never inside the headline", () => {
+    // The headline says what the daemon is doing now; the revision says
+    // which build this is. Putting the version in the headline made
+    // every status read as a version announcement.
     const at = (over: Record<string, unknown>) =>
       redwallLines({ address: null, version: "4.0.11", ...over } as never)[0];
 
-    expect(at({ workers: 0, queued: 0 })).toBe("redskilled 4.0.11 standing by");
-    expect(at({ workers: 2, capacity: 5, queued: 1 })).toBe("redskilled 4.0.11 at work");
-    expect(at({ workers: 5, capacity: 5, queued: 3 })).toBe("redskilled 4.0.11 at capacity");
-    expect(at({ workers: null })).toBe("redskilled 4.0.11 unavailable");
+    expect(at({ workers: 0, queued: 0 })).toBe("redskilled standing by");
+    expect(at({ workers: 2, capacity: 5, queued: 1 })).toBe("redskilled at work");
+    expect(at({ workers: null })).toBe("redskilled unavailable");
     expect(at({ workers: 1, attention: { kind: "births-paused" } })).toBe(
-      "redskilled 4.0.11 needs attention",
+      "redskilled needs attention",
     );
   });
 
-  test("a machine with no set draws the name alone, which is true", () => {
-    const lines = redwallLines({ workers: 0, queued: 0, address: null } as never);
-    expect(lines[0]).toBe("redskilled standing by");
-    expect(lines[0]).not.toContain("undefined");
-    expect(lines[0]).not.toContain("null");
+  test("is prefixed, because a bare number is one more number on that row", () => {
+    expect(redwallVersionLabel({ workers: 0, version: "4.0.12" } as never)).toBe("v4.0.12");
+  });
+
+  test("is nothing when there is no version, and the card is unchanged", () => {
+    expect(redwallVersionLabel({ workers: 0 } as never)).toBeNull();
+    expect(redwallVersionLabel({ workers: 0, version: "" } as never)).toBeNull();
   });
 
   test("a revision the face cannot set is dropped, not drawn as boxes", () => {
-    // The same rule the address and the agent windows already follow: a
-    // line the embedded face cannot set drops every other line with it,
-    // so nothing unsettable is allowed into one.
-    const lines = redwallLines({
+    // The rule every line on this card follows: a glyph the embedded
+    // face has no mask for would be drawn as nothing at all.
+    expect(redwallVersionLabel({ workers: 0, version: "4.0.11-日本語" } as never)).toBeNull();
+  });
+
+  test("is really drawn, not silently dropped", () => {
+    const plain = render({ workers: 0, queued: 0, address: "10.101.1.105" } as never);
+    const labelled = render({
       workers: 0,
       queued: 0,
-      address: null,
-      version: "4.0.11-日本語",
+      address: "10.101.1.105",
+      version: "4.0.12",
     } as never);
-    expect(lines[0]).toBe("redskilled standing by");
+    expect(Buffer.compare(Buffer.from(plain), Buffer.from(labelled))).not.toBe(0);
   });
+
 });

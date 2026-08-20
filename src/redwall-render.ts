@@ -219,6 +219,31 @@ export function redwallInk(theme: Theme): RedwallInk {
  * one line; what is kept is the other, which is the same rule
  * `host-state.ts` states for a missing daemon.
  */
+/**
+ * The revision, drawn small and right-aligned on the last line.
+ *
+ * Beside the address rather than in the headline: both are facts about
+ * *which machine and which build this is*, and the headline is about
+ * what the daemon is doing right now. Putting the version there made
+ * every status read as a version announcement — "redskilled 4.0.11
+ * standing by" leads with the number when the sentence is about
+ * standing by.
+ *
+ * `v` prefixed, because a bare `4.0.12` at the end of a line of numbers
+ * — percentages, an IP — is one more number, and the one thing on this
+ * card that is a name rather than a measurement.
+ *
+ * Null when there is no version, or when the embedded face cannot set
+ * it: the same rule every other line follows, since a glyph this font
+ * has no mask for would be drawn as nothing at all.
+ */
+export function redwallVersionLabel(state: RedwallState): string | null {
+  const version = state.version;
+  if (typeof version !== "string" || version.length === 0) return null;
+  const label = `v${version}`;
+  return drawable(label) ? label : null;
+}
+
 export function redwallLines(state: RedwallState): string[] {
   const address = state.address !== null && validAddress(state.address) && drawable(state.address)
     ? state.address
@@ -226,16 +251,8 @@ export function redwallLines(state: RedwallState): string[] {
   const github = githubLines(state.github);
   const agent = agentLines(state.agent);
 
-  // The subject of every headline below, named once. A revision this
-  // face cannot set is dropped rather than drawn as boxes — the same
-  // rule the address and the agent windows already follow.
-  const name =
-    typeof state.version === "string" && state.version.length > 0 && drawable(state.version)
-      ? `redskilled ${state.version}`
-      : "redskilled";
-
   if (state.workers === null) {
-    return [`${name} unavailable`, ...github, ...agent, address]
+    return ["redskilled unavailable", ...github, ...agent, address]
       .filter((line): line is string => line !== null);
   }
   if (!Number.isSafeInteger(state.workers) || state.workers < 0) return [];
@@ -246,19 +263,19 @@ export function redwallLines(state: RedwallState): string[] {
   let headline: string;
   let detail: string;
   if (state.attention) {
-    headline = `${name} needs attention`;
+    headline = "redskilled needs attention";
     detail = attentionLine(state.attention);
     if (queued !== null && queued > 0) detail += ` · ${queued} queued`;
   } else if (capacity !== null && capacity > 0 && workers >= capacity && (queued ?? 0) > 0) {
-    headline = `${name} at capacity`;
+    headline = "redskilled at capacity";
     detail = workerLine(workers, capacity);
     if (queued !== null) detail += ` · ${queued} queued`;
   } else if (workers > 0) {
-    headline = `${name} at work`;
+    headline = "redskilled at work";
     detail = workerLine(workers, capacity);
     if (queued !== null) detail += queued === 0 ? " · nothing queued" : ` · ${queued} queued`;
   } else {
-    headline = `${name} standing by`;
+    headline = "redskilled standing by";
     detail = queued === 0 ? "nothing queued" : queued === null ? "0 workers" : `${queued} queued`;
   }
 
@@ -389,6 +406,8 @@ interface RedwallLayout {
   title: Mask;
   details: Mask[];
   year: RedwallYear;
+  /** The revision, right-aligned on the last line drawn. */
+  trailing: Mask | null;
   yearLabel: Mask;
   calendarTop: number;
   calendarWidth: number;
@@ -424,20 +443,28 @@ function layoutFor(
   font: Font,
   lines: readonly string[],
   year: RedwallYear,
+  trailingLabel: string | null = null,
 ): RedwallLayout | null {
   if (lines.length === 0) return null;
   const scale = scaleFor(art.height);
   const title = typeset(font, [lines[0]!], scale.title);
   const details = lines.slice(1).map((line) => typeset(font, [line], scale.detail));
+  const trailing = trailingLabel === null ? null : typeset(font, [trailingLabel], scale.detail);
   const yearLabel = typeset(font, [yearProgressLabel(year)], scale.detail);
   const calendarColumns = Math.ceil((year.firstWeekday + year.days) / 7);
   const calendarWidth = calendarColumns * scale.calendarCell +
     (calendarColumns - 1) * scale.calendarGap;
   const calendarHeight = 7 * scale.calendarCell + 6 * scale.calendarGap;
   const signalReserve = Math.round(scale.title * 1.5);
+  // The last line and the trailing label share a row, so the card has to
+  // be wide enough for both plus a gap between them — otherwise the
+  // revision would be laid over the address rather than after it.
+  const last = details.at(-1) ?? title;
+  const sharedRow = trailing === null ? 0 : last.width + scale.title + trailing.width;
   const contentWidth = Math.max(
     title.width + signalReserve,
     ...details.map((mask) => mask.width),
+    sharedRow,
     yearLabel.width,
     calendarWidth,
   );
@@ -449,6 +476,7 @@ function layoutFor(
   const width = contentWidth + scale.padX * 2;
   const height = contentHeight + scale.padY * 2;
   return {
+    trailing,
     box: {
       x: Math.max(0, art.width - scale.margin - width),
       y: Math.max(0, scale.topInset),
@@ -496,7 +524,7 @@ export function renderRedwall(input: RedwallInput): Uint8Array {
 
   const raster = decodePng(input.art);
   const font = readFont(input.font);
-  const layout = layoutFor(raster, font, lines, input.year)!;
+  const layout = layoutFor(raster, font, lines, input.year, redwallVersionLabel(input.state))!;
 
   paint(raster, layout, lines[0]!, redwallInk(input.theme));
   return encodePng(raster);
@@ -541,12 +569,25 @@ function paint(
   }
 
   let top = box.y + scale.padY;
+  let lastTop = top;
+  let lastHeight = title.height;
   pour(raster, title, box.x + scale.padX, top, ink.plate, ink.text);
   top += title.height;
   for (const detail of details) {
     top += scale.gap;
+    lastTop = top;
+    lastHeight = detail.height;
     pour(raster, detail, box.x + scale.padX, top, ink.plate, ink.secondary);
     top += detail.height;
+  }
+
+  // The revision, against the right edge of the last row drawn. Its own
+  // baseline is that row's, so it sits beside the address rather than
+  // under it — one line, two facts about which machine this is.
+  if (layout.trailing !== null) {
+    const right = box.x + box.width - scale.padX - layout.trailing.width;
+    const centred = lastTop + Math.max(0, Math.round((lastHeight - layout.trailing.height) / 2));
+    pour(raster, layout.trailing, right, centred, ink.plate, ink.secondary);
   }
   paintSignal(raster, layout, headline, ink);
   paintYear(raster, layout, ink);
