@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test";
 
 import { providerFor, TOOLS } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
-import { declaredAptPackages, declaredWingetIds, globToRegExp } from "./providers.ts";
+import { declaredAptPackages, declaredWingetIds, globToRegExp,
+  expandArchiveArgv,
+} from "./providers.ts";
 
 const UBUNTU: Platform = {
   os: "linux",
@@ -101,5 +103,42 @@ describe("what `red-dev update` moves", () => {
     // Windows converge would install, so it is what an update may move.
     expect(declaredAptPackages(WINDOWS)).toEqual([]);
     expect(declaredWingetIds(WINDOWS)).toContain("BurntSushi.ripgrep.MSVC");
+  });
+});
+
+describe("unzipping on Windows", () => {
+  test("the paths go inside the script, because -Command does not fill $args", () => {
+    // Verified against a real PowerShell: with `-Command`, `$args` comes
+    // back empty and the trailing words are executed as further
+    // commands. So `Expand-Archive -LiteralPath $args[0]` ran with a
+    // null path and exited 1 — which is why RedCode has never installed
+    // on a Windows machine through red-dev.
+    const argv = expandArchiveArgv("C:/tmp/redcode.zip", "C:/tmp/out");
+    expect(argv.slice(0, 4)).toEqual([
+      "powershell.exe",
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+    ]);
+    // Nothing after the script: an argument there is a second command.
+    expect(argv).toHaveLength(5);
+    expect(argv[4]).toBe(
+      "Expand-Archive -LiteralPath 'C:/tmp/redcode.zip' -DestinationPath 'C:/tmp/out' -Force",
+    );
+    expect(argv.join(" ")).not.toContain("$args");
+  });
+
+  test("a quote in a path is doubled, the way a PowerShell literal spells it", () => {
+    // A literal takes no escapes, which is what makes it right for a
+    // path full of backslashes; the quote is the one character that
+    // needs care, and an unescaped one would end the string early and
+    // turn the rest of the path into code.
+    const argv = expandArchiveArgv("C:/Users/o'brien/a.zip", "C:/out");
+    expect(argv[4]).toContain("'C:/Users/o''brien/a.zip'");
+  });
+
+  test("backslashes survive, because a literal does not process them", () => {
+    const argv = expandArchiveArgv("C:\\Temp\\new\\redcode.zip", "C:\\Temp\\out");
+    expect(argv[4]).toContain("'C:\\Temp\\new\\redcode.zip'");
   });
 });

@@ -812,6 +812,37 @@ async function runMise(cmd: string[], platform: Platform): Promise<number> {
   }
 }
 
+/**
+ * Unzip on Windows, with the paths inside the script rather than after it.
+ *
+ * `-Command` does not populate `$args`. Only `-File script.ps1 a b`
+ * does; with `-Command`, everything after the script is appended to the
+ * command line as *more statements to run*. So
+ *
+ *     powershell -Command "Expand-Archive -LiteralPath $args[0] ..." C:\a.zip C:\dest
+ *
+ * ran `Expand-Archive` with a null path, then tried to execute
+ * `C:\a.zip` and `C:\dest` as commands, and exited 1 — which is why
+ * RedCode has never installed on a Windows machine through red-dev.
+ * Verified against a real PowerShell rather than remembered: `$args`
+ * comes back empty and the trailing words echo as commands.
+ *
+ * The paths go in as single-quoted PowerShell literals. A literal takes
+ * no escapes, which is exactly right for a Windows path full of
+ * backslashes — the one character that needs care is the quote itself,
+ * doubled the way PowerShell spells it.
+ */
+export function expandArchiveArgv(zip: string, dest: string): string[] {
+  const literal = (value: string) => `'${value.replace(/'/g, "''")}'`;
+  return [
+    "powershell.exe",
+    "-NoProfile",
+    "-NonInteractive",
+    "-Command",
+    `Expand-Archive -LiteralPath ${literal(zip)} -DestinationPath ${literal(dest)} -Force`,
+  ];
+}
+
 export async function ghInstall(
   repo: string,
   glob: string,
@@ -918,15 +949,7 @@ export async function ghInstallExactArchive(
     await run(["tar", "-xzf", downloaded, "-C", tmp]);
   } else if (asset.endsWith(".zip") && p.os === "windows") {
     log.info(`extracting ${asset} with Windows PowerShell`);
-    await run([
-      "powershell.exe",
-      "-NoProfile",
-      "-NonInteractive",
-      "-Command",
-      "Expand-Archive -LiteralPath $args[0] -DestinationPath $args[1] -Force",
-      downloaded,
-      tmp,
-    ]);
+    await run(expandArchiveArgv(downloaded, tmp));
   } else if (asset.endsWith(".zip")) {
     log.info(`extracting ${asset}`);
     await run(["unzip", "-qo", downloaded, "-d", tmp]);
