@@ -219,6 +219,10 @@ function reconcile(m: Machine, opts: CompanionReconcileOptions = {}): Promise<Co
     present: () => true,
     running: () => false,
     editors: () => [...m.installed.keys()],
+    // Identity: this fixture is about the walk, and its fake runner
+    // keys what it installed by the command it was given. Resolution to
+    // a real executable is its own subject, below.
+    resolve: (cli: string) => cli,
     extensions: async (cli: string) => m.installed.get(cli) ?? [],
     compose: async () => {},
     now: () => STAMPED_AT,
@@ -757,5 +761,59 @@ describe("finding the extension inside a set", () => {
 
   test("a set with no extension anywhere is still null, not a guess", () => {
     expect(setVsix(setWith({ dist: "something-else.txt" }))).toBeNull();
+  });
+});
+
+/** The fields the vscode adapter's plan actually reads. */
+function companionCtx(
+  source: string,
+  editors: string[],
+  resolve: (cli: string) => string | null,
+): Parameters<(typeof COMPANION_ADAPTERS)[number]["plan"]>[0] {
+  return {
+    platform: UBUNTU,
+    source,
+    setDigest: SET_DIGEST,
+    setVersion: SET_VERSION,
+    current: source,
+    home: source,
+    config: source,
+    herdrDir: null,
+    zellijDir: source,
+    bin: source,
+    editors,
+    resolve,
+    extensionsOf: async () => [],
+    compose: async () => {},
+  };
+}
+
+describe("installing the extension on Windows", () => {
+  test("the step names the resolved executable, not the bare command", () => {
+    // `where code` lists two files: `code`, a shell script Windows
+    // cannot execute, and `code.cmd`, which it can. Spawning the name
+    // took the first and failed with ENOENT while `code` was on PATH
+    // and working — see commandPath in src/agents.ts.
+    const vscode = COMPANION_ADAPTERS.find((a) => a.name === "vscode")!;
+    const source = mkdtempSync(join(tmpdir(), "red-vsix-win-"));
+    mkdirSync(join(source, "artifacts"), { recursive: true });
+    writeFileSync(join(source, "artifacts", "vscode-extension-red-skills-4.0.11.vsix"), "PK");
+
+    const plan = vscode.plan(
+      companionCtx(source, ["code"], (cli) => `C:\\VS Code\\bin\\${cli}.cmd`),
+    );
+
+    expect(plan.steps).toHaveLength(1);
+    expect(plan.steps[0]?.argv[0]).toBe("C:\\VS Code\\bin\\code.cmd");
+  });
+
+  test("a resolver that answers nothing leaves the name, and the failure explains itself", () => {
+    const vscode = COMPANION_ADAPTERS.find((a) => a.name === "vscode")!;
+    const source = mkdtempSync(join(tmpdir(), "red-vsix-none-"));
+    mkdirSync(join(source, "artifacts"), { recursive: true });
+    writeFileSync(join(source, "artifacts", "vscode-extension-red-skills-4.0.11.vsix"), "PK");
+
+    const plan = vscode.plan(companionCtx(source, ["codium"], () => null));
+    expect(plan.steps[0]?.argv[0]).toBe("codium");
   });
 });

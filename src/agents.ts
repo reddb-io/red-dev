@@ -276,9 +276,29 @@ export function availableAgents(p: Platform): AgentSpec[] {
 }
 
 /** Resolve against PATH as it exists now, including tools exposed this run. */
-export function commandPath(command: string): string | null {
+export function commandPath(
+  command: string,
+  platform: string = process.platform,
+): string | null {
   const path = process.env["Path"] ?? process.env["PATH"] ?? "";
-  return Bun.which(command, { PATH: path });
+  if (platform !== "win32") return Bun.which(command, { PATH: path });
+
+  // On Windows one directory routinely holds both `code` — a shell
+  // script for Git Bash, which the OS itself cannot execute — and
+  // `code.cmd`, which it can. `where code` lists them in that order and
+  // so does `Bun.which`, so taking the first match takes the wrong one
+  // exactly when both exist. The extension is not decoration there; it
+  // is what makes a file runnable.
+  //
+  // Measured on the machine that found it: the VS Code extension step
+  // failed with `ENOENT: no such file or directory` while `code` was on
+  // PATH and working — because what red-dev had resolved was the bash
+  // script.
+  for (const extension of [".cmd", ".exe", ".bat", ""]) {
+    const found = Bun.which(`${command}${extension}`, { PATH: path });
+    if (found) return found;
+  }
+  return null;
 }
 
 export function isAgentInstalled(a: AgentSpec): boolean {

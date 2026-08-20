@@ -105,6 +105,8 @@ export interface CompanionContext {
   bin: string;
   /** The VS Code-family CLIs this machine has. */
   editors: readonly string[];
+  /** One CLI's executable path, or null. Defaults to `commandPath`. */
+  resolve: (cli: string) => string | null;
   /** What one editor says it carries. Only a live machine can answer it. */
   extensionsOf: (cli: string) => Promise<string[]>;
   /** Recompose zellij's config.kdl over the fragment just written. */
@@ -498,7 +500,14 @@ const vscode: CompanionAdapter = {
     }
     return plan({
       version: vsixVersion(vsix) ?? ctx.setVersion,
-      steps: ctx.editors.map((cli) => must(cli, "--install-extension", vsix, "--force")),
+      // The resolved path, not the bare name. On Windows the name finds
+      // a shell script the OS cannot run while `code.cmd` sits beside
+      // it — see commandPath in src/agents.ts. Falling back to the name
+      // keeps a machine whose resolver answers nothing behaving as it
+      // did, which is to try and to say why if it fails.
+      steps: ctx.editors.map((cli) =>
+        must(ctx.resolve(cli) ?? cli, "--install-extension", vsix, "--force"),
+      ),
       expect: ctx.editors.map((cli) => ({ kind: "host", what: `${EXTENSION_ID} (${cli})` }) as const),
     });
   },
@@ -784,6 +793,8 @@ export interface CompanionReconcileOptions {
   /** zellij's config directory. Defaults to the one dotfiles writes. */
   zellijDir?: string;
   adapters?: readonly CompanionAdapter[];
+  /** One CLI's executable path. Defaults to `commandPath`. */
+  resolve?: (cli: string) => string | null;
   /** Is this command on PATH? Defaults to `commandPath`. */
   present?: (cmd: string) => boolean;
   /** Is a process of it running right now? Defaults to a `pgrep` probe. */
@@ -856,6 +867,7 @@ export async function reconcileCompanions(
     zellijDir: opts.zellijDir ?? (await zellijDirOf(p)),
     bin: opts.bin ?? runtimeBinDir(home),
     editors: editorsOf(),
+    resolve: opts.resolve ?? defaultResolve,
     extensionsOf: opts.extensions ?? (await extensionProbe()),
     compose: opts.compose ?? (await composer()),
   };
@@ -1093,6 +1105,7 @@ export async function removeCompanions(
     zellijDir: opts.zellijDir ?? (await zellijDirOf(p)),
     bin: opts.bin ?? runtimeBinDir(home),
     editors: (opts.editors ?? (() => []))(),
+    resolve: opts.resolve ?? defaultResolve,
     extensionsOf: opts.extensions ?? (async () => []),
     compose: opts.compose ?? (async () => {}),
   };
@@ -1218,6 +1231,20 @@ async function currentSource(): Promise<string | null> {
 async function presenceProbe(): Promise<(cmd: string) => boolean> {
   const { commandPath } = await import("./agents.ts");
   return (cmd: string) => commandPath(cmd) !== null;
+}
+
+/**
+ * Where a CLI actually is, extension and all.
+ *
+ * Synchronous and shared, because a plan is built before anything runs
+ * and the answer is a fact about PATH rather than about the run.
+ */
+function defaultResolve(cli: string): string | null {
+  // Required lazily for the same reason `present` does: agents.ts pulls
+  // in the whole agent table, and a companion walk that touched it on
+  // import would pay for it on every command.
+  const { commandPath } = require("./agents.ts") as typeof import("./agents.ts");
+  return commandPath(cli);
 }
 
 async function defaultRunner(): Promise<(cmd: string[]) => Promise<number>> {
