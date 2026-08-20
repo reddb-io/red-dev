@@ -341,3 +341,43 @@ describe("which red-dev the Windows half is asked through", () => {
     expect(onLinux.reason).toContain("nothing to cross to");
   });
 });
+
+describe("a release that is still uploading", () => {
+  test("is asked again in a minute, not in fifteen", async () => {
+    // A GitHub release exists before its assets do. Measured: v4.0.12
+    // was created at 16:40:53 and had 2 of its 39 assets a minute
+    // later, and the person who asked in that window was told it
+    // "publishes no package-set.manifest.json" and then waited a
+    // quarter of an hour for the machine to look again.
+    const h = home();
+    const now = 10_000_000;
+    await watchRedSkills({
+      home: h,
+      nowMs: now,
+      take: async () => ({
+        outcome: "refused",
+        reason: "release v4.0.12 publishes no package-set.manifest.json",
+      }),
+    });
+
+    // Due again a minute later, not fifteen.
+    const last = lastAskedAt(watchStampPath(h));
+    expect(isDue(last, now + 59_000)).toBe(false);
+    expect(isDue(last, now + 61_000)).toBe(true);
+  });
+
+  test("an ordinary refusal still stands for the whole interval", async () => {
+    // A signature that did not verify is not a matter of timing, and
+    // asking again in a minute would be a machine retrying a refusal.
+    const h = home();
+    const now = 10_000_000;
+    await watchRedSkills({
+      home: h,
+      nowMs: now,
+      take: async () => ({ outcome: "refused", reason: "manifest signature is invalid" }),
+    });
+
+    const last = lastAskedAt(watchStampPath(h));
+    expect(isDue(last, now + 61_000)).toBe(false);
+  });
+});

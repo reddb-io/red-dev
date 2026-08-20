@@ -1712,6 +1712,14 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
         // printed one — including the refusal, which is the operator's
         // own declaration standing where red-dev would have put its.
         await applyRedwallHook(ctx.platform);
+
+        // Beside it because both are "what asks red-dev something while
+        // nobody is typing", and this one is the floor under the shell
+        // hook rather than a competitor to it. See src/watch-schedule.ts
+        // for why a timer is defensible here and was not for the
+        // Redwall.
+        const { convergeWatchSchedule } = await import("./watch-schedule.ts");
+        await convergeWatchSchedule(ctx.platform);
         return;
       }
       if (pr.name === "puppeteer") {

@@ -157,13 +157,26 @@ describe("the mechanism this slice picked", () => {
     expect(sources.some((text) => text.includes("redskilled.log.toonl"))).toBe(false);
   });
 
-  test("and no schedule: nothing in the source asks a supervisor to repaint", () => {
-    const sources = everySource();
+  test("and no schedule: nothing asks a supervisor to repaint", () => {
     // The two ways red-dev used to ask for a repeat: a systemd timer and
-    // a per-minute scheduled task. Both are removed by this slice, so
-    // neither may be written by it.
-    expect(sources.some((text) => text.includes("OnUnitActiveSec"))).toBe(false);
-    expect(sources.some((text) => text.includes('"/Create"'))).toBe(false);
+    // a per-minute scheduled task. What ADR 0009 retired is *the
+    // Redwall on a clock* — a process spawned on an idle machine to
+    // learn a Worker count had not moved, and on Windows a black console
+    // drawn over the wallpaper every two minutes.
+    //
+    // It did not retire the clock itself, and this used to be written as
+    // though it had: any source mentioning a timer failed, which made
+    // the guard fire on ADR 0017's release watch — a different fact,
+    // changing hourly rather than rarely, asked for with one
+    // `ls-remote`. So the promise is checked where it lives: a schedule
+    // may exist, and none of them may name `redwall`.
+    for (const text of everySource()) {
+      const schedules = text.includes("OnUnitActiveSec") || text.includes('"/Create"');
+      if (!schedules) continue;
+      expect(text).not.toContain(" redwall\"");
+      expect(text).not.toContain(" redwall`");
+      expect(text).not.toContain('"redwall"');
+    }
   });
 });
 

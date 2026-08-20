@@ -58,6 +58,22 @@ import { redSkillsRoot } from "./red-skills-root.ts";
 export const WATCH_INTERVAL_MS = 15 * 60 * 1000;
 
 /**
+ * How long a *half-published* release stands before asking again.
+ *
+ * A GitHub release exists before its assets do: the tag appears, and the
+ * publishing job then uploads for minutes. Measured on this project —
+ * v4.0.12 was created at 16:40:53 and had 2 of its 39 assets a full
+ * minute later, and somebody who asked in that window was told the
+ * release "publishes no package-set.manifest.json" and then waited a
+ * quarter of an hour for the machine to look again.
+ *
+ * That answer is not "nothing new"; it is "not yet". Waiting the full
+ * interval on it means an aggressive watch systematically catches
+ * releases mid-upload and then sleeps through the moment they finish.
+ */
+export const WATCH_NOT_READY_MS = 60 * 1000;
+
+/**
  * How long a lock is believed.
  *
  * An acquisition is a clone and a download, so this is minutes rather
@@ -231,8 +247,15 @@ export async function watchRedSkills(opts: WatchOptions = {}): Promise<WatchResu
     // Stamped after the ask, not before: a run that could not reach the
     // publisher has not had its answer, and must not silence the next
     // trigger for a quarter of an hour on the strength of a failure.
+    //
+    // And a release still uploading is stamped short rather than not at
+    // all: not stamping would let every trigger through, which on a
+    // ten-minute timer beside a shell hook is a machine asking the
+    // publisher continuously while a release finishes. A minute is long
+    // enough to be polite and short enough to catch it.
     if (result.outcome !== "unreachable") {
-      recordAsk(stamp, nowMs, result.outcome === "current" ? null : result.reason);
+      const short = notReady(result) ? nowMs - WATCH_INTERVAL_MS + WATCH_NOT_READY_MS : nowMs;
+      recordAsk(stamp, short, result.outcome === "current" ? null : result.reason);
     }
     return result;
   } finally {
@@ -405,6 +428,17 @@ export async function crossToWindows(p: Platform): Promise<Crossing> {
   } catch (err) {
     return { outcome: "skipped", reason: `wscript could not start: ${(err as Error).message}` };
   }
+}
+
+/**
+ * Whether the publisher answered "not yet" rather than "nothing new".
+ *
+ * Read from the refusal the acquisition already words for a person —
+ * the release exists and carries no package set — because that is the
+ * one refusal that is a matter of timing rather than of trust.
+ */
+function notReady(result: WatchResult): boolean {
+  return result.outcome === "refused" && /publishes no package-set/.test(result.reason);
 }
 
 /** One line, and only when something happened. */
