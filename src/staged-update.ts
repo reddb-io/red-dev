@@ -97,6 +97,17 @@ export interface SurfaceOutcome {
    * session. Empty on every surface that has no such notion.
    */
   restartNeeded: string[];
+  /**
+   * The acquisition's own verdict, on the acquisition surface alone.
+   *
+   * `state` collapses five answers into three, which is right for a
+   * reader deciding whether the update worked and wrong for one asking
+   * *what the publisher said*: "already on this commit" and "could not
+   * reach the publisher" both land on `verified`, and a caller that
+   * treats those the same either re-asks a machine that is current or
+   * silences the next ask on the strength of a network failure.
+   */
+  acquisition?: Acquisition["outcome"];
 }
 
 /**
@@ -141,7 +152,7 @@ export interface StagedUpdate {
 export function acquisitionSurface(a: Acquisition): SurfaceOutcome {
   const state: SurfaceState =
     a.outcome === "refused" ? "failed" : a.outcome === "unavailable" ? "skipped" : "verified";
-  return { surface: "acquisition", state, reason: a.reason, restartNeeded: [] };
+  return { surface: "acquisition", state, reason: a.reason, restartNeeded: [], acquisition: a.outcome };
 }
 
 /**

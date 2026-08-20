@@ -862,8 +862,24 @@ async function cmdRedSkills(p: Platform, inv: Invocation): Promise<number> {
   // state, and nothing mise invokes on its own schedule may do that.
   if (phase === "adopt") return await cmdRedSkillsAdopt();
 
+  // `watch` is what the triggers run: debounced, locked, and silent
+  // unless something moved. Typed by a person it means "ask now", so
+  // the interval is skipped — nobody types a command to be told it was
+  // asked eleven minutes ago. See ADR 0017 and src/red-skills-watch.ts.
+  if (phase === "watch") {
+    const { watchRedSkills, announceWatch } = await import("./red-skills-watch.ts");
+    const result = await watchRedSkills({
+      manifestPlatform: p,
+      force: inv.redSkillsSelector !== "due",
+    });
+    announceWatch(result);
+    return result.outcome === "refused" ? 1 : 0;
+  }
+
   if (!isPluginPhase(phase)) {
-    log.err(`unknown phase '${phase}' (expected: ${[...PLUGIN_PHASES, "sync", "adopt"].join(", ")})`);
+    log.err(
+      `unknown phase '${phase}' (expected: ${[...PLUGIN_PHASES, "sync", "adopt", "watch"].join(", ")})`,
+    );
     return 1;
   }
   return await runPluginPhase(phase, {

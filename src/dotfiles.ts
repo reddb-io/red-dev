@@ -32,6 +32,7 @@ import functionsSh from "../config/bash/functions.sh" with { type: "text" };
 import promptSh from "../config/bash/prompt.sh" with { type: "text" };
 import sharedSh from "../config/bash/shared.sh" with { type: "text" };
 import zellijSh from "../config/bash/zellij.sh" with { type: "text" };
+import redSkillsWatchSh from "../config/bash/red-skills-watch.sh" with { type: "text" };
 import windowsClipboardSh from "../config/bash/windows-clipboard.sh" with { type: "text" };
 import inputrc from "../config/bash/inputrc.conf" with { type: "text" };
 import zellijBase from "../config/zellij/config.kdl" with { type: "text" };
@@ -48,6 +49,7 @@ export const FILES: Record<string, string> = {
   "prompt.sh": promptSh,
   "shared.sh": sharedSh,
   "zellij.sh": zellijSh,
+  "red-skills-watch.sh": redSkillsWatchSh,
   "windows-clipboard.sh": windowsClipboardSh,
   // Deployed without the .conf suffix: the repo needs an extension for
   // the text import to resolve, readline does not care what it is
