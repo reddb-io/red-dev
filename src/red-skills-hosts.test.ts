@@ -786,8 +786,9 @@ describe("configuration the operator owns", () => {
 // ------------------------------------------------------------- the Gemini
 
 /** What an adapter is a function of, for the plans and checks called directly. */
-function hostContext(m: Machine): AdapterContext {
+function hostContext(m: Machine, os: AdapterContext["os"] = "linux"): AdapterContext {
   return {
+    os,
     plugins: ACTIVATED,
     source: m.tree,
     setDigest: "0".repeat(64),
@@ -1527,5 +1528,24 @@ describe("the skills a package set can project", () => {
     // Nothing declared exists, so the fallback answers instead of an
     // empty projection that would read as "this set has no skills".
     expect(setSkillsIn(root).map((s) => s.name)).toEqual(["afk"]);
+  });
+});
+
+describe("a generator that cannot run on this platform", () => {
+  test("blocks rather than fails, so it stops holding every other host", () => {
+    // `.sh` has no shebang handling on Windows: the spawn failed with
+    // EFTYPE, the reconciliation was reported failed, and the adoption —
+    // which removes nothing until every surface verifies — was held by
+    // one host that cannot work there at all.
+    const m = machine();
+    const opencode = HOST_ADAPTERS.find((a) => a.name === "opencode")!;
+
+    const onWindows = opencode.plan(hostContext(m, "windows"));
+    expect(onWindows.blocked).toContain("shell script");
+    expect(onWindows.steps).toEqual([]);
+
+    const onLinux = opencode.plan(hostContext(m, "linux"));
+    expect(onLinux.blocked).toBeUndefined();
+    expect(onLinux.steps.length).toBeGreaterThan(0);
   });
 });

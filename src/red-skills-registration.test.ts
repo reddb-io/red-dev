@@ -35,6 +35,7 @@ import {
   codexRegistration,
   codexRegistrationPath,
   convergeMarketplaceOwnership,
+  registrationIsOurs,
   type RegistrationOptions,
 } from "./red-skills-registration.ts";
 
@@ -363,5 +364,59 @@ describe("a machine without red-dev is left exactly as it is", () => {
     expect(existsSync(`${root}/.claude`)).toBe(false);
     expect(existsSync(`${root}/.codex`)).toBe(false);
     expect(existsSync(`${root}/.local`)).toBe(false);
+  });
+});
+
+describe("Codex's config on Windows", () => {
+  test("a source recorded as a TOML literal string is read, not read as nothing", async () => {
+    // Codex writes the path in single quotes there, because it is full
+    // of backslashes and TOML's literal string is what that is for.
+    // Read as basic-only, this answered null and the check reported
+    // "the marketplace is registered from nothing" about a marketplace
+    // Codex had just recorded correctly — so Codex on Windows could
+    // never verify, and the adoption was held.
+    const home = mkdtempSync(join(tmpdir(), "red-codex-toml-"));
+    mkdirSync(join(home, ".codex"), { recursive: true });
+    const set = "\\\\?\\C:\\Users\\me\\.red\\skills\\sets\\4.0.1+41a32e805372";
+    writeFileSync(
+      join(home, ".codex", "config.toml"),
+      [
+        "[marketplaces.openai-bundled]",
+        `source = '\\\\?\\C:\\Users\\me\\.codex\\bundled'`,
+        "",
+        "[marketplaces.red-skills]",
+        'last_updated = "2026-08-20T02:16:51Z"',
+        'source_type = "local"',
+        `source = '${set}'`,
+        "",
+      ].join("\n"),
+    );
+
+    const registration = await codexRegistration(home);
+    expect(registration).toEqual({ kind: "directory", source: set });
+  });
+
+  test("the extended-length prefix does not make it somebody else's directory", () => {
+    // `\\?\C:\x` and `C:\x` are the same file. Compared as text without
+    // saying so, they are two, and the registration reads as foreign.
+    expect(
+      registrationIsOurs(
+        { kind: "directory", source: "\\\\?\\C:\\Users\\me\\.red\\skills\\current" },
+        "C:\\Users\\me\\.red\\skills\\current",
+      ),
+    ).toBe(true);
+  });
+
+  test("and a basic string still reads, because that is what every other host writes", async () => {
+    const home = mkdtempSync(join(tmpdir(), "red-codex-basic-"));
+    mkdirSync(join(home, ".codex"), { recursive: true });
+    writeFileSync(
+      join(home, ".codex", "config.toml"),
+      ['[marketplaces.red-skills]', 'source_type = "local"', 'source = "/home/me/.red/skills/current"', ""].join("\n"),
+    );
+    expect(await codexRegistration(home)).toEqual({
+      kind: "directory",
+      source: "/home/me/.red/skills/current",
+    });
   });
 });

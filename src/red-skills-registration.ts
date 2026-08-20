@@ -117,9 +117,31 @@ export async function claudeRegistration(home: string): Promise<MarketplaceRegis
   }
 }
 
+/**
+ * One TOML string value, in either of the two spellings TOML has.
+ *
+ * `"basic"` and `'literal'`. Only the first was read, and Codex writes
+ * the second on Windows for exactly the reason TOML has it: the value
+ * is a path full of backslashes, and a basic string would need every
+ * one of them escaped.
+ *
+ *     source = '\\?\C:\Users\me\.red\skills\sets\4.0.1+41a32e805372'
+ *
+ * Read as basic-only, that line answered null, the registration looked
+ * like a source of nothing, and the check reported "the marketplace is
+ * registered from nothing" about a marketplace Codex had just recorded
+ * correctly. Codex on Windows could therefore never verify — which held
+ * the adoption and left `red-dev update` permanently partial there.
+ *
+ * A literal string is literal: no escape processing, which is what makes
+ * it the right container for a Windows path and means the value is used
+ * exactly as written.
+ */
 function tomlStringValue(line: string, key: string): string | null {
-  const match = line.match(new RegExp(`^\\s*${key}\\s*=\\s*"([^"]*)"\\s*$`));
-  return match?.[1] ?? null;
+  const basic = line.match(new RegExp(`^\\s*${key}\\s*=\\s*"([^"]*)"\\s*$`));
+  if (basic) return basic[1] ?? null;
+  const literal = line.match(new RegExp(`^\\s*${key}\\s*=\\s*'([^']*)'\\s*$`));
+  return literal?.[1] ?? null;
 }
 
 /** Codex's entry for the same marketplace, read out of its config table. */
@@ -376,7 +398,10 @@ async function runSteps(
 /** Two paths naming one directory, whether or not either resolves today. */
 function samePath(a: string | null, b: string): boolean {
   if (a === null) return false;
-  const trim = (s: string) => normalise(s).replace(/\/+$/, "");
+  // `\\?\` is Windows' extended-length prefix. Codex records it; nothing
+  // else on this side writes it, and it names the same file either way,
+  // so it comes off before two paths are compared as text.
+  const trim = (s: string) => normalise(s.replace(/^\\\\\?\\/, "")).replace(/\/+$/, "");
   if (trim(a) === trim(b)) return true;
   try {
     return realpathSync(a) === realpathSync(b);

@@ -177,6 +177,15 @@ export interface AdapterContext {
   home: string;
   /** `$XDG_CONFIG_HOME`, or `~/.config`. */
   config: string;
+  /**
+   * What this machine is, for the adapters whose answer depends on it.
+   *
+   * Defaults to `process.platform`, and is a field rather than a call so
+   * a Windows-only decision can be exercised on a machine that is not
+   * Windows. Only the shape of the platform matters here, so it is that
+   * string and not the whole Platform record.
+   */
+  os: "windows" | "linux" | "darwin";
 }
 
 export type { OwnedCopy, OwnedEntry, OwnedMerge, OwnedWrite };
@@ -293,6 +302,26 @@ function opencodeCompatible(host: string): HostAdapter {
     plan: (ctx) => {
       if (!existsSync(script(ctx.source))) {
         return plan({ mode: "generator", blocked: "the package set carries no install-opencode.sh" });
+      }
+      // A `.sh` cannot be executed on Windows: there is no shebang
+      // handling, so the spawn fails with EFTYPE and the whole
+      // reconciliation is reported as failed — which then holds the
+      // adoption, which refuses to remove anything until every surface
+      // verifies. One host that cannot work on this platform was
+      // stopping every other host's cleanup.
+      //
+      // Blocked rather than failed, which is the difference between "not
+      // supported here" and "broken here". Making it work is the
+      // publishing side's: the generator would have to be a `.mjs` the
+      // way install-hermes-skills.mjs already is, or a `.ps1` beside the
+      // shell one. Running it through Git Bash is not the answer — the
+      // paths it writes into the config would be the ones Git Bash sees,
+      // not the ones a Windows program reads.
+      if (ctx.os === "windows") {
+        return plan({
+          mode: "generator",
+          blocked: `${host}: its generator is a shell script and this is Windows`,
+        });
       }
       return plan({
         mode: "generator",
@@ -1274,6 +1303,8 @@ export interface HostReconcileOptions {
   home?: string;
   /** Defaults to `$XDG_CONFIG_HOME`, then `<home>/.config`. */
   config?: string;
+  /** Defaults to this machine's. See AdapterContext.os. */
+  os?: AdapterContext["os"];
   /** The resolved package set. Defaults to `resolvedSource()`. */
   source?: string | null;
   /** The pointer the marketplace hosts register. Defaults to `~/.red/skills/current`. */
@@ -1301,6 +1332,12 @@ export interface HostReconcileOptions {
 function homeOf(): string {
   const h = process.env["HOME"] ?? process.env["USERPROFILE"] ?? "";
   return h.replace(/\\/g, "/");
+}
+
+/** What `process.platform` says, narrowed to the three this branches on. */
+function platformOs(): AdapterContext["os"] {
+  if (process.platform === "win32") return "windows";
+  return process.platform === "darwin" ? "darwin" : "linux";
 }
 
 function configOf(home: string): string {
@@ -1387,6 +1424,7 @@ export async function reconcileSkillHosts(
     current: opts.current ?? redSkillsCurrentPosix(home),
     home,
     config: opts.config ?? configOf(home),
+    os: opts.os ?? platformOs(),
   };
 
   const registry = readHostRegistry(home);
@@ -1652,6 +1690,7 @@ export async function removeSkillHosts(
         current: opts.current ?? redSkillsCurrentPosix(home),
         home,
         config: opts.config ?? configOf(home),
+        os: opts.os ?? platformOs(),
       };
       const failure = await runSteps(adapter.remove(ctx), run);
       if (failure !== null) {
