@@ -79,6 +79,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { sha256Hex } from "./checksum.ts";
+import { githubAuthHeaders } from "./github-token.ts";
 import { log } from "./log.ts";
 import type { Platform } from "./platform.ts";
 import { redSkillsPluginNames } from "./red-skills-plugins.ts";
@@ -677,9 +678,13 @@ export function githubAssetProvider(
       };
     }
 
-    const headers: Record<string, string> = { Accept: "application/vnd.github+json" };
-    const token = env["GITHUB_TOKEN"];
-    if (token) headers["Authorization"] = `Bearer ${token}`;
+    // The same signing-in the providers do, for the same reason: this
+    // asks the API once per acquisition, and the anonymous allowance is
+    // 60 an hour for everything sharing the IP. See src/github-token.ts.
+    const headers: Record<string, string> = {
+      Accept: "application/vnd.github+json",
+      ...githubAuthHeaders(env),
+    };
 
     let release: { assets?: ReleaseAsset[] };
     try {

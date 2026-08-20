@@ -19,6 +19,7 @@
  */
 
 import { existsSync, mkdirSync } from "node:fs";
+import { githubAuthHeaders } from "./github-token.ts";
 import { log, RedError } from "./log.ts";
 
 function home(): string {
@@ -68,9 +69,13 @@ export async function installBlesh(): Promise<void> {
     return;
   }
 
-  const headers: Record<string, string> = { Accept: "application/vnd.github+json" };
-  const token = process.env["GITHUB_TOKEN"];
-  if (token) headers["Authorization"] = `Bearer ${token}`;
+  // Signed in when the machine can be. ble.sh is somebody else's
+  // repository, so this request competes for the same anonymous
+  // allowance as every other one on this IP. See src/github-token.ts.
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github+json",
+    ...githubAuthHeaders(),
+  };
 
   const res = await fetch(
     "https://api.github.com/repos/akinomyoga/ble.sh/releases/latest",

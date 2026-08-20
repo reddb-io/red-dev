@@ -15,6 +15,7 @@ import { parseChecksums, pickChecksumAsset, sha256Hex, verifyChecksum } from "./
 import { providerFor, TOOLS, type Provider, type Tool } from "./manifest.ts";
 import { convergeMiseConfig, miseEntries, releaseAgeExcludes } from "./mise-config.ts";
 import type { Platform } from "./platform.ts";
+import { githubAuthHeaders, rateLimitAdvice } from "./github-token.ts";
 import { startProcessHeartbeat } from "./process-heartbeat.ts";
 import { missingRights } from "./rights.ts";
 import { tlsTrustFailure, unattendedEnvironment } from "./unattended.ts";
@@ -567,9 +568,15 @@ export async function resolveGhRelease(
   glob: string,
   version?: string,
 ): Promise<GhRelease> {
-  const headers: Record<string, string> = { Accept: "application/vnd.github+json" };
-  const token = process.env["GITHUB_TOKEN"];
-  if (token) headers["Authorization"] = `Bearer ${token}`;
+  // Signed in where the machine can prove it is: 60 anonymous requests
+  // an hour are shared with everything else on this IP — mise included —
+  // and a converge spends one per gh-provided tool. See
+  // src/github-token.ts.
+  const auth = githubAuthHeaders();
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github+json",
+    ...auth,
+  };
 
   // The same deadline the download has, and for a sharper reason: this
   // is where a converge actually stopped. `red` printed its step header
@@ -595,7 +602,7 @@ export async function resolveGhRelease(
         // when the publisher prefixes with `v`. Saying which tag was
         // asked for is the difference between a one-line fix and a hunt.
         (version && res.status === 404 ? ` — no release tagged '${version}'` : "") +
-        (res.status === 403 ? " — rate limited, set GITHUB_TOKEN" : ""),
+        (res.status === 403 ? rateLimitAdvice(auth["Authorization"] !== undefined) : ""),
     );
   }
 
