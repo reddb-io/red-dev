@@ -1742,6 +1742,41 @@ function retire(home: string, retained: readonly PackageSetRevision[]): string[]
   return removed;
 }
 
+/**
+ * Give the active set the artifacts it was activated without.
+ *
+ * A machine already on a revision never reaches activation — the
+ * acquisition short-circuits on the commit, which is right and is what
+ * makes an up-to-date machine cost one `ls-remote`. But a set copied
+ * before activation carried `artifacts/` has no extension to install
+ * from, and would keep not having one for as long as it stayed on that
+ * revision: the machine is *correct* and permanently unable to do one
+ * thing, which is the worst shape a bug can take.
+ *
+ * So the short-cut repairs before it returns. Nothing else is touched,
+ * and a set that already has its artifacts is not written to at all —
+ * this answers null on every run but the first.
+ */
+export function healSetArtifacts(home: string, commit: string): string | null {
+  const state = readPackageSetState(home);
+  const active = state.revisions.find((r) => r.key === state.active);
+  if (!active || active.kind !== "manifest") return null;
+
+  const into = setArtifactsDir(active.path);
+  if (existsSync(into)) return null;
+
+  const from = setArtifactsDir(join(redSkillsRoot(home), "candidates", commit));
+  if (!existsSync(from)) return null;
+
+  try {
+    cpSync(from, into, { recursive: true, dereference: true });
+  } catch {
+    // A set that cannot be repaired is the set it already was.
+    return null;
+  }
+  return into;
+}
+
 /** Copy one tree into an immutable directory, atomically by name. */
 function copyTree(from: string, to: string): void {
   if (existsSync(to)) return;
@@ -1770,7 +1805,23 @@ function copyTree(from: string, to: string): void {
  * companion is handed answers for its own contents.
  */
 function copySet(tree: string, artifacts: string, to: string): void {
-  if (existsSync(to)) return;
+  if (existsSync(to)) {
+    // The set is already here, from before activation carried artifacts
+    // across. Repaired in place rather than left broken until the next
+    // release: without this the fix helps only machines that have yet
+    // to acquire the revision, and every machine already on one stays
+    // unable to install the extension for as long as it stays there.
+    //
+    // Adding the directory does not touch the tree, and a published
+    // set's identity is its manifest's digest over the declared
+    // artifacts — not a digest of this directory — so the revision this
+    // names is the same revision afterwards.
+    const into = setArtifactsDir(to);
+    if (!existsSync(into) && existsSync(artifacts)) {
+      cpSync(artifacts, into, { recursive: true, dereference: true });
+    }
+    return;
+  }
   const staging = join(dirname(to), `.tmp-${basename(to)}`);
   rmSync(staging, { recursive: true, force: true });
   mkdirSync(dirname(to), { recursive: true });

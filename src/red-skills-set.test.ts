@@ -33,7 +33,7 @@ import {
 } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { sha256Hex } from "./checksum.ts";
 import { providerFor, REDSKILLS_MAJOR, TOOLS } from "./manifest.ts";
@@ -88,6 +88,7 @@ import {
   verifyPackageSet,
   type PackageSetManifest,
   type SignatureVerifier,
+  healSetArtifacts,
 } from "./red-skills-set.ts";
 
 const UBUNTU: Platform = {
@@ -1521,5 +1522,84 @@ describe("a schema this red-dev has never seen", () => {
     if (parsed.ok) return;
     expect(parsed.reason).toContain("red.package-set.v3");
     expect(parsed.reason).toContain("update red-dev");
+  });
+});
+
+describe("a set activated before it carried its artifacts", () => {
+  function machineOn(kind: "manifest" | "composed", withArtifacts: boolean): {
+    home: string;
+    commit: string;
+    setPath: string;
+  } {
+    const home = mkdtempSync(join(tmpdir(), "red-heal-"));
+    const commit = "a".repeat(40);
+    const setPath = join(home, ".red", "skills", "sets", "4.0.4+abcdefabcdef");
+    mkdirSync(setPath, { recursive: true });
+    writeFileSync(join(setPath, "package.json"), '{"version":"4.0.4"}\n');
+    if (withArtifacts) {
+      mkdirSync(join(setPath, "artifacts"), { recursive: true });
+      writeFileSync(join(setPath, "artifacts", "old.vsix"), "PK");
+    }
+
+    // What the acquisition left behind, which is where the extension is.
+    const candidate = join(home, ".red", "skills", "candidates", commit, "artifacts");
+    mkdirSync(candidate, { recursive: true });
+    writeFileSync(join(candidate, "vscode-extension-red-skills-4.0.4.vsix"), "PK");
+
+    const statePath = join(home, ".red", "skills", "package-set.json");
+    mkdirSync(dirname(statePath), { recursive: true });
+    writeFileSync(
+      statePath,
+      `${JSON.stringify(
+        {
+          schema: 1,
+          active: "4.0.4+abcdefabcdef",
+          revisions: [
+            {
+              key: "4.0.4+abcdefabcdef",
+              version: "4.0.4",
+              digest: "0".repeat(64),
+              sourceCommit: commit,
+              kind,
+              trust: kind === "manifest" ? "trusted" : "unsigned",
+              path: setPath,
+            },
+          ],
+          refused: null,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    return { home, commit, setPath };
+  }
+
+  test("is repaired from the candidate the acquisition left behind", () => {
+    // A machine already on the revision never reaches activation — the
+    // acquisition short-circuits on the commit — so without this it
+    // would be correct and permanently unable to install the extension.
+    const { home, commit, setPath } = machineOn("manifest", false);
+    expect(healSetArtifacts(home, commit)).toBe(join(setPath, "artifacts"));
+    expect(existsSync(join(setPath, "artifacts", "vscode-extension-red-skills-4.0.4.vsix"))).toBe(
+      true,
+    );
+  });
+
+  test("a set that already has them is not written to at all", () => {
+    const { home, commit, setPath } = machineOn("manifest", true);
+    expect(healSetArtifacts(home, commit)).toBeNull();
+    // Untouched: the old file is still the only one there.
+    expect(readdirSync(join(setPath, "artifacts"))).toEqual(["old.vsix"]);
+  });
+
+  test("a composed set is left alone: it has no published artifacts to carry", () => {
+    const { home, commit, setPath } = machineOn("composed", false);
+    expect(healSetArtifacts(home, commit)).toBeNull();
+    expect(existsSync(join(setPath, "artifacts"))).toBe(false);
+  });
+
+  test("no candidate on disk is nothing to repair from, not a failure", () => {
+    const home = mkdtempSync(join(tmpdir(), "red-heal-none-"));
+    expect(healSetArtifacts(home, "b".repeat(40))).toBeNull();
   });
 });

@@ -89,6 +89,7 @@ import {
   recordPackageSetRefusal,
   hostActivationConfig,
   parsePackageSetManifest,
+  healSetArtifacts,
   readPackageSetState,
   revisionKey,
   SET_BUNDLE_NAME,
@@ -1039,6 +1040,13 @@ export async function acquireRedSkills(opts: AcquireOptions = {}): Promise<Acqui
   // all nothing for a host to be reconciled against.
   const active = activeIdentityOf(home);
   if (active && active.sourceCommit === commit) {
+    // Before returning: a set activated before activation carried its
+    // artifacts has no VS Code extension to install from, and this
+    // branch is the only place a machine on that revision ever passes
+    // through. See healSetArtifacts.
+    const healed = healSetArtifacts(home, commit);
+    if (healed !== null) log.ok(`red-skills: ${healed} restored to the active set`);
+
     return nothing("current", `already on ${commit.slice(0, 12)} (${selectorLabel(selector)})`, null, {
       selector,
       commit,
