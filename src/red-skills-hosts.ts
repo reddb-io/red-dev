@@ -84,7 +84,7 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 import { log } from "./log.ts";
 import { redSkillsCurrentPosix } from "./red-skills-root.ts";
@@ -442,18 +442,101 @@ function setSkills(ctx: AdapterContext): SetSkill[] {
   for (const plugin of ctx.plugins) {
     const root = join(pluginDir(ctx, plugin), "skills");
     if (!existsSync(root)) continue;
-    for (const name of listing(root)) {
-      const file = join(root, name, "SKILL.md");
+    for (const dir of skillDirs(pluginDir(ctx, plugin), root)) {
+      const file = join(dir, "SKILL.md");
       if (!existsSync(file)) continue;
       const text = readFileSync(file, "utf8");
       out.push({
-        name: frontMatter(text, "name") ?? name,
+        name: frontMatter(text, "name") ?? basename(dir),
         description: frontMatter(text, "description") ?? "",
-        path: join(root, name),
+        path: dir,
       });
     }
   }
   return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Which skill directories a plugin ships, asked of the plugin.
+ *
+ * `plugin.json` lists them (`"skills": ["./skills/engineering/afk", …]`),
+ * which is the publisher saying what this plugin *is* — and it is the
+ * only thing that knows which drafts are drafts: red-skills keeps an
+ * `in-progress/` bucket that ships in the tree and appears in no
+ * declaration.
+ *
+ * The fallback is the old behaviour, one level under `skills/`, for a
+ * plugin that declares nothing. That single level was all there ever
+ * was, and red-skills has organised its skills into buckets —
+ * `skills/engineering/<name>/SKILL.md` — for as long as this has
+ * existed, so the scan found zero every time and Gemini and Hermes were
+ * blocked with "the package set carries no skills to project" on every
+ * machine. 48 skills in the dev plugin alone, none of them projected.
+ */
+export function setSkillsIn(pluginRoot: string): SetSkill[] {
+  const root = join(pluginRoot, "skills");
+  if (!existsSync(root)) return [];
+  const out: SetSkill[] = [];
+  for (const dir of skillDirs(pluginRoot, root)) {
+    const file = join(dir, "SKILL.md");
+    if (!existsSync(file)) continue;
+    const text = readFileSync(file, "utf8");
+    out.push({
+      name: frontMatter(text, "name") ?? basename(dir),
+      description: frontMatter(text, "description") ?? "",
+      path: dir,
+    });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function skillDirs(pluginRoot: string, skillsRoot: string): string[] {
+  const declared = declaredSkillPaths(pluginRoot);
+  if (declared.length > 0) return declared;
+
+  // No declaration to read, so look — one level for the flat layout
+  // this used to assume, and one deeper for the buckets red-skills
+  // actually ships (`skills/engineering/<name>/SKILL.md`). `in-progress`
+  // is skipped by name: it is the bucket red-skills documents as drafts
+  // and declares nowhere, and a fallback that projected it would put
+  // unfinished skills in front of people.
+  const out: string[] = [];
+  for (const entry of listing(skillsRoot)) {
+    if (entry === "in-progress") continue;
+    const dir = join(skillsRoot, entry);
+    if (existsSync(join(dir, "SKILL.md"))) {
+      out.push(dir);
+      continue;
+    }
+    for (const nested of listing(dir)) {
+      const inner = join(dir, nested);
+      if (existsSync(join(inner, "SKILL.md"))) out.push(inner);
+    }
+  }
+  return out;
+}
+
+function declaredSkillPaths(pluginRoot: string): string[] {
+  for (const manifest of [
+    join(pluginRoot, ".claude-plugin", "plugin.json"),
+    join(pluginRoot, ".codex-plugin", "plugin.json"),
+  ]) {
+    try {
+      const parsed = JSON.parse(readFileSync(manifest, "utf8")) as { skills?: unknown };
+      if (!Array.isArray(parsed.skills)) continue;
+      const paths = parsed.skills
+        .filter((entry): entry is string => typeof entry === "string")
+        // Relative to the plugin, as declared. `resolve` rather than
+        // `join` so a declaration that is already absolute is left alone.
+        .map((entry) => resolve(pluginRoot, entry))
+        .filter((path) => existsSync(path));
+      if (paths.length > 0) return paths;
+    } catch {
+      // An unreadable or absent manifest is not a plugin without
+      // skills; the caller falls back to looking.
+    }
+  }
+  return [];
 }
 
 /**
@@ -1426,22 +1509,49 @@ async function applyPlan(desired: HostPlan, run: (cmd: string[]) => Promise<numb
   for (const manifest of desired.manifests) {
     if (!existsSync(manifest)) continue;
     owned.push({ kind: "path", path: manifest });
-    for (const path of manifestPaths(manifest)) owned.push({ kind: "path", path });
+    for (const path of hostManifestPaths(manifest)) owned.push({ kind: "path", path });
   }
   return { failure: null, owned: dedupeOwned(owned) };
 }
 
-/** Every path a generator recorded, one per line, blank lines ignored. */
-function manifestPaths(manifest: string): string[] {
+/**
+ * Every path a generator recorded — and only the paths.
+ *
+ * The manifests describe themselves at the top:
+ *
+ *     # RedSkills OpenCode install manifest
+ *     # One absolute path per line. Used by ... --uninstall.
+ *     /home/me/.config/opencode/plugins/redskills-dev-pre-tool-use.ts
+ *
+ * Every non-empty line used to be taken as a path, so those two comments
+ * were recorded as owned files, `missingOwned` then found nothing at
+ * `# RedSkills OpenCode install manifest`, and the verification failed
+ * with that sentence followed by "was not written". Which read like the
+ * generator had not run — it had, perfectly, every single time.
+ *
+ * The cost was not cosmetic: opencode and redcode could never verify,
+ * on any machine, ever. `red-dev update` therefore always ended
+ * "partial", the CLIs were never recorded as holding the new revision,
+ * and the Spec #185 adoption — which refuses to remove anything until
+ * every surface verifies — was held permanently on every workstation.
+ *
+ * Comments are skipped, and so is anything that is not an absolute path
+ * on this platform: the header says absolute, and a line that is not one
+ * is documentation rather than something red-dev owns and will later
+ * remove. Read strictly, because the failure mode of reading it loosely
+ * is a machine that can never converge.
+ */
+export function hostManifestPaths(manifest: string): string[] {
   try {
     return readFileSync(manifest, "utf8")
       .split(/\r?\n/)
       .map((line) => line.trim())
-      .filter((line) => line.length > 0);
+      .filter((line) => line.length > 0 && !line.startsWith("#") && isAbsolute(line));
   } catch {
     return [];
   }
 }
+
 
 interface Verified {
   ok: boolean;

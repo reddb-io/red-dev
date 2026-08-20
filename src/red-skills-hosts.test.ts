@@ -31,7 +31,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 import type { Platform } from "./platform.ts";
 import { activatedPlugins } from "./red-skills-plugins.ts";
@@ -1437,5 +1437,95 @@ describe("the converge reaches the reconciliation", () => {
     // And what a host did not get is on the converge itself rather than
     // only in a doctor run nobody is obliged to make.
     expect(converge.slice(wired)).toContain("h.missing");
+  });
+});
+
+describe("what a generator's install manifest records", () => {
+  /** The real shape: two comment lines, then absolute paths. */
+  function manifestFile(lines: string[]): string {
+    const dir = mkdtempSync(join(tmpdir(), "red-manifest-"));
+    const path = join(dir, "redskills-install-manifest.txt");
+    writeFileSync(path, `${lines.join("\n")}\n`);
+    return path;
+  }
+
+  test("the header comments are not files red-dev owns", async () => {
+    // The bug this replaces: every non-empty line was a path, so
+    // `# RedSkills OpenCode install manifest` was recorded as one and
+    // the verification then reported it "was not written" — opencode
+    // and redcode could never verify, on any machine, ever.
+    const real = join(mkdtempSync(join(tmpdir(), "red-owned-")), "plugin.ts");
+    writeFileSync(real, "//\n");
+    const path = manifestFile([
+      "# RedSkills OpenCode install manifest",
+      "# One absolute path per line. Used by scripts/install-opencode.sh --uninstall.",
+      real,
+      "",
+      "  ",
+      "not-an-absolute-path.txt",
+    ]);
+
+    const { hostManifestPaths } = await import("./red-skills-hosts.ts");
+    expect(hostManifestPaths(path)).toEqual([real]);
+  });
+
+  test("an absent manifest is no paths rather than a throw", async () => {
+    const { hostManifestPaths } = await import("./red-skills-hosts.ts");
+    expect(hostManifestPaths(join(tmpdir(), "red-nope", "missing.txt"))).toEqual([]);
+  });
+});
+
+describe("the skills a package set can project", () => {
+  function pluginWith(declared: string[] | null, dirs: string[]): string {
+    const root = mkdtempSync(join(tmpdir(), "red-skills-plugin-"));
+    for (const dir of dirs) {
+      mkdirSync(join(root, dir), { recursive: true });
+      writeFileSync(
+        join(root, dir, "SKILL.md"),
+        `---\nname: ${basename(dir)}\ndescription: d\n---\n`,
+      );
+    }
+    if (declared !== null) {
+      mkdirSync(join(root, ".claude-plugin"), { recursive: true });
+      writeFileSync(
+        join(root, ".claude-plugin", "plugin.json"),
+        `${JSON.stringify({ name: "dev", skills: declared }, null, 2)}\n`,
+      );
+    }
+    return root;
+  }
+
+  test("comes from the plugin's own declaration, drafts and all excluded", async () => {
+    // red-skills organises skills into buckets and ships an
+    // `in-progress/` one it declares nowhere. A scan one level under
+    // `skills/` found nothing at all — 48 skills in the dev plugin, none
+    // projected, and Gemini and Hermes blocked with "the package set
+    // carries no skills to project" on every machine.
+    const root = pluginWith(
+      ["./skills/engineering/afk", "./skills/knowledge/wiki"],
+      ["skills/engineering/afk", "skills/knowledge/wiki", "skills/in-progress/draft"],
+    );
+
+    const { setSkillsIn } = await import("./red-skills-hosts.ts");
+    expect(setSkillsIn(root).map((s) => s.name).sort()).toEqual(["afk", "wiki"]);
+  });
+
+  test("falls back to looking, at both layouts, for a plugin that declares nothing", async () => {
+    const root = pluginWith(null, [
+      "skills/older-layout",
+      "skills/engineering/afk",
+      "skills/in-progress/draft",
+    ]);
+    const { setSkillsIn } = await import("./red-skills-hosts.ts");
+    // The flat one and the bucketed one; never the drafts bucket.
+    expect(setSkillsIn(root).map((s) => s.name).sort()).toEqual(["afk", "older-layout"]);
+  });
+
+  test("a declaration naming something absent does not invent it", async () => {
+    const root = pluginWith(["./skills/engineering/gone"], ["skills/engineering/afk"]);
+    const { setSkillsIn } = await import("./red-skills-hosts.ts");
+    // Nothing declared exists, so the fallback answers instead of an
+    // empty projection that would read as "this set has no skills".
+    expect(setSkillsIn(root).map((s) => s.name)).toEqual(["afk"]);
   });
 });
