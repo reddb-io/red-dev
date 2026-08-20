@@ -7,7 +7,7 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runBounded } from "./bounded-command.ts";
@@ -40,6 +40,16 @@ process.exit(0);
 
     const harness = join(dir, "harness.ts");
     const runtimes = join(import.meta.dir, "runtimes.ts");
+    // The observation goes to a file, not to stdout.
+    //
+    // It used to be a last line of stdout, behind the 8,000 diagnostics
+    // this test deliberately pushes through the pipe — so the assertion
+    // that mattered ("the caller was handed the real error") depended on
+    // the tail of a large captured stream surviving intact, and on CI it
+    // intermittently did not. The subject here is what `stepEnd`
+    // receives; a file says that without asking anything of pipe
+    // capacity.
+    const observed = join(dir, "observed.txt");
     writeFileSync(
       harness,
       `import { useRuntimes } from ${JSON.stringify(runtimes)};
@@ -47,7 +57,7 @@ let detail = "";
 await useRuntimes(["bun@latest"], {
   stepEnd: (_id, error) => { detail = error ?? ""; },
 });
-console.log("OBSERVED: " + detail);
+await Bun.write(${JSON.stringify(observed)}, "OBSERVED: " + detail);
 `,
     );
 
@@ -66,7 +76,11 @@ console.log("OBSERVED: " + detail);
     expect(result.stdout + result.stderr).toContain(
       "REAL INSTALL ERROR: artifact unavailable",
     );
-    expect(result.stdout).toContain("OBSERVED: REAL INSTALL ERROR: artifact unavailable");
+    // The error the caller is handed is the installer's own last word,
+    // not one of the 8,000 progress lines in front of it.
+    expect(readFileSync(observed, "utf8")).toBe(
+      "OBSERVED: REAL INSTALL ERROR: artifact unavailable",
+    );
   });
 
   test("one runtime failure does not prevent the next selection from running", async () => {
