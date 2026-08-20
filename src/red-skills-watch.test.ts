@@ -169,6 +169,39 @@ describe("a watch run", () => {
 });
 
 describe("the trigger in the shell", () => {
+  test("hangs off the prompt, which is the event that happens while somebody works", async () => {
+    // It used to fire once at shell start, and a terminal opened in the
+    // morning and kept all day never asked again: measured at 107
+    // minutes behind, one release stale, with the shell open the whole
+    // time. A prompt is a person; a shell start is a person once.
+    const source = await Bun.file(
+      new URL("../config/bash/red-skills-watch.sh", import.meta.url),
+    ).text();
+
+    expect(source).toContain("PROMPT_COMMAND");
+    // Appended, never replacing: `history -a` and whatever the operator
+    // set for themselves both have to keep running.
+    expect(source).toContain('PROMPT_COMMAND="_red_skills_watch_tick${PROMPT_COMMAND:+; $PROMPT_COMMAND}"');
+    // And installed once, however many times the profile is sourced.
+    expect(source).toContain("*_red_skills_watch_tick*");
+  });
+
+  test("costs no fork per prompt, which is the whole reason it can be there", async () => {
+    const source = await Bun.file(
+      new URL("../config/bash/red-skills-watch.sh", import.meta.url),
+    ).text();
+    const tick = source.slice(source.indexOf("_red_skills_watch_tick() {"));
+
+    // $EPOCHSECONDS is a bash builtin. `date` or `stat` here would be a
+    // process per prompt, which is the timer this design refuses,
+    // wearing a different hat.
+    expect(tick).toContain("EPOCHSECONDS");
+    expect(tick).not.toContain("$(date");
+    expect(tick).not.toContain("$(stat");
+    // The guard returns before anything is spawned.
+    expect(tick.indexOf("return 0")).toBeLessThan(tick.indexOf("red-dev red-skills watch"));
+  });
+
   test("is detached, interactive-only, and off when RED_SKILLS_WATCH=0", async () => {
     const source = await Bun.file(
       new URL("../config/bash/red-skills-watch.sh", import.meta.url),
