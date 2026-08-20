@@ -758,6 +758,16 @@ async function endInstall(
   });
   for (const line of completionBanner(verdict, process.stdout.columns ?? 72)) log.plain(line);
 
+  // A failed run copies itself. The console this most often ends in
+  // cannot be selected from — red-dev disables QuickEdit for the length
+  // of the fullscreen view, because a mouse drag there pauses the
+  // process — so the errors somebody is about to retype by hand are put
+  // where they can be pasted instead. Nothing is copied on success.
+  // See src/failure-clipboard.ts.
+  const { copyFailures } = await import("./failure-clipboard.ts");
+  const copied = await copyFailures(detect(), verdict, VERSION);
+  if (copied) log.plain(`       ${copied}`);
+
   if (options.dryRun === true) return 0;
   return convergeExit({ failed: verdict.counts.failed, deferred: verdict.counts.deferred });
 }
