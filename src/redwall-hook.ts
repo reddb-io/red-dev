@@ -877,7 +877,13 @@ function parentOf(path: string): string {
   return cut === -1 ? "." : path.slice(0, cut);
 }
 
-async function hiddenRunnerPath(p: Platform): Promise<string | null> {
+/**
+ * The hidden runner, installed if it is not there. Exported because the
+ * RedSkills watch crosses the same boundary for the same reason: a
+ * console program launched from a process with no console of its own
+ * draws a black rectangle on the desktop.
+ */
+export async function hiddenRunnerPath(p: Platform): Promise<string | null> {
   try {
     const { imageRoot } = await import("./wallpaper.ts");
     const { installHiddenRunner } = await import("./windows-hidden.ts");

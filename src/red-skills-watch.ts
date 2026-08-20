@@ -178,6 +178,8 @@ export interface WatchOptions {
   manifestPlatform?: Platform;
   /** The take, injected for the tests. Defaults to the staged update. */
   take?: () => Promise<WatchResult>;
+  /** The crossing, injected for the tests. Defaults to crossToWindows. */
+  cross?: (p: Platform) => Promise<"kicked" | "skipped">;
 }
 
 /**
@@ -203,6 +205,14 @@ export async function watchRedSkills(opts: WatchOptions = {}): Promise<WatchResu
 
   try {
     const result = await (opts.take ?? (() => defaultTake(opts)))();
+
+    // The other half of a WSL machine, whatever this half found: the
+    // Windows side keeps its own stamp, so asking it costs nothing when
+    // it asked recently and is the only trigger it has when it did not.
+    if (opts.manifestPlatform) {
+      await (opts.cross ?? crossToWindows)(opts.manifestPlatform);
+    }
+
     // Stamped after the ask, not before: a run that could not reach the
     // publisher has not had its answer, and must not silence the next
     // trigger for a quarter of an hour on the strength of a failure.
@@ -235,6 +245,51 @@ async function defaultTake(opts: WatchOptions): Promise<WatchResult> {
   if (staged.outcome === "staged") return { outcome: "staged", reason };
   if (staged.outcome === "failed") return { outcome: "refused", reason };
   return { outcome: "took", reason };
+}
+
+/**
+ * Ask the Windows side to look too, from inside a distro.
+ *
+ * A WSL machine is two machines: two roots, two package sets, two
+ * red-devs. The distro's watch moves the distro and nothing else, and
+ * the Windows half has no trigger of its own — a shell profile is bash's
+ * and PowerShell reads none of it, and the daemon's host hook execs
+ * inside the distro and cannot reach across (see reportBoundary in
+ * src/redwall-hook.ts, which says the same thing about Worker events).
+ *
+ * So the crossing is the remedy the Redwall already ships: the distro's
+ * red-dev reaches the Windows side through interop. Through the hidden
+ * runner, because red-dev.exe is a console program and a console
+ * program started from a process without one gets a black rectangle
+ * drawn on somebody's desktop — the whole reason windows-hidden.ts
+ * exists.
+ *
+ * Detached and never awaited: a shell starting must not wait for a
+ * Windows process, and the far side keeps its own stamp and its own
+ * lock, so this is free whenever that side asked recently.
+ */
+export async function crossToWindows(p: Platform): Promise<"kicked" | "skipped"> {
+  if (p.env !== "wsl") return "skipped";
+
+  try {
+    const { windowsBinDir } = await import("./providers.ts");
+    const { hiddenRunnerPath } = await import("./redwall-hook.ts");
+    const binary = `${windowsBinDir()}\\red-dev.exe`;
+    const runner = await hiddenRunnerPath(p);
+    if (runner === null) return "skipped";
+
+    const proc = Bun.spawn(
+      ["wscript.exe", "//B", "//Nologo", runner, `"${binary}" red-skills watch due`],
+      { stdout: "ignore", stderr: "ignore", stdin: "ignore" },
+    );
+    proc.unref();
+    return "kicked";
+  } catch {
+    // A distro with no interop, no LOCALAPPDATA answer or no runner is a
+    // distro that updates itself and leaves the other half to a person.
+    // Not an error: the half this run is on is already done.
+    return "skipped";
+  }
 }
 
 /** One line, and only when something happened. */

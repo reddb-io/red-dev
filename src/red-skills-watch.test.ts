@@ -201,3 +201,56 @@ describe("the trigger in the shell", () => {
     expect(FILES["red-skills-watch.sh"]).toContain("red-skills watch due");
   });
 });
+
+describe("the other half of a WSL machine", () => {
+  test("is asked too, whatever this half found", async () => {
+    // Two roots, two package sets, two red-devs. The distro's watch
+    // moves the distro and nothing else, and the Windows half has no
+    // trigger of its own: PowerShell reads no bash profile, and the
+    // daemon's host hook execs inside the distro.
+    const h = home();
+    const crossed: string[] = [];
+    await watchRedSkills({
+      home: h,
+      nowMs: 1_000,
+      take: async () => ({ outcome: "current", reason: "already on e0dea94" }),
+      manifestPlatform: { env: "wsl" } as never,
+      cross: async () => {
+        crossed.push("kicked");
+        return "kicked";
+      },
+    });
+    // Current on this side says nothing about the other one.
+    expect(crossed).toEqual(["kicked"]);
+  });
+
+  test("is not asked from a machine that has no other half", async () => {
+    const h = home();
+    let crossed = 0;
+    await watchRedSkills({
+      home: h,
+      nowMs: 1_000,
+      take: async () => took,
+      cross: async () => {
+        crossed++;
+        return "kicked";
+      },
+    });
+    // No platform, no crossing: a plain Linux machine is one machine.
+    expect(crossed).toBe(0);
+  });
+
+  test("crosses through the hidden runner, because red-dev.exe is a console program", async () => {
+    const source = await Bun.file(new URL("./red-skills-watch.ts", import.meta.url)).text();
+    const fn = source.slice(source.indexOf("export async function crossToWindows"));
+    expect(fn).toContain("wscript.exe");
+    expect(fn).toContain("//B");
+    expect(fn).toContain("hiddenRunnerPath");
+    // Detached: a shell starting must not wait for a Windows process.
+    expect(fn).toContain("proc.unref()");
+    // `due`, so the far side's own interval decides.
+    expect(fn).toContain("red-skills watch due");
+    // Only from inside a distro.
+    expect(fn).toContain('p.env !== "wsl"');
+  });
+});
