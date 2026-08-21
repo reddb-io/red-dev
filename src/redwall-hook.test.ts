@@ -755,6 +755,10 @@ describe("which red-dev a schedule and a hook name", () => {
     delete process.env["RED_DEV_BIN_DIR"];
     try {
       const path = await redwallBinary(desktop);
+      // Never a versioned install directory: mise deletes the previous
+      // one on upgrade, so a path through it names a directory that the
+      // next self-update removes.
+      expect(path).not.toMatch(/[\\/]installs[\\/]red-dev[\\/]\d+\.\d+\.\d+[\\/]/);
       // A versioned path would be the same bug with a shorter fuse: the
       // ten-minute timer was pinned to a copy from before the release
       // that taught red-dev to update itself, so it never ran.

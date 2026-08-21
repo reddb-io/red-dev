@@ -259,16 +259,36 @@ export function legacyUnitDir(): string {
  * process that runs on a schedule was pinned, by this function, to a
  * copy from before it existed.
  *
- * ## `latest`, not a version
+ * ## A path that stays valid, which is not the same as a path that works
  *
- * mise keeps a `latest` selector beside its installs and moves it on
- * every upgrade, so a path through it is correct today and stays
- * correct. A versioned path would be this same bug with a shorter
- * fuse. `miseToolBin` prefers `latest` already.
+ * `miseToolBin` finds the executable *now* and will happily answer with
+ * `installs/red-dev/1.0.103/red-dev`. That is correct for a minute and
+ * wrong for good: mise removes the previous install on upgrade, so the
+ * next self-update deletes the directory the schedule names. Same bug,
+ * shorter fuse.
+ *
+ * What is needed is a path mise keeps pointing at the current version,
+ * and the two targets have different ones:
+ *
+ *   - **Linux** has `installs/red-dev/latest`, a real directory symlink
+ *     that mise moves. A path through it is stable and direct.
+ *   - **Windows** has `installs/red-dev/latest` too — as a nine-byte
+ *     *regular file* containing `.\1.0.103`, because creating a symlink
+ *     there needs a privilege an ordinary process does not have. It is
+ *     unusable as a directory, which is exactly why the first version of
+ *     this returned a versioned path on that side. The stable path there
+ *     is the shim, `mise/shims/red-dev.exe`, which re-enters mise and
+ *     answers whatever is current.
+ *
+ * The shim is fine *here* and would not be in `crossToWindows`: that one
+ * starts a Windows process from inside a distro, where mise answers
+ * `mise ERROR Version:` and exits. A scheduled task and a daemon hook
+ * both run on their own side, with their own mise.
  *
  * Order: `RED_DEV_BIN_DIR` when the operator set one — their machine,
- * their answer — then mise's copy, then boot's, which is all a machine
- * that has never seen mise has.
+ * their answer — then a selector that is a real directory, then the
+ * shim, then the versioned install, then boot's copy, which is all a
+ * machine that has never seen mise has.
  */
 export async function redwallBinary(p: Platform): Promise<string> {
   const override = process.env["RED_DEV_BIN_DIR"];
@@ -276,7 +296,17 @@ export async function redwallBinary(p: Platform): Promise<string> {
     return p.os === "windows" ? `${override}\\red-dev.exe` : `${override}/red-dev`;
   }
 
-  const { miseToolBin } = await import("./mise-config.ts");
+  const { miseInstallRoot, miseShim, miseToolBin } = await import("./mise-config.ts");
+  const exe = p.os === "windows" ? "red-dev.exe" : "red-dev";
+  const sep = p.os === "windows" ? "\\" : "/";
+
+  // The selector, only when it is a directory holding the executable.
+  const selector = `${miseInstallRoot()}${sep}red-dev${sep}latest${sep}${exe}`;
+  if (existsSync(selector)) return selector;
+
+  const shim = miseShim("red-dev");
+  if (shim !== null) return shim;
+
   const managed = miseToolBin("red-dev");
   if (managed !== null) return managed;
 

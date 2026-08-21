@@ -347,10 +347,21 @@ async function convergeTask(
     return "skipped";
   }
 
-  // The wrapper beside the binary it names, which is where the Redwall's
-  // retired one also sat: a file red-dev owns, holding the quoting.
+  // In red-dev's own directory, and no longer beside the binary it
+  // names. "Beside it" was fine while that was boot.ps1's fixed folder
+  // and became a trap the moment the binary moved under mise: the
+  // wrapper landed in `installs\\red-dev\\1.0.103\\`, and mise deletes
+  // that directory on the next upgrade. The task would have gone on
+  // firing, found nothing to run, and reported success — the exact
+  // shape of failure this schedule has already been caught in twice.
   const binary = await watchBinary();
-  const wrapper = `${parentOf(binary)}\\red-skills-watch.cmd`;
+  const { windowsBinDir } = await import("./providers.ts");
+  const wrapper = `${windowsBinDir()}\\red-skills-watch.cmd`;
+  try {
+    mkdirSync(parentOf(wrapper), { recursive: true });
+  } catch {
+    // Written below; the failure is reported there with its path.
+  }
   try {
     writeFileSync(wrapper, watchWrapper(binary));
   } catch (err) {

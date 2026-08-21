@@ -162,6 +162,25 @@ export function miseInstallRoot(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 /**
+ * mise's shim for one tool, when there is one. PURE-ish.
+ *
+ * A shim is a small program that re-enters mise and execs whatever the
+ * current version is, so its path never changes. That makes it the one
+ * stable answer on Windows, where the `latest` selector is written as a
+ * regular file holding `.\\<version>` rather than as a directory link —
+ * a symlink there needs a privilege an ordinary process does not have.
+ *
+ * Not for every caller: a shim is useless where mise cannot run, which
+ * is precisely the WSL-to-Windows crossing (`mise ERROR Version:` from
+ * inside a distro). Callers that cross a boundary want `miseToolBin`.
+ */
+export function miseShim(tool: string, env: NodeJS.ProcessEnv = process.env): string | null {
+  const windows = process.platform === "win32";
+  const path = join(miseDataRoot(env), "shims", windows ? `${tool}.exe` : tool);
+  return existsSync(path) ? path : null;
+}
+
+/**
  * The binary of a mise-installed tool, by path rather than by `$PATH`.
  *
  * A converge installs a tool and then uses it, and those are two things
