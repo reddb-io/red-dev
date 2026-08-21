@@ -53,7 +53,26 @@ export function selectCrashDumpRetention(
   return [...selected.values()].sort((a, b) => a.file.mtimeMs - b.file.mtimeMs);
 }
 
-export type ReclaimKind = "transcript" | "zellij-crash" | "red-dev-crash" | "windows-dump";
+export type ReclaimKind =
+  | "transcript"
+  | "zellij-crash"
+  | "red-dev-crash"
+  | "windows-dump"
+  /**
+   * A WSL virtual machine's swap file, left behind by a session that
+   * ended.
+   *
+   * Measured on one developer machine: four of them, 19.4 GB, against
+   * 26 MB free on C:. `red-dev reclaim` reported 1.5 MiB reclaimable on
+   * that same machine, because it knew only its own transcripts — a
+   * tool that offers to reclaim disk and cannot see the largest thing
+   * on it is answering a different question than the one being asked.
+   *
+   * Never the live one. WSL keeps its running VM's swap in the same
+   * place, and taking that is taking the machine out from under the
+   * person asking.
+   */
+  | "wsl-swap";
 
 export interface ReclaimItem extends RetentionSelection {
   kind: ReclaimKind;
@@ -71,6 +90,8 @@ export interface ReclaimPlanOptions {
   nowMs?: number;
   includeCrashDumps: boolean;
   crashDumpDir?: string | null;
+  /** Windows' Temp, where WSL leaves the swap of sessions that ended. */
+  tempDir?: string | null;
   livePids?: ReadonlySet<number>;
   protectedPaths?: ReadonlySet<string>;
 }
@@ -134,6 +155,63 @@ export function collectArtifactUsage(
   };
 }
 
+/**
+ * The swap files of WSL sessions that have ended.
+ *
+ * Identified by age rather than by asking Windows which VM is live:
+ * every session writes to its swap while it runs, so the running one's
+ * mtime is minutes old and a finished one's is hours or days. The floor
+ * is deliberately generous — a machine that has been idle since
+ * breakfast must not have its own swap collected.
+ *
+ * Each lives alone in a GUID directory; the directory goes with the
+ * file, and one holding anything else is left alone entirely, because
+ * it is then not the thing this recognises.
+ */
+export function collectWslSwap(
+  tempDir: string | null,
+  nowMs: number,
+  idleMs = WSL_SWAP_IDLE_MS,
+): RetainedFile[] {
+  if (!tempDir) return [];
+  let names: string[];
+  try {
+    names = readdirSync(tempDir);
+  } catch {
+    return [];
+  }
+
+  const out: RetainedFile[] = [];
+  for (const name of names) {
+    const dir = `${tempDir.replace(/\/$/, "")}/${name}`;
+    let held: string[];
+    try {
+      held = readdirSync(dir);
+    } catch {
+      continue;
+    }
+    if (held.length !== 1 || held[0] !== "swap.vhdx") continue;
+
+    const path = `${dir}/swap.vhdx`;
+    try {
+      const stat = lstatSync(path);
+      if (!stat.isFile() || stat.isSymbolicLink()) continue;
+      // The live VM writes to its swap continuously; a finished one's
+      // has not been touched since it stopped.
+      if (nowMs - stat.mtimeMs < idleMs) continue;
+      // The file's own name, as every other collector reports it; the
+      // directory it sits in is already visible in the path.
+      out.push({ path, name: "swap.vhdx", size: stat.size, mtimeMs: stat.mtimeMs });
+    } catch {
+      continue;
+    }
+  }
+  return out;
+}
+
+/** Six hours: long enough that no live session is ever inside it. */
+export const WSL_SWAP_IDLE_MS = 6 * 60 * 60 * 1000;
+
 export function collectReclaimPlan(options: ReclaimPlanOptions): ReclaimPlan {
   const nowMs = options.nowMs ?? Date.now();
   const protectedPaths = options.protectedPaths ?? new Set<string>();
@@ -158,6 +236,25 @@ export function collectReclaimPlan(options: ReclaimPlanOptions): ReclaimPlan {
       selectRetention(redDevCrashes, RED_DEV_CRASH_POLICY, nowMs, protectedPaths),
     ),
   ];
+  // Asked for by name, like the crash dumps: a swap file is 6 GB and
+  // removing one is not something to do because somebody typed
+  // `reclaim` to tidy their logs.
+  if (options.includeCrashDumps && options.tempDir) {
+    items.push(
+      // Every one of them: a swap file whose session ended is not
+      // retained for a while, it is finished. The age gate is inside
+      // collectWslSwap, which is where the live one is excluded.
+      ...asItems(
+        "wsl-swap",
+        selectRetention(
+          collectWslSwap(options.tempDir, nowMs),
+          { maxCount: 0, maxAgeMs: 0, maxBytes: 0 },
+          nowMs,
+          protectedPaths,
+        ),
+      ),
+    );
+  }
   if (options.includeCrashDumps && options.crashDumpDir) {
     const dumps = filesIn(options.crashDumpDir, (name) => name.toLowerCase().endsWith(".dmp"));
     items.push(...asItems("windows-dump", selectCrashDumpRetention(dumps, nowMs)));
@@ -223,6 +320,22 @@ export function redDevStateRoot(
 }
 
 /** Resolve %LOCALAPPDATA%/CrashDumps natively or through bounded WSL interop. */
+/**
+ * Windows' own Temp, as this side spells it.
+ *
+ * Beside `windowsCrashDumpDir` and resolved the same way, because both
+ * answer "where does Windows keep the big things nobody collects" and
+ * both have to work from inside a distro.
+ */
+export async function windowsTempDir(
+  env: Record<string, string | undefined> = process.env,
+  platform = process.platform,
+): Promise<string | null> {
+  const dumps = await windowsCrashDumpDir(env, platform);
+  // CrashDumps sits directly under %LOCALAPPDATA%, and so does Temp.
+  return dumps === null ? null : `${dumps.replace(/\/CrashDumps$/, "")}/Temp`;
+}
+
 export async function windowsCrashDumpDir(
   env: Record<string, string | undefined> = process.env,
   platform = process.platform,
@@ -232,17 +345,28 @@ export async function windowsCrashDumpDir(
     return local ? `${local.replace(/\\/g, "/")}/CrashDumps` : null;
   }
   if (!env["WSL_DISTRO_NAME"] || !Bun.which("powershell.exe") || !Bun.which("wslpath")) return null;
-  const local = await runBounded([
-    "powershell.exe",
-    "-NoLogo",
-    "-NoProfile",
-    "-NonInteractive",
-    "-Command",
-    "[Environment]::GetFolderPath('LocalApplicationData')",
-  ]);
+  // Ten seconds, not the two-second default. Starting powershell.exe
+  // through WSL interop costs about a second on an idle machine and
+  // several on a busy one — and the failure is silent: the lookup
+  // answers null, `reclaim --crash-dumps` says "none are in this plan",
+  // and a machine with gigabytes of dumps looks clean. Observed on this
+  // machine while it was under load.
+  const local = await runBounded(
+    [
+      "powershell.exe",
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      "[Environment]::GetFolderPath('LocalApplicationData')",
+    ],
+    { timeoutMs: 10_000 },
+  );
   const windowsPath = local.stdout.trim();
   if (local.timedOut || local.exitCode !== 0 || windowsPath === "") return null;
-  const converted = await runBounded(["wslpath", "-u", `${windowsPath}\\CrashDumps`]);
+  const converted = await runBounded(["wslpath", "-u", `${windowsPath}\\CrashDumps`], {
+    timeoutMs: 10_000,
+  });
   const path = converted.stdout.trim();
   return !converted.timedOut && converted.exitCode === 0 && path !== "" ? path : null;
 }

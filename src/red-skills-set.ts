@@ -1945,9 +1945,21 @@ export function redSkillsSetRows(report: SetDoctorReport): SetDoctorRow[] {
     });
   }
   if (report.refused) {
+    // A `downgrade` refusal is the machine working, not failing: an
+    // unsigned composed set is being kept away from a verified one. It
+    // reported as `err` beside real problems, so a correct machine
+    // showed a red line on every doctor — and a doctor that cries about
+    // the thing it is supposed to do is a doctor people stop reading.
+    //
+    // Every other refusal keeps `err`. A signature that did not verify,
+    // a tree that would not extract, a manifest whose schema this build
+    // cannot read: those are conditions somebody has to act on.
+    const declined = report.refused.failure === "downgrade";
     rows.push({
-      status: "err",
-      detail: `last candidate refused (${report.refused.failure}): ${report.refused.reason}`,
+      status: declined ? "n/a" : "err",
+      detail: declined
+        ? `held back the last candidate: ${report.refused.reason}`
+        : `last candidate refused (${report.refused.failure}): ${report.refused.reason}`,
     });
   }
   return rows;

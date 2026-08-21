@@ -521,10 +521,16 @@ async function cmdReclaim(p: Platform, inv: Invocation): Promise<number> {
 
   const current = transcriptPath();
   const crashDumpDir = inv.crashDumps ? await reclaim.windowsCrashDumpDir() : null;
+  // Windows' Temp, where WSL leaves the swap of every session that
+  // ended. Asked for only alongside the crash dumps, for the same
+  // reason: these are gigabytes, and `reclaim` typed to tidy some logs
+  // must not take one by surprise.
+  const tempDir = inv.crashDumps ? await reclaim.windowsTempDir() : null;
   const plan = reclaim.collectReclaimPlan({
     stateRoot: reclaim.redDevStateRoot(),
     includeCrashDumps: inv.crashDumps,
     crashDumpDir,
+    tempDir,
     livePids,
     protectedPaths: new Set(current ? [current] : []),
   });

@@ -1603,3 +1603,44 @@ describe("a set activated before it carried its artifacts", () => {
     expect(healSetArtifacts(home, "b".repeat(40))).toBeNull();
   });
 });
+
+describe("what doctor calls a refusal", () => {
+  const revision = {
+    key: "4.1.6+aaaaaaaaaaaa",
+    version: "4.1.6",
+    digest: "a".repeat(64),
+    sourceCommit: "b".repeat(40),
+    kind: "manifest" as const,
+    trust: "trusted" as const,
+    path: "/home/me/.red/skills/sets/4.1.6+aaaaaaaaaaaa",
+    addressable: true,
+  };
+  const report = (failure: string) => ({
+    active: { ...revision },
+    retained: [revision, { ...revision, key: "4.1.5+bbbbbbbbbbbb", version: "4.1.5" }],
+    refused: { failure, reason: "why it did not take" },
+    staged: null,
+    hosts: [],
+    companions: [],
+    lock: null,
+    depot: null,
+    workstation: null,
+  });
+
+  test("a trust refusal is held back, not failed", () => {
+    // An unsigned composed set being kept away from a verified one is
+    // the machine working. Reported as `err` beside real problems, a
+    // correct machine showed a red line on every doctor — and a doctor
+    // that cries about the thing it is supposed to do is one people
+    // stop reading.
+    const row = redSkillsSetRows(report("downgrade") as never).at(-1)!;
+    expect(row.status).not.toBe("err");
+    expect(row.detail).toStartWith("held back the last candidate");
+  });
+
+  test("every other refusal is still an error somebody has to act on", () => {
+    for (const failure of ["signature", "tree", "manifest", "payload", "skew"]) {
+      expect(redSkillsSetRows(report(failure) as never).at(-1)!.status, failure).toBe("err");
+    }
+  });
+});

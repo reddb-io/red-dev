@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   applyReclaim,
@@ -9,6 +10,7 @@ import {
   selectCrashDumpRetention,
   windowsDiskUsage,
   windowsWslWorkerState,
+  collectWslSwap,
 } from "./reclaim.ts";
 import type { RetainedFile } from "./retention.ts";
 
@@ -190,5 +192,57 @@ describe("Reclaim plan", () => {
 
     expect(result.removed).toEqual([]);
     expect(result.skipped).toEqual([{ path, reason: "file changed after preview" }]);
+  });
+});
+
+describe("the WSL swap files a finished session leaves", () => {
+  function tempWith(entries: { dir: string; file?: string; ageHours: number; size: number }[]): string {
+    const root = mkdtempSync(join(tmpdir(), "red-swap-"));
+    for (const entry of entries) {
+      const dir = join(root, entry.dir);
+      mkdirSync(dir, { recursive: true });
+      const path = join(dir, entry.file ?? "swap.vhdx");
+      writeFileSync(path, "x".repeat(entry.size));
+      const when = new Date(Date.now() - entry.ageHours * 60 * 60 * 1000);
+      utimesSync(path, when, when);
+    }
+    return root;
+  }
+
+  test("an old one is collected, and 19 GB is what this was missing", () => {
+    // Measured on one machine: four of them, 19.4 GB, against 26 MB
+    // free — while `reclaim` reported 1.5 MiB, because it knew only its
+    // own transcripts.
+    const root = tempWith([{ dir: "A1", ageHours: 48, size: 64 }]);
+    const found = collectWslSwap(root, Date.now());
+    expect(found).toHaveLength(1);
+    expect(found[0]?.name).toBe("swap.vhdx");
+  });
+
+  test("the live one is never taken, which is the whole risk here", () => {
+    // WSL keeps the running VM's swap in the same place and writes to
+    // it continuously. Taking that is taking the machine out from under
+    // the person who asked.
+    const root = tempWith([{ dir: "LIVE", ageHours: 0, size: 64 }]);
+    expect(collectWslSwap(root, Date.now())).toEqual([]);
+  });
+
+  test("a directory holding anything else is left alone entirely", () => {
+    // Then it is not the thing this recognises, and guessing about
+    // somebody else's directory is how a cleanup becomes a loss.
+    const root = tempWith([{ dir: "MIXED", ageHours: 48, size: 64 }]);
+    writeFileSync(join(root, "MIXED", "notes.txt"), "mine");
+    expect(collectWslSwap(root, Date.now())).toEqual([]);
+  });
+
+  test("only when asked for by name, like the crash dumps", () => {
+    const root = tempWith([{ dir: "A1", ageHours: 48, size: 64 }]);
+    const state = mkdtempSync(join(tmpdir(), "red-state-"));
+
+    const casual = collectReclaimPlan({ stateRoot: state, includeCrashDumps: false, tempDir: root });
+    expect(casual.items.some((item) => item.kind === "wsl-swap")).toBe(false);
+
+    const asked = collectReclaimPlan({ stateRoot: state, includeCrashDumps: true, tempDir: root });
+    expect(asked.items.some((item) => item.kind === "wsl-swap")).toBe(true);
   });
 });
