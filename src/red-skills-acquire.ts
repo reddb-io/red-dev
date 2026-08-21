@@ -73,6 +73,7 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -498,6 +499,101 @@ export function ensureMirror(
 }
 
 /**
+ * How long a snapshot's publication is allowed to be refused before the
+ * acquisition gives up: ten tries over roughly two seconds.
+ *
+ * Renaming a directory on Windows fails with EPERM while *any* process
+ * holds a handle inside it, and the moment we ask is the worst possible
+ * one — we have just written a few thousand files, so the real-time
+ * scanner is walking the tree we are trying to move. It lets go within
+ * a scanner's pass; the first version of this had no retry and turned
+ * that half-second into `1 item failed`, which is how it was found.
+ */
+const SNAPSHOT_RENAME_ATTEMPTS = 10;
+const SNAPSHOT_RENAME_BACKOFF_MS = 200;
+
+/**
+ * How long an abandoned staging survives before retention collects it.
+ *
+ * Stagings are named for the process that owns them, so an old one is
+ * either a run that died or a run still going after an hour, and an
+ * hour is far longer than an acquisition has ever taken. Without this
+ * a single interrupted run leaks a whole source tree that nothing ever
+ * removes, because retention deliberately skips `.staging-`.
+ */
+const STAGING_STALE_MS = 60 * 60 * 1000;
+
+/** Sleep on the calling thread. `ensureSnapshot` is synchronous by design. */
+function pauseSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * The staging one process owns, named so no two can ever share one.
+ *
+ * The name used to be `.staging-<commit>` for everybody, which was fine
+ * while the only acquisition was one a person typed. It stopped being
+ * fine when the machine grew a ten-minute timer: two runs reaching the
+ * same commit would extract into the same directory, and the second's
+ * `rmSync` would delete the tree the first was still filling. PURE.
+ */
+export function stagingName(commit: string, pid: number): string {
+  return `.staging-${commit}-${pid}`;
+}
+
+/** Whether a failed rename is worth asking again about. PURE. */
+export function transientRename(code: unknown): boolean {
+  return code === "EPERM" || code === "EACCES" || code === "EBUSY";
+}
+
+/**
+ * Move a finished staging into its final name, or say why not.
+ *
+ * Two things happen here that a bare `renameSync` cannot do: a
+ * transient refusal is retried rather than thrown, and every round
+ * re-asks whether the destination has appeared — because the reason
+ * ours is refused may be that another run is publishing the same
+ * commit, in which case theirs is as good as ours and we are done.
+ */
+export function publishSnapshot(
+  staging: string,
+  path: string,
+  /** The move and the wait, injected so the retry is testable off Windows. */
+  io: { rename?: (from: string, to: string) => void; pause?: (ms: number) => void } = {},
+): { ok: true; created: boolean } | { ok: false; reason: string } {
+  const rename = io.rename ?? renameSync;
+  const pause = io.pause ?? pauseSync;
+  let last = "";
+  for (let attempt = 1; attempt <= SNAPSHOT_RENAME_ATTEMPTS; attempt++) {
+    if (existsSync(path)) {
+      // Somebody else finished first. Theirs is the same commit by
+      // construction, so the staged copy is the one that goes.
+      rmSync(staging, { recursive: true, force: true });
+      return { ok: true, created: false };
+    }
+    try {
+      rename(staging, path);
+      return { ok: true, created: true };
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      last = err instanceof Error ? err.message : String(err);
+      if (!transientRename(code)) break;
+      if (attempt < SNAPSHOT_RENAME_ATTEMPTS) pause(SNAPSHOT_RENAME_BACKOFF_MS);
+    }
+  }
+  // The staging goes even though the move would not: leaving it is a
+  // source tree nobody will ever look at again. Best effort, because
+  // whatever refused the rename may refuse this too, and the reason we
+  // are about to return is the more useful of the two.
+  try {
+    rmSync(staging, { recursive: true, force: true });
+  } catch {
+    /* the reason below is what the machine needs to hear */
+  }
+  return { ok: false, reason: `snapshot could not be published: ${last}` };
+}
+
+/**
  * The commit's tree, extracted once and never written to again.
  *
  * `git archive` rather than a worktree or a second clone: it produces
@@ -549,7 +645,7 @@ export function ensureSnapshot(
   const path = redSkillsSnapshotDir(opts.home, opts.commit);
   if (existsSync(path)) return { ok: true, path, created: false };
 
-  const staging = redSkillsSnapshotDir(opts.home, `.staging-${opts.commit}`);
+  const staging = redSkillsSnapshotDir(opts.home, stagingName(opts.commit, process.pid));
   const tar = `${staging}.tar`;
   rmSync(staging, { recursive: true, force: true });
   rmSync(tar, { force: true });
@@ -604,14 +700,9 @@ export function ensureSnapshot(
     writeFileSync(dest, target.stdout);
   }
 
-  if (existsSync(path)) {
-    // Somebody else finished first. Theirs is the same commit by
-    // construction, so the staged copy is the one that goes.
-    rmSync(staging, { recursive: true, force: true });
-    return { ok: true, path, created: false };
-  }
-  renameSync(staging, path);
-  return { ok: true, path, created: true };
+  const published = publishSnapshot(staging, path);
+  if (!published.ok) return { ok: false, reason: published.reason };
+  return { ok: true, path, created: published.created };
 }
 
 // --------------------------------------------------------------- the assets
@@ -1175,13 +1266,26 @@ export async function acquireRedSkills(opts: AcquireOptions = {}): Promise<Acqui
  * for a machine that has recorded no commit at all, which is what an
  * offline import looks like halfway through.
  */
-export function retainAcquired(home: string, keep: readonly string[]): string[] {
+/** Whether an abandoned staging is old enough that no run still owns it. */
+function staleStaging(path: string, nowMs: number): boolean {
+  try {
+    return nowMs - statSync(path).mtimeMs > STAGING_STALE_MS;
+  } catch {
+    return false;
+  }
+}
+
+export function retainAcquired(home: string, keep: readonly string[], nowMs = Date.now()): string[] {
   if (keep.length === 0) return [];
+  const now = nowMs;
   const removed: string[] = [];
   for (const parent of [join(redSkillsRoot(home), "snapshots"), join(redSkillsRoot(home), "candidates")]) {
     if (!existsSync(parent)) continue;
     for (const name of listing(parent)) {
-      if (keep.includes(name) || name.startsWith(".staging-")) continue;
+      if (keep.includes(name)) continue;
+      // A staging belongs to a run that may still be filling it, so it
+      // is spared until it is far too old to be one.
+      if (name.startsWith(".staging-") && !staleStaging(join(parent, name), now)) continue;
       rmSync(join(parent, name), { recursive: true, force: true });
       removed.push(join(parent, name));
     }

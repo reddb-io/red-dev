@@ -29,8 +29,10 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -45,6 +47,10 @@ import {
   directoryAssetProvider,
   ensureMirror,
   ensureSnapshot,
+  retainAcquired,
+  publishSnapshot,
+  stagingName,
+  transientRename,
   extractArgv,
   githubAssetProvider,
   listRemoteRevisions,
@@ -423,6 +429,101 @@ describe("one mirror, and one snapshot per commit", () => {
     expect(first).toMatchObject({ ok: true, created: true });
     expect(again).toMatchObject({ ok: true, created: false });
     expect(git.calls.filter((c) => c[3] === "archive")).toHaveLength(1);
+  });
+
+  test("a scanner holding the tree is waited out, not reported as a failure", () => {
+    const home = fakeHome();
+    const staging = redSkillsSnapshotDir(home, stagingName(COMMIT_A, 4242));
+    mkdirSync(staging, { recursive: true });
+    writeFileSync(join(staging, "package.json"), "{}\n");
+
+    // What Windows does while its real-time scanner walks a tree we
+    // have only just finished writing: refuse, then let go.
+    let refusals = 0;
+    const waits: number[] = [];
+    const published = publishSnapshot(staging, redSkillsSnapshotDir(home, COMMIT_A), {
+      rename: (from, to) => {
+        if (refusals++ < 3) {
+          const err = new Error("EPERM: operation not permitted, rename") as NodeJS.ErrnoException;
+          err.code = "EPERM";
+          throw err;
+        }
+        renameSync(from, to);
+      },
+      pause: (ms) => waits.push(ms),
+    });
+
+    expect(published).toEqual({ ok: true, created: true });
+    expect(waits).toHaveLength(3);
+    expect(existsSync(join(redSkillsSnapshotDir(home, COMMIT_A), "package.json"))).toBe(true);
+    expect(existsSync(staging)).toBe(false);
+  });
+
+  test("a refusal that never lifts is a reason, and takes the staging with it", () => {
+    const home = fakeHome();
+    const staging = redSkillsSnapshotDir(home, stagingName(COMMIT_A, 4242));
+    mkdirSync(staging, { recursive: true });
+
+    const published = publishSnapshot(staging, redSkillsSnapshotDir(home, COMMIT_A), {
+      rename: () => {
+        const err = new Error("EPERM: operation not permitted, rename") as NodeJS.ErrnoException;
+        err.code = "EPERM";
+        throw err;
+      },
+      pause: () => {},
+    });
+
+    // A reason the caller can print, never an exception that fails the
+    // whole item with a raw Node message — which is how this was found.
+    expect(published.ok).toBe(false);
+    expect(published.ok === false && published.reason).toContain("EPERM");
+    expect(existsSync(staging)).toBe(false);
+    expect(existsSync(redSkillsSnapshotDir(home, COMMIT_A))).toBe(false);
+  });
+
+  test("a refusal that is not transient is not waited on at all", () => {
+    const home = fakeHome();
+    const staging = redSkillsSnapshotDir(home, stagingName(COMMIT_A, 4242));
+    mkdirSync(staging, { recursive: true });
+    const waits: number[] = [];
+    const published = publishSnapshot(staging, redSkillsSnapshotDir(home, COMMIT_A), {
+      rename: () => {
+        const err = new Error("ENOSPC: no space left on device") as NodeJS.ErrnoException;
+        err.code = "ENOSPC";
+        throw err;
+      },
+      pause: (ms) => waits.push(ms),
+    });
+    expect(published.ok).toBe(false);
+    expect(waits).toEqual([]);
+    expect(transientRename("ENOSPC")).toBe(false);
+    expect(transientRename("EPERM")).toBe(true);
+  });
+
+  test("the destination appearing mid-wait is somebody else's identical commit", () => {
+    const home = fakeHome();
+    const staging = redSkillsSnapshotDir(home, stagingName(COMMIT_A, 4242));
+    mkdirSync(staging, { recursive: true });
+    const other = redSkillsSnapshotDir(home, COMMIT_A);
+
+    const published = publishSnapshot(staging, other, {
+      rename: () => {
+        // The other run publishes while we are being refused.
+        mkdirSync(other, { recursive: true });
+        const err = new Error("EPERM: operation not permitted, rename") as NodeJS.ErrnoException;
+        err.code = "EPERM";
+        throw err;
+      },
+      pause: () => {},
+    });
+
+    expect(published).toEqual({ ok: true, created: false });
+    expect(existsSync(staging)).toBe(false);
+  });
+
+  test("two runs at one commit stage apart, so neither deletes the other's tree", () => {
+    expect(stagingName(COMMIT_A, 11)).not.toBe(stagingName(COMMIT_A, 12));
+    expect(stagingName(COMMIT_A, 11).startsWith(`.staging-${COMMIT_A}`)).toBe(true);
   });
 
   test("an interrupted clone is replaced, not fetched into", () => {
@@ -1061,5 +1162,37 @@ describe("reading symlinks out of a commit", () => {
       "-C",
       "/tmp/dest",
     ]);
+  });
+});
+
+describe("retention and the stagings nothing owns", () => {
+  test("a staging a run is still filling is spared, and an abandoned one is collected", () => {
+    const home = fakeHome();
+    const snapshots = join(home, ".red", "skills", "snapshots");
+    const live = join(snapshots, stagingName(COMMIT_B, 4242));
+    const abandoned = join(snapshots, stagingName(COMMIT_B, 4243));
+    for (const dir of [join(snapshots, COMMIT_A), join(snapshots, COMMIT_B), live, abandoned]) {
+      mkdirSync(dir, { recursive: true });
+    }
+    // Two hours old: no acquisition has ever taken that long, so the
+    // run that owned it is gone and the tree is a leak.
+    const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    utimesSync(abandoned, old, old);
+
+    const removed = retainAcquired(home, [COMMIT_A]);
+
+    expect(existsSync(join(snapshots, COMMIT_A))).toBe(true);
+    expect(existsSync(join(snapshots, COMMIT_B))).toBe(false);
+    expect(existsSync(live)).toBe(true);
+    expect(existsSync(abandoned)).toBe(false);
+    expect(removed).toContain(abandoned);
+  });
+
+  test("keeping nothing collects nothing, so a half-imported machine is left alone", () => {
+    const home = fakeHome();
+    const snapshots = join(home, ".red", "skills", "snapshots");
+    mkdirSync(join(snapshots, COMMIT_A), { recursive: true });
+    expect(retainAcquired(home, [])).toEqual([]);
+    expect(existsSync(join(snapshots, COMMIT_A))).toBe(true);
   });
 });
