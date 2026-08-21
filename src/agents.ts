@@ -87,6 +87,21 @@ export interface AgentSpec {
    * than having it spliced in at a call site no guard looks at.
    */
   launchArgs?: string[];
+  /**
+   * This host's configuration, as home-relative file paths.
+   *
+   * Files, and never the directory that holds them. The directories are
+   * where these tools keep their working life: measured on one
+   * workstation, `~/.codex` is 3.9 GB of sessions and caches, `~/.claude`
+   * is 856 MB and `~/.local/share/redcode` is 610 MB. A retirement that
+   * copied those aside would move gigabytes to protect a few kilobytes
+   * of settings, every time it ran.
+   *
+   * What is listed is what a person would be sorry to lose if a version
+   * change rewrote it. A path that does not exist is skipped, so a host
+   * that has never been configured costs nothing.
+   */
+  configFiles?: string[];
   /** Desktop applications have no CLI and only exist on some targets. */
   desktopOnly?: boolean;
   /**
@@ -104,6 +119,7 @@ export const AGENTS: AgentSpec[] = [
     label: "Claude Code",
     about: "Anthropic's CLI",
     cmd: "claude",
+    configFiles: [".claude/settings.json", ".claude.json"],
     recommended: true,
     installer: "https://claude.ai/install.sh",
     winget: "Anthropic.ClaudeCode",
@@ -114,6 +130,7 @@ export const AGENTS: AgentSpec[] = [
     label: "Codex CLI",
     about: "OpenAI's CLI",
     cmd: "codex",
+    configFiles: [".codex/config.toml"],
     recommended: true,
     winget: "OpenAI.Codex",
     npm: "@openai/codex",
@@ -128,6 +145,7 @@ export const AGENTS: AgentSpec[] = [
     label: "RedCode",
     about: "RedDB's OpenCode-compatible terminal agent",
     cmd: "redcode",
+    configFiles: [".config/redcode/opencode.json", ".config/redcode/opencode.jsonc"],
     recommended: true,
     release: {
       repo: "reddb-io/redcode",
@@ -153,6 +171,7 @@ export const AGENTS: AgentSpec[] = [
     label: "Gemini CLI",
     about: "Google's CLI",
     cmd: "gemini",
+    configFiles: [".gemini/settings.json"],
     recommended: false,
     npm: "@google/gemini-cli",
   },

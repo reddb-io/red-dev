@@ -157,10 +157,19 @@ export async function updateRedDev(opts: SelfUpdateOptions): Promise<SelfUpdate>
   }
 
   const run = opts.run ?? boundedRun;
-  // The cache first, and its absence is not fatal: mise answers the
-  // version question from a list it caches, and an upgrade against a
-  // list older than the release is the silent no-op this exists for.
-  await run(["mise", "cache", "clear", "red-dev"]);
+  // The whole cache, not this tool's.
+  //
+  // `mise cache clear red-dev` is the obvious call and it does not do
+  // this job: measured on the machine, it left `mise latest red-dev`
+  // still answering 1.0.100 after 1.0.101 was published, and only the
+  // unqualified `mise cache clear` moved it. The remote version list is
+  // not filed under the tool whose versions it holds.
+  //
+  // Wiping every tool's list is heavier than it looks and cheaper than
+  // it sounds: this line is only reached once the publisher has already
+  // been asked and has already said there is something newer, so it
+  // runs once per release rather than once per ten minutes.
+  await run(["mise", "cache", "clear"]);
   await run(["mise", "upgrade", "red-dev"]);
 
   // The verdict is the version, not the exit code — see the note at the

@@ -77,7 +77,9 @@ describe("taking it", () => {
     // `mise upgrade` answered "All tools are up to date" against a list
     // cached before the release existed.
     expect(h.ran.map((a) => a.join(" "))).toEqual([
-      "mise cache clear red-dev",
+      // Unqualified: the per-tool form does not invalidate the remote
+      // version list, which is the only thing that matters here.
+      "mise cache clear",
       "mise upgrade red-dev",
     ]);
   });
