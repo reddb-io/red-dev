@@ -240,20 +240,53 @@ export function legacyUnitDir(): string {
  * The daemon execs this with none of red-dev's environment, so "red-dev"
  * on its own is not an answer: the directory red-dev installs itself
  * into is on the PATH red-dev builds for an interactive shell, and a
- * daemon does not read it. Absolute, and derived the same way the two
- * installers derive it — `RED_DEV_BIN_DIR` when the operator set one,
- * `~/.local/bin` on Linux and `%LOCALAPPDATA%\red-dev\bin` on Windows
- * otherwise (boot.sh and boot.ps1).
+ * daemon does not read it. So it is absolute — and *which* absolute
+ * path is the whole question.
+ *
+ * ## Why not the bootstrap directory
+ *
+ * It used to be `~/.local/bin/red-dev`, which is where boot.sh writes.
+ * ADR 0008 then put red-dev under mise, and boot's copy stopped being
+ * updated by anything: `mise upgrade red-dev` moves mise's, and nothing
+ * moves the other. A machine that had run both ended up with a systemd
+ * unit and a daemon hook pinned to whichever version boot.sh happened
+ * to leave behind.
+ *
+ * Measured on the maintainer's workstation, hours after red-dev learned
+ * to update itself: the shell resolved 1.0.101, the ten-minute timer's
+ * `ExecStart` named 1.0.100, and so the self-updater — shipped in
+ * 1.0.101 — was never once executed. It could not have been. The only
+ * process that runs on a schedule was pinned, by this function, to a
+ * copy from before it existed.
+ *
+ * ## `latest`, not a version
+ *
+ * mise keeps a `latest` selector beside its installs and moves it on
+ * every upgrade, so a path through it is correct today and stays
+ * correct. A versioned path would be this same bug with a shorter
+ * fuse. `miseToolBin` prefers `latest` already.
+ *
+ * Order: `RED_DEV_BIN_DIR` when the operator set one — their machine,
+ * their answer — then mise's copy, then boot's, which is all a machine
+ * that has never seen mise has.
  */
 export async function redwallBinary(p: Platform): Promise<string> {
   const override = process.env["RED_DEV_BIN_DIR"];
+  if (override) {
+    return p.os === "windows" ? `${override}\\red-dev.exe` : `${override}/red-dev`;
+  }
+
+  const { miseToolBin } = await import("./mise-config.ts");
+  const managed = miseToolBin("red-dev");
+  if (managed !== null) return managed;
+
   if (p.os === "windows") {
     // Lazily, so a Linux target never loads the module that knows about
     // LOCALAPPDATA in order to write a YAML block.
     const { windowsBinDir } = await import("./providers.ts");
-    return `${override ?? windowsBinDir()}\\red-dev.exe`;
+    return `${windowsBinDir()}\\red-dev.exe`;
   }
-  return `${override ?? `${home()}/.local/bin`}/red-dev`;
+  return `${home()}/.local/bin/red-dev`;
 }
 
 /**

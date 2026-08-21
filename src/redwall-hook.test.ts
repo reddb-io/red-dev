@@ -23,6 +23,7 @@ import type { BoundedCommandOptions, BoundedCommandResult } from "./bounded-comm
 import { captureStart, captureStop } from "./log.ts";
 import type { Platform } from "./platform.ts";
 import {
+  redwallBinary,
   applyRedwallHook,
   classifyHookPayload,
   declareRedwallHook,
@@ -731,5 +732,41 @@ describe("the argv the daemon is handed", () => {
     // Double-quoted YAML takes JSON's escapes, which is the whole reason
     // the argv is written in flow style with JSON.stringify.
     expect(block.join("\n")).toContain('argv: ["C:\\\\Users\\\\First Last\\\\red-dev.exe", "redwall"]');
+  });
+});
+
+describe("which red-dev a schedule and a hook name", () => {
+  test("the operator's directory wins, on both targets", async () => {
+    const prev = process.env["RED_DEV_BIN_DIR"];
+    process.env["RED_DEV_BIN_DIR"] = "/opt/red";
+    try {
+      expect(await redwallBinary(desktop)).toBe("/opt/red/red-dev");
+      expect(await redwallBinary(windows)).toBe(
+        "/opt/red\\red-dev.exe",
+      );
+    } finally {
+      if (prev === undefined) delete process.env["RED_DEV_BIN_DIR"];
+      else process.env["RED_DEV_BIN_DIR"] = prev;
+    }
+  });
+
+  test("otherwise mise's copy, through the selector it moves on upgrade", async () => {
+    const prev = process.env["RED_DEV_BIN_DIR"];
+    delete process.env["RED_DEV_BIN_DIR"];
+    try {
+      const path = await redwallBinary(desktop);
+      // A versioned path would be the same bug with a shorter fuse: the
+      // ten-minute timer was pinned to a copy from before the release
+      // that taught red-dev to update itself, so it never ran.
+      if (path.includes("/installs/red-dev/")) {
+        expect(path).toContain("/latest/");
+        expect(path).not.toMatch(/\/installs\/red-dev\/\d+\.\d+\.\d+\//);
+      } else {
+        // A machine that has never seen mise still has boot's copy.
+        expect(path.endsWith("/.local/bin/red-dev")).toBe(true);
+      }
+    } finally {
+      if (prev !== undefined) process.env["RED_DEV_BIN_DIR"] = prev;
+    }
   });
 });
