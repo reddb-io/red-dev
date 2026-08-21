@@ -24,12 +24,18 @@
 # Interactive shells only. A script or a hook that sources this profile
 # has not asked for background work, and a non-interactive shell that
 # spawns one is how a converge ends up racing itself.
+#
+# Answered into a variable rather than returned early: `return` at the
+# top level is only valid in a sourced file, so it is a syntax error
+# waiting for whoever runs this the other way, and it is unreachable to
+# a reader — shellcheck said so (SC2317) and it was right.
+_red_skills_watch_interactive=0
 case "$-" in
-  *i*) ;;
-  *) return 0 2>/dev/null || true ;;
+  *i*) _red_skills_watch_interactive=1 ;;
 esac
 
-if [ "${RED_SKILLS_WATCH:-1}" = "1" ] && [ -z "${RED_DEV_NO_LAUNCH-}" ]; then
+if [ "$_red_skills_watch_interactive" = "1" ] &&
+  [ "${RED_SKILLS_WATCH:-1}" = "1" ] && [ -z "${RED_DEV_NO_LAUNCH-}" ]; then
   # How long a shell waits before asking again. red-dev applies its own
   # interval on top; this one only decides how often it is worth paying
   # for a process to ask the question.
@@ -58,3 +64,4 @@ if [ "${RED_SKILLS_WATCH:-1}" = "1" ] && [ -z "${RED_DEV_NO_LAUNCH-}" ]; then
     *) PROMPT_COMMAND="_red_skills_watch_tick${PROMPT_COMMAND:+; $PROMPT_COMMAND}" ;;
   esac
 fi
+unset _red_skills_watch_interactive
