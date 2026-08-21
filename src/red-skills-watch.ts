@@ -418,11 +418,39 @@ export async function crossToWindows(p: Platform): Promise<Crossing> {
     return { outcome: "skipped", reason: "the hidden runner could not be installed" };
   }
 
+  // Through a .cmd file rather than a command line, and this is the
+  // whole reason the crossing never worked. The argument used to be
+  //
+  //     "C:\...\red-dev.exe" red-skills watch due
+  //
+  // one string carrying quotes, and quotes do not survive the trip from
+  // Bun through WSL interop into wscript: what arrived was a literal
+  // \"C:\...\red-dev.exe\", which the shell then reported as a command
+  // it did not recognise. The kick was sent, wscript started, and
+  // nothing ever ran — three times, each time looking like a different
+  // bug. An argument with *no* quotes in it crosses intact, so the
+  // quoting moves into a file where nothing can mangle it.
+  const wrapper = `${local}/red-dev/red-skills-watch.cmd`;
   try {
-    const proc = Bun.spawn(
-      ["wscript.exe", "//B", "//Nologo", runner, `"${binary}" red-skills watch due`],
-      { stdout: "ignore", stderr: "ignore", stdin: "ignore" },
-    );
+    mkdirSync(dirname(wrapper), { recursive: true });
+    // CRLF because it is a Windows batch file, and `@echo off` so the
+    // hidden console it never gets is not asked to print anything.
+    writeFileSync(wrapper, `@echo off\r\n"${binary}" red-skills watch due\r\n`);
+  } catch (err) {
+    return { outcome: "skipped", reason: `could not write ${wrapper}: ${(err as Error).message}` };
+  }
+
+  const wrapperOnWindows = await windowsPathFor(wrapper, p);
+  if (wrapperOnWindows === null) {
+    return { outcome: "skipped", reason: `wslpath could not spell ${wrapper}` };
+  }
+
+  try {
+    const proc = Bun.spawn(["wscript.exe", "//B", "//Nologo", runner, wrapperOnWindows], {
+      stdout: "ignore",
+      stderr: "ignore",
+      stdin: "ignore",
+    });
     proc.unref();
     return { outcome: "kicked", reason: `asked ${binary}` };
   } catch (err) {

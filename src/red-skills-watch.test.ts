@@ -381,3 +381,28 @@ describe("a release that is still uploading", () => {
     expect(isDue(last, now + 61_000)).toBe(false);
   });
 });
+
+describe("how the crossing carries its command", () => {
+  test("through a .cmd file, because quotes do not survive the trip", async () => {
+    // Three attempts failed the same way and looked like three
+    // different bugs. The argument used to be one string carrying
+    // quotes — `"C:\...\red-dev.exe" red-skills watch due` — and what
+    // arrived on the far side was a literal \"C:\...\red-dev.exe\",
+    // which the shell reported as a command it did not recognise. The
+    // kick was sent, wscript started, and nothing ever ran.
+    const source = await Bun.file(new URL("./red-skills-watch.ts", import.meta.url)).text();
+    const fn = source.slice(source.indexOf("export async function crossToWindows"));
+
+    expect(fn).toContain("red-skills-watch.cmd");
+    // The argument handed to wscript carries no quotes of its own.
+    expect(fn).not.toContain('`"${binary}" red-skills watch due`');
+    // And the quoting lives in the file, where nothing can mangle it.
+    expect(fn).toContain('@echo off');
+    expect(fn).toContain('"${binary}" red-skills watch due');
+  });
+
+  test("the wrapper is a Windows batch file, CRLF and all", async () => {
+    const source = await Bun.file(new URL("./red-skills-watch.ts", import.meta.url)).text();
+    expect(source.slice(source.indexOf("export async function crossToWindows"))).toContain("\\r\\n");
+  });
+});
