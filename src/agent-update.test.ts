@@ -66,6 +66,19 @@ function plan(key: string, p: Platform, overrides: Partial<{ npm: string | null 
   });
 }
 
+/**
+ * The machine questions, answered without asking a machine.
+ *
+ * `updateAgents` resolves npm once per run — for the hosts npm updates,
+ * and for the shadow check that follows a release install. Left to the
+ * default those spawn `npm ls -g`, which made one of these tests time
+ * out at five seconds in CI while passing locally.
+ */
+const offMachine = {
+  npm: async () => null,
+  npmGlobals: async () => new Set<string>(),
+};
+
 describe("the update argv of each per-host mechanism", () => {
   test("npm reinstalls the package globally, pinned to latest", () => {
     const p = plan("gemini", LINUX);
@@ -267,6 +280,7 @@ describe("a host with nothing to do", () => {
       release: async () => {
         downloads++;
       },
+      ...offMachine,
     });
     expect(downloads).toBe(0);
     expect(outcomes[0]).toMatchObject({ state: "skipped", reason: "already at v0.4.2" });
@@ -281,6 +295,7 @@ describe("a host with nothing to do", () => {
       release: async () => {
         downloads++;
       },
+      ...offMachine,
     });
     expect(downloads).toBe(1);
     expect(outcomes[0]).toMatchObject({ state: "updated" });
@@ -295,6 +310,7 @@ describe("a host with nothing to do", () => {
       release: async () => {
         downloads++;
       },
+      ...offMachine,
     });
     expect(downloads).toBe(1);
   });
@@ -311,6 +327,7 @@ describe("one host failing", () => {
       [host("claude-code"), host("redcode"), host("gemini")],
       LINUX,
       {
+        ...offMachine,
         locate: found("claude", "redcode", "gemini"),
         npm: async () => "/usr/bin/npm",
         releaseTag: async () => null,
@@ -343,6 +360,7 @@ describe("one host failing", () => {
         throw new Error("installer exited 1: https://dev.meta.ai/install.sh");
       },
       report: (outcome) => reported.push(outcome),
+      ...offMachine,
     });
     expect(reported).toHaveLength(1);
     expect(reported[0]).toMatchObject({ key: "muse", label: "Muse", state: "failed" });
@@ -350,7 +368,10 @@ describe("one host failing", () => {
 
   test("and a host that cannot be updated at all names the fix", async () => {
     const outcomes = await updateAgents([host("gemini")], LINUX, {
+      ...offMachine,
       locate: found("gemini"),
+      // Spelled out after the spread, because it is the subject here
+      // rather than a machine question being kept out of the way.
       npm: async () => null,
       command: async () => {
         throw new Error("npm should never have been reached");

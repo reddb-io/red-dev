@@ -422,6 +422,11 @@ async function verifyRuns(
   host: AgentSpec,
   p: Platform,
   deps: AgentUpdateDeps,
+  // Resolved once by `updateAgents` and handed down. Asking again per
+  // host spawns `npm ls -g` inside every release update, which is both
+  // wasteful and, in CI, slow enough to time a test out at five
+  // seconds — measured, on the run that shipped this.
+  resolved: { npm: string | null; globals: ReadonlySet<string> },
 ): Promise<ShadowRepair | null> {
   if (host.cmd.length === 0) return null;
   try {
@@ -430,8 +435,7 @@ async function verifyRuns(
     const bin = p.os === "windows" ? windowsBinDir() : userBinDir();
     const installed = `${bin}/${host.cmd}${p.os === "windows" ? ".exe" : ""}`;
     const locate = deps.locate ?? commandPath;
-    const npm = await (deps.npm ?? resolveNpm)();
-    const globals = npm ? await (deps.npmGlobals ?? npmGlobalPackages)(npm) : new Set<string>();
+    const { npm, globals } = resolved;
     const repair = await repairShadow({
       cmd: host.cmd,
       installedPath: installed,
@@ -471,6 +475,7 @@ async function performUpdate(
   p: Platform,
   npm: string | null,
   deps: AgentUpdateDeps,
+  resolved: { npm: string | null; globals: ReadonlySet<string> },
 ): Promise<AgentUpdateOutcome> {
   const base = { key: plan.key, label: plan.label, mechanism: plan.mechanism };
 
@@ -493,7 +498,7 @@ async function performUpdate(
     // active node's bin, which `mise activate` puts first — so this
     // reported success three times while the machine kept executing a
     // version from before the publisher moved. See src/shadow-repair.ts.
-    const repair = await verifyRuns(host, p, deps);
+    const repair = await verifyRuns(host, p, deps, resolved);
     if (repair && repair.outcome !== "clear") {
       return { ...base, state: "updated", detail: `${tag ?? ""} — ${repair.reason}`.trim() };
     }
@@ -554,15 +559,22 @@ export async function updateAgents(
 ): Promise<AgentUpdateOutcome[]> {
   const locate = deps.locate ?? commandPath;
   // Resolved once, and only when something on this machine needs it.
-  const wantsNpm = hosts.some((host) => agentUpdateMechanism(host, p) === "npm");
+  // Two reasons to want npm, and both are answered by one resolution:
+  // a host npm updates, and a host installed from a release that an old
+  // npm package might be shadowing.
+  const mechanisms = hosts.map((host) => agentUpdateMechanism(host, p));
+  const wantsNpm = mechanisms.some((m) => m === "npm" || m === "github-release");
   const npm = wantsNpm ? await (deps.npm ?? resolveNpm)() : null;
 
-  // Asked once, and only for hosts that could answer differently: a
-  // catalog entry with both an npm package and a self-updater is the
-  // only place the machine's answer can overrule the catalog's.
-  const contested = hosts.some((host) => host.npm && host.selfUpdate);
+  // Asked once, for two questions: whether a catalog entry that names
+  // an npm package is actually installed by npm here, and which package
+  // owns a binary shadowing one red-dev placed.
+  const contested =
+    hosts.some((host) => host.npm && host.selfUpdate) ||
+    mechanisms.some((m) => m === "github-release");
   const globals =
     npm && contested ? await (deps.npmGlobals ?? npmGlobalPackages)(npm) : new Set<string>();
+  const resolved = { npm, globals };
   const npmOwns = npm && contested ? (pkg: string) => globals.has(pkg) : undefined;
   const resolution: UpdateResolution = { locate, npm, ...(npmOwns ? { npmOwns } : {}) };
 
@@ -583,7 +595,7 @@ export async function updateAgents(
       };
     } else {
       try {
-        outcome = await performUpdate(plan, host, p, npm, deps);
+        outcome = await performUpdate(plan, host, p, npm, deps, resolved);
       } catch (err) {
         outcome = {
           key: plan.key,
