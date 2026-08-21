@@ -90,7 +90,17 @@ export function preferencesFromAnswers(answers: SetupAnswers): Preferences {
 }
 
 /** The exact units the pre-converge setup is about to perform. */
-export async function setupPlan(p: Platform, choices: SetupChoices): Promise<SetupPlanStep[]> {
+export async function setupPlan(
+  p: Platform,
+  choices: SetupChoices,
+  /**
+   * Whether this machine already has a node. Injected because the
+   * answer is a fact about the machine the tests run on, and a plan
+   * that changed shape depending on the developer's own runtimes would
+   * be a plan nothing could assert.
+   */
+  hasNode?: () => Promise<boolean>,
+): Promise<SetupPlanStep[]> {
   const { agentInstallMethod, availableAgents } = await import("./agents.ts");
   const agents = choices.agents ?? [];
   const available = availableAgents(p);
@@ -103,7 +113,12 @@ export async function setupPlan(p: Platform, choices: SetupChoices): Promise<Set
     const needsNpm =
       chosen.some((agent) => agentInstallMethod(agent, p) === "npm") ||
       choices.apps.includes("puppeteer");
-    if (needsNpm) runtimes.unshift("node@24");
+    // And only when this machine has none. `mise use -g` sets the
+    // global node rather than adding one, so adding `node@24` here to
+    // satisfy an agent overwrites a version the person chose — see
+    // nodeAlreadyProvided.
+    const provided = hasNode ?? (await import("./runtimes.ts")).nodeAlreadyProvided;
+    if (needsNpm && !(await provided())) runtimes.unshift("node@24");
   }
   for (const runtime of chosen.flatMap((agent) => agent.runtimeNeeds ?? [])) {
     const name = runtime.split("@")[0]!;

@@ -34,6 +34,38 @@ import { unattendedEnvironment } from "./unattended.ts";
 const DEFAULT_RUNTIMES = ["node@24"] as const;
 
 /**
+ * Whether this machine already has a node an npm install can use.
+ *
+ * Asked before red-dev adds `node@24` on an agent's behalf, and the
+ * whole reason that addition needs a question at all: `mise use -g`
+ * does not add a tool, it *sets* one. So a run that appends `node@24`
+ * to satisfy an npm agent rewrites whatever node line the global config
+ * held — and on this machine it rewrote `latest`.
+ *
+ * Measured, from one install transcript:
+ *
+ *     :: mise: node@latest    tools: node@26.7.0     <- what was asked for
+ *     :: mise: node@24        tools: node@24.18.0    <- what replaced it
+ *
+ * Those are two separate red-dev commands — `red-dev lang …` then
+ * `red-dev agents …`, which is how the Windows side reproduces a
+ * selection inside WSL — so the second could not see the first's
+ * choice in its own `choices.runtimes`, took the machine for one with
+ * no node, and pinned 24 over the answer a person had just given.
+ *
+ * The install tree rather than PATH, and both rather than either: a
+ * node installed moments ago by the previous command is not on this
+ * process's PATH yet, which is the same reshim gap `miseToolBin` exists
+ * for. Any node satisfies this — the requirement is npm, not a version.
+ */
+export async function nodeAlreadyProvided(): Promise<boolean> {
+  const { miseToolBin } = await import("./mise-config.ts");
+  if (miseToolBin("node") !== null) return true;
+  const { commandPath } = await import("./agents.ts");
+  return commandPath("node") !== null;
+}
+
+/**
  * Offered by `red-dev lang`. omakub asks the same question at first
  * run; here it is a command you can re-run, because the answer changes
  * when a project does.
@@ -57,10 +89,20 @@ export interface OfferedRuntime {
  * Every list ends in a moving channel so the UI remains useful between
  * red-dev releases, while the numbered entries let a project stay on a
  * major/minor line. Mise resolves each selector to the newest patch on it.
+ *
+ * ## The default is the moving channel
+ *
+ * Each `id` is what the picker starts on, and every one of them is
+ * `latest`. The numbered lines used to be the defaults, which meant a
+ * red-dev that had not shipped in a month offered a picker whose
+ * "default" was a version behind — and the numbers went stale in this
+ * file rather than on anybody's machine, where they would have been
+ * noticed. A person who wants a line still picks it; the tool no longer
+ * decides on their behalf that they wanted last quarter's.
  */
 export const OFFERED_RUNTIMES: OfferedRuntime[] = [
   {
-    id: "node@24",
+    id: "node@latest",
     label: "Node.js",
     about: "also brings npm and corepack",
     versions: [
@@ -71,7 +113,7 @@ export const OFFERED_RUNTIMES: OfferedRuntime[] = [
     ],
   },
   {
-    id: "bun@1.3",
+    id: "bun@latest",
     label: "Bun",
     about: "runtime, bundler and package manager",
     versions: [
@@ -81,7 +123,7 @@ export const OFFERED_RUNTIMES: OfferedRuntime[] = [
     ],
   },
   {
-    id: "deno@2.9",
+    id: "deno@latest",
     label: "Deno",
     about: "secure JavaScript and TypeScript runtime",
     versions: [
@@ -91,7 +133,7 @@ export const OFFERED_RUNTIMES: OfferedRuntime[] = [
     ],
   },
   {
-    id: "python@3.13",
+    id: "python@latest",
     label: "Python",
     about: "CPython with SQLite support verified after install",
     versions: [
@@ -101,7 +143,7 @@ export const OFFERED_RUNTIMES: OfferedRuntime[] = [
     ],
   },
   {
-    id: "go@1.26",
+    id: "go@latest",
     label: "Go",
     about: "compiler and standard toolchain",
     versions: [
@@ -111,7 +153,7 @@ export const OFFERED_RUNTIMES: OfferedRuntime[] = [
     ],
   },
   {
-    id: "rust@1.97",
+    id: "rust@latest",
     label: "Rust",
     about: "via rustup",
     versions: [
@@ -121,7 +163,7 @@ export const OFFERED_RUNTIMES: OfferedRuntime[] = [
     ],
   },
   {
-    id: "ruby@3.4",
+    id: "ruby@latest",
     label: "Ruby",
     about: "MRI Ruby",
     versions: [
@@ -132,7 +174,7 @@ export const OFFERED_RUNTIMES: OfferedRuntime[] = [
     ],
   },
   {
-    id: "java@25",
+    id: "java@latest",
     label: "Java",
     about: "OpenJDK",
     versions: [

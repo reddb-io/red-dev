@@ -76,12 +76,24 @@ describe("Puppeteer toolchain", () => {
   });
 
   test("brings Node when selected without a runtime", async () => {
-    const plan = await setupPlan(platform("linux"), {
-      agents: [],
-      runtimes: [],
-      apps: ["puppeteer"],
-    });
+    // A machine with no node: Puppeteer needs one and nothing else here
+    // provides it. Injected, because whether the machine running this
+    // suite has node is not what the test is about.
+    const plan = await setupPlan(
+      platform("linux"),
+      { agents: [], runtimes: [], apps: ["puppeteer"] },
+      async () => false,
+    );
     expect(plan[0]).toMatchObject({ key: "node@24", kind: "runtime" });
+  });
+
+  test("and leaves the node a machine already has alone", async () => {
+    const plan = await setupPlan(
+      platform("linux"),
+      { agents: [], runtimes: [], apps: ["puppeteer"] },
+      async () => true,
+    );
+    expect(plan.map((step) => step.key)).not.toContain("node@24");
   });
 
   test("resolves the npm global CLI on either platform", () => {

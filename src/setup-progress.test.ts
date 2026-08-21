@@ -34,13 +34,22 @@ const wsl: Platform = {
 
 const strip = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "");
 
+/**
+ * A machine with no node yet, which is what every plan below describes.
+ *
+ * Injected rather than probed: the answer is a fact about whatever
+ * machine runs the suite, and these assertions are about the plan.
+ */
+const noNode = async () => false;
+const hasNode = async () => true;
+
 describe("the setup work plan", () => {
   test("an npm agent brings node and every unit appears once", async () => {
     const plan = await setupPlan(windows, {
       agents: ["gemini", "t3code"],
       runtimes: [],
       apps: [],
-    });
+    }, noNode);
 
     expect(plan.map((step) => step.tool)).toEqual([
       "node@24",
@@ -50,12 +59,34 @@ describe("the setup work plan", () => {
     ]);
   });
 
+  test("a machine that already has node is not re-pinned to 24 for an npm agent", async () => {
+    // The bug this closes, from one install transcript:
+    //
+    //     :: mise: node@latest    tools: node@26.7.0
+    //     :: mise: node@24        tools: node@24.18.0
+    //
+    // `red-dev lang node@latest` then `red-dev agents …` — two separate
+    // commands, which is how the Windows side reproduces a selection
+    // inside WSL. The second saw no node in its own choices, took the
+    // machine for one without any, and `mise use -g node@24` set the
+    // global pin over the `latest` a person had just chosen.
+    const plan = await setupPlan(windows, { agents: ["gemini"], runtimes: [], apps: [] }, hasNode);
+
+    expect(plan.map((step) => step.tool)).not.toContain("node@24");
+    expect(plan.map((step) => step.tool)).toEqual(["Gemini CLI", "red-skills"]);
+  });
+
+  test("and a machine without one still gets it, so npm has something to run", async () => {
+    const plan = await setupPlan(windows, { agents: ["gemini"], runtimes: [], apps: [] }, noNode);
+    expect(plan.map((step) => step.tool)).toContain("node@24");
+  });
+
   test("an explicitly selected node is not counted twice", async () => {
     const plan = await setupPlan(windows, {
       agents: ["gemini"],
       runtimes: ["node@lts"],
       apps: [],
-    });
+    }, noNode);
 
     expect(plan.filter((step) => step.tool === "node@lts")).toHaveLength(1);
   });
@@ -65,7 +96,7 @@ describe("the setup work plan", () => {
       agents: ["hermes"],
       runtimes: [],
       apps: [],
-    });
+    }, noNode);
 
     expect(plan.map((step) => step.tool)).toEqual([
       "node@24",
@@ -80,7 +111,7 @@ describe("the setup work plan", () => {
       agents: ["openclaw", "hermes"],
       runtimes: [],
       apps: [],
-    });
+    }, noNode);
 
     expect(plan.map((step) => step.tool)).toEqual([
       "node@24",
@@ -96,7 +127,7 @@ describe("the setup work plan", () => {
       agents: ["t3code", "claude-desktop", "codex-desktop"],
       runtimes: [],
       apps: [],
-    });
+    }, noNode);
 
     expect(plan.map((step) => step.tool)).not.toContain("red-skills");
   });
