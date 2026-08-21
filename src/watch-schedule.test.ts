@@ -17,6 +17,7 @@ import {
   watchEnabled,
   watchMinutes,
   watchTaskArgv,
+  watchWrapper,
   watchUnits,
   WATCH_TASK,
 } from "./watch-schedule.ts";
@@ -74,16 +75,37 @@ describe("the systemd pair", () => {
 });
 
 describe("the Windows task", () => {
+  const argv = watchTaskArgv("C:\\r\\hidden-run.vbs", "C:\\r\\bin\\red-skills-watch.cmd", 10);
+
   test("goes through the hidden runner, or it draws a console every tick", () => {
     // The mistake ADR 0009 recorded: a console program started by the
     // scheduler with no console of its own gets one allocated — a black
     // rectangle over the wallpaper, on a timer.
-    const argv = watchTaskArgv("C:\\r\\hidden-run.vbs", "C:\\r\\red-dev.exe", 10);
     expect(argv.join(" ")).toContain("wscript.exe //B //Nologo");
     expect(argv).toContain(WATCH_TASK);
-    expect(argv.join(" ")).toContain("red-skills watch due");
     // Every ten minutes, by the scheduler's own vocabulary.
     expect(argv.join(" ")).toContain("/SC MINUTE /MO 10");
+  });
+
+  test("carries no quotes of its own, because they do not survive the scheduler", () => {
+    // Shipped once with the command inline. The task then fired every
+    // ten minutes, reported `Last Result: 0`, and ran nothing: wscript
+    // started, could not parse what it was handed, and exited cleanly.
+    // Verified by the absence of the transcript the run should have
+    // written, not by the scheduler's own opinion of it.
+    const command = argv.at(-1)!;
+    expect(command).not.toContain('\\"');
+    expect(command).toContain("red-skills-watch.cmd");
+    // The command itself lives in the file.
+    expect(command).not.toContain("red-skills watch due");
+  });
+
+  test("and the file it names holds the quoting", () => {
+    const wrapper = watchWrapper("C:\\Program Files\\red-dev\\red-dev.exe");
+    expect(wrapper).toContain('"C:\\Program Files\\red-dev\\red-dev.exe" red-skills watch due');
+    // A Windows batch file, CRLF and all, and silent.
+    expect(wrapper.startsWith("@echo off\r\n")).toBe(true);
+    expect(wrapper.endsWith("\r\n")).toBe(true);
   });
 });
 

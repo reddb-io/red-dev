@@ -118,6 +118,13 @@ export function watchUnits(binary: string, minutes: number): { service: string; 
   return { service, timer };
 }
 
+/** What the scheduler runs: a batch file, not a command line. PURE. */
+export function watchWrapper(binary: string): string {
+  // CRLF because it is a Windows batch file, and `@echo off` so the
+  // console it never gets is not asked to print anything.
+  return `@echo off\r\n"${binary}" red-skills watch due\r\n`;
+}
+
 /**
  * The scheduled task, as the argv that creates it. PURE.
  *
@@ -125,8 +132,18 @@ export function watchUnits(binary: string, minutes: number): { service: string; 
  * and a console program started by the scheduler with no console of its
  * own gets one allocated — a black rectangle on the desktop, every ten
  * minutes, which is precisely the mistake ADR 0009 recorded.
+ *
+ * And through a `.cmd` file rather than a command line, for the reason
+ * the WSL crossing needed the same thing. The first version of this
+ * shipped with the quotes inline — `"\"C:\\...\\red-dev.exe\" red-skills
+ * watch due"` — and the task then fired every ten minutes, reported
+ * `Last Result: 0`, and ran nothing: wscript started, could not parse
+ * what it was handed, and exited cleanly. An exit code from the wrong
+ * process is the most convincing kind of silence, which is why this is
+ * verified by looking for the transcript the run should have written
+ * and not by the scheduler's own opinion of it.
  */
-export function watchTaskArgv(runner: string, binary: string, minutes: number): string[] {
+export function watchTaskArgv(runner: string, wrapper: string, minutes: number): string[] {
   return [
     "schtasks",
     "/Create",
@@ -138,7 +155,7 @@ export function watchTaskArgv(runner: string, binary: string, minutes: number): 
     "/MO",
     String(minutes),
     "/TR",
-    `wscript.exe //B //Nologo "${runner}" "\\"${binary}\\" red-skills watch due"`,
+    `wscript.exe //B //Nologo "${runner}" "${wrapper}"`,
   ];
 }
 
@@ -238,14 +255,31 @@ async function convergeTask(
     return "skipped";
   }
 
+  // The wrapper beside the binary it names, which is where the Redwall's
+  // retired one also sat: a file red-dev owns, holding the quoting.
+  const binary = await watchBinary();
+  const wrapper = `${parentOf(binary)}\\red-skills-watch.cmd`;
+  try {
+    writeFileSync(wrapper, watchWrapper(binary));
+  } catch (err) {
+    log.warn(`red-skills watch: could not write ${wrapper}: ${(err as Error).message}`);
+    return "skipped";
+  }
+
   const minutes = watchMinutes(env);
-  const created = await run(watchTaskArgv(runnerPath, await watchBinary(), minutes));
+  const created = await run(watchTaskArgv(runnerPath, wrapper, minutes));
   if (created.exitCode !== 0) {
     log.warn("red-skills watch: schtasks refused; the shell hook is the whole of it here");
     return "skipped";
   }
   log.ok(`red-skills watch: asking every ${minutes} minutes`);
   return "installed";
+}
+
+/** The directory part of a Windows path. PURE. */
+function parentOf(path: string): string {
+  const at = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
+  return at === -1 ? path : path.slice(0, at);
 }
 
 /** The binary the schedule names, resolved the way the Redwall hook does. */
