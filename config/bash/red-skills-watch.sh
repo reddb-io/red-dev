@@ -53,7 +53,11 @@ if [ "$_red_skills_watch_interactive" = "1" ] &&
     # Detached and silent: a prompt must not wait for the network, and
     # `due` rather than a bare `watch` because a prompt is not a person
     # typing — red-dev's own interval decides whether to really look.
-    ( red-dev red-skills watch due >/dev/null 2>&1 & ) >/dev/null 2>&1
+    # Stamped, because this run has a person at the keyboard but no way
+    # to reach them: the child is detached with all three streams on
+    # /dev/null, so anything it started that wanted an answer would wait
+    # forever. See src/trigger.ts.
+    ( RED_DEV_TRIGGER=shell red-dev red-skills watch due >/dev/null 2>&1 & ) >/dev/null 2>&1
     return 0
   }
 

@@ -58,6 +58,7 @@ import { dirname, join } from "node:path";
 import { log } from "./log.ts";
 import { redSkillsRoot } from "./red-skills-root.ts";
 import type { Platform } from "./platform.ts";
+import { attended, type Trigger } from "./trigger.ts";
 import type { Acquisition } from "./red-skills-acquire.ts";
 import { stuckCompanions, type CompanionOutcome } from "./red-skills-companions.ts";
 import { stuckHosts, type HostOutcome } from "./red-skills-hosts.ts";
@@ -330,6 +331,21 @@ export interface StagedUpdateRecord {
   surfaces: SurfaceOutcome[];
   /** Active Workers when the run started, or null when unknown. */
   workers: number | null;
+  /**
+   * How many unattended runs in a row have ended badly, this one included.
+   *
+   * Counted rather than derived, because the evidence a person would have
+   * to derive it from is one file per run: this machine wrote 119 watch
+   * transcripts, 26 of them recorded a failure, and 20 were the same
+   * sentence about the same companion every ten minutes for a day.
+   * Nobody read them, and a failure that repeats unattended and is never
+   * summed reads exactly like silence.
+   *
+   * An attended run does not touch it. A person watching a run that fails
+   * has already been told, and a count they can see is not the problem
+   * this solves.
+   */
+  unattendedFailures?: number;
 }
 
 /** `~/.red/skills/update.json` — how the last staged reconciliation ended. */
@@ -361,6 +377,8 @@ export function readStagedUpdate(home: string): StagedUpdateRecord | null {
       outcome,
       surfaces: parsed.surfaces,
       workers: typeof parsed.workers === "number" ? parsed.workers : null,
+      unattendedFailures:
+        typeof parsed.unattendedFailures === "number" ? parsed.unattendedFailures : 0,
     };
   } catch {
     return null;
@@ -389,6 +407,13 @@ export interface StagedUpdateOptions {
   env?: NodeJS.ProcessEnv;
   /** The red-dev platform the host and companion walks need. */
   manifestPlatform?: Platform;
+  /**
+   * Who started this run. Defaults to `unknown`, which is unattended —
+   * see `src/trigger.ts`. It decides what the converge below is allowed
+   * to do, not what it is allowed to acquire: verification is the same
+   * for every trigger.
+   */
+  trigger?: Trigger;
   /**
    * Active Workers on this machine. Defaults to asking the daemon over
    * its existing socket, and never starting one: an update that births a
@@ -471,7 +496,13 @@ export async function runStagedUpdate(opts: StagedUpdateOptions = {}): Promise<S
   const active = state.revisions.find((r) => r.key === state.active) ?? null;
   const restartNeeded = [...new Set(surfaces.flatMap((s) => s.restartNeeded))];
 
-  writeStagedUpdate(home, { schema: 1, outcome, surfaces, workers });
+  writeStagedUpdate(home, {
+    schema: 1,
+    outcome,
+    surfaces,
+    workers,
+    unattendedFailures: nextUnattendedFailures(home, opts.trigger ?? "unknown", outcome),
+  });
   await recordRevision(home, outcome, active, opts.at ?? nowSeconds());
   announceStagedUpdate({ outcome, surfaces, restartNeeded });
 
@@ -649,7 +680,7 @@ function defaultConverge(
   return async () => {
     const { convergeRedSkills } = await import("./agents.ts");
     const { detect } = await import("./platform.ts");
-    return await convergeRedSkills(opts.manifestPlatform ?? detect());
+    return await convergeRedSkills(opts.manifestPlatform ?? detect(), opts.trigger ?? "unknown");
   };
 }
 
@@ -717,6 +748,23 @@ export interface UpdateDoctorReport {
   restartNeeded: string[];
   /** Active Workers when the last run started, or null when unknown. */
   workers: number | null;
+  /** Unattended runs that have ended badly in a row. Zero when the last one did not. */
+  unattendedFailures: number;
+}
+
+/**
+ * The consecutive-failure count this run leaves behind. PURE-ish.
+ *
+ * `converged` and `staged` clear it: both mean the machine did what it
+ * set out to. Everything else adds one. An attended run carries the
+ * previous count forward untouched rather than clearing it — a person
+ * running the command by hand has not fixed the timer, and a count that
+ * a manual run silently reset would hide exactly the drift it is for.
+ */
+function nextUnattendedFailures(home: string, trigger: Trigger, outcome: UpdateOutcome): number {
+  const previous = readStagedUpdate(home)?.unattendedFailures ?? 0;
+  if (attended(trigger)) return previous;
+  return outcome === "converged" || outcome === "staged" ? 0 : previous + 1;
 }
 
 /**
@@ -749,6 +797,7 @@ export function stagedUpdateReport(home: string): UpdateDoctorReport {
     failed: (record?.surfaces ?? []).filter((s) => s.state === "failed").map((s) => s.surface),
     restartNeeded: [...new Set((record?.surfaces ?? []).flatMap((s) => s.restartNeeded ?? []))],
     workers: record?.workers ?? null,
+    unattendedFailures: record?.unattendedFailures ?? 0,
   };
 }
 
@@ -774,6 +823,18 @@ export function stagedUpdateRows(report: UpdateDoctorReport): UpdateDoctorRow[] 
     status: verdict[report.outcome],
     detail: `the last update ${VERDICT_DETAIL[report.outcome]}`,
   });
+  // Said once the run has failed twice, because one is a machine that
+  // was offline and the second is a pattern. Above the surface rows on
+  // purpose: the surfaces say what went wrong *this* time, and this says
+  // that it has been going wrong since nobody was looking.
+  if (report.unattendedFailures > 1) {
+    rows.push({
+      status: "err",
+      detail:
+        `${report.unattendedFailures} unattended updates in a row have not converged — ` +
+        "run `red-dev red-skills watch` to see it happen",
+    });
+  }
   if (report.pending.length > 0) {
     rows.push({
       status: "warn",

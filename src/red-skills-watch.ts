@@ -52,6 +52,7 @@ import { dirname } from "node:path";
 
 import { log } from "./log.ts";
 import type { Platform } from "./platform.ts";
+import { TRIGGER_ENV, type Trigger } from "./trigger.ts";
 import { redSkillsRoot } from "./red-skills-root.ts";
 
 /** How long an answer stands before the network is asked again. */
@@ -199,6 +200,12 @@ export interface WatchOptions {
   nowMs?: number;
   /** Ask even inside the interval. What a person typing the command means. */
   force?: boolean;
+  /**
+   * Who started this run. Every automatic trigger reaches the watch —
+   * the timer, the Scheduled Task, the shell's prompt and the daemon —
+   * so this is the one place the distinction has to arrive intact.
+   */
+  trigger?: Trigger;
   intervalMs?: number;
   manifestPlatform?: Platform;
   /** The take, injected for the tests. Defaults to the staged update. */
@@ -268,6 +275,7 @@ async function defaultTake(opts: WatchOptions): Promise<WatchResult> {
   const { runStagedUpdate } = await import("./staged-update.ts");
   const staged = await runStagedUpdate({
     ...(opts.manifestPlatform ? { manifestPlatform: opts.manifestPlatform } : {}),
+    trigger: opts.trigger ?? "unknown",
   });
 
   const acquisition = staged.surfaces.find((s) => s.surface === "acquisition");
@@ -393,7 +401,7 @@ export async function crossToWindows(p: Platform): Promise<Crossing> {
 
   const { existsSync } = await import("node:fs");
   const { windowsLocalAppData } = await import("./wsl.ts");
-  const { windowsPathFor } = await import("./windows-hidden.ts");
+  const { windowsPathFor, wscriptBin } = await import("./windows-hidden.ts");
   const { hiddenRunnerPath } = await import("./redwall-hook.ts");
 
   let local: string;
@@ -435,7 +443,10 @@ export async function crossToWindows(p: Platform): Promise<Crossing> {
     mkdirSync(dirname(wrapper), { recursive: true });
     // CRLF because it is a Windows batch file, and `@echo off` so the
     // hidden console it never gets is not asked to print anything.
-    writeFileSync(wrapper, `@echo off\r\n"${binary}" red-skills watch due\r\n`);
+    writeFileSync(
+      wrapper,
+      `@echo off\r\nset ${TRIGGER_ENV}=cross\r\n"${binary}" red-skills watch due\r\n`,
+    );
   } catch (err) {
     return { outcome: "skipped", reason: `could not write ${wrapper}: ${(err as Error).message}` };
   }
@@ -446,7 +457,7 @@ export async function crossToWindows(p: Platform): Promise<Crossing> {
   }
 
   try {
-    const proc = Bun.spawn(["wscript.exe", "//B", "//Nologo", runner, wrapperOnWindows], {
+    const proc = Bun.spawn([wscriptBin(), "//B", "//Nologo", runner, wrapperOnWindows], {
       stdout: "ignore",
       stderr: "ignore",
       stdin: "ignore",

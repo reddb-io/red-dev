@@ -77,6 +77,60 @@ async function pumpToLog(
   return raw;
 }
 
+/**
+ * What a child that outstayed its deadline exits with.
+ *
+ * 124 because that is what `timeout(1)` uses, so a reader who has seen
+ * one has seen the other.
+ */
+export const TIMED_OUT = 124;
+
+/**
+ * Stop a child that will not stop itself, and say so.
+ *
+ * The whole process group, not the process: an installer that has
+ * already forked is exactly the case worth killing, and killing only
+ * the parent leaves the fork holding whatever it was holding. TERM
+ * first, then KILL after a grace, which is the shape `runBounded`
+ * settled on for host probes.
+ *
+ * Returns a promise that resolves when the deadline has been armed and
+ * a canceller to disarm it, so a child that finishes normally does not
+ * leave a timer holding the event loop open.
+ */
+function deadline(
+  proc: { pid: number; kill: (signal?: number | NodeJS.Signals) => void },
+  cmd: readonly string[],
+  timeoutMs: number | undefined,
+  killGraceMs = 250,
+): { fired: () => boolean; cancel: () => void } {
+  if (timeoutMs === undefined) return { fired: () => false, cancel: () => {} };
+  let hit = false;
+  const timer = setTimeout(() => {
+    hit = true;
+    const waited = timeoutMs >= 1000 ? `${Math.round(timeoutMs / 1000)}s` : `${timeoutMs}ms`;
+    log.warn(`${cmd[0]} took longer than ${waited} — stopping it`);
+    try {
+      // Negative pid is the group. Only meaningful where the spawn was
+      // detached, which is every platform but Windows.
+      if (process.platform !== "win32") process.kill(-proc.pid, "SIGTERM");
+      else proc.kill();
+    } catch {
+      proc.kill();
+    }
+    setTimeout(() => {
+      try {
+        if (process.platform !== "win32") process.kill(-proc.pid, "SIGKILL");
+        else proc.kill();
+      } catch {
+        /* already gone, which is the point */
+      }
+    }, killGraceMs).unref();
+  }, timeoutMs);
+  timer.unref();
+  return { fired: () => hit, cancel: () => clearTimeout(timer) };
+}
+
 /** Stream both child outputs through the logger and retain them for classification. */
 export async function spawnLoggedCapture(
   cmd: string[],
@@ -85,25 +139,30 @@ export async function spawnLoggedCapture(
     cwd?: string;
     /** Test seam; production uses the shared five-second cadence. */
     heartbeatMs?: number;
+    /** Stop the child after this long. Unbounded when absent. */
+    timeoutMs?: number;
   } = {},
 ): Promise<{ code: number; out: string; err: string }> {
-  const { env, heartbeatMs, ...spawnOptions } = extra;
+  const { env, heartbeatMs, timeoutMs, ...spawnOptions } = extra;
   const proc = Bun.spawn(cmd, {
     stdout: "pipe",
     stderr: "pipe",
     stdin: providerStdinMode(),
+    detached: timeoutMs !== undefined && process.platform !== "win32",
     ...spawnOptions,
     env: unattendedEnvironment(process.env, env),
   });
   const heartbeat = startProcessHeartbeat(cmd, heartbeatMs);
+  const limit = deadline(proc, cmd, timeoutMs);
   try {
     const [out, err, code] = await Promise.all([
       pumpToLog(proc.stdout, heartbeat.activity),
       pumpToLog(proc.stderr, heartbeat.activity),
       proc.exited,
     ]);
-    return { code, out, err };
+    return { code: limit.fired() ? TIMED_OUT : code, out, err };
   } finally {
+    limit.cancel();
     heartbeat.stop();
   }
 }
@@ -128,23 +187,29 @@ export async function spawnLogged(
     env?: Record<string, string | undefined>;
     cwd?: string;
     heartbeatMs?: number;
+    /** Stop the child after this long. Unbounded when absent. */
+    timeoutMs?: number;
   } = {},
 ): Promise<number> {
   if (!logIsCaptured()) {
-    const { env, heartbeatMs, ...spawnOptions } = extra;
+    const { env, heartbeatMs, timeoutMs, ...spawnOptions } = extra;
     const proc = Bun.spawn(cmd, {
       stdout: "inherit",
       stderr: "inherit",
       stdin: providerStdinMode(),
+      detached: timeoutMs !== undefined && process.platform !== "win32",
       ...spawnOptions,
       env: unattendedEnvironment(process.env, env),
     });
     // Inherited output cannot be observed here, so do not claim it has been
     // silent. The elapsed heartbeat still proves the child is alive.
     const heartbeat = startProcessHeartbeat(cmd, heartbeatMs, false);
+    const limit = deadline(proc, cmd, timeoutMs);
     try {
-      return await proc.exited;
+      const code = await proc.exited;
+      return limit.fired() ? TIMED_OUT : code;
     } finally {
+      limit.cancel();
       heartbeat.stop();
     }
   }

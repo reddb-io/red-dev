@@ -117,10 +117,18 @@ export async function startTranscript(command: string, version: string, at: Date
     mkdirSync(dir, { recursive: true });
 
     const path = `${dir}/${transcriptName(at, command)}`;
+    // The trigger, on the platform line, because two runs of the same
+    // command in the same version can be entirely different runs. On the
+    // machine that found this, `red-skills watch due` fired from a shell
+    // prompt and from a systemd timer — one saw six coding agents and
+    // the other saw none — and 119 transcripts recorded no way to tell
+    // which was which. See src/trigger.ts.
+    const { triggerOf } = await import("./trigger.ts");
+    const trigger = triggerOf(process.env, process.stdout.isTTY === true);
     const header = [
       `# red-dev ${version} — ${command}`,
       `# ${at.toISOString()}`,
-      `# ${process.platform} ${process.arch}`,
+      `# ${process.platform} ${process.arch} — ${trigger}`,
       "",
     ].join("\n");
     appendFileSync(path, header);

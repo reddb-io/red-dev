@@ -40,6 +40,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { TRIGGER_ENV } from "./trigger.ts";
 
 import { log } from "./log.ts";
 import { misePluginRoot, REDSKILLS_RECONCILE_POSTINSTALL } from "./mise-config.ts";
@@ -119,7 +120,10 @@ const SCRIPT_HEADER = [
  * that swallowed it would turn a refused set into a successful install.
  */
 export function pluginScript(phase: PluginPhase): string {
-  return `${SCRIPT_HEADER}exec "$red_dev" red-skills ${phase}\n`;
+  // The trigger is defaulted rather than set: a person running
+  // `mise install` has one, and mise passes its environment straight
+  // through, so whatever started the chain keeps its own name.
+  return `${SCRIPT_HEADER}${TRIGGER_ENV}="\${${TRIGGER_ENV}:-mise}" exec "$red_dev" red-skills ${phase}\n`;
 }
 
 /** Every file the plugin directory contains, relative to it. PURE. */

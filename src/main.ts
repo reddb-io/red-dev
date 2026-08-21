@@ -884,9 +884,15 @@ async function cmdRedSkills(p: Platform, inv: Invocation): Promise<number> {
   // asked eleven minutes ago. See ADR 0017 and src/red-skills-watch.ts.
   if (phase === "watch") {
     const { watchRedSkills, announceWatch } = await import("./red-skills-watch.ts");
+    const { triggerOf } = await import("./trigger.ts");
+    const { interactive } = await import("./ui.ts");
     const result = await watchRedSkills({
       manifestPlatform: p,
       force: inv.redSkillsSelector !== "due",
+      // `force` used to be the only thing this line carried, and it
+      // decides a debounce. What the converge downstream actually needs
+      // to know is whether anybody is there — see src/trigger.ts.
+      trigger: triggerOf(process.env, interactive()),
     });
     announceWatch(result);
     return result.outcome === "refused" ? 1 : 0;

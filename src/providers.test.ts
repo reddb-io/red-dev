@@ -142,3 +142,34 @@ describe("unzipping on Windows", () => {
     expect(argv[4]).toContain("'C:\\Temp\\new\\redcode.zip'");
   });
 });
+
+describe("a child that will not stop itself", () => {
+  test("a step past its deadline is stopped, not waited on", async () => {
+    const { spawnLogged, TIMED_OUT } = await import("./providers.ts");
+    const began = Date.now();
+
+    // The shape of the run that hung: a companion step that never
+    // returns, holding the watch lock while every later trigger is told
+    // another run has it.
+    const code = await spawnLogged(["sleep", "30"], { timeoutMs: 300 });
+
+    expect(code).toBe(TIMED_OUT);
+    // Stopped near its deadline rather than at the child's own pace.
+    expect(Date.now() - began).toBeLessThan(5_000);
+  });
+
+  test("a step that finishes keeps its own exit code", async () => {
+    const { spawnLogged, TIMED_OUT } = await import("./providers.ts");
+    expect(await spawnLogged(["true"], { timeoutMs: 10_000 })).toBe(0);
+    // A real failure must not be mistaken for a timeout.
+    const failed = await spawnLogged(["false"], { timeoutMs: 10_000 });
+    expect(failed).not.toBe(0);
+    expect(failed).not.toBe(TIMED_OUT);
+  });
+
+  test("no deadline is still no deadline", async () => {
+    const { spawnLogged } = await import("./providers.ts");
+    // An attended run passes nothing, and nothing is what it gets.
+    expect(await spawnLogged(["true"])).toBe(0);
+  });
+});

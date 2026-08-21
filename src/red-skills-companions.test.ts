@@ -32,6 +32,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { Platform } from "./platform.ts";
+import type { Trigger } from "./trigger.ts";
 import {
   companionReconciliationFailed,
   companionRegistryPath,
@@ -205,8 +206,12 @@ function runner(
   };
 }
 
-function reconcile(m: Machine, opts: CompanionReconcileOptions = {}): Promise<CompanionOutcome[]> {
-  return reconcileCompanions(UBUNTU, {
+function reconcile(
+  m: Machine,
+  opts: CompanionReconcileOptions & { platform?: Platform } = {},
+): Promise<CompanionOutcome[]> {
+  const { platform, ...rest } = opts;
+  return reconcileCompanions(platform ?? UBUNTU, {
     home: m.home,
     config: m.config,
     herdrDir: join(m.config, "herdr"),
@@ -227,12 +232,16 @@ function reconcile(m: Machine, opts: CompanionReconcileOptions = {}): Promise<Co
     compose: async () => {},
     now: () => STAMPED_AT,
     run: runner(m).run,
-    ...opts,
+    ...rest,
   });
 }
 
 function statusOf(out: readonly CompanionOutcome[], name: string): string | undefined {
   return out.find((o) => o.companion === name)?.status;
+}
+
+function reasonOf(out: readonly CompanionOutcome[], name: string): string {
+  return out.find((o) => o.companion === name)?.reason ?? "";
 }
 
 function lines(calls: readonly string[][]): string[] {
@@ -444,6 +453,9 @@ describe("the editor guarantee", () => {
     let asked = 0;
 
     const out = await reconcile(m, {
+      // Typed: the guarantee is a thing a person asked for. Every other
+      // trigger defers it — see the two tests below.
+      trigger: "typed",
       editors: () => [...m.installed.keys()],
       installEditor: async () => {
         asked++;
@@ -478,10 +490,82 @@ describe("the editor guarantee", () => {
     const m = machine();
     m.installed.clear();
 
-    const out = await reconcile(m, { editors: () => [], installEditor: async () => [] });
+    const out = await reconcile(m, {
+      trigger: "typed",
+      editors: () => [],
+      installEditor: async () => [],
+    });
     expect(statusOf(out, "vscode")).toBe("blocked");
     expect(companionReconciliationFailed(out)).toBe(true);
     expect(readCompanionRegistry(m.home).companions["vscode"]).toBeUndefined();
+  });
+
+  test("a run nobody is watching defers the editor instead of installing one", async () => {
+    const m = machine();
+    m.installed.clear();
+    let asked = 0;
+
+    // What the ten-minute timer is. It found no editor twenty times in a
+    // row and each time was entitled to add an apt repository, import a
+    // signing key and install a desktop editor to fix it.
+    const out = await reconcile(m, {
+      trigger: "timer",
+      editors: () => [],
+      installEditor: async () => {
+        asked++;
+        return [];
+      },
+    });
+
+    expect(asked).toBe(0);
+    expect(statusOf(out, "vscode")).toBe("deferred");
+    // Deferred is not stuck: the machine did what it was allowed to.
+    expect(companionReconciliationFailed(out)).toBe(false);
+    expect(reasonOf(out, "vscode")).toContain("red-dev install");
+  });
+
+  test("a machine with no display of its own never installs an editor, typed or not", async () => {
+    const m = machine();
+    m.installed.clear();
+    let asked = 0;
+
+    // WSL: caps.gui is false because the display belongs to the host, and
+    // the host's editor already carries the extension.
+    const out = await reconcile(m, {
+      platform: { ...UBUNTU, env: "wsl", caps: { ...UBUNTU.caps, gui: false } },
+      trigger: "typed",
+      editors: () => [],
+      installEditor: async () => {
+        asked++;
+        return [];
+      },
+    });
+
+    expect(asked).toBe(0);
+    expect(statusOf(out, "vscode")).toBe("deferred");
+    expect(companionReconciliationFailed(out)).toBe(false);
+    expect(reasonOf(out, "vscode")).toContain("Windows half");
+  });
+
+  test("a machine with no display drives no editor either, even one it can see", async () => {
+    const m = machine();
+    // The host's editor, reachable over interop and already carrying the
+    // extension. Handing it a Linux path is what hung the run for two
+    // minutes; the whole companion defers instead.
+    const out = await reconcile(m, {
+      platform: { ...UBUNTU, env: "wsl", caps: { ...UBUNTU.caps, gui: false } },
+      trigger: "typed",
+      editors: () => ["code"],
+      run: async (cmd) => {
+        if (cmd.includes("--install-extension")) {
+          throw new Error("no editor may be driven from a machine with no display");
+        }
+        return runner(m).run(cmd);
+      },
+    });
+
+    expect(statusOf(out, "vscode")).toBe("deferred");
+    expect(companionReconciliationFailed(out)).toBe(false);
   });
 });
 
@@ -769,9 +853,11 @@ function companionCtx(
   source: string,
   editors: string[],
   resolve: (cli: string) => string | null,
+  over: { platform?: Platform; trigger?: Trigger } = {},
 ): Parameters<(typeof COMPANION_ADAPTERS)[number]["plan"]>[0] {
   return {
-    platform: UBUNTU,
+    platform: over.platform ?? UBUNTU,
+    trigger: over.trigger ?? "typed",
     source,
     setDigest: SET_DIGEST,
     setVersion: SET_VERSION,

@@ -277,7 +277,12 @@ describe("the other half of a WSL machine", () => {
   test("crosses through the hidden runner, because red-dev.exe is a console program", async () => {
     const source = await Bun.file(new URL("./red-skills-watch.ts", import.meta.url)).text();
     const fn = source.slice(source.indexOf("export async function crossToWindows"));
-    expect(fn).toContain("wscript.exe");
+    // Through wscriptBin() rather than the bare name: the crossing runs
+    // from a systemd service too, whose PATH carries no /mnt/c at all,
+    // and the bare spawn reported `wscript could not start` there while
+    // the same code worked from a shell.
+    expect(fn).toContain("wscriptBin()");
+    expect(fn).not.toContain('["wscript.exe"');
     expect(fn).toContain("//B");
     expect(fn).toContain("hiddenRunnerPath");
     // Never `windowsBinDir`: it reads %LOCALAPPDATA%, which a distro

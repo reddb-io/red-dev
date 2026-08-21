@@ -120,7 +120,7 @@ export async function windowsPathFor(path: string, p: Platform): Promise<string 
 }
 
 /** Where wscript is, from either side of the boundary. */
-function wscriptBin(): string {
+export function wscriptBin(): string {
   if (process.platform === "win32") return "wscript.exe";
   return Bun.which("wscript.exe") ?? "/mnt/c/Windows/System32/wscript.exe";
 }

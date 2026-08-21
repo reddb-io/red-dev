@@ -25,6 +25,7 @@ import {
 import { log, RedError } from "./log.ts";
 import { tlsTrustFailure, unattendedEnvironment } from "./unattended.ts";
 import type { Platform } from "./platform.ts";
+import type { Trigger } from "./trigger.ts";
 import type { CompanionOutcome } from "./red-skills-companions.ts";
 import type { HostOutcome } from "./red-skills-hosts.ts";
 import { redSkillsCurrentPosix } from "./red-skills-root.ts";
@@ -932,13 +933,16 @@ export interface RedSkillsConverge {
   companions: CompanionOutcome[];
 }
 
-export async function convergeRedSkills(p: Platform): Promise<RedSkillsConverge> {
+export async function convergeRedSkills(
+  p: Platform,
+  trigger: Trigger = "unknown",
+): Promise<RedSkillsConverge> {
   // The companions first, and deliberately above the guard below: the
   // runtimes, the daemon, herdr, the editor extension and zellij's
   // dashboard are RedSkills on this workstation whether or not a coding
   // agent is installed on it, and gating them on one would leave a
   // machine with an editor and no coder holding none of them.
-  const companions = await convergeRedSkillsCompanions(p);
+  const companions = await convergeRedSkillsCompanions(p, trigger);
 
   const present = SKILL_HOSTS.filter((h) => commandPath(h.cmd));
   if (present.length === 0) {
@@ -1094,11 +1098,14 @@ async function adoptSpec185Workstation(
  * failure; one that refused is, and is said out loud without taking the
  * artifact the machine was already using with it.
  */
-export async function convergeRedSkillsCompanions(p: Platform): Promise<CompanionOutcome[]> {
+export async function convergeRedSkillsCompanions(
+  p: Platform,
+  trigger: Trigger = "unknown",
+): Promise<CompanionOutcome[]> {
   const { reconcileCompanions, companionReconciliationFailed, stuckCompanions } = await import(
     "./red-skills-companions.ts"
   );
-  const companions = await reconcileCompanions(p);
+  const companions = await reconcileCompanions(p, { trigger });
   if (companionReconciliationFailed(companions)) {
     const stuck = stuckCompanions(companions);
     log.warn(`red-skills: companions not converged: ${stuck.map((c) => c.companion).join(", ")}`);

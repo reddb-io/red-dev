@@ -73,6 +73,7 @@ import {
 import { readPackageSetState } from "./red-skills-set.ts";
 import { ZELLIJ_COMPANION_FILE } from "./zellij-layer.ts";
 import type { Platform } from "./platform.ts";
+import { attended, deferred, type Trigger } from "./trigger.ts";
 
 /** The five surfaces, and the order a converge walks them. */
 export type CompanionName = "runtimes" | "redskilled" | "herdr" | "vscode" | "zellij";
@@ -105,6 +106,8 @@ export interface CompanionContext {
   bin: string;
   /** The VS Code-family CLIs this machine has. */
   editors: readonly string[];
+  /** Who started this run — see `src/trigger.ts`. */
+  trigger: Trigger;
   /** One CLI's executable path, or null. Defaults to `commandPath`. */
   resolve: (cli: string) => string | null;
   /** What one editor says it carries. Only a live machine can answer it. */
@@ -128,6 +131,11 @@ export interface CompanionPlan {
   unavailable?: string;
   /** This machine cannot take it. Reported, and the reconciliation fails. */
   blocked?: string;
+  /**
+   * This machine could take it and deliberately did not. Reported, and
+   * the reconciliation still succeeds — see `CompanionStatus`.
+   */
+  deferred?: string;
 }
 
 /** A plan with every empty part spelled out once, here instead of five times. */
@@ -488,6 +496,21 @@ const herdr: CompanionAdapter = {
  * question with no good default. The editor that guarantees there is at
  * least one is installed by the walk before this plan is asked for.
  */
+/**
+ * Why this machine installs no editor, in the machine's own terms. PURE.
+ *
+ * Named rather than inlined because both the walk and the adapter have to
+ * say it, and a WSL half saying "no compatible editor could be installed"
+ * was the sentence that hid this for twenty runs: it reads as a failed
+ * attempt, when what happened is that the editor lives on the other half
+ * and already has the extension.
+ */
+export function noDisplayHere(p: Platform): string {
+  return p.env === "wsl"
+    ? "the editor belongs to the Windows half of this machine, which installs the extension there"
+    : "this machine has no display to install an editor onto";
+}
+
 const vscode: CompanionAdapter = {
   name: "vscode",
   plan: (ctx) => {
@@ -495,8 +518,28 @@ const vscode: CompanionAdapter = {
     if (vsix === null) {
       return plan({ version: ctx.setVersion, unavailable: "the package set carries no .vsix" });
     }
+    // A machine with no display of its own drives no editor, even when it
+    // can see one. This is stronger than "install no editor here", and
+    // the difference was measured rather than reasoned: on WSL the `code`
+    // that PATH finds is the *host's*, reached over interop, and handing
+    // it `--install-extension /home/cyber/.red/skills/...` gives a
+    // Windows program a path that means nothing on Windows. It does not
+    // fail — it sits there, and the run was killed at its deadline with
+    // exit 124. The Windows half installs the same extension from the
+    // same set with paths it can read, and had already done so.
+    if (!ctx.platform.caps.gui) {
+      return plan({ version: vsixVersion(vsix) ?? ctx.setVersion, deferred: noDisplayHere(ctx.platform) });
+    }
     if (ctx.editors.length === 0) {
-      return plan({ version: vsixVersion(vsix) ?? ctx.setVersion, blocked: "no compatible editor could be installed" });
+      const version = vsixVersion(vsix) ?? ctx.setVersion;
+      // Nowhere to put it is not always a broken machine. On a half whose
+      // display belongs to the host it is the ordinary answer, and on any
+      // machine an unattended run is not entitled to go and make one.
+      if (!ctx.platform.caps.gui) return plan({ version, deferred: noDisplayHere(ctx.platform) });
+      if (!attended(ctx.trigger)) {
+        return plan({ version, deferred: deferred("no compatible editor", "red-dev install") });
+      }
+      return plan({ version, blocked: "no compatible editor could be installed" });
     }
     return plan({
       version: vsixVersion(vsix) ?? ctx.setVersion,
@@ -730,12 +773,22 @@ async function writeCompanionRegistry(home: string, registry: CompanionRegistry)
  * a broken machine and not a failed install, it is a set published before
  * the artifact was part of it. The remedy is a newer set, so it is said
  * once and the reconciliation still succeeds.
+ *
+ * `deferred` is its sibling and separates two things that used to be one
+ * word. `unavailable` is a fact about the set; `deferred` is a decision
+ * this run made about itself — the display belongs to the other half of
+ * this machine, or nobody is watching and the work needs a person. Both
+ * succeed. `blocked` keeps its meaning: this machine cannot take it, and
+ * saying so is the failure. The distinction is the same one
+ * `acquisitionSurface` draws for a declined downgrade, and it exists for
+ * the same reason — a machine that deferred is not a machine that broke.
  */
 export type CompanionStatus =
   | "reconciled"
   | "current"
   | "absent"
   | "unavailable"
+  | "deferred"
   | "blocked"
   | "failed";
 
@@ -805,6 +858,11 @@ export interface CompanionReconcileOptions {
   editors?: () => string[];
   /** Installs the guaranteed editor, and answers what is present after. */
   installEditor?: (p: Platform) => Promise<string[]>;
+  /**
+   * Who started this run. Defaults to `unknown`, which is unattended —
+   * a caller that has not said is a caller that cannot vouch for a person.
+   */
+  trigger?: Trigger;
   /** What one editor lists. Defaults to `<cli> --list-extensions`. */
   extensions?: (cli: string) => Promise<string[]>;
   /** Recomposes zellij's config. Defaults to `installZellijConfig`. */
@@ -851,7 +909,8 @@ export async function reconcileCompanions(
       : await setIdentity(home, source);
   const present = opts.present ?? (await presenceProbe());
   const running = opts.running ?? runningProbe;
-  const run = opts.run ?? (await defaultRunner());
+  const trigger = opts.trigger ?? "unknown";
+  const run = opts.run ?? (await defaultRunner(trigger));
   const now = opts.now ?? (() => new Date().toISOString());
   const editorsOf = opts.editors ?? (() => EDITOR_CLIS.filter((cli) => present(cli)));
 
@@ -867,6 +926,7 @@ export async function reconcileCompanions(
     zellijDir: opts.zellijDir ?? (await zellijDirOf(p)),
     bin: opts.bin ?? runtimeBinDir(home),
     editors: editorsOf(),
+    trigger,
     resolve: opts.resolve ?? defaultResolve,
     extensionsOf: opts.extensions ?? (await extensionProbe()),
     compose: opts.compose ?? (await composer()),
@@ -876,13 +936,32 @@ export async function reconcileCompanions(
   // has to: an extension in the set and nowhere to put it is the clean
   // workstation Spec #201 promises an editor to. Nothing about the
   // extension itself is fetched — it is already on this disk.
-  if (
-    adapters.some((a) => a.name === "vscode") &&
-    ctx.editors.length === 0 &&
-    setVsix(source) !== null
-  ) {
-    const installer = opts.installEditor ?? (await editorInstaller());
-    ctx.editors = await installer(p);
+  //
+  // Two things have to be true before it fires, and neither was checked
+  // until a ten-minute timer made both of them matter.
+  //
+  // `caps.gui` is the older one and was here all along: it means "there
+  // is a display on this machine that we install GUI apps onto", and
+  // `src/platform.ts` says in as many words that it is false for WSL,
+  // "where the display belongs to the host". manifest.ts, theme-editors.ts
+  // and webapps.ts all read it; this file was the one that did not, so a
+  // distro whose editor is the host's — reached over interop, already
+  // carrying the extension — kept trying to apt-get itself a second one.
+  //
+  // The trigger is the new one. Installing a desktop editor is a thing a
+  // person asks for, and `aptRepoInstall` adds a repository and a signing
+  // key to do it. That is not work to start behind somebody's back every
+  // ten minutes.
+  const wants = adapters.some((a) => a.name === "vscode") && ctx.editors.length === 0;
+  if (wants && setVsix(source) !== null) {
+    if (!p.caps.gui) {
+      // Said by the adapter, which defers the whole companion here.
+    } else if (!attended(trigger)) {
+      log.skip(`vscode: ${deferred("no editor to install the extension into", "red-dev install")}`);
+    } else {
+      const installer = opts.installEditor ?? (await editorInstaller());
+      ctx.editors = await installer(p);
+    }
   }
 
   const registry = readCompanionRegistry(home);
@@ -905,6 +984,11 @@ export async function reconcileCompanions(
     if (desired.unavailable !== undefined) {
       log.skip(`${adapter.name}: ${desired.unavailable}`);
       out.push({ companion: adapter.name, status: "unavailable", reason: desired.unavailable });
+      continue;
+    }
+    if (desired.deferred !== undefined) {
+      log.skip(`${adapter.name}: ${desired.deferred}`);
+      out.push({ companion: adapter.name, status: "deferred", reason: desired.deferred });
       continue;
     }
     if (desired.blocked !== undefined) {
@@ -1089,7 +1173,7 @@ export async function removeCompanions(
 ): Promise<CompanionRemoveOutcome[]> {
   const home = opts.home ?? homeOf();
   const adapters = opts.adapters ?? COMPANION_ADAPTERS;
-  const run = opts.run ?? (await defaultRunner());
+  const run = opts.run ?? (await defaultRunner(opts.trigger ?? "unknown"));
   const registry = readCompanionRegistry(home);
   const source = opts.source !== undefined ? opts.source : await currentSource();
 
@@ -1104,6 +1188,7 @@ export async function removeCompanions(
     herdrDir: opts.herdrDir !== undefined ? opts.herdrDir : await herdrDirOf(p),
     zellijDir: opts.zellijDir ?? (await zellijDirOf(p)),
     bin: opts.bin ?? runtimeBinDir(home),
+    trigger: opts.trigger ?? "unknown",
     editors: (opts.editors ?? (() => []))(),
     resolve: opts.resolve ?? defaultResolve,
     extensionsOf: opts.extensions ?? (async () => []),
@@ -1247,9 +1332,26 @@ function defaultResolve(cli: string): string | null {
   return commandPath(cli);
 }
 
-async function defaultRunner(): Promise<(cmd: string[]) => Promise<number>> {
+/**
+ * How long one companion step gets when nobody is watching.
+ *
+ * Generous, because a step that links a plugin or installs an extension
+ * into three editors is allowed to be slow. It exists only to make the
+ * difference between slow and *never*: an unattended run that blocks
+ * forever holds the watch lock, and the next nine triggers return
+ * "another run holds the watch lock" while the machine quietly stops
+ * updating. That is the shape of the run on this machine that sat for
+ * six minutes and forty seconds and was killed by a person.
+ *
+ * An attended run gets no deadline at all. Somebody is there, they can
+ * see the heartbeat, and they can press Ctrl-C.
+ */
+const UNATTENDED_STEP_MS = 120_000;
+
+async function defaultRunner(trigger: Trigger): Promise<(cmd: string[]) => Promise<number>> {
   const { spawnLogged } = await import("./providers.ts");
-  return (cmd: string[]) => spawnLogged(cmd);
+  const timeoutMs = attended(trigger) ? undefined : UNATTENDED_STEP_MS;
+  return (cmd: string[]) => spawnLogged(cmd, ...(timeoutMs === undefined ? [] : [{ timeoutMs }]));
 }
 
 async function extensionProbe(): Promise<(cli: string) => Promise<string[]>> {

@@ -444,6 +444,7 @@ describe("what doctor reads", () => {
       outcome: null,
       active: null,
       staged: null,
+      unattendedFailures: 0,
       pending: [],
       failed: [],
       restartNeeded: [],
@@ -501,5 +502,53 @@ describe("the order", () => {
     const run = await walk(home);
     expect(run.surfaces.map((s) => s.surface)).toEqual([...UPDATE_SURFACES]);
     expect(new Set(UPDATE_SURFACES).size).toBe(UPDATE_SURFACES.length);
+  });
+});
+
+describe("a failure nobody is watching is counted, not just written", () => {
+  const broken = {
+    converge: async () => ({
+      hosts: SEVEN.map((h) => host(h)),
+      companions: [companion("vscode", { status: "failed", reason: "no editor" })],
+    }),
+  };
+
+  test("consecutive unattended failures add up", async () => {
+    const home = fakeHome();
+    for (const n of [1, 2, 3]) {
+      await walk(home, { ...broken, trigger: "timer" });
+      expect(readStagedUpdate(home)?.unattendedFailures).toBe(n);
+    }
+    // What doctor says once it is a pattern rather than an outage.
+    const rows = stagedUpdateRows(stagedUpdateReport(home));
+    expect(rows.some((r) => r.detail.includes("3 unattended updates in a row"))).toBe(true);
+  });
+
+  test("one failure is an outage and is not called a pattern", async () => {
+    const home = fakeHome();
+    await walk(home, { ...broken, trigger: "timer" });
+    const rows = stagedUpdateRows(stagedUpdateReport(home));
+    expect(rows.some((r) => r.detail.includes("in a row"))).toBe(false);
+  });
+
+  test("a run that converges clears the count", async () => {
+    const home = fakeHome();
+    await walk(home, { ...broken, trigger: "timer" });
+    await walk(home, { ...broken, trigger: "timer" });
+    expect(readStagedUpdate(home)?.unattendedFailures).toBe(2);
+
+    await walk(home, { trigger: "timer" });
+    expect(readStagedUpdate(home)?.unattendedFailures).toBe(0);
+  });
+
+  test("a person running it by hand does not reset the count they came to look at", async () => {
+    const home = fakeHome();
+    await walk(home, { ...broken, trigger: "timer" });
+    await walk(home, { ...broken, trigger: "timer" });
+
+    // Typed, and it fails the same way. The count is the reason they
+    // typed it; clearing it here would hide the drift on the next run.
+    await walk(home, { ...broken, trigger: "typed" });
+    expect(readStagedUpdate(home)?.unattendedFailures).toBe(2);
   });
 });
