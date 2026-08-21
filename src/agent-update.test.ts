@@ -377,3 +377,50 @@ describe("reading a release", () => {
     expect(sameRelease("no version here", "v0.4.2")).toBe(false);
   });
 });
+
+describe("when the catalog and the machine disagree about npm", () => {
+  const codex = host("codex");
+  const res = (npmOwns?: (pkg: string) => boolean) => ({
+    locate: (_c: string) => "/home/cyber/.local/bin/codex",
+    npm: "/usr/bin/npm",
+    ...(npmOwns ? { npmOwns } : {}),
+  });
+
+  test("the catalog still decides on a machine nothing asked about", () => {
+    // No npmOwns injected: every existing caller keeps the old answer.
+    expect(agentUpdateMechanism(codex, WSL)).toBe("npm");
+  });
+
+  test("npm holding the package keeps npm as the mechanism", () => {
+    expect(agentUpdateMechanism(codex, WSL, res(() => true))).toBe("npm");
+  });
+
+  test("npm not holding it hands the host to its own updater", () => {
+    // The measured failure: `codex` resolved into
+    // ~/.codex/packages/standalone, npm had never installed it, and
+    // `npm install -g @openai/codex@latest` answered EEXIST every run.
+    expect(agentUpdateMechanism(codex, WSL, res(() => false))).toBe("self-update");
+
+    const plan = planAgentUpdate(codex, WSL, res(() => false));
+    expect(plan.state).toBe("ready");
+    if (plan.state !== "ready") return;
+    expect(plan.step.kind).toBe("command");
+    if (plan.step.kind !== "command") return;
+    expect(plan.step.argv.join(" ")).toContain("codex update");
+    expect(plan.step.argv.join(" ")).not.toContain("install -g");
+  });
+
+  test("a host with no self-updater is left on npm, wrong or not", () => {
+    // Gemini declares npm and no `update` subcommand. Reclassifying it
+    // would be inventing a mechanism its publisher never shipped.
+    const gemini = host("gemini");
+    expect(gemini.selfUpdate).toBeUndefined();
+    expect(agentUpdateMechanism(gemini, WSL, res(() => false))).toBe("npm");
+  });
+
+  test("Claude Code is unaffected: its installer already elected self-update", () => {
+    const claude = host("claude-code");
+    expect(agentUpdateMechanism(claude, WSL, res(() => true))).toBe("self-update");
+    expect(agentUpdateMechanism(claude, WSL, res(() => false))).toBe("self-update");
+  });
+});

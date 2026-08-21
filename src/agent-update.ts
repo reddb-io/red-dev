@@ -89,6 +89,14 @@ export type AgentUpdatePlan =
 export interface UpdateResolution {
   locate: (command: string) => string | null;
   npm: string | null;
+  /**
+   * Whether npm's global tree actually holds this package.
+   *
+   * Asked of npm rather than assumed from the catalog, because the
+   * catalog says what red-dev *would* install and this says what is
+   * installed. Absent on a machine where nothing needed the answer.
+   */
+  npmOwns?: (pkg: string) => boolean;
   /** process.platform, for the one argv that is rewritten on Windows. */
   platform?: string;
 }
@@ -102,11 +110,39 @@ export interface UpdateResolution {
  * same catalog entry. The single divergence is a vendor self-update,
  * which replaces re-running the vendor's install script — the same
  * publisher, through the door they built for exactly this.
+ *
+ * ## When the catalog and the machine disagree
+ *
+ * `agentInstallMethod` reads the catalog entry and the platform: it
+ * answers what red-dev *would* install with, which is the right question
+ * on a machine red-dev installed. It is the wrong one where the vendor
+ * has since moved. Codex is that case — OpenAI now ships a standalone
+ * build with its own updater, and a machine carrying one has a `codex`
+ * that npm did not put there. Updating it by npm produced, verbatim:
+ *
+ *     npm error EEXIST: file already exists
+ *     npm error File exists: .../mise/installs/node/24.18.0/bin/codex
+ *
+ * npm refusing to overwrite a symlink it does not own, every time, on a
+ * host that was perfectly up to date.
+ *
+ * So where the catalog says npm and npm does not have the package, a
+ * declared self-updater wins. `npmOwns` is injected because this
+ * function is pure and the answer comes from asking npm; without it the
+ * old behaviour stands, which is the right default for every caller
+ * that has no reason to care.
  */
-export function agentUpdateMechanism(a: AgentSpec, p: Platform): AgentUpdateMechanism | null {
+export function agentUpdateMechanism(
+  a: AgentSpec,
+  p: Platform,
+  res?: Pick<UpdateResolution, "npmOwns">,
+): AgentUpdateMechanism | null {
   const method = agentInstallMethod(a, p);
   if (method === null) return null;
   if (method === "installer" && a.selfUpdate) return "self-update";
+  if (method === "npm" && a.selfUpdate && a.npm && res?.npmOwns?.(a.npm) === false) {
+    return "self-update";
+  }
   return method;
 }
 
@@ -117,7 +153,7 @@ export function planAgentUpdate(
   res: UpdateResolution,
 ): AgentUpdatePlan {
   const { key, label } = a;
-  const mechanism = agentUpdateMechanism(a, p);
+  const mechanism = agentUpdateMechanism(a, p, res);
   if (!mechanism) return { state: "skip", key, label, reason: "no update mechanism here" };
 
   // A host with a command that is not on PATH is not installed, and
@@ -367,6 +403,8 @@ export interface AgentUpdateDeps {
   releaseTag?: (repo: string, asset: string) => Promise<string | null>;
   /** What the installed host answers when asked for its version. */
   version?: (executable: string) => Promise<string | null>;
+  /** The packages npm's global tree holds. Defaults to asking npm once. */
+  npmGlobals?: (npm: string) => Promise<ReadonlySet<string>>;
   /** Called as each host settles, so a caller can report while it runs. */
   report?: (outcome: AgentUpdateOutcome) => void;
 }
@@ -439,6 +477,27 @@ async function performUpdate(
  * throws on a TLS failure, and either would otherwise end an update that
  * still had four working hosts in front of it.
  */
+/**
+ * What npm's global tree holds, by name.
+ *
+ * `--depth=0 --json` and nothing else: the question is membership, and
+ * a tree walk to answer it would be slower and no more true. A failure
+ * to ask answers "nothing", which leaves every catalog decision exactly
+ * where it was rather than reclassifying a host on a bad reading.
+ */
+export async function npmGlobalPackages(npm: string): Promise<ReadonlySet<string>> {
+  try {
+    const { runBounded } = await import("./bounded-command.ts");
+    const result = await runBounded(npmArgv(npm, ["ls", "-g", "--depth=0", "--json"]), {
+      timeoutMs: 30_000,
+    });
+    const parsed = JSON.parse(result.stdout) as { dependencies?: Record<string, unknown> };
+    return new Set(Object.keys(parsed.dependencies ?? {}));
+  } catch {
+    return new Set();
+  }
+}
+
 export async function updateAgents(
   hosts: readonly AgentSpec[],
   p: Platform,
@@ -449,9 +508,18 @@ export async function updateAgents(
   const wantsNpm = hosts.some((host) => agentUpdateMechanism(host, p) === "npm");
   const npm = wantsNpm ? await (deps.npm ?? resolveNpm)() : null;
 
+  // Asked once, and only for hosts that could answer differently: a
+  // catalog entry with both an npm package and a self-updater is the
+  // only place the machine's answer can overrule the catalog's.
+  const contested = hosts.some((host) => host.npm && host.selfUpdate);
+  const globals =
+    npm && contested ? await (deps.npmGlobals ?? npmGlobalPackages)(npm) : new Set<string>();
+  const npmOwns = npm && contested ? (pkg: string) => globals.has(pkg) : undefined;
+  const resolution: UpdateResolution = { locate, npm, ...(npmOwns ? { npmOwns } : {}) };
+
   const outcomes: AgentUpdateOutcome[] = [];
   for (const host of hosts) {
-    const plan = planAgentUpdate(host, p, { locate, npm });
+    const plan = planAgentUpdate(host, p, resolution);
     let outcome: AgentUpdateOutcome;
     if (plan.state === "skip") {
       outcome = { key: plan.key, label: plan.label, mechanism: null, state: "skipped", reason: plan.reason };
@@ -459,7 +527,7 @@ export async function updateAgents(
       outcome = {
         key: plan.key,
         label: plan.label,
-        mechanism: agentUpdateMechanism(host, p),
+        mechanism: agentUpdateMechanism(host, p, resolution),
         state: "failed",
         reason: plan.reason,
         fix: plan.fix,

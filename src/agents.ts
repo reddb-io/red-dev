@@ -117,6 +117,11 @@ export const AGENTS: AgentSpec[] = [
     recommended: true,
     winget: "OpenAI.Codex",
     npm: "@openai/codex",
+    // OpenAI ships a standalone build with its own updater, and machines
+    // are moving onto it: this one's `codex` resolves into
+    // ~/.codex/packages/standalone, which npm did not put there and will
+    // not overwrite. See agentUpdateMechanism for when this wins.
+    selfUpdate: ["update"],
   },
   {
     key: "redcode",
