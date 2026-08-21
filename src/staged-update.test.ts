@@ -43,11 +43,15 @@ import {
 const fakeHome = (): string => mkdtempSync(`${tmpdir()}/red-staged-`);
 
 /** One acquisition, in whichever of its five endings a case needs. */
-function acquisition(outcome: Acquisition["outcome"], reason: string = outcome): Acquisition {
+function acquisition(
+  outcome: Acquisition["outcome"],
+  reason: string = outcome,
+  failure: Acquisition["failure"] = outcome === "refused" ? "signature" : null,
+): Acquisition {
   return {
     outcome,
     reason,
-    failure: outcome === "refused" ? "signature" : null,
+    failure,
     selector: null,
     commit: null,
     version: null,
@@ -127,6 +131,36 @@ describe("one surface's own vocabulary, in the shared one", () => {
     expect(acquisitionSurface(acquisition("unreachable")).state).toBe("verified");
     expect(acquisitionSurface(acquisition("current")).state).toBe("verified");
     expect(acquisitionSurface(acquisition("unavailable")).state).toBe("skipped");
+  });
+
+  test("declining an unsigned composed set is the guard working, not a failed surface", () => {
+    // What every converge produces: mise installs the npm payloads, and
+    // red-dev reconciles after each one on a machine that already
+    // resolves a verified set. Recording it as failed stamped a healthy
+    // workstation's update.json with `outcome: "failed"`.
+    const declined = acquisitionSurface(
+      acquisition("refused", "an unsigned composed one cannot replace it", "downgrade"),
+    );
+    expect(declined.state).toBe("skipped");
+    // Still said out loud, and still carried in the record: the reason
+    // and the outcome are unchanged, only the verdict on the machine is.
+    expect(declined.acquisition).toBe("refused");
+    expect(declined.reason).toContain("cannot replace it");
+    // Every other refusal is still a failure — a bad signature is not a
+    // machine declining, it is a machine finding something wrong.
+    expect(acquisitionSurface(acquisition("refused", "bad", "signature")).state).toBe("failed");
+    expect(acquisitionSurface(acquisition("refused", "bad", "tree")).state).toBe("failed");
+  });
+
+  test("a declined downgrade leaves the run converged, not failed", () => {
+    // The whole point: the outcome the machine records about itself.
+    expect(
+      stagedUpdateOutcome([
+        acquisitionSurface(acquisition("refused", "composed set declined", "downgrade")),
+        hostSurface(SEVEN.map((h) => host(h))),
+        companionSurface([companion("redskilled")]),
+      ]),
+    ).toBe("converged");
   });
 
   test("a blocked host fails the surface, and an absent one does not", () => {

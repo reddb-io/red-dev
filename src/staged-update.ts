@@ -148,10 +148,30 @@ export interface StagedUpdate {
  * update it runs changes nothing while leaving the machine on the set it
  * already resolves. Recording that as a failed surface would make every
  * offline update report a broken workstation.
+ *
+ * A `downgrade` refusal is the same shape of fact and is recorded the
+ * same way. It means something offered this machine an unsigned composed
+ * set while it already resolves a verified one, and the machine declined
+ * — which is ADR 0012's guard doing exactly what it is for, not a
+ * surface that failed. It reaches here on every ordinary converge,
+ * because mise installs the npm payloads and red-dev reconciles after
+ * each one; recording it as `failed` stamped `outcome: "failed"` over a
+ * healthy machine's record four times per run, which is how it was
+ * found — a workstation on the newest trusted set whose own `update.json`
+ * said it had failed.
+ *
+ * Only the stamp changes. The refusal is still announced out loud by
+ * `announce`, and a person who *typed* a downgrade still gets a non-zero
+ * exit from the install path, which never comes through here.
  */
 export function acquisitionSurface(a: Acquisition): SurfaceOutcome {
+  const declined = a.outcome === "refused" && a.failure === "downgrade";
   const state: SurfaceState =
-    a.outcome === "refused" ? "failed" : a.outcome === "unavailable" ? "skipped" : "verified";
+    a.outcome === "refused" && !declined
+      ? "failed"
+      : a.outcome === "unavailable" || declined
+        ? "skipped"
+        : "verified";
   return { surface: "acquisition", state, reason: a.reason, restartNeeded: [], acquisition: a.outcome };
 }
 

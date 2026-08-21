@@ -1416,6 +1416,16 @@ export function announce(a: Acquisition): void {
       log.warn(`red-skills package set: ${a.reason}`);
       return;
     case "refused":
+      // A declined downgrade is not a refusal to report in red. It
+      // happens on every ordinary converge — mise installs the npm
+      // payloads and each one offers an unsigned composed set to a
+      // machine that already resolves a verified one — so reporting it
+      // as a failure printed four errors per run on a workstation that
+      // was doing exactly the right thing.
+      if (a.failure === "downgrade") {
+        log.skip(`red-skills package set: ${a.reason}`);
+        return;
+      }
       log.err(`red-skills package set refused (${a.failure ?? "unknown"}): ${a.reason}`);
       log.plain("       current is unchanged — the machine keeps the set it already resolves");
       return;
