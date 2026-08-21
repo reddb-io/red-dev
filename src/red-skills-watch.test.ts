@@ -23,6 +23,8 @@ import {
   watchStampPath,
   type WatchResult,
   windowsRedDevCandidates,
+  windowsRedDev,
+  versionInPath,
 } from "./red-skills-watch.ts";
 
 function home(): string {
@@ -289,7 +291,9 @@ describe("the other half of a WSL machine", () => {
     // does not have — the first version called it, threw, caught itself
     // and reported "skipped", so the crossing never once happened.
     expect(fn).not.toContain("windowsBinDir");
-    expect(fn).toContain("windowsRedDevCandidates");
+    // Through windowsRedDev, which weighs the bootstrap copy against
+    // mise's newest instead of taking whatever the list ordered first.
+    expect(fn).toContain("windowsRedDev(local)");
     expect(fn).toContain("windowsLocalAppData");
     // Detached: a shell starting must not wait for a Windows process.
     expect(fn).toContain("proc.unref()");
@@ -409,5 +413,81 @@ describe("how the crossing carries its command", () => {
   test("the wrapper is a Windows batch file, CRLF and all", async () => {
     const source = await Bun.file(new URL("./red-skills-watch.ts", import.meta.url)).text();
     expect(source.slice(source.indexOf("export async function crossToWindows"))).toContain("\\r\\n");
+  });
+});
+
+describe("which red-dev the Windows half is asked through", () => {
+  const LOCAL = "/mnt/c/Users/filip/AppData/Local";
+  const boot = `${LOCAL}/red-dev/bin/red-dev.exe`;
+  const mise = (v: string) => `${LOCAL}/mise/installs/red-dev/${v}/red-dev.exe`;
+
+  test("a stale mise install does not win over a current bootstrap copy", async () => {
+    // Measured on the maintainer's machine: mise had stopped at 1.0.80
+    // while boot.ps1 kept the other copy on 1.0.98, and the crossing kicked
+    // the old one every ten minutes without anything saying so.
+    const picked = await windowsRedDev(LOCAL, {
+      readdir: () => ["1.0.80", "latest", "1", "1.0"],
+      exists: () => true,
+      versionOf: async () => "1.0.98",
+    });
+    expect(picked).toBe(boot);
+  });
+
+  test("and a stale bootstrap copy does not win over a current mise install", async () => {
+    const picked = await windowsRedDev(LOCAL, {
+      readdir: () => ["1.0.98", "1.0.80"],
+      exists: () => true,
+      versionOf: async () => "1.0.50",
+    });
+    expect(picked).toBe(mise("1.0.98"));
+  });
+
+  test("the same version on both sides takes the one Windows' own PATH resolves", async () => {
+    const picked = await windowsRedDev(LOCAL, {
+      readdir: () => ["1.0.98"],
+      exists: () => true,
+      versionOf: async () => "1.0.98",
+    });
+    expect(picked).toBe(boot);
+  });
+
+  test("a copy that will not say what it is still wins, rather than losing by silence", async () => {
+    const picked = await windowsRedDev(LOCAL, {
+      readdir: () => ["1.0.80"],
+      exists: () => true,
+      versionOf: async () => null,
+    });
+    expect(picked).toBe(boot);
+  });
+
+  test("nothing is asked when there is nothing to weigh", async () => {
+    let asked = 0;
+    const count = async () => {
+      asked++;
+      return "1.0.98";
+    };
+    // mise has never touched this side.
+    expect(
+      await windowsRedDev(LOCAL, { readdir: () => [], exists: () => true, versionOf: count }),
+    ).toBe(boot);
+    // and the bootstrap copy is not there.
+    expect(
+      await windowsRedDev(LOCAL, {
+        readdir: () => ["1.0.98"],
+        exists: (path) => path !== boot,
+        versionOf: count,
+      }),
+    ).toBe(mise("1.0.98"));
+    expect(asked).toBe(0);
+  });
+
+  test("a Windows side with no red-dev at all answers null", async () => {
+    expect(await windowsRedDev(LOCAL, { readdir: () => [], exists: () => false })).toBeNull();
+  });
+
+  test("a mise install spells its own version, whichever slash it uses", () => {
+    expect(versionInPath(mise("1.0.98"))).toBe("1.0.98");
+    expect(versionInPath("C:\\x\\mise\\installs\\red-dev\\1.2.3\\red-dev.exe")).toBe("1.2.3");
+    expect(versionInPath(boot)).toBeNull();
   });
 });

@@ -346,6 +346,67 @@ export function windowsRedDevCandidates(
   return [...versions, `${root}/red-dev/bin/red-dev.exe`];
 }
 
+/**
+ * The red-dev the Windows half should be asked through.
+ *
+ * `windowsRedDevCandidates` orders what exists; this decides between the
+ * two things that order cannot compare. A mise install carries its
+ * version in its path. The bootstrap copy does not — boot.ps1 writes one
+ * file to a fixed location and overwrites it in place — so the list put
+ * it last, and a machine whose mise had stopped at 1.0.80 while boot.ps1
+ * kept the other copy current got kicked into a red-dev eighteen
+ * releases old. It ran, which is why nothing said so.
+ *
+ * So the bootstrap copy is asked what it is. One Windows process, only
+ * when there is a mise install to weigh it against, and only on a
+ * crossing that was already going to start one. A copy that will not
+ * answer still wins ties: it is the one the Windows user's own PATH
+ * resolves and the one red-dev's installer maintains, and preferring it
+ * is how this was wrong in the safe direction rather than the other.
+ */
+export async function windowsRedDev(
+  localAppData: string,
+  io: {
+    readdir?: (dir: string) => string[];
+    exists?: (path: string) => boolean;
+    /** The version a binary reports, or null when it would not say. */
+    versionOf?: (path: string) => Promise<string | null>;
+  } = {},
+): Promise<string | null> {
+  const { existsSync } = await import("node:fs");
+  const exists = io.exists ?? existsSync;
+  const ordered = windowsRedDevCandidates(localAppData, io.readdir ?? defaultReaddir).filter(exists);
+  if (ordered.length === 0) return null;
+
+  const boot = ordered.at(-1);
+  const mise = ordered.slice(0, -1);
+  // Nothing to weigh: either only the bootstrap copy is there, or only
+  // mise's are and the newest of those is already first.
+  if (boot === undefined || mise.length === 0) return ordered[0] ?? null;
+
+  const newest = mise[0] as string;
+  const reported = await (io.versionOf ?? reportedVersion)(boot);
+  if (reported === null) return boot;
+  return byVersionDesc(reported, versionInPath(newest) ?? "0.0.0") <= 0 ? boot : newest;
+}
+
+/** The version a mise install spells in its own path, or null. PURE. */
+export function versionInPath(path: string): string | null {
+  return /\/red-dev\/(\d+\.\d+\.\d+[^/]*)\//.exec(path.replace(/\\/g, "/"))?.[1] ?? null;
+}
+
+/** Ask a Windows red-dev what it is. Bounded, and never fatal. */
+async function reportedVersion(path: string): Promise<string | null> {
+  try {
+    const { runBounded } = await import("./bounded-command.ts");
+    const result = await runBounded([path, "--version"], { timeoutMs: 10_000 });
+    const line = result.stdout.trim().split(/\r?\n/).find((l) => /^\d+\.\d+\.\d+/.test(l.trim()));
+    return line?.trim() ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function defaultReaddir(dir: string): string[] {
   try {
     return readdirSync(dir);
@@ -399,7 +460,6 @@ export type Crossing = { outcome: "kicked" | "skipped"; reason: string };
 export async function crossToWindows(p: Platform): Promise<Crossing> {
   if (p.env !== "wsl") return { outcome: "skipped", reason: "not a distro; nothing to cross to" };
 
-  const { existsSync } = await import("node:fs");
   const { windowsLocalAppData } = await import("./wsl.ts");
   const { windowsPathFor, wscriptBin } = await import("./windows-hidden.ts");
   const { hiddenRunnerPath } = await import("./redwall-hook.ts");
@@ -413,8 +473,8 @@ export async function crossToWindows(p: Platform): Promise<Crossing> {
     return { outcome: "skipped", reason: `could not read %LOCALAPPDATA%: ${(err as Error).message}` };
   }
 
-  const here = windowsRedDevCandidates(local).find((path) => existsSync(path));
-  if (here === undefined) {
+  const here = await windowsRedDev(local);
+  if (here === null) {
     return { outcome: "skipped", reason: `no red-dev.exe under ${local}` };
   }
 
