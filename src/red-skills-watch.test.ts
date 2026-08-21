@@ -33,6 +33,22 @@ function home(): string {
 
 const took: WatchResult = { outcome: "took", reason: "acquired 4.0.2" };
 
+/**
+ * red-dev's own upgrade, stubbed out.
+ *
+ * Injected at every call rather than defaulted inside the watch: the
+ * real one asks the publisher over the network, and a test suite that
+ * reaches GitHub is a test suite that fails on a train. This file went
+ * from 89ms to 4.2s the moment it was left to the default, which is how
+ * the omission was noticed.
+ */
+const noUpgrade = async () => ({
+  outcome: "current" as const,
+  reason: "stubbed",
+  from: "1.0.0",
+  latest: "1.0.0",
+});
+
 describe("the interval", () => {
   test("a machine that has never asked is due", () => {
     expect(isDue(null, 1_000_000)).toBe(true);
@@ -82,7 +98,7 @@ describe("the lock", () => {
   test("is released even when the take throws", async () => {
     const h = home();
     await expect(
-      watchRedSkills({
+      watchRedSkills({ upgrade: noUpgrade,
         home: h,
         nowMs: 1_000,
         take: () => Promise.reject(new Error("boom")),
@@ -97,7 +113,7 @@ describe("the lock", () => {
 describe("a watch run", () => {
   test("takes what is there and records that it asked", async () => {
     const h = home();
-    const result = await watchRedSkills({ home: h, nowMs: 5_000, take: async () => took });
+    const result = await watchRedSkills({ upgrade: noUpgrade, home: h, nowMs: 5_000, take: async () => took });
     expect(result).toEqual(took);
     expect(lastAskedAt(watchStampPath(h))).toBe(5_000);
   });
@@ -110,8 +126,8 @@ describe("a watch run", () => {
       return took;
     };
 
-    await watchRedSkills({ home: h, nowMs: 5_000, take });
-    const second = await watchRedSkills({ home: h, nowMs: 5_000 + 60_000, take });
+    await watchRedSkills({ upgrade: noUpgrade, home: h, nowMs: 5_000, take });
+    const second = await watchRedSkills({ upgrade: noUpgrade, home: h, nowMs: 5_000 + 60_000, take });
 
     expect(second.outcome).toBe("not-due");
     expect(asks).toBe(1);
@@ -124,8 +140,8 @@ describe("a watch run", () => {
       asks++;
       return took;
     };
-    await watchRedSkills({ home: h, nowMs: 5_000, take });
-    await watchRedSkills({ home: h, nowMs: 5_100, take, force: true });
+    await watchRedSkills({ upgrade: noUpgrade, home: h, nowMs: 5_000, take });
+    await watchRedSkills({ upgrade: noUpgrade, home: h, nowMs: 5_100, take, force: true });
     expect(asks).toBe(2);
   });
 
@@ -133,7 +149,7 @@ describe("a watch run", () => {
     // Fifteen minutes of silence bought with a failure is fifteen
     // minutes a machine stays behind for no reason.
     const h = home();
-    const result = await watchRedSkills({
+    const result = await watchRedSkills({ upgrade: noUpgrade,
       home: h,
       nowMs: 5_000,
       take: async () => ({ outcome: "unreachable", reason: "no network" }),
@@ -152,7 +168,7 @@ describe("a watch run", () => {
 
   test("what it found is written down, for a person reading the file", async () => {
     const h = home();
-    await watchRedSkills({ home: h, nowMs: 7_000, take: async () => took });
+    await watchRedSkills({ upgrade: noUpgrade, home: h, nowMs: 7_000, take: async () => took });
     const stamp = JSON.parse(readFileSync(watchStampPath(h), "utf8")) as Record<string, unknown>;
     expect(stamp["found"]).toBe("acquired 4.0.2");
     expect(stamp["askedAtMs"]).toBe(7_000);
@@ -160,7 +176,7 @@ describe("a watch run", () => {
 
   test("a machine already current writes no news, only the time", async () => {
     const h = home();
-    await watchRedSkills({
+    await watchRedSkills({ upgrade: noUpgrade,
       home: h,
       nowMs: 9_000,
       take: async () => ({ outcome: "current", reason: "already on e0dea94" }),
@@ -246,7 +262,7 @@ describe("the other half of a WSL machine", () => {
     // daemon's host hook execs inside the distro.
     const h = home();
     const crossed: string[] = [];
-    await watchRedSkills({
+    await watchRedSkills({ upgrade: noUpgrade,
       home: h,
       nowMs: 1_000,
       take: async () => ({ outcome: "current", reason: "already on e0dea94" }),
@@ -263,7 +279,7 @@ describe("the other half of a WSL machine", () => {
   test("is not asked from a machine that has no other half", async () => {
     const h = home();
     let crossed = 0;
-    await watchRedSkills({
+    await watchRedSkills({ upgrade: noUpgrade,
       home: h,
       nowMs: 1_000,
       take: async () => took,
@@ -360,7 +376,7 @@ describe("a release that is still uploading", () => {
     // quarter of an hour for the machine to look again.
     const h = home();
     const now = 10_000_000;
-    await watchRedSkills({
+    await watchRedSkills({ upgrade: noUpgrade,
       home: h,
       nowMs: now,
       take: async () => ({
@@ -380,7 +396,7 @@ describe("a release that is still uploading", () => {
     // asking again in a minute would be a machine retrying a refusal.
     const h = home();
     const now = 10_000_000;
-    await watchRedSkills({
+    await watchRedSkills({ upgrade: noUpgrade,
       home: h,
       nowMs: now,
       take: async () => ({ outcome: "refused", reason: "manifest signature is invalid" }),

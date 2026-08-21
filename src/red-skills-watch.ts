@@ -53,6 +53,7 @@ import { dirname } from "node:path";
 import { log } from "./log.ts";
 import type { Platform } from "./platform.ts";
 import { TRIGGER_ENV, type Trigger } from "./trigger.ts";
+import { announceSelfUpdate, type SelfUpdate } from "./self-update.ts";
 import { redSkillsRoot } from "./red-skills-root.ts";
 
 /** How long an answer stands before the network is asked again. */
@@ -210,6 +211,8 @@ export interface WatchOptions {
   manifestPlatform?: Platform;
   /** The take, injected for the tests. Defaults to the staged update. */
   take?: () => Promise<WatchResult>;
+  /** red-dev's own upgrade, injected for the tests. */
+  upgrade?: () => Promise<SelfUpdate>;
   /** The crossing, injected for the tests. Defaults to crossToWindows. */
   cross?: (p: Platform) => Promise<Crossing>;
 }
@@ -236,6 +239,15 @@ export async function watchRedSkills(opts: WatchOptions = {}): Promise<WatchResu
   if (fd === null) return { outcome: "busy", reason: "another run holds the watch lock" };
 
   try {
+    // red-dev before RedSkills, and deliberately so. A newer red-dev may
+    // be the thing that knows how to take the newer set — every fix on
+    // 2026-08-21 was exactly that — and taking the set first would leave
+    // the machine one trigger behind its own repair for ten minutes.
+    // The upgraded binary does not run here; it runs from the next
+    // trigger, which is ten minutes away and costs nothing to wait for.
+    const upgraded = await (opts.upgrade ?? (() => defaultUpgrade(opts)))();
+    announceSelfUpdate(upgraded);
+
     const result = await (opts.take ?? (() => defaultTake(opts)))();
 
     // The other half of a WSL machine, whatever this half found: the
@@ -268,6 +280,17 @@ export async function watchRedSkills(opts: WatchOptions = {}): Promise<WatchResu
   } finally {
     releaseWatchLock(stamp, fd);
   }
+}
+
+/** The real upgrade: ask the publisher, let mise place it. */
+async function defaultUpgrade(opts: WatchOptions): Promise<SelfUpdate> {
+  const { updateRedDev } = await import("./self-update.ts");
+  const { VERSION } = await import("./cli.ts");
+  const { detect } = await import("./platform.ts");
+  return await updateRedDev({
+    current: VERSION,
+    platform: opts.manifestPlatform ?? detect(),
+  });
 }
 
 /** The real take: the staged update, which is ADR 0012's one acquisition. */

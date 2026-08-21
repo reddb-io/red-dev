@@ -271,6 +271,26 @@ async function cmdDoctor(p: Platform, inv: Invocation): Promise<number> {
       if (row.fix) log.plain(`       fix: ${row.fix}`);
       shadowedCount++;
     }
+
+    // The agents, which the walk above does not reach: it examines
+    // tools mise provides, and a host installed from a GitHub release
+    // into ~/.local/bin is not one. That gap let an npm copy from
+    // before RedCode moved publishers answer to `redcode` for three
+    // releases while every install said `ok`. See src/shadow-repair.ts.
+    const { checkShadow } = await import("./shadow-repair.ts");
+    const { AGENTS, agentInstallMethod, commandPath } = await import("./agents.ts");
+    const { userBinDir, windowsBinDir } = await import("./providers.ts");
+    for (const a of AGENTS) {
+      if (a.cmd.length === 0 || agentInstallMethod(a, p) !== "github-release") continue;
+      const running = commandPath(a.cmd);
+      if (running === null) continue;
+      const bin = p.os === "windows" ? windowsBinDir() : userBinDir();
+      const check = checkShadow(running, `${bin}/${a.cmd}${p.os === "windows" ? ".exe" : ""}`);
+      if (!check.shadowed) continue;
+      log.warn(`${a.cmd} — ${check.running} answers first; red-dev installs ${check.installed}`);
+      log.plain("       fix: red-dev agents update — it removes the copy it can identify");
+      shadowedCount++;
+    }
   }
 
   // Presence on PATH is the easy half. Everything that goes wrong after

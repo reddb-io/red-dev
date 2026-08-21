@@ -35,6 +35,7 @@ import {
 } from "./agents.ts";
 import { runBounded } from "./bounded-command.ts";
 import { log } from "./log.ts";
+import type { ShadowRepair } from "./shadow-repair.ts";
 import type { Platform } from "./platform.ts";
 import {
   exactGhReleaseUrl,
@@ -362,7 +363,7 @@ export function releaseTagFromLocation(location: string): string | null {
   return match?.[1] ? decodeURIComponent(match[1]) : null;
 }
 
-async function resolveReleaseTag(repo: string, asset: string): Promise<string | null> {
+export async function resolveReleaseTag(repo: string, asset: string): Promise<string | null> {
   try {
     const res = await fetch(exactGhReleaseUrl(repo, asset), {
       method: "HEAD",
@@ -409,6 +410,45 @@ export interface AgentUpdateDeps {
   report?: (outcome: AgentUpdateOutcome) => void;
 }
 
+/**
+ * Whether the host that runs is the host just installed, and the repair.
+ *
+ * Only for mechanisms that place a file themselves. npm and winget own
+ * their own resolution, and a self-update replaced whatever was already
+ * running by definition — none of those can be shadowed by the act of
+ * updating them.
+ */
+async function verifyRuns(
+  host: AgentSpec,
+  p: Platform,
+  deps: AgentUpdateDeps,
+): Promise<ShadowRepair | null> {
+  if (host.cmd.length === 0) return null;
+  try {
+    const { repairShadow } = await import("./shadow-repair.ts");
+    const { userBinDir, windowsBinDir } = await import("./providers.ts");
+    const bin = p.os === "windows" ? windowsBinDir() : userBinDir();
+    const installed = `${bin}/${host.cmd}${p.os === "windows" ? ".exe" : ""}`;
+    const locate = deps.locate ?? commandPath;
+    const npm = await (deps.npm ?? resolveNpm)();
+    const globals = npm ? await (deps.npmGlobals ?? npmGlobalPackages)(npm) : new Set<string>();
+    const repair = await repairShadow({
+      cmd: host.cmd,
+      installedPath: installed,
+      runningPath: locate(host.cmd),
+      npm,
+      npmGlobals: globals,
+      run: async (argv) => (await (deps.command ?? defaultCommand)(argv, {})).code,
+      mise: Bun.which("mise"),
+    });
+    if (repair.outcome === "reported") log.warn(`${host.label}: ${repair.reason}`);
+    return repair;
+  } catch {
+    // A verification that cannot run must not fail an update that did.
+    return null;
+  }
+}
+
 async function defaultCommand(
   argv: string[],
   env: Record<string, string | undefined>,
@@ -448,6 +488,15 @@ async function performUpdate(
         { repo, asset, bin },
         p,
       );
+    // Installed is not the same as running. A release goes into
+    // ~/.local/bin, and an npm global of the same name sits in the
+    // active node's bin, which `mise activate` puts first — so this
+    // reported success three times while the machine kept executing a
+    // version from before the publisher moved. See src/shadow-repair.ts.
+    const repair = await verifyRuns(host, p, deps);
+    if (repair && repair.outcome !== "clear") {
+      return { ...base, state: "updated", detail: `${tag ?? ""} — ${repair.reason}`.trim() };
+    }
     return { ...base, state: "updated", detail: tag ?? undefined };
   }
 
