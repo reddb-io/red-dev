@@ -209,12 +209,32 @@ async function miseHoldsRedDev(): Promise<boolean> {
   }
 }
 
+/**
+ * What mise's copy of red-dev answers now — not what PATH answers.
+ *
+ * This asked PATH first, and PATH is the wrong witness for the question
+ * "did mise place a newer one". A machine that has run both installers
+ * has boot's copy in `~/.local/bin`, mise never touches it, and on the
+ * maintainer's workstation it came first: the upgrade genuinely placed
+ * 1.0.106, this read `~/.local/bin/red-dev` and got 1.0.104, and the run
+ * reported
+ *
+ *     warn red-dev: 1.0.106 is published and this machine is still on 1.0.104
+ *
+ * about an upgrade that had just succeeded. The next tick then ran the
+ * new binary and went quiet — a false alarm, once, on the one event a
+ * person would want to be able to trust.
+ *
+ * It is the same mistake `redwallBinary` was fixed for hours earlier,
+ * in a second function, which is why it is now asked of the same
+ * resolver rather than spelled again here.
+ */
 async function installedVersion(): Promise<string | null> {
   try {
     const { runBounded } = await import("./bounded-command.ts");
-    const { commandPath } = await import("./agents.ts");
-    const exe = commandPath("red-dev");
-    if (exe === null) return null;
+    const { redwallBinary } = await import("./redwall-hook.ts");
+    const { detect } = await import("./platform.ts");
+    const exe = await redwallBinary(detect());
     const result = await runBounded([exe, "--version"], { timeoutMs: 10_000 });
     return /(\d+\.\d+\.\d+[^\s]*)/.exec(result.stdout)?.[1] ?? null;
   } catch {

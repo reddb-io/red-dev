@@ -113,6 +113,18 @@ describe("taking it", () => {
     expect(h.ran).toEqual([]);
   });
 
+  test("the copy mise placed is the witness, not whatever PATH answers", async () => {
+    // Asserted against the source, the way this repo checks the other
+    // behaviour a test machine cannot stage: a machine that has run both
+    // installers keeps boot's copy in ~/.local/bin, mise never touches
+    // it, and it can come first on PATH. Reading it made a successful
+    // upgrade report itself refused, once, on the maintainer's machine.
+    const source = await Bun.file(new URL("./self-update.ts", import.meta.url)).text();
+    const fn = source.slice(source.indexOf("async function installedVersion"));
+    expect(fn).toContain("redwallBinary");
+    expect(fn).not.toContain("commandPath");
+  });
+
   test("an upgrade that did not move the version says so", async () => {
     const h = harness({ installed: async () => "1.0.99" });
     const result = await updateRedDev(h.opts);
