@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { providerFor, TOOLS } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
-import { declaredAptPackages, declaredWingetIds, globToRegExp,
+import { declaredAptPackages, declaredWingetIds, globToRegExp, installRefreshesDeclared,
   expandArchiveArgv,
 } from "./providers.ts";
 
@@ -211,5 +211,20 @@ describe("replacing a binary somebody is running", () => {
     } finally {
       proc.kill();
     }
+  });
+});
+
+describe("when an install also moves the declared packages", () => {
+  test("a typed core install does; everything else leaves them alone", () => {
+    expect(installRefreshesDeclared("install", false, ["core", "agents"])).toBe(true);
+    // `red-dev update` runs the same pass as its own first stage and
+    // then reuses this converge — ungated, one update would run it twice.
+    expect(installRefreshesDeclared("update", false, ["core"])).toBe(false);
+    // A dry run changes nothing, so it upgrades nothing.
+    expect(installRefreshesDeclared("install", true, ["core"])).toBe(false);
+    // A targeted install names one surface; upgrading git under it
+    // widens what was asked.
+    expect(installRefreshesDeclared("install", false, ["redwall"])).toBe(false);
+    expect(installRefreshesDeclared("install", false, [])).toBe(false);
   });
 });

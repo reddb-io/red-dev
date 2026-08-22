@@ -1542,6 +1542,37 @@ export function declaredWingetIds(p: Platform, tools: readonly Tool[] = TOOLS): 
 }
 
 /**
+ * Whether this install run also moves the declared packages forward. PURE.
+ *
+ * "Installed" and "current" are different facts, and the converge only
+ * ever asks the first: a tool the machine already has is `present` in
+ * two milliseconds and never touched again. The pass that asks the
+ * second — `systemUpdate` over the packages red-dev declares — lived
+ * only in `red-dev update`, a command nobody types on a machine the
+ * installer is supposed to keep in order.
+ *
+ * Measured across one workstation's two halves: the WSL mise was
+ * current because `red-dev update` had run there (apt's history names
+ * the exact `install --only-upgrade` line), while the Windows mise sat
+ * a month behind through four boot.ps1 installs, each reporting
+ * `mise winget:jdx.mise present 2ms`. Same machine, same declaration,
+ * and only the half where somebody happened to type `update` moved.
+ *
+ * Three gates. `install` only, because `red-dev update` runs the same
+ * pass as its own first stage and reuses this converge afterwards — an
+ * ungated call here would run it twice per update. Never on a dry run.
+ * And only when `core` is in scope: `red-dev install redwall` names one
+ * surface, and quietly upgrading git under it widens what was asked.
+ */
+export function installRefreshesDeclared(
+  entry: "install" | "update",
+  dryRun: boolean,
+  scopes: readonly string[],
+): boolean {
+  return entry === "install" && !dryRun && scopes.includes("core");
+}
+
+/**
  * Move what red-dev installed forward. Nothing else on the machine.
  *
  * This used to be `apt full-upgrade -y` and `winget upgrade --all`,

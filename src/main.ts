@@ -696,6 +696,21 @@ async function cmdInstall(
 
   const scopes = [...resolveScopes(p, inv.scope), ...extraScopes];
 
+  // Move the declared packages forward before converging over them —
+  // see installRefreshesDeclared for why install has to do this itself.
+  // Never fatal: a machine that cannot refresh (no sudo on this run, a
+  // proxy in the way) still converges against what it has.
+  {
+    const { installRefreshesDeclared, systemUpdate } = await import("./providers.ts");
+    if (installRefreshesDeclared(entry, inv.dryRun, scopes)) {
+      try {
+        await systemUpdate(p, { whole: false });
+      } catch (err) {
+        log.warn(`declared-package refresh: ${(err as Error).message}`);
+      }
+    }
+  }
+
   // Direct `red-dev install` reaches here without the first-run interview.
   // Prime once before either fullscreen or line reporting begins. `--yes`
   // remains strictly unattended and non-TTY runs never ask anything.
