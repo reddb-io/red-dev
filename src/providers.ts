@@ -9,7 +9,15 @@
  */
 
 import { removeTemp, tempDir, tempFile } from "./temp.ts";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+} from "node:fs";
 import { formatBytes, formatDuration, log, logIsCaptured, RedError } from "./log.ts";
 import { parseChecksums, pickChecksumAsset, sha256Hex, verifyChecksum } from "./checksum.ts";
 import { providerFor, TOOLS, type Provider, type Tool } from "./manifest.ts";
@@ -987,6 +995,47 @@ export async function ghInstall(
 }
 
 /**
+ * Put a binary in place even when the copy it replaces is running.
+ *
+ * `copyFileSync` writes *into* the destination file, and a Linux kernel
+ * refuses that for an executable something is currently running:
+ * `ETXTBSY: text file is busy`. Measured on the maintainer's machine
+ * with six `redcode` processes open — the ordinary state of a terminal
+ * agent — where every `red-dev agents update` failed on the one host
+ * the person was actually using and succeeded on the ones they were not.
+ *
+ * Renaming does not have that problem. The running process holds its
+ * inode and keeps running from it; the name points at the new file, and
+ * the next invocation is the new version. The rename is atomic, so the
+ * command never briefly does not exist — which a delete-then-copy would
+ * have made possible.
+ *
+ * Windows cannot rename onto a running image either, and cannot keep an
+ * open file alive under a new name the way Unix does — but it *can*
+ * rename the running one out of the way. So the old binary is moved
+ * aside and cleared on the next pass, which is what a Windows updater
+ * has always had to do.
+ */
+function placeBinary(source: string, target: string, os: Platform["os"]): void {
+  const staging = `${target}.red-dev-new`;
+  copyFileSync(source, staging);
+  if (os !== "windows") chmodSync(staging, 0o755);
+
+  if (os === "windows") {
+    const aside = `${target}.red-dev-old`;
+    // Left by a previous replacement whose process has since exited.
+    rmSync(aside, { force: true });
+    try {
+      renameSync(target, aside);
+    } catch {
+      // Nothing there yet: the first install.
+    }
+  }
+
+  renameSync(staging, target);
+}
+
+/**
  * A stable release asset whose filename is known exactly.
  *
  * GitHub serves this redirect from github.com rather than the REST API, so a
@@ -1052,8 +1101,7 @@ export async function ghInstallExactArchive(
   const dir = p.os === "windows" ? windowsBinDir() : userBinDir();
   const target = `${dir}/${filename}`;
   mkdirSync(dir, { recursive: true });
-  copyFileSync(source, target);
-  if (p.os !== "windows") chmodSync(target, 0o755);
+  placeBinary(source, target, p.os);
   log.ok(`installed ${target}`);
   removeTemp(tmp);
 }
@@ -1109,8 +1157,10 @@ export async function ghInstallWindows(
     log.info(`bare binary — installing it as ${dir}\\${bin}.exe`);
     mkdirSync(dir, { recursive: true });
     // Copied rather than moved: the download and the destination can be
-    // on different volumes, where a rename fails.
-    copyFileSync(downloaded, `${dir}\\${bin}.exe`);
+    // on different volumes, where a rename fails. The staging copy
+    // placeBinary makes is inside the destination directory, so its own
+    // rename is same-volume by construction.
+    placeBinary(downloaded, `${dir}\\${bin}.exe`, "windows");
     log.ok(`installed ${dir}\\${bin}.exe`);
   } else {
     throw new RedError(

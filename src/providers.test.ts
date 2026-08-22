@@ -173,3 +173,43 @@ describe("a child that will not stop itself", () => {
     expect(await spawnLogged(["true"])).toBe(0);
   });
 });
+
+describe("replacing a binary somebody is running", () => {
+  test("the install path renames rather than copies over the target", async () => {
+    // Asserted against the source, because staging six running agents in
+    // a test is not the point: what matters is that the destination is
+    // never written *into*. A plain copyFileSync there fails with
+    // ETXTBSY on Linux, which is how `red-dev agents update` came to
+    // fail on the one host the person had open and succeed on the rest.
+    const source = await Bun.file(new URL("./providers.ts", import.meta.url)).text();
+    const fn = source.slice(source.indexOf("function placeBinary"), source.indexOf("A stable release asset"));
+    expect(fn).toContain("renameSync(staging, target)");
+    // The staging file sits in the destination directory, so its rename
+    // is same-volume — the reason the copy could not simply become a move.
+    expect(fn).toContain("`${target}.red-dev-new`");
+  });
+
+  test("ETXTBSY is what a copy over a running binary actually gives", async () => {
+    const { copyFileSync, mkdtempSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+
+    const dir = mkdtempSync(join(tmpdir(), "red-busy-"));
+    const target = join(dir, "toy");
+    copyFileSync("/bin/sleep", target);
+    const proc = Bun.spawn([target, "30"], { stdout: "ignore", stderr: "ignore" });
+    try {
+      await Bun.sleep(200);
+      expect(() => copyFileSync("/bin/true", target)).toThrow(/ETXTBSY/);
+
+      // And the shape placeBinary uses instead.
+      const { renameSync } = await import("node:fs");
+      copyFileSync("/bin/true", `${target}.red-dev-new`);
+      renameSync(`${target}.red-dev-new`, target);
+      // The process that was running is untouched by the replacement.
+      expect(proc.killed).toBe(false);
+    } finally {
+      proc.kill();
+    }
+  });
+});
