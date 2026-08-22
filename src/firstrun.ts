@@ -645,6 +645,7 @@ async function retireLegacy(p: Platform, hosts: readonly AgentSpec[]): Promise<v
     const { retireLegacyInstalls } = await import("./legacy-install.ts");
     const { agentInstallMethod, resolveNpm } = await import("./agents.ts");
     const { pathLookup } = await import("./shadowed.ts");
+    const { miseShim } = await import("./mise-config.ts");
     const { npmGlobalPackages } = await import("./agent-update.ts");
     const { userBinDir, windowsBinDir, spawnLogged } = await import("./providers.ts");
     const { adoptionBackupRoot } = await import("./red-skills-adopt.ts");
@@ -657,6 +658,7 @@ async function retireLegacy(p: Platform, hosts: readonly AgentSpec[]): Promise<v
       bin: p.os === "windows" ? windowsBinDir() : userBinDir(),
       method: (a) => agentInstallMethod(a, p),
       lookup: (cmd) => pathLookup(cmd),
+      shim: (cmd) => miseShim(cmd),
       npmGlobals: npm ? await npmGlobalPackages(npm) : new Set<string>(),
       home,
       // One directory per run, beside the adoption backups: same shape

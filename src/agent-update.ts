@@ -50,6 +50,7 @@ import {
  * case where the publisher owns the update and not the install.
  */
 export type AgentUpdateMechanism =
+  | "mise"
   | "self-update"
   | "npm"
   | "winget"
@@ -206,6 +207,26 @@ export function planAgentUpdate(
         // is indistinguishable from one that hung.
         env: { MISE_SKIP_RESHIM: "1" },
       });
+    }
+
+    case "mise": {
+      // The one mechanism that is not a vendor's: for a host this
+      // organisation publishes, mise is what moves every other tool in
+      // the suite, and `upgrade` is the same verb `red-dev` itself
+      // takes. The cache is not cleared here — `mise upgrade` on a
+      // named tool re-resolves it, and the version list this depends on
+      // is refreshed by the self-update that runs beside this.
+      const mise = res.locate("mise");
+      if (!mise) {
+        return {
+          state: "blocked",
+          key,
+          label,
+          reason: "mise is not on PATH",
+          fix: "red-dev install core",
+        };
+      }
+      return ready({ kind: "command", argv: [mise, "upgrade", a.mise as string], env: {} });
     }
 
     case "winget":

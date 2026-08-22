@@ -150,7 +150,7 @@ describe("the set is derived, not written down", () => {
   test("a fixture manifest with a different set produces a different projection", () => {
     const fixture = fixtureManifest("dev", "sparkle");
     expect(redSkillsPluginNames(UBUNTU, fixture)).toEqual(["dev", "sparkle"]);
-    expect(miseEntries(UBUNTU, fixture).map((e) => e.spec)).toEqual([
+    expect(miseEntries(UBUNTU, fixture, []).map((e) => e.spec)).toEqual([
       `${REDSKILLS_PLUGIN_PREFIX}dev`,
       `${REDSKILLS_PLUGIN_PREFIX}sparkle`,
     ]);
@@ -265,7 +265,7 @@ describe("opting a plugin out", () => {
   test("removes its entry from the fragment", () => {
     const kept = DECLARED[0] as string;
     const fixture = fixtureManifest(kept);
-    const specs = miseEntries(UBUNTU, fixture).map((e) => e.spec);
+    const specs = miseEntries(UBUNTU, fixture, []).map((e) => e.spec);
     expect(specs).toEqual([`${REDSKILLS_PLUGIN_PREFIX}${kept}`]);
     for (const name of DECLARED.filter((n) => n !== kept)) {
       expect(specs).not.toContain(`${REDSKILLS_PLUGIN_PREFIX}${name}`);

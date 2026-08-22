@@ -99,7 +99,19 @@ describe("renderMiseConfig", () => {
 describe("miseEntries", () => {
   test("every mise provider in the manifest reaches the fragment", () => {
     const declared = TOOLS.filter((t) => providerFor(t, UBUNTU).kind === "mise");
-    expect(miseEntries(UBUNTU)).toHaveLength(declared.length);
+    // No hosts: this is about the manifest's own projection. The agent
+    // hosts this organisation publishes are folded in on top, and have
+    // their own test below.
+    expect(miseEntries(UBUNTU, TOOLS, [])).toHaveLength(declared.length);
+  });
+
+  test("an agent host we publish is pinned like any other tool of ours", () => {
+    const entries = miseEntries(UBUNTU);
+    const ours = entries.find((e) => e.spec === "github:reddb-io/redcode");
+    expect(ours).toMatchObject({ alias: "redcode", version: "latest" });
+    // And so the release-age gate learns to let it through, which is
+    // what kept its newest five versions hidden from `mise ls-remote`.
+    expect(releaseAgeExcludes(entries)).toContain("github:reddb-io/redcode");
   });
 
   test("the suite CLIs are there, under the names people type", () => {

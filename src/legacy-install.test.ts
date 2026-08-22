@@ -175,3 +175,96 @@ describe("what a backup copies", () => {
     expect(backupAgentConfig({ ...REDCODE, configFiles: undefined }, m.root, join(m.root, "b"))).toEqual([]);
   });
 });
+
+describe("a host that moved from a release to mise", () => {
+  const MISED: AgentSpec = { ...REDCODE, mise: "github:reddb-io/redcode" };
+
+  test("mise's shim is canonical, and the release copy becomes the leftover", () => {
+    const m = machine();
+    const shimPath = join(m.root, "shims", "redcode");
+    mkdirSync(join(m.root, "shims"), { recursive: true });
+    writeFileSync(shimPath, "#!/bin/sh\n# shim\n");
+
+    const found = findLegacyCopies({
+      ...scan(m),
+      hosts: [MISED],
+      method: () => "mise",
+      shim: () => shimPath,
+      lookup: () => [join(m.bin, "redcode"), shimPath],
+    });
+
+    expect(found).toHaveLength(1);
+    // What red-dev placed under the old mechanism, at a path it chose.
+    expect(found[0]?.path).toBe(join(m.bin, "redcode"));
+    expect(found[0]?.ours).toBe(true);
+    expect(found[0]?.canonical).toBe(shimPath);
+  });
+
+  test("mise not having placed it yet makes nothing legacy", () => {
+    const m = machine();
+    // No canonical copy means nothing to call the others legacy against.
+    const found = findLegacyCopies({
+      ...scan(m),
+      hosts: [MISED],
+      method: () => "mise",
+      shim: () => null,
+      lookup: () => [join(m.bin, "redcode")],
+    });
+    expect(found).toEqual([]);
+  });
+
+  test("red-dev removes the copy it placed itself, and backs the config up first", async () => {
+    const m = machine();
+    const shimPath = join(m.root, "shims", "redcode");
+    mkdirSync(join(m.root, "shims"), { recursive: true });
+    writeFileSync(shimPath, "#!/bin/sh\n");
+
+    const ran: string[][] = [];
+    const out = await retireLegacyInstalls({
+      ...scan(m),
+      hosts: [MISED],
+      method: () => "mise",
+      shim: () => shimPath,
+      lookup: () => [join(m.bin, "redcode"), shimPath],
+      home: m.root,
+      backupDir: join(m.root, "backup"),
+      npm: "/usr/bin/npm",
+      mise: "/usr/bin/mise",
+      specOf: () => MISED,
+      run: async (argv: string[]) => {
+        ran.push(argv);
+        return 0;
+      },
+    });
+
+    expect(out[0]?.outcome).toBe("retired");
+    expect(existsSync(join(m.bin, "redcode"))).toBe(false);
+    // Its own file, so no package manager is asked to do it.
+    expect(ran).toEqual([]);
+    expect(existsSync(join(m.root, "backup", "redcode", ".config", "redcode", "opencode.json"))).toBe(
+      true,
+    );
+  });
+
+  test("and once removed, a second run finds nothing", async () => {
+    const m = machine();
+    const shimPath = join(m.root, "shims", "redcode");
+    mkdirSync(join(m.root, "shims"), { recursive: true });
+    writeFileSync(shimPath, "#!/bin/sh\n");
+    const opts = {
+      ...scan(m),
+      hosts: [MISED],
+      method: () => "mise" as const,
+      shim: () => shimPath,
+      lookup: () => (existsSync(join(m.bin, "redcode")) ? [join(m.bin, "redcode"), shimPath] : [shimPath]),
+      home: m.root,
+      backupDir: join(m.root, "backup"),
+      npm: "/usr/bin/npm",
+      mise: "/usr/bin/mise",
+      specOf: () => MISED,
+      run: async () => 0,
+    };
+    await retireLegacyInstalls(opts);
+    expect(await retireLegacyInstalls(opts)).toEqual([]);
+  });
+});

@@ -55,6 +55,33 @@ export interface AgentSpec {
   msstore?: string;
   /** npm package, when neither of the above fits the platform. */
   npm?: string;
+  /**
+   * A mise spec, for a host this organisation publishes itself.
+   *
+   * The rule in `src/agent-update.ts` — every host by its own
+   * publisher's mechanism — is written against third parties, and it is
+   * right for them: red-dev has no business deciding what "current"
+   * means for Anthropic's CLI or OpenAI's. It says nothing about a host
+   * we publish, because there is no vendor to get between.
+   *
+   * For those, `src/manifest.ts` already recorded the opposite rule and
+   * the reason: a bare release download "downloads a tool *once* and
+   * there is nothing left that knows how to move it forward; every
+   * reddb-io tool grew an install.sh and none of them grew an updater."
+   * RedCode was in this list rather than that one, so it got the
+   * third-party answer by accident of which catalog it lived in — and
+   * sat three versions behind while every other reddb-io tool tracked
+   * the publisher through `mise upgrade`.
+   *
+   * Declaring it here rather than moving the host into `TOOLS` keeps
+   * the one thing that list is for: red-skills wires its marketplace
+   * into these hosts, and a host that left the list would stop being
+   * wired.
+   *
+   * Takes precedence over `release` on a machine that has mise. The
+   * `release` entry stays as the answer for a machine that does not.
+   */
+  mise?: string;
   /** GitHub release archives whose stable filenames are part of our contract. */
   release?: {
     repo: string;
@@ -147,6 +174,7 @@ export const AGENTS: AgentSpec[] = [
     cmd: "redcode",
     configFiles: [".config/redcode/opencode.json", ".config/redcode/opencode.jsonc"],
     recommended: true,
+    mise: "github:reddb-io/redcode",
     release: {
       repo: "reddb-io/redcode",
       linux: {
@@ -586,10 +614,30 @@ async function exposeWindowsAgentCommand(a: AgentSpec): Promise<void> {
   log.ok("Codex CLI command exposed as codex");
 }
 
-export type AgentInstallMethod = "msstore" | "winget" | "npm" | "installer" | "github-release";
+export type AgentInstallMethod =
+  | "mise"
+  | "msstore"
+  | "winget"
+  | "npm"
+  | "installer"
+  | "github-release";
 
 /** Choose a method that can run unattended on this target. */
 export function agentInstallMethod(a: AgentSpec, p: Platform): AgentInstallMethod | null {
+  // First, and only for a host we publish: mise owns version resolution,
+  // download, checksum and the shim for the rest of this organisation's
+  // suite, and a host of ours is not different in kind from `red` or
+  // `tq`.
+  //
+  // Not conditioned on mise being present, though the first draft was.
+  // This function is asked what mechanism a host *has*, and the answer
+  // must not change with the machine it is asked on — a probe here made
+  // it disagree with itself between a developer's box and CI. mise is
+  // core's first tool and red-dev is itself installed by it, so a run
+  // that reaches an agent has one; where it somehow does not,
+  // `installAgent` says so in those words rather than quietly picking a
+  // mechanism nothing will maintain.
+  if (a.mise) return "mise";
   const release = p.os === "windows" ? a.release?.windows[p.arch] : a.release?.linux[p.arch];
   if (release) return "github-release";
   if (p.os === "windows" && a.msstore) return "msstore";
@@ -605,6 +653,18 @@ export function agentInstallMethod(a: AgentSpec, p: Platform): AgentInstallMetho
 
 export async function installAgent(a: AgentSpec, p: Platform): Promise<void> {
   const method = agentInstallMethod(a, p);
+
+  if (method === "mise" && a.mise) {
+    // `use -g`, the same verb every other tool in the suite is placed
+    // with: it installs, writes the pin into the global config and
+    // leaves a shim on PATH, so the next `mise upgrade` knows this host
+    // exists. `ghInstallExactArchive` below places a file and leaves
+    // nothing that knows how to move it — which is the whole reason
+    // this branch is here.
+    const { useRuntimes } = await import("./runtimes.ts");
+    await useRuntimes([`${a.mise}@latest`]);
+    return;
+  }
 
   if (method === "github-release" && a.release) {
     const asset = p.os === "windows" ? a.release.windows[p.arch] : a.release.linux[p.arch];

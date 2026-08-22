@@ -56,11 +56,34 @@ const found = (...commands: string[]) => (command: string): string | null =>
 
 const host = (key: string): AgentSpec => AGENTS.find((a) => a.key === key) as AgentSpec;
 
+/**
+ * A host published as a GitHub release and nothing else.
+ *
+ * A fixture rather than a real entry, because the catalog no longer has
+ * one: RedCode was the only `github-release` host and moved to mise
+ * when this organisation's own hosts did. The mechanism still exists
+ * for third parties that publish that way, so it keeps its tests.
+ */
+const RELEASE_HOST: AgentSpec = {
+  key: "toy",
+  label: "Toy",
+  about: "",
+  cmd: "toy",
+  recommended: false,
+  release: {
+    repo: "example/toy",
+    linux: { x64: "toy-linux-x64.tar.gz" },
+    windows: { x64: "toy-windows-x64.zip" },
+  },
+};
+
 /** Resolve one host's plan, with everything it could ask the machine answered. */
 function plan(key: string, p: Platform, overrides: Partial<{ npm: string | null }> = {}) {
   const spec = host(key);
   return planAgentUpdate(spec, p, {
-    locate: found(spec.cmd),
+    // mise too: a host this organisation publishes is upgraded through
+    // it, so the resolver has to be able to find it.
+    locate: found(spec.cmd, "mise"),
     npm: overrides.npm === undefined ? "/home/u/.local/share/mise/shims/npm" : overrides.npm,
     platform: p.os === "windows" ? "win32" : "linux",
   });
@@ -170,15 +193,33 @@ describe("the update argv of each per-host mechanism", () => {
   });
 
   test("a GitHub release is re-resolved as an archive, not as a command", () => {
-    const p = plan("redcode", LINUX);
+    const p = planAgentUpdate(RELEASE_HOST, LINUX, {
+      locate: () => "/usr/bin/toy",
+      npm: "/usr/bin/npm",
+    });
     expect(p.state).toBe("ready");
     if (p.state !== "ready") return;
     expect(p.mechanism).toBe("github-release");
     expect(p.step).toEqual({
       kind: "release",
-      repo: "reddb-io/redcode",
-      asset: "redcode-linux-x64.tar.gz",
-      bin: "redcode",
+      repo: "example/toy",
+      asset: "toy-linux-x64.tar.gz",
+      bin: "toy",
+    });
+  });
+
+  test("a host this organisation publishes is mise's, like the rest of the suite", () => {
+    // RedCode sat three versions behind while `red`, `tq` and red-dev
+    // itself tracked the publisher through `mise upgrade`, because it
+    // was in the agent catalog and got the third-party answer.
+    const p = plan("redcode", LINUX);
+    expect(p.state).toBe("ready");
+    if (p.state !== "ready") return;
+    expect(p.mechanism).toBe("mise");
+    expect(p.step).toEqual({
+      kind: "command",
+      argv: ["/usr/bin/mise", "upgrade", "github:reddb-io/redcode"],
+      env: {},
     });
   });
 
@@ -273,8 +314,8 @@ describe("a host with nothing to do", () => {
     // comes from the same redirect the download would have followed, so
     // asking costs nothing the install would not have spent anyway.
     let downloads = 0;
-    const outcomes = await updateAgents([host("redcode")], LINUX, {
-      locate: found("redcode"),
+    const outcomes = await updateAgents([RELEASE_HOST], LINUX, {
+      locate: found("toy"),
       releaseTag: async () => "v0.4.2",
       version: async () => "redcode 0.4.2",
       release: async () => {
@@ -288,8 +329,8 @@ describe("a host with nothing to do", () => {
 
   test("and one carrying an older version is", async () => {
     let downloads = 0;
-    const outcomes = await updateAgents([host("redcode")], LINUX, {
-      locate: found("redcode"),
+    const outcomes = await updateAgents([RELEASE_HOST], LINUX, {
+      locate: found("toy"),
       releaseTag: async () => "v0.4.2",
       version: async () => "redcode 0.4.1",
       release: async () => {
@@ -303,8 +344,8 @@ describe("a host with nothing to do", () => {
 
   test("and one whose version cannot be read is updated rather than assumed current", async () => {
     let downloads = 0;
-    await updateAgents([host("redcode")], LINUX, {
-      locate: found("redcode"),
+    await updateAgents([RELEASE_HOST], LINUX, {
+      locate: found("toy"),
       releaseTag: async () => null,
       version: async () => null,
       release: async () => {
@@ -324,11 +365,11 @@ describe("one host failing", () => {
     // front of it.
     const order: string[] = [];
     const outcomes = await updateAgents(
-      [host("claude-code"), host("redcode"), host("gemini")],
+      [host("claude-code"), RELEASE_HOST, host("gemini")],
       LINUX,
       {
         ...offMachine,
-        locate: found("claude", "redcode", "gemini"),
+        locate: found("claude", "toy", "gemini"),
         npm: async () => "/usr/bin/npm",
         releaseTag: async () => null,
         version: async () => null,
@@ -338,15 +379,15 @@ describe("one host failing", () => {
         },
         release: async () => {
           order.push("release");
-          throw new Error("GitHub API 404 for reddb-io/redcode");
+          throw new Error("GitHub API 404 for example/toy");
         },
       },
     );
 
     expect(outcomes.map((o) => o.state)).toEqual(["updated", "failed", "updated"]);
     expect(outcomes[1]).toMatchObject({
-      key: "redcode",
-      detail: "GitHub API 404 for reddb-io/redcode",
+      key: "toy",
+      detail: "GitHub API 404 for example/toy",
     });
     // The host after the failure ran, and ran its own mechanism.
     expect(order[2]).toContain("@google/gemini-cli@latest");

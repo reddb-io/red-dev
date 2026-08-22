@@ -35,7 +35,7 @@
  * reported with its path and left where it is.
  */
 
-import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { log } from "./log.ts";
@@ -51,6 +51,8 @@ export interface LegacyCopy {
   path: string;
   /** The npm package it belongs to, when it belongs to one. */
   owner: string | null;
+  /** red-dev placed this itself, under a mechanism it no longer uses. */
+  ours: boolean;
   /** Where the mechanism in use today would have put it. */
   canonical: string;
 }
@@ -70,9 +72,36 @@ export function canonicalPath(
   method: string | null,
   bin: string,
   os: Platform["os"],
+  shim?: string | null,
 ): string | null {
-  if (method !== "github-release" || a.cmd.length === 0) return null;
+  if (a.cmd.length === 0) return null;
+  // A host we publish: mise placed it, and its shim is where the name
+  // is answered from. Null when mise has not placed it yet, because a
+  // canonical copy that does not exist cannot make the others legacy.
+  if (method === "mise") return shim ?? null;
+  if (method !== "github-release") return null;
   return `${bin}/${a.cmd}${os === "windows" ? ".exe" : ""}`;
+}
+
+/**
+ * A copy red-dev itself placed under a mechanism it no longer uses. PURE.
+ *
+ * The retirement will not remove what it cannot attribute, which is
+ * right for a binary somebody else installed and wrong for one red-dev
+ * wrote at a path it chose. A host that moved from a GitHub release to
+ * mise leaves exactly one such file — `<bin>/<cmd>` — and leaving it
+ * there means the old version keeps answering, which is the failure
+ * this whole file exists for.
+ */
+export function ourOwnLeftover(
+  a: AgentSpec,
+  path: string,
+  bin: string,
+  os: Platform["os"],
+): boolean {
+  if (a.release === undefined || a.cmd.length === 0) return false;
+  const placed = `${bin}/${a.cmd}${os === "windows" ? ".exe" : ""}`;
+  return path.replace(/\\/g, "/") === placed.replace(/\\/g, "/");
 }
 
 export interface LegacyScanOptions {
@@ -86,13 +115,21 @@ export interface LegacyScanOptions {
   lookup: (cmd: string) => string[];
   /** The packages npm's global tree holds. */
   npmGlobals: ReadonlySet<string>;
+  /** mise's shim for one host, when there is one. */
+  shim?: (cmd: string) => string | null;
 }
 
 /** Every copy of a host that the mechanism in use today does not own. */
 export function findLegacyCopies(opts: LegacyScanOptions): LegacyCopy[] {
   const out: LegacyCopy[] = [];
   for (const a of opts.hosts) {
-    const canonical = canonicalPath(a, opts.method(a), opts.bin, opts.platform.os);
+    const canonical = canonicalPath(
+      a,
+      opts.method(a),
+      opts.bin,
+      opts.platform.os,
+      opts.shim?.(a.cmd) ?? null,
+    );
     if (canonical === null) continue;
 
     const seen = new Set<string>();
@@ -110,6 +147,7 @@ export function findLegacyCopies(opts: LegacyScanOptions): LegacyCopy[] {
         label: a.label,
         path: check.running,
         owner: owner !== null && opts.npmGlobals.has(owner) ? owner : null,
+        ours: ourOwnLeftover(a, check.running, opts.bin, opts.platform.os),
         canonical,
       });
     }
@@ -174,6 +212,29 @@ export async function retireLegacyInstalls(opts: RetireOptions): Promise<Retirem
   const out: Retirement[] = [];
 
   for (const copy of found) {
+    // A file red-dev wrote itself, at a path red-dev chose, under a
+    // mechanism it has since left. Nobody else's software, and the one
+    // leftover the attribution rule below would otherwise refuse to
+    // touch on a machine where it is the whole problem.
+    if (copy.ours) {
+      const spec = opts.specOf(copy.cmd);
+      const backedUp = spec ? backupAgentConfig(spec, opts.home, opts.backupDir) : [];
+      log.warn(`${copy.label}: retiring ${copy.path}, which red-dev placed before it moved to mise`);
+      try {
+        rmSync(copy.path, { force: true });
+      } catch (err) {
+        out.push({
+          cmd: copy.cmd,
+          outcome: "reported",
+          reason: `${copy.path} could not be removed: ${(err as Error).message}`,
+          backedUp,
+        });
+        continue;
+      }
+      out.push({ cmd: copy.cmd, outcome: "retired", reason: `removed ${copy.path}`, backedUp });
+      continue;
+    }
+
     if (copy.owner === null || opts.npm === null) {
       log.warn(`${copy.label}: ${copy.path} answers before ${copy.canonical}`);
       log.plain("       red-dev cannot tell what installed it — remove it by hand to take the newer one");

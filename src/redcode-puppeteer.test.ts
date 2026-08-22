@@ -37,8 +37,17 @@ describe("RedCode", () => {
     expect(AGENTS.some((agent) => agent.key === "opencode")).toBe(false);
   });
 
-  test("uses exact public release archives without a GitHub API lookup", () => {
-    expect(agentInstallMethod(redcode, platform("linux"))).toBe("github-release");
+  test("is mise's, like every other tool this organisation publishes", () => {
+    // It was `github-release`, which is the right answer for a third
+    // party and the wrong one for us: a release download places a file
+    // once and leaves nothing that moves it forward. RedCode sat three
+    // versions behind while `red`, `tq` and red-dev tracked the
+    // publisher through `mise upgrade`. See the note on AgentSpec.mise.
+    expect(agentInstallMethod(redcode, platform("linux"))).toBe("mise");
+    expect(redcode.mise).toBe("github:reddb-io/redcode");
+  });
+
+  test("keeps its release assets, for a machine that has no mise yet", () => {
     expect(redcode.release?.linux.x64).toBe("redcode-linux-x64.tar.gz");
     expect(redcode.release?.windows.x64).toBe("redcode-windows-x64.zip");
     expect(exactGhReleaseUrl("reddb-io/redcode", "redcode-linux-x64.tar.gz")).toBe(

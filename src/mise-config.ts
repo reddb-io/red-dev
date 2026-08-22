@@ -50,6 +50,7 @@ import { dirname, join } from "node:path";
 
 import { log } from "./log.ts";
 import { providerFor, TOOLS, type Tool } from "./manifest.ts";
+import { AGENTS } from "./agents.ts";
 import type { Platform } from "./platform.ts";
 
 /**
@@ -368,8 +369,24 @@ export function renderMiseConfig(entries: MiseEntry[]): string {
 }
 
 /** The tools this platform gets from mise, in manifest order. */
-export function miseEntries(p: Platform, tools: readonly Tool[] = TOOLS): MiseEntry[] {
+export function miseEntries(
+  p: Platform,
+  tools: readonly Tool[] = TOOLS,
+  hosts: readonly { mise?: string; cmd: string }[] = AGENTS,
+): MiseEntry[] {
   const entries: MiseEntry[] = [];
+
+  // The agent hosts this organisation publishes itself. They live in
+  // the agent catalog because red-skills wires its marketplace into
+  // them, and they are mise's for the same reason every other tool of
+  // ours is — see the note on `AgentSpec.mise`. Without this the pin is
+  // never written, and the release-age gate below never learns to let
+  // our own releases through, which is exactly what kept RedCode's
+  // newest five versions hidden from `mise ls-remote`.
+  for (const host of hosts) {
+    if (host.mise) entries.push({ spec: host.mise, alias: host.cmd, version: "latest" });
+  }
+
   for (const tool of tools) {
     const pr = providerFor(tool, p);
     if (pr.kind !== "mise") continue;
