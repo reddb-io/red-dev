@@ -19,6 +19,7 @@
  */
 
 import { existsSync } from "node:fs";
+import { dirname, isAbsolute, join } from "node:path";
 import { runBounded, type BoundedCommandOptions } from "./bounded-command.ts";
 import { THEMES } from "./themes.ts";
 
@@ -29,8 +30,18 @@ const ENV_OVERRIDE = "REDWALL_BIN";
 const VENDOR_RELATIVE = "vendor/redwall-bin/redwall";
 
 function resolveVendorBin(): string | null {
+  // Sibling to the running red-dev binary — the normal install puts both
+  // bins in the same directory (boot.sh writes them next to each other
+  // under ~/.local/bin/, and a mise install does the same under its
+  // installs/red-dev/latest/ tree). `process.execPath` is the red-dev
+  // binary itself; the scriptc build is `redwall` next to it.
+  const sibling = process.execPath && isAbsolute(process.execPath)
+    ? join(dirname(process.execPath), "redwall")
+    : "";
+
   const candidates = [
     process.env[ENV_OVERRIDE],
+    sibling,
     VENDOR_RELATIVE,
     `${process.env["HOME"] ?? ""}/.local/share/mise/installs/redwall/latest/redwall`,
   ];

@@ -23,7 +23,7 @@ case "$(uname -s)" in
 esac
 
 case "$(uname -m)" in
-  x86_64|amd64) ASSET="red-dev-linux-x64" ;;
+  x86_64|amd64) ASSET="red-dev-linux-x64"; REDWALL_ASSET="redwall-linux-x64" ;;
   aarch64|arm64) fail "no arm64 build is published yet" ;;
   *) fail "unsupported architecture: $(uname -m)" ;;
 esac
@@ -38,7 +38,7 @@ command -v curl >/dev/null 2>&1 || fail "curl is required"
 CHANNEL="${RED_DEV_CHANNEL:-stable}"
 
 case "$CHANNEL" in
-  stable) URL="https://github.com/$REPO/releases/latest/download/$ASSET" ;;
+  stable) URL="https://github.com/$REPO/releases/latest/download/$ASSET"; REDWALL_URL="https://github.com/$REPO/releases/latest/download/$REDWALL_ASSET" ;;
   # /releases is not ordered the way you would hope: the newest
   # prerelease is not reliably first, and taking [0] served the stable
   # release to everyone who asked for `next`. Fetch a page and pick the
@@ -128,6 +128,22 @@ curl -fsSL "$URL" -o "$TMP" || fail "download failed"
 chmod +x "$TMP"
 mv "$TMP" "$BIN"
 say "installed $BIN"
+
+# The render-only Redwall helper: a 1.8 MB scriptc-compiled binary that
+# red-dev spawns in place of the in-process PNG renderer. Optional, so a
+# release that lacks the asset is still a working install — the in-process
+# renderer is the documented fallback.
+if [ "$CHANNEL" = "stable" ]; then
+  REDWALL_TMP=$(mktemp)
+  if curl -fsSL "$REDWALL_URL" -o "$REDWALL_TMP" 2>/dev/null && [ -s "$REDWALL_TMP" ]; then
+    chmod +x "$REDWALL_TMP"
+    mv "$REDWALL_TMP" "$BIN_DIR/redwall"
+    say "installed $BIN_DIR/redwall (1.8 MB renderer)"
+  else
+    rm -f "$REDWALL_TMP"
+    say "redwall renderer asset not found, falling back to in-process"
+  fi
+fi
 
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
