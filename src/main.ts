@@ -718,6 +718,17 @@ async function cmdInstall(
       const { retireLegacyAgents } = await import("./legacy-install.ts");
       const { availableAgents } = await import("./agents.ts");
       await retireLegacyAgents(p, availableAgents(p));
+
+      // The toon VS Code extension, published as a release asset rather
+      // than carried in a package set. Only where toon itself is on the
+      // machine — installing an editor extension for a tool that is not
+      // here would be work nobody asked for — and it defers on its own
+      // where there is no display of this machine's to install into.
+      const { commandPath } = await import("./agents.ts");
+      if (commandPath("tq") !== null) {
+        const { installToonExtension, announceVsix } = await import("./vscode-extension.ts");
+        announceVsix("toon extension", await installToonExtension(p));
+      }
     }
   }
 
