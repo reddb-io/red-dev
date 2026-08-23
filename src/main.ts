@@ -708,6 +708,16 @@ async function cmdInstall(
       } catch (err) {
         log.warn(`declared-package refresh: ${(err as Error).message}`);
       }
+
+      // Retire the copies a publisher's move left behind, on every core
+      // install rather than only when a person picks agents. This lived
+      // in the first-run interview, so a plain `red-dev install core`
+      // swept nothing and the RedCode binary it was built to retire sat
+      // in ~/.local/bin install after install. The gate is the same as
+      // the refresh above, for the same reasons.
+      const { retireLegacyAgents } = await import("./legacy-install.ts");
+      const { availableAgents } = await import("./agents.ts");
+      await retireLegacyAgents(p, availableAgents(p));
     }
   }
 

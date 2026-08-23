@@ -265,3 +265,85 @@ export async function retireLegacyInstalls(opts: RetireOptions): Promise<Retirem
 
   return out;
 }
+
+/**
+ * Retire what an old mechanism left, resolving every dependency here.
+ *
+ * The one entry point both install paths share. It lived in firstrun.ts
+ * and so ran only where a person picked agents — the first-run
+ * interview or the menu — which meant a plain `red-dev install core` on
+ * a configured machine swept nothing, and the RedCode copy this move
+ * was built to retire sat in ~/.local/bin through install after install.
+ *
+ * What npm holds, where PATH looks, where a release lands and where mise
+ * shims are all facts about this machine; resolved here rather than
+ * inside `retireLegacyInstalls`, which stays pure and testable.
+ */
+export async function retireLegacyAgents(
+  p: Platform,
+  hosts: readonly AgentSpec[],
+): Promise<void> {
+  try {
+    const { agentInstallMethod, resolveNpm } = await import("./agents.ts");
+    const { pathLookup } = await import("./shadowed.ts");
+    const { npmGlobalPackages } = await import("./agent-update.ts");
+    const { userBinDir, windowsBinDir, spawnLogged } = await import("./providers.ts");
+    const { adoptionBackupRoot } = await import("./red-skills-adopt.ts");
+
+    const home = (process.env["HOME"] ?? process.env["USERPROFILE"] ?? "").replace(/\\/g, "/");
+
+    // A host that should be mise's but is not there yet has no canonical
+    // copy, so nothing could be called legacy against it and the old
+    // copy would survive every sweep. Place the mise ones first — the
+    // converge walks the manifest's tools, never the agent hosts, so on
+    // a plain `install core` this is the only thing that installs them.
+    //
+    // `mise install`, not `mise use`: the pin is already in red-dev's
+    // conf.d fragment, and `use` would write it a *second* time into
+    // config.toml — which is exactly the doubled `redcode` entry the
+    // first version of this produced. `install` reads the fragment and
+    // downloads what is declared, writing nothing. Idempotent, and it
+    // leaves an already-current tool alone.
+    const { miseShim } = await import("./mise-config.ts");
+    const { agentInstallMethod: methodOf } = await import("./agents.ts");
+    const mise = Bun.which("mise");
+    const needMise = hosts.some(
+      (h) => h.mise && methodOf(h, p) === "mise" && miseShim(h.cmd) === null,
+    );
+    if (needMise && mise) {
+      try {
+        const { spawnLogged } = await import("./providers.ts");
+        await spawnLogged([mise, "install"], { timeoutMs: 300_000 });
+      } catch (err) {
+        log.warn(`could not place hosts under mise: ${(err as Error).message}`);
+      }
+    }
+
+    const npm = await resolveNpm();
+    const retired = await retireLegacyInstalls({
+      hosts,
+      platform: p,
+      bin: p.os === "windows" ? windowsBinDir() : userBinDir(),
+      method: (a) => agentInstallMethod(a, p),
+      lookup: (cmd) => pathLookup(cmd),
+      shim: (cmd) => miseShim(cmd),
+      npmGlobals: npm ? await npmGlobalPackages(npm) : new Set<string>(),
+      home,
+      // One directory per run, beside the adoption backups: same shape
+      // of act, same place a person already looks for what red-dev moved.
+      backupDir: `${adoptionBackupRoot(home)}/${new Date().toISOString().replace(/[:.]/g, "-")}`,
+      npm,
+      mise: Bun.which("mise"),
+      specOf: (cmd) => hosts.find((a) => a.cmd === cmd),
+      run: async (argv) => await spawnLogged(argv, { timeoutMs: 120_000 }),
+    });
+    const removed = retired.filter((r) => r.outcome === "retired");
+    if (removed.length > 0) {
+      log.ok(`retired ${removed.length} install(s) from before red-dev's standard`);
+    }
+  } catch (err) {
+    // Never fatal: this tidies, and an install that refused to proceed
+    // because tidying failed would be the worse trade.
+    log.warn(`legacy sweep: ${(err as Error).message}`);
+  }
+}

@@ -16,7 +16,6 @@
 import { log } from "./log.ts";
 import type { StepOutcome } from "./converge.ts";
 import type { Platform } from "./platform.ts";
-import type { AgentSpec } from "./agents.ts";
 import type { SetupAnswers } from "./tui-setup-model.ts";
 import { readPreferences, writePreferences, type Preferences } from "./preferences.ts";
 import { DEFAULT_THEME, themeNames } from "./themes.ts";
@@ -300,7 +299,8 @@ export async function carryOutChoices(
     // red-dev is putting in order rather than of a leftover that
     // happens to answer first. Writes nothing on a machine already in
     // order — see the note on looping in src/legacy-install.ts.
-    await retireLegacy(p, available);
+    const { retireLegacyAgents } = await import("./legacy-install.ts");
+    await retireLegacyAgents(p, available);
     for (const step of plan.filter((candidate) => candidate.kind === "agent")) {
       const agent = available.find((a) => a.key === step.key);
       if (!agent) continue;
@@ -632,50 +632,3 @@ async function writeShellEnvAt(home: string, vars: Record<string, string>): Prom
   await Bun.write(path, body);
 }
 
-/**
- * Retire what an old mechanism left, on the way into an install.
- *
- * Every dependency is resolved here rather than inside the module: what
- * npm holds, where PATH looks and where a release lands are all facts
- * about this machine, and a module that asked for them itself could not
- * be tested without one.
- */
-async function retireLegacy(p: Platform, hosts: readonly AgentSpec[]): Promise<void> {
-  try {
-    const { retireLegacyInstalls } = await import("./legacy-install.ts");
-    const { agentInstallMethod, resolveNpm } = await import("./agents.ts");
-    const { pathLookup } = await import("./shadowed.ts");
-    const { miseShim } = await import("./mise-config.ts");
-    const { npmGlobalPackages } = await import("./agent-update.ts");
-    const { userBinDir, windowsBinDir, spawnLogged } = await import("./providers.ts");
-    const { adoptionBackupRoot } = await import("./red-skills-adopt.ts");
-
-    const home = (process.env["HOME"] ?? process.env["USERPROFILE"] ?? "").replace(/\\/g, "/");
-    const npm = await resolveNpm();
-    const retired = await retireLegacyInstalls({
-      hosts,
-      platform: p,
-      bin: p.os === "windows" ? windowsBinDir() : userBinDir(),
-      method: (a) => agentInstallMethod(a, p),
-      lookup: (cmd) => pathLookup(cmd),
-      shim: (cmd) => miseShim(cmd),
-      npmGlobals: npm ? await npmGlobalPackages(npm) : new Set<string>(),
-      home,
-      // One directory per run, beside the adoption backups: same shape
-      // of act, same place a person already looks for what red-dev moved.
-      backupDir: `${adoptionBackupRoot(home)}/${new Date().toISOString().replace(/[:.]/g, "-")}`,
-      npm,
-      mise: Bun.which("mise"),
-      specOf: (cmd) => hosts.find((a) => a.cmd === cmd),
-      run: async (argv) => await spawnLogged(argv, { timeoutMs: 120_000 }),
-    });
-    const removed = retired.filter((r) => r.outcome === "retired");
-    if (removed.length > 0) {
-      log.ok(`retired ${removed.length} install(s) from before red-dev's standard`);
-    }
-  } catch (err) {
-    // Never fatal: this tidies, and an install that refused to proceed
-    // because tidying failed would be the worse trade.
-    log.warn(`legacy sweep: ${(err as Error).message}`);
-  }
-}
