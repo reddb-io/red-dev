@@ -73,6 +73,7 @@ import { mergeHostStates, readHostState, readWindowsWslHostState } from "./host-
 import { resolveRedwallAddress, spawnCapture } from "./lan-address.ts";
 import type { Platform } from "./platform.ts";
 import { readPreferences, resolveRedwall } from "./preferences.ts";
+import { renderRedwallViaBin } from "./redwall-bin.ts";
 import { REDWALL_SUBSET } from "./redwall-font.ts";
 import { readPackageSetState } from "./red-skills-set.ts";
 import { renderRedwall, yearProgress, type RedwallState } from "./redwall-render.ts";
@@ -344,7 +345,22 @@ export async function generateRedwall(
   const state = await (seams.state ?? (() => redwallState(p)))();
 
   const fontBytes = readFileSync(REDWALL_SUBSET);
-  const bytes = renderRedwall({
+  const stateForBin: Record<string, unknown> = {
+    workers: state.workers,
+    version: state.version,
+    address: state.address,
+    capacity: state.capacity,
+    queued: state.queued,
+  };
+
+  // Prefer the scriptc-compiled binary when one is reachable: 1.8 MB on
+  // disk, ~4 MB resident, ~10 ms cold-start. Falls through to the
+  // in-process renderer if the binary is missing or fails.
+  const binBytes = await renderRedwallViaBin({
+    state: stateForBin,
+    themeSlug: colourSlug,
+  });
+  const bytes = binBytes ?? renderRedwall({
     art: art.bytes,
     font: fontBytes,
     theme: art.theme,
