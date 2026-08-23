@@ -89,7 +89,7 @@
  * Redwall for the first time.
  */
 
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import {
   runBounded,
@@ -733,7 +733,7 @@ async function readHookPayload(): Promise<string | null> {
     const timed = new Promise<null>((resolve) => {
       timer = setTimeout(() => resolve(null), 2_000);
     });
-    return await Promise.race([Bun.stdin.text(), timed]);
+    return await Promise.race([readStdinText(), timed]);
   } catch {
     return null;
   } finally {
@@ -745,6 +745,42 @@ function runner(
   seams: RedwallHookSeams,
 ): (argv: string[], options?: BoundedCommandOptions) => Promise<BoundedCommandResult> {
   return seams.run ?? runBounded;
+}
+
+/**
+ * Read stdin to EOF as UTF-8 text, returning an empty string when the
+ * stream has nothing in it (TTY, pipe closed, etc).
+ *
+ * Bun's `Bun.stdin.text()` resolved a promise on EOF; the Node equivalent
+ * is a manual subscription that resolves on `'end'`. The pattern handles
+ * both shapes that callers fed it: stdin arriving from a daemon pipe and
+ * stdin arriving from a person who never typed anything.
+ */
+function readStdinText(): Promise<string> {
+  return new Promise((resolve) => {
+    let data = "";
+    const onData = (chunk: Buffer | string): void => {
+      data += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    };
+    const finish = (): void => {
+      process.stdin.off("data", onData);
+      process.stdin.off("end", finish);
+      process.stdin.off("error", finish);
+      resolve(data);
+    };
+    process.stdin.on("data", onData);
+    process.stdin.on("end", finish);
+    process.stdin.on("error", finish);
+  });
+}
+
+/** Read a file as UTF-8 text, returning empty string on any read error. */
+function safeReadText(path: string): string {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return "";
+  }
 }
 
 /**
@@ -773,7 +809,7 @@ export async function applyRedwallHook(
   const removed = await removeLegacyRedwallSchedule(p, seams);
 
   const path = seams.configPath ?? redskilledHostConfigPath();
-  const document = existsSync(path) ? await Bun.file(path).text().catch(() => "") : "";
+  const document = existsSync(path) ? safeReadText(path) : "";
   const wanted = await (seams.enabled ?? (() => resolveRedwall(p)))();
 
   if (!wanted) {
@@ -804,7 +840,7 @@ export async function applyRedwallHook(
 
   if (edit.action === "declared") {
     mkdirSync(parentOf(path), { recursive: true });
-    await Bun.write(path, edit.document);
+    writeFileSync(path, edit.document);
     // Said out loud, because it is not true yet: Amendment 2 has the
     // daemon read machine policy at start, so a daemon already running
     // is holding the declaration it booted with.
@@ -836,7 +872,7 @@ export async function removeRedwallHook(
 
   const removed = await removeLegacyRedwallSchedule(p, seams);
   const path = seams.configPath ?? redskilledHostConfigPath();
-  const document = existsSync(path) ? await Bun.file(path).text().catch(() => "") : "";
+  const document = existsSync(path) ? safeReadText(path) : "";
   const edit = withdrawRedwallHook(document);
   if (!edit.removed) return absent(null, removed);
 
@@ -857,7 +893,7 @@ async function writePolicy(path: string, document: string): Promise<string[]> {
     rmSync(path, { force: true });
     return [path];
   }
-  await Bun.write(path, document);
+  writeFileSync(path, document);
   return [];
 }
 

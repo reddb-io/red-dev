@@ -60,7 +60,7 @@
  * reason: nothing there will ever display it.
  */
 
-import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { agentUsageReading, agentUsageSnapshot, type AgentUsageReading } from "./agent-usage.ts";
 import {
   githubRatePercent,
@@ -123,7 +123,7 @@ async function readShownRedwall(p: Platform): Promise<string | null> {
   try {
     const path = `${await redwallDir(p)}/${SHOWN_RECORD}`;
     if (!existsSync(path)) return null;
-    const body = await Bun.file(path).text();
+    const body = readFileSync(path, "utf8");
     return body.split("\n").map((line) => line.trim())
       .find((line) => line !== "" && !line.startsWith("#")) ?? null;
   } catch {
@@ -134,7 +134,7 @@ async function readShownRedwall(p: Platform): Promise<string | null> {
 }
 
 async function recordShownRedwall(p: Platform, path: string): Promise<void> {
-  await Bun.write(`${await redwallDir(p)}/${SHOWN_RECORD}`, redwallRecord(path));
+  writeFileSync(`${await redwallDir(p)}/${SHOWN_RECORD}`, redwallRecord(path));
 }
 
 /** Why nothing was generated, when nothing was. */
@@ -343,9 +343,10 @@ export async function generateRedwall(
   );
   const state = await (seams.state ?? (() => redwallState(p)))();
 
+  const fontBytes = readFileSync(REDWALL_SUBSET);
   const bytes = renderRedwall({
     art: art.bytes,
-    font: await Bun.file(REDWALL_SUBSET).bytes(),
+    font: fontBytes,
     theme: art.theme,
     state,
     year: yearProgress((seams.now ?? (() => new Date()))()),
@@ -360,7 +361,7 @@ export async function generateRedwall(
   // every tick would leave a directory that looks freshly churned on a
   // machine where nothing changed.
   const written = !existsSync(path);
-  if (written) await Bun.write(path, bytes);
+  if (written) writeFileSync(path, bytes);
 
   const removed = await sweepSupersededRedwalls(p, path, seams.inUse);
   return { path, skipped: null, written, removed };
