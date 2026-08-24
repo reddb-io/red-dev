@@ -356,10 +356,14 @@ export async function generateRedwall(
   // Prefer the scriptc-compiled binary when one is reachable: 1.8 MB on
   // disk, ~4 MB resident, ~10 ms cold-start. Falls through to the
   // in-process renderer if the binary is missing or fails.
-  const binBytes = await renderRedwallViaBin({
-    state: stateForBin,
-    themeSlug: colourSlug,
-  });
+  // Seams define a controlled rendering world. Keep that world entirely
+  // in-process: the external renderer observes the real clock and filesystem,
+  // which would violate an injected `now` and turn deterministic checks into
+  // assertions about the host running them. Ordinary product calls have no
+  // seams and keep the small native renderer path.
+  const binBytes = Object.keys(seams).length === 0
+    ? await renderRedwallViaBin({ state: stateForBin, themeSlug: colourSlug })
+    : null;
   const bytes = binBytes ?? renderRedwall({
     art: art.bytes,
     font: fontBytes,
