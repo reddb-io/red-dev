@@ -218,21 +218,32 @@ export function setPackageVersion(source: string): string | null {
   }
 }
 
-/** The `bin` map the core declares: launcher name to path inside the set. */
+/**
+ * The runtime `bin` map carried by the set: launcher name to path inside it.
+ *
+ * A composed npm package declares the map at its root. A published workstation
+ * set is a RedSkills source tree with the npm package retained below
+ * `packaging/npm`, so its private workspace package.json deliberately has no
+ * `bin`. Both layouts carry the same shims; only their prefix differs.
+ */
 export function setBinMap(source: string): Record<string, string> {
-  try {
-    const parsed = JSON.parse(readFileSync(join(source, "package.json"), "utf8")) as {
-      bin?: Record<string, string>;
-    };
-    const bin = parsed.bin ?? {};
-    const out: Record<string, string> = {};
-    for (const [name, rel] of Object.entries(bin)) {
-      if (typeof rel === "string" && existsSync(join(source, rel))) out[name] = rel;
+  const out: Record<string, string> = {};
+  for (const packageRoot of ["", join("packaging", "npm")]) {
+    try {
+      const parsed = JSON.parse(readFileSync(join(source, packageRoot, "package.json"), "utf8")) as {
+        bin?: Record<string, string>;
+      };
+      for (const [name, rel] of Object.entries(parsed.bin ?? {})) {
+        if (name in out || typeof rel !== "string") continue;
+        const publishedBundle = packageRoot === "" ? undefined : PUBLISHED_RUNTIME_BUNDLES[name];
+        const fromSetRoot = publishedBundle ?? join(packageRoot, rel);
+        if (existsSync(join(source, fromSetRoot))) out[name] = fromSetRoot;
+      }
+    } catch {
+      // One layout omits the other package.json by construction.
     }
-    return out;
-  } catch {
-    return {};
   }
+  return out;
 }
 
 /**
@@ -340,6 +351,16 @@ const DAEMON_BINS: Record<string, string> = {
   "red-skills-redskilled-mcp": "redskilled-mcp",
 };
 
+/** Runtime bundles the published source-tree set overlays at its root. */
+const PUBLISHED_RUNTIME_BUNDLES: Record<string, string> = {
+  "red-skills-brain": "dist/brain.bundle.min.mjs",
+  "red-skills-code-nav": "dist/code-nav.bundle.min.mjs",
+  "red-skills-memory": "dist/memory.bundle.min.mjs",
+  "red-skills-redskilled": "dist/redskilled.bundle.min.mjs",
+  "red-skills-redskilled-mcp": "dist/redskilled-mcp.bundle.min.mjs",
+  rsp: "dist/rsp.bundle.min.mjs",
+};
+
 /** The bundle a daemon launcher is worth nothing without. */
 const DAEMON_BUNDLE = "redskilled.bundle.min.mjs";
 
@@ -377,7 +398,7 @@ export function launcherFor(
   }
   return {
     path: `${ctx.bin}/${name}`,
-    bytes: `#!/usr/bin/env bash\n# ${LAUNCHER_NOTE}\nexec "${ctx.current}/${rel}" "$@"\n`,
+    bytes: `#!/usr/bin/env bash\n# ${LAUNCHER_NOTE}\nexec node "${ctx.current}/${rel}" "$@"\n`,
     mode: 0o755,
   };
 }

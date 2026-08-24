@@ -78,6 +78,8 @@ interface SetOptions {
   without?: ("vsix" | "herdr" | "zellij" | "daemon")[];
   /** The version the `.vsix` carries, which is not the set's. */
   vsixVersion?: string;
+  /** Match a published source tree: the npm bin map lives below packaging/npm. */
+  repositoryPackageLayout?: boolean;
 }
 
 /** A package set with the shape composeSet produces, and its companions. */
@@ -95,14 +97,21 @@ function packageSet(opts: SetOptions = {}): string {
     bin["red-skills-redskilled-mcp"] = "bin/red-skills-redskilled-mcp.mjs";
   }
 
-  mkdirSync(join(tree, "bin"), { recursive: true });
+  const packageRoot = opts.repositoryPackageLayout ? join(tree, "packaging", "npm") : tree;
+  mkdirSync(join(packageRoot, "bin"), { recursive: true });
   for (const rel of Object.values(bin)) {
-    writeFileSync(join(tree, rel), "#!/usr/bin/env node\n// a shim\n");
+    writeFileSync(join(packageRoot, rel), "#!/usr/bin/env node\n// a shim\n");
   }
   writeFileSync(
     join(tree, "package.json"),
-    `${JSON.stringify({ name: "@reddb-io/red-skills", version: SET_VERSION, bin }, null, 2)}\n`,
+    `${JSON.stringify({ name: "red-skills", version: SET_VERSION, ...(opts.repositoryPackageLayout ? {} : { bin }) }, null, 2)}\n`,
   );
+  if (opts.repositoryPackageLayout) {
+    writeFileSync(
+      join(packageRoot, "package.json"),
+      `${JSON.stringify({ name: "@reddb-io/red-skills", version: "0.0.0", bin }, null, 2)}\n`,
+    );
+  }
 
   mkdirSync(join(tree, "dist"), { recursive: true });
   writeFileSync(join(tree, "dist", "dev.bundle.min.mjs"), "// dev\n");
@@ -305,6 +314,16 @@ describe("the five companion surfaces", () => {
 // ---------------------------------------------------------- the launchers
 
 describe("the runtimes and the daemon", () => {
+  test("a published source set derives root runtime bundles from the npm bin map", async () => {
+    const m = machine({ repositoryPackageLayout: true });
+    const out = await reconcile(m);
+
+    expect(statusOf(out, "redskilled")).toBe("reconciled");
+    const launcher = readFileSync(join(m.bin, "redskilled"), "utf8");
+    expect(launcher).toContain(`${m.current}/dist/redskilled.bundle.min.mjs`);
+    expect(launcher).toContain("exec node");
+  });
+
   test("land on PATH as launchers that resolve through the active set", async () => {
     const m = machine();
     await reconcile(m);
