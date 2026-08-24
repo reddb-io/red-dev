@@ -18,7 +18,8 @@
  * piped back into the caller's buffer.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { runBounded, type BoundedCommandOptions } from "./bounded-command.ts";
 import { THEMES } from "./themes.ts";
@@ -84,14 +85,24 @@ export async function renderRedwallViaBin(
     }
   }
   env["REDWALL_THEME"] = input.themeSlug;
-  env["REDWALL_OUT"] = ""; // forces stdout
 
-  const result = await run([bin], { env, timeoutMs: 10_000 });
-  if (result.exitCode !== 0) {
-    process.stderr.write(`redwall-bin: exit ${result.exitCode}: ${result.stderr}\n`);
-    return null;
+  // `runBounded` is intentionally a text-capture surface for host probes.
+  // Sending a PNG through it replaces byte 0x89 with the UTF-8 replacement
+  // sequence, so let the renderer use its native file-output contract and
+  // read those bytes back without a text round-trip.
+  const scratch = mkdtempSync(join(tmpdir(), "redwall-render-"));
+  const output = join(scratch, "redwall.png");
+  env["REDWALL_OUT"] = output;
+  try {
+    const result = await run([bin], { env, timeoutMs: 10_000 });
+    if (result.exitCode !== 0 || !existsSync(output)) {
+      process.stderr.write(`redwall-bin: exit ${result.exitCode}: ${result.stderr}\n`);
+      return null;
+    }
+    return readFileSync(output);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
   }
-  return result.stdout;
 }
 
 async function runBoundedCapture(
