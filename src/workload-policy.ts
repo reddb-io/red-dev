@@ -153,7 +153,8 @@ function resourceDomains(facts: WorkloadPolicyFacts): ResourceDomains {
         CPUQuota: cpu(0.3),
         CPUWeight: "100",
         IOWeight: "100",
-        MemoryHigh: memory(0.1),
+        // Leaf MemoryHigh can trap an interactive scope in indefinite reclaim.
+        // Aggregate domains retain the soft boundary; launches keep a hard wall.
         MemoryMax: memory(0.15),
         MemorySwapMax: "0",
         TasksMax: "2048",
@@ -176,7 +177,7 @@ function resourceDomains(facts: WorkloadPolicyFacts): ResourceDomains {
         CPUQuota: cpu(0.25),
         CPUWeight: "200",
         IOWeight: "100",
-        MemoryHigh: memory(0.2),
+        // Let the hard wall invoke memcg OOM instead of indefinite reclaim.
         MemoryMax: memory(0.25),
         MemorySwapMax: "128M",
         TasksMax: "2048",
@@ -199,7 +200,6 @@ function resourceDomains(facts: WorkloadPolicyFacts): ResourceDomains {
         CPUQuota: cpu(0.5),
         CPUWeight: "50",
         IOWeight: "25",
-        MemoryHigh: memory(0.25),
         MemoryMax: memory(0.4),
         MemorySwapMax: "128M",
         TasksMax: "2048",

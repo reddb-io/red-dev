@@ -28,6 +28,7 @@ describe("workload policy", () => {
       "--slice=red-dev-heavy-panes.slice",
     ]);
     expect(paneLaunch).toContain("--property=MemoryMax=3G");
+    expect(paneLaunch.some((arg) => arg.startsWith("--property=MemoryHigh="))).toBe(false);
     expect(paneLaunch.slice(-3)).toEqual(["red-dev-heavy-panes.slice", "pane", "bash"]);
     expect(paneLaunch[paneLaunch.indexOf("-c") + 1]).toContain("cat /proc/self/cgroup");
     if (process.platform === "win32") return;
@@ -83,12 +84,14 @@ describe("workload policy", () => {
     const agentLaunch = policy.launch("agent", ["redcode", "--yolo"], LINUX_SYSTEMD);
     expect(agentLaunch).toContain("--slice=red-dev-heavy-agents.slice");
     expect(agentLaunch).toContain("--property=MemoryMax=5G");
+    expect(agentLaunch.some((arg) => arg.startsWith("--property=MemoryHigh="))).toBe(false);
     expect(agentLaunch.slice(-4)).toEqual([
       "red-dev-heavy-agents.slice", "agent", "redcode", "--yolo",
     ]);
     const buildLaunch = policy.launch("build", ["cargo", "test"], LINUX_SYSTEMD);
     expect(buildLaunch).toContain("--slice=red-dev-heavy-builds.slice");
     expect(buildLaunch).toContain("--property=MemoryMax=8G");
+    expect(buildLaunch.some((arg) => arg.startsWith("--property=MemoryHigh="))).toBe(false);
     expect(buildLaunch.slice(-7)).toEqual([
       "red-dev-heavy-builds.slice", "build", "nice", "-n", "10", "cargo", "test",
     ]);
@@ -125,6 +128,9 @@ describe("workload policy", () => {
     );
     expect(policy.systemd["red-worker-.service.d/50-red-dev-heavy-slice.conf"]).toContain(
       "MemoryMax=5G",
+    );
+    expect(policy.systemd["red-worker-.service.d/50-red-dev-heavy-slice.conf"]).not.toContain(
+      "MemoryHigh=",
     );
     expect(policy.systemd["red-fleet-.scope.d/50-red-dev-heavy-slice.conf"]).toBe(
       "# Managed by red-dev.\n[Scope]\nSlice=red-dev-heavy-agents.slice\n",
