@@ -68,6 +68,11 @@ export function renderCargoDefaults(policy: BuildResourcePolicy): string {
 [build]
 jobs = ${policy.cargoJobs}
 
+[cache]
+# Cargo owns global registry/git retention. Stable Cargo keeps downloaded data
+# unused for 3 months and regenerable data unused for 1 month.
+auto-clean-frequency = "1 day"
+
 [env]
 # libtest still recognises this compatibility variable. An explicitly exported
 # value wins because force=false; projects may also override it in deeper config.

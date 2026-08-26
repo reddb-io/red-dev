@@ -59,6 +59,8 @@ describe("build resource policy", () => {
     expect(rendered).toContain("[build]");
     expect(rendered).toContain("jobs = 4");
     expect(rendered).toContain("RUST_TEST_THREADS = { value = \"2\", force = false }");
+    expect(rendered).toContain("[cache]");
+    expect(rendered).toContain('auto-clean-frequency = "1 day"');
     expect(rendered).not.toMatch(/^target-dir\s*=/m);
     expect(rendered).not.toMatch(/^incremental\s*=/m);
     expect(rendered).not.toMatch(/^rustflags\s*=/m);
@@ -128,7 +130,7 @@ describe("workload isolation", () => {
     })).toEqual([
       { name: "Cargo resources", status: "ok", detail: "5 compiler job(s), 2 libtest thread(s)" },
       { name: "workload isolation", status: "ok", detail: "dynamic 80% wall (16G memory, 800% CPU); protected Zellij and bounded panes, agents and builds" },
-      { name: "host disk guard", status: "ok", detail: "35 GiB free; 72 GiB build reserve (admission blocked); 20 GiB freeze / 30 GiB resume; timer enabled/active; workloads running; last event action=thawed reason=host-disk-recovered" },
+      { name: "host disk guard", status: "ok", detail: "35 GiB free; 30 GiB build reserve (admission open); 20 GiB freeze / 30 GiB resume; timer enabled/active; workloads running; last event action=thawed reason=host-disk-recovered" },
       { name: "WSL host resources", status: "ok", detail: "60% host RAM, CPU headroom, 4 GiB swap, one retained crash dump, cache reclaim" },
     ]);
   });
@@ -169,7 +171,7 @@ describe("workload isolation", () => {
 
 test("host disk thresholds share the admission reserve and guardian hysteresis", () => {
   expect(hostDiskThresholds(900 * 1024 ** 2)).toEqual({
-    reserveKiB: 72 * 1024 ** 2,
+    reserveKiB: 30 * 1024 ** 2,
     floorKiB: 20 * 1024 ** 2,
     resumeKiB: 30 * 1024 ** 2,
   });

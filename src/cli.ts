@@ -128,7 +128,12 @@ export function buildCli(): CLI {
         },
       },
       reclaim: {
-        description: "inspect or prune derived logs and crash artifacts",
+        description: "inspect or prune derived logs, build output and package caches",
+        positional: [{
+          name: "reclaim_workspace",
+          description: "workspace whose Cargo target is selected by --build-cache (default: cwd)",
+          required: false,
+        }],
         options: {
           apply: {
             type: "boolean",
@@ -143,6 +148,16 @@ export function buildCli(): CLI {
           "crash-dumps": {
             type: "boolean",
             description: "include Windows CrashDumps in the explicit reclaim",
+            default: false,
+          },
+          "package-caches": {
+            type: "boolean",
+            description: "include Cargo/npm/pnpm/Bun global cache maintenance",
+            default: false,
+          },
+          "build-cache": {
+            type: "boolean",
+            description: "include the selected Cargo workspace target directory",
             default: false,
           },
         },
@@ -343,6 +358,11 @@ export interface Invocation {
   apply: boolean;
   /** Reclaim only touches Windows CrashDumps when explicitly selected. */
   crashDumps: boolean;
+  /** Reclaim package-manager caches through their supported maintenance commands. */
+  packageCaches: boolean;
+  /** Reclaim one Cargo workspace target selected through Cargo metadata. */
+  buildCache: boolean;
+  reclaimWorkspace: string | undefined;
   /**
    * `update --system`: upgrade the whole machine rather than the tools
    * red-dev declares. Off by default — see systemUpdate in providers.ts
@@ -495,6 +515,10 @@ export function parseArgs(cli: CLI, argv: string[]): Invocation {
     dryRun: opts["dry-run"] === true,
     apply: opts["apply"] === true,
     crashDumps: opts["crash-dumps"] === true,
+    packageCaches: opts["package-caches"] === true,
+    buildCache: opts["build-cache"] === true,
+    reclaimWorkspace:
+      typeof pos["reclaim_workspace"] === "string" ? pos["reclaim_workspace"] : undefined,
     system: opts["system"] === true,
     yes: opts["yes"] === true,
     shareTarget: typeof pos["target"] === "string" ? pos["target"] : undefined,

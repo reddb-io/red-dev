@@ -568,6 +568,8 @@ red-dev rescue               # preview process groups proven orphaned
 red-dev rescue --apply       # snapshot, revalidate and end those groups
 red-dev reclaim              # preview generated logs outside retention
 red-dev reclaim --apply      # prune red-dev-owned generated artifacts
+red-dev reclaim --package-caches # preview Cargo/npm/pnpm/Bun global caches
+red-dev reclaim --build-cache    # preview the current Cargo workspace target
 red-dev reclaim --crash-dumps # include Windows dumps in the preview
 ```
 
@@ -605,6 +607,18 @@ Transcripts retain 20 runs/30 days/250 MiB; Zellij crashes retain 10/14 days/
 statusline and converge never prune them. Windows dumps are considered only
 with `--crash-dumps`; reclaim reduces their total toward 2 GiB while preserving
 the newest three per executable and everything from the last 72 hours.
+
+Package and build caches remain opt-in. `--package-caches` inventories Cargo's
+registry/git roots and uses only each package manager's supported maintenance:
+Cargo's native age-based GC, `npm cache verify`, `pnpm store prune`, and
+`bun pm cache rm`. pnpm's separate metadata/dlx cache is reported but remains
+inventory-only while pnpm's bulk deletion command is experimental.
+`--build-cache` asks `cargo metadata` for exactly one
+workspace target, requires its `CACHEDIR.TAG`, and applies `cargo clean`; pass a
+workspace path after `reclaim` to select a workspace other than the current
+directory. Reclaim refuses while Workers or cache-writing build/install
+processes are active. On WSL the reported bytes are freed inside ext4; returning
+physical VHDX bytes to `C:` remains a separate offline compaction.
 
 ---
 

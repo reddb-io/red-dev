@@ -522,16 +522,23 @@ async function cmdRescue(p: Platform, inv: Invocation): Promise<number> {
 
 async function cmdReclaim(p: Platform, inv: Invocation): Promise<number> {
   const reclaim = await import("./reclaim.ts");
+  const cachePolicy = inv.packageCaches || inv.buildCache
+    ? await import("./cache-policy.ts")
+    : null;
   const { transcriptPath } = await import("./transcript.ts");
   let workerStateKnown = false;
   let workers = 0;
+  let cacheWriters = 0;
   const livePids = new Set<number>();
   if (p.os === "linux") {
     const { collectLinuxHostSnapshot } = await import("./linux-host.ts");
     const snapshot = await collectLinuxHostSnapshot();
     workerStateKnown = snapshot.workerStateKnown;
     workers = snapshot.workers.length;
-    for (const process of snapshot.processes) livePids.add(process.pid);
+    for (const process of snapshot.processes) {
+      livePids.add(process.pid);
+      if (cachePolicy?.isCacheMutatingProcess(process)) cacheWriters++;
+    }
   } else if (p.os === "windows") {
     const { readPreferences } = await import("./preferences.ts");
     const gate = await reclaim.windowsWslWorkerState((await readPreferences(p)).distro);
@@ -554,16 +561,49 @@ async function cmdReclaim(p: Platform, inv: Invocation): Promise<number> {
     livePids,
     protectedPaths: new Set(current ? [current] : []),
   });
+  const packageCaches = inv.packageCaches && cachePolicy
+    ? await cachePolicy.collectPackageCaches()
+    : [];
+  const cargoBuildCache = inv.buildCache && cachePolicy
+    ? await cachePolicy.inspectCargoBuildCache(inv.reclaimWorkspace ?? process.cwd())
+    : null;
+  const selectedCaches = [
+    ...packageCaches,
+    ...(cargoBuildCache ? [cargoBuildCache] : []),
+  ];
+  const cacheActions = selectedCaches.filter((item) => item.argv !== null && item.bytes !== 0);
 
   log.plain("\n[reclaim]");
   if (inv.crashDumps && crashDumpDir === null) {
     log.warn("Windows CrashDumps could not be reached; none are in this plan");
   }
-  if (plan.items.length === 0) {
-    log.ok("all derived artifacts are within their retention budgets");
+  if (inv.buildCache && cargoBuildCache === null) {
+    log.warn("Cargo target could not be proven from workspace metadata and CACHEDIR.TAG; none is in this plan");
+  }
+  if (selectedCaches.length > 0) {
+    log.plain("  selected cache maintenance:");
+    for (const item of selectedCaches) {
+      const size = item.bytes === null ? "unknown" : reclaim.formatBytes(item.bytes);
+      const disposition = item.argv
+        ? item.argv.join(" ")
+        : item.kind.startsWith("cargo-")
+          ? "Cargo native GC"
+          : "inventory only";
+      log.plain(`  ${item.kind.padEnd(15)} ${size.padStart(10)}  ${item.path}`);
+      log.plain(`                    ${disposition} — ${item.note}`);
+    }
+  }
+  if (plan.items.length === 0 && cacheActions.length === 0) {
+    if (selectedCaches.some((item) => (item.bytes ?? 1) > 0)) {
+      log.ok("inventory complete; no supported cache maintenance action is pending");
+    } else {
+      log.ok("all derived artifacts are within their retention budgets");
+    }
     return 0;
   }
-  log.warn(`${plan.items.length} derived file(s), ${reclaim.formatBytes(plan.bytes)} reclaimable`);
+  if (plan.items.length > 0) {
+    log.warn(`${plan.items.length} derived file(s), ${reclaim.formatBytes(plan.bytes)} reclaimable`);
+  }
   for (const item of plan.items) {
     log.plain(
       `  ${item.kind.padEnd(15)} ${reclaim.formatBytes(item.file.size).padStart(10)}  ` +
@@ -572,8 +612,13 @@ async function cmdReclaim(p: Platform, inv: Invocation): Promise<number> {
   }
 
   if (!inv.apply) {
+    const workspace = inv.reclaimWorkspace
+      ? ` '${inv.reclaimWorkspace.split("'").join(`'"'"'`)}'`
+      : "";
     const crash = inv.crashDumps ? " --crash-dumps" : "";
-    log.plain(`\nPreview only. Apply exactly this plan with: red-dev reclaim --apply${crash}`);
+    const packages = inv.packageCaches ? " --package-caches" : "";
+    const build = inv.buildCache ? " --build-cache" : "";
+    log.plain(`\nPreview only. Apply this plan with: red-dev reclaim${workspace} --apply${crash}${packages}${build}`);
     return 0;
   }
   if (!workerStateKnown) {
@@ -584,13 +629,20 @@ async function cmdReclaim(p: Platform, inv: Invocation): Promise<number> {
     log.err(`Reclaim refuses while ${workers} Worker(s) are active`);
     return 1;
   }
+  if (cacheActions.length > 0 && cacheWriters > 0) {
+    log.err(`Reclaim refuses while ${cacheWriters} cache-writing build/install process(es) are active`);
+    return 1;
+  }
   if (!interactive() && !inv.yes) {
     log.err("non-interactive Reclaim requires both --apply and --yes");
     return 1;
   }
   if (interactive() && !inv.yes) {
     const { confirm } = await import("./ui.ts");
-    if (!(await confirm(`Remove ${plan.items.length} derived file(s)?`, false))) {
+    if (!(await confirm(
+      `Apply ${plan.items.length} file removal(s) and ${cacheActions.length} cache maintenance action(s)?`,
+      false,
+    ))) {
       log.skip("nothing changed");
       return 0;
     }
@@ -607,6 +659,13 @@ async function cmdReclaim(p: Platform, inv: Invocation): Promise<number> {
     }
     if (latest.workers.length > 0) {
       log.err(`Reclaim refuses: ${latest.workers.length} Worker(s) became active before apply`);
+      return 1;
+    }
+    const latestCacheWriters = latest.processes.filter((process) =>
+      cachePolicy?.isCacheMutatingProcess(process)
+    ).length;
+    if (cacheActions.length > 0 && latestCacheWriters > 0) {
+      log.err(`Reclaim refuses: ${latestCacheWriters} cache writer(s) became active before apply`);
       return 1;
     }
   } else if (p.os === "windows") {
@@ -626,8 +685,28 @@ async function cmdReclaim(p: Platform, inv: Invocation): Promise<number> {
   for (const path of result.removed) log.ok(`removed ${path}`);
   for (const item of result.skipped) log.warn(`skipped ${item.path} — ${item.reason}`);
   for (const item of result.failed) log.err(`failed ${item.path} — ${item.reason}`);
-  log.ok(`reclaimed ${reclaim.formatBytes(result.removedBytes)}`);
-  return result.skipped.length > 0 || result.failed.length > 0 ? 1 : 0;
+  let cacheFailed = false;
+  let cacheFreed = 0;
+  if (cachePolicy) {
+    const outcomes = await cachePolicy.applyCacheMaintenance(cacheActions);
+    for (const outcome of outcomes) {
+      if (!outcome.ok) {
+        cacheFailed = true;
+        log.err(`${outcome.kind} maintenance failed — ${outcome.detail}`);
+      } else {
+        const freed = outcome.freedBytes === null
+          ? "unmeasured"
+          : reclaim.formatBytes(outcome.freedBytes);
+        cacheFreed += outcome.freedBytes ?? 0;
+        log.ok(`${outcome.kind} maintenance completed — ${freed} reclaimed`);
+      }
+    }
+  }
+  log.ok(`reclaimed ${reclaim.formatBytes(result.removedBytes + cacheFreed)} inside the filesystem`);
+  if (p.env === "wsl") {
+    log.plain("       VHDX physical size changes only after a separate offline compaction");
+  }
+  return result.skipped.length > 0 || result.failed.length > 0 || cacheFailed ? 1 : 0;
 }
 
 async function cmdInstall(

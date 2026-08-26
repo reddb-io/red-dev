@@ -204,10 +204,13 @@ describe("flags", () => {
       apply: true,
       yes: true,
     });
-    expect(parse(["reclaim", "--apply", "--crash-dumps"])).toMatchObject({
+    expect(parse(["reclaim", "/work/reddb", "--apply", "--crash-dumps", "--package-caches", "--build-cache"])).toMatchObject({
       command: "reclaim",
       apply: true,
       crashDumps: true,
+      packageCaches: true,
+      buildCache: true,
+      reclaimWorkspace: "/work/reddb",
     });
   });
 });

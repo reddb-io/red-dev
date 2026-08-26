@@ -439,6 +439,44 @@ describe("workload policy", () => {
     }
   });
 
+  test("admits a WSL build with 34 GiB free while preserving the 30 GiB reserve", async () => {
+    if (process.platform === "win32") return;
+    const dir = mkdtempSync(`${tmpdir()}/red-dev-workload-disk-admit-`);
+    const bin = `${dir}/bin`;
+    const marker = `${dir}/executed`;
+    mkdirSync(bin);
+    try {
+      writeFileSync(
+        `${bin}/df`,
+        "#!/bin/sh\nprintf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\n'\nprintf 'C: 1000000000 964000000 36000000 97%% /mnt/c\\n'\n",
+      );
+      writeFileSync(`${bin}/cargo`, `#!/bin/sh\ntouch "${marker}"\n`);
+      chmodSync(`${bin}/df`, 0o755);
+      chmodSync(`${bin}/cargo`, 0o755);
+      const shell = `${dir}/workload.sh`;
+      writeFileSync(shell, workloadPolicy(WORKSTATION).shell);
+
+      const proc = Bun.spawn([
+        "/bin/bash", "--noprofile", "--norc", "-c", `source "${shell}"; cargo test`,
+      ], {
+        env: {
+          ...process.env,
+          HOME: dir,
+          PATH: `${bin}:${process.env.PATH ?? ""}`,
+          RED_ENV: "wsl",
+          RED_DEV_HEAVY_SCOPE: "0",
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      expect(await proc.exited).toBe(0);
+      expect(await new Response(proc.stderr).text()).toBe("");
+      expect(await Bun.file(marker).exists()).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("refuses Linux workloads when containment is unavailable or cannot be proven", async () => {
     if (process.platform === "win32") return;
     const dir = mkdtempSync(`${tmpdir()}/red-dev-workload-refusal-`);
