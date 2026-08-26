@@ -525,7 +525,12 @@ describe("workload policy", () => {
           `${bin}/systemd-run`,
           '#!/bin/sh\nwhile [ "$1" != "--" ]; do shift; done\nshift\nexec "$@"\n',
         );
+        writeFileSync(
+          `${bin}/cat`,
+          "#!/bin/sh\nprintf '0::/red-dev-heavy-agents.slice/test.scope\\n'\n",
+        );
         chmodSync(`${bin}/systemd-run`, 0o755);
+        chmodSync(`${bin}/cat`, 0o755);
         const wrongGroup = Bun.spawn([
           "/bin/bash", "--noprofile", "--norc", "-c", `source "${shell}"; cargo test`,
         ], {

@@ -155,6 +155,7 @@ export function questions(
   apps: Choice[],
   runtimes: Choice[],
   redApps: Choice[] = [],
+  wslTuning: Choice[] = [],
 ): Question[] {
   // Annotated rather than inferred: the return type does not reach
   // through `.filter` to type a step's callbacks, so `choicesFrom` and
@@ -203,6 +204,19 @@ export function questions(
         { key: "gitbash", label: "Git Bash", note: "stay on Windows, same dotfiles" },
       ],
       preset: ["wsl"],
+      applies: (pl: Platform) => pl.env === "wsl" || pl.os === "windows",
+    },
+    {
+      id: "wsl-tuning",
+      title: "WSL tuning",
+      description:
+        "red-dev never stops a live distro. This is the safety policy applied " +
+        "across Windows and WSL before builds, " +
+        "tests and coding agents begin using the machine. These are safe defaults, " +
+        "not optional tools; Enter accepts the inventory and continues.",
+      multi: true,
+      choices: wslTuning,
+      preset: [],
       applies: (pl: Platform) => pl.env === "wsl" || pl.os === "windows",
     },
     {
@@ -551,8 +565,9 @@ export function setupSteps(
   apps: Choice[],
   runtimes: Choice[],
   redApps: Choice[] = [],
+  wslTuning: Choice[] = [],
 ): { steps: Question[]; wizard: ReturnType<typeof createWizard> } {
-  const steps = questions(p, agents, apps, runtimes, redApps);
+  const steps = questions(p, agents, apps, runtimes, redApps, wslTuning);
   // createWizard creates signals; calling it during render rebuilds them
   // thirty times a second and puts a warning across the interface.
   const wizard = createWizard(
@@ -575,6 +590,7 @@ export function SetupLayout(m: SetupModel, p: Platform, width: number, height: n
   const rightWidth = twoColumn ? frame.width - leftWidth - 3 : frame.width;
   const isTheme = q.id === "theme";
   const isRuntimes = q.id === "runtimes";
+  const isWslTuning = q.id === "wsl-tuning";
   const options = stepChoices(q, m.pickedFor);
   const activeKey = options[m.cursor()]?.key ?? "";
   // A step the answers have ruled out is not a step someone is going to
@@ -640,22 +656,29 @@ export function SetupLayout(m: SetupModel, p: Platform, width: number, height: n
           Text({}, ""),
           Text({ color: muted }, q.description),
           Text({}, ""),
-          ...options.map((c, i) => {
-            const runtimeId = selectedRuntimeId(m.selection(), c.key);
-            const checked = isRuntimes
-              ? m.selection().includes(runtimeId)
-              : m.selection().includes(c.key);
-            const selectable = choiceSelectable(q, c);
-            const showNote = !isRuntimes && (q.id !== "reddb" || selectable);
-            const inventoryMarker = c.marker === "elsewhere" ? "→ " : "• ";
-            return ListItem({
-              primary: isRuntimes
-                ? `${checked ? "[x]" : "[ ]"} ${c.label}  ‹ ${runtimeVersionLabel(runtimeId)} ›`
-                : `${q.multi ? (selectable ? (checked ? "[x] " : "[ ] ") : inventoryMarker) : ""}${c.label}`,
-              ...(showNote ? { secondary: c.note } : {}),
-              selected: i === m.cursor(),
-            });
-          }),
+          ...(isWslTuning
+            ? options.map((c, i) =>
+                Text(
+                  { ...(i === m.cursor() ? { color: ui.accent } : {}) },
+                  `• ${c.label}: ${c.note}`,
+                )
+              )
+            : options.map((c, i) => {
+                const runtimeId = selectedRuntimeId(m.selection(), c.key);
+                const checked = isRuntimes
+                  ? m.selection().includes(runtimeId)
+                  : m.selection().includes(c.key);
+                const selectable = choiceSelectable(q, c);
+                const showNote = !isRuntimes && (q.id !== "reddb" || selectable);
+                const inventoryMarker = c.marker === "elsewhere" ? "→ " : "• ";
+                return ListItem({
+                  primary: isRuntimes
+                    ? `${checked ? "[x]" : "[ ]"} ${c.label}  ‹ ${runtimeVersionLabel(runtimeId)} ›`
+                    : `${q.multi ? (selectable ? (checked ? "[x] " : "[ ] ") : inventoryMarker) : ""}${c.label}`,
+                  ...(showNote ? { secondary: c.note } : {}),
+                  selected: i === m.cursor(),
+                });
+              })),
           // The reason this screen exists: the palette is visible while
           // the cursor moves, not after the choice is made.
           ...(isTheme

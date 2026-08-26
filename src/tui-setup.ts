@@ -65,8 +65,9 @@ export async function runSetupTui(
   apps: Choice[],
   runtimes: Choice[],
   redApps: Choice[] = [],
+  wslTuning: Choice[] = [],
 ): Promise<SetupAnswers | null> {
-  const steps = questions(p, agents, apps, runtimes, redApps);
+  const steps = questions(p, agents, apps, runtimes, redApps, wslTuning);
   let result: SetupAnswers | null = null;
 
   // Built here, outside the component, and deliberately so.
@@ -201,6 +202,7 @@ export async function runSetupTui(
     const rightWidth = twoColumn ? frame.width - leftWidth - 3 : frame.width;
     const isTheme = q.id === "theme";
     const isRuntimes = q.id === "runtimes";
+    const isWslTuning = q.id === "wsl-tuning";
     const activeKey = q.choices[cursor()]?.key ?? "";
 
     return CenteredScreen(
@@ -260,22 +262,29 @@ export async function runSetupTui(
             Text({}, ""),
             Text({ color: muted }, q.description),
             Text({}, ""),
-            ...q.choices.map((c, i) => {
-              const runtimeId = selectedRuntimeId(selection(), c.key);
-              const checked = isRuntimes
-                ? selection().includes(runtimeId)
-                : selection().includes(c.key);
-              const selectable = choiceSelectable(q, c);
-              const showNote = !isRuntimes && (q.id !== "reddb" || selectable);
-              const inventoryMarker = c.marker === "elsewhere" ? "→ " : "• ";
-              return ListItem({
-                primary: isRuntimes
-                  ? `${checked ? "[x]" : "[ ]"} ${c.label}  ‹ ${runtimeVersionLabel(runtimeId)} ›`
-                  : `${q.multi ? (selectable ? (checked ? "[x] " : "[ ] ") : inventoryMarker) : ""}${c.label}`,
-                ...(showNote ? { secondary: c.note } : {}),
-                selected: i === cursor(),
-              });
-            }),
+            ...(isWslTuning
+              ? q.choices.map((c, i) =>
+                  Text(
+                    { ...(i === cursor() ? { color: ui.accent } : {}) },
+                    `• ${c.label}: ${c.note}`,
+                  )
+                )
+              : q.choices.map((c, i) => {
+                  const runtimeId = selectedRuntimeId(selection(), c.key);
+                  const checked = isRuntimes
+                    ? selection().includes(runtimeId)
+                    : selection().includes(c.key);
+                  const selectable = choiceSelectable(q, c);
+                  const showNote = !isRuntimes && (q.id !== "reddb" || selectable);
+                  const inventoryMarker = c.marker === "elsewhere" ? "→ " : "• ";
+                  return ListItem({
+                    primary: isRuntimes
+                      ? `${checked ? "[x]" : "[ ]"} ${c.label}  ‹ ${runtimeVersionLabel(runtimeId)} ›`
+                      : `${q.multi ? (selectable ? (checked ? "[x] " : "[ ] ") : inventoryMarker) : ""}${c.label}`,
+                    ...(showNote ? { secondary: c.note } : {}),
+                    selected: i === cursor(),
+                  });
+                })),
             // The reason this screen exists: the palette is visible
             // while the cursor moves, not after the choice is made.
             ...(isTheme

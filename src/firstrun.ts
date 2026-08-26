@@ -20,6 +20,7 @@ import type { SetupAnswers } from "./tui-setup-model.ts";
 import { readPreferences, writePreferences, type Preferences } from "./preferences.ts";
 import { DEFAULT_THEME, themeNames } from "./themes.ts";
 import { checkbox, confirm, interactive, select } from "./ui.ts";
+import type { WslTuningFacts } from "./wsl-tuning.ts";
 
 export interface FirstRunChoices {
   theme?: string;
@@ -161,11 +162,14 @@ export async function isFirstRun(p: Platform): Promise<boolean> {
  * and a no-scope gate — and the menu is the path the one-liner takes, so
  * choosing Install converged the whole manifest having asked nothing.
  */
-export async function buildSetupSteps(p: Platform) {
+export async function buildSetupSteps(p: Platform, wslTuningFacts?: WslTuningFacts) {
   const { setupSteps } = await import("./tui-setup-model.ts");
   const { availableAgents, isAgentInstalled } = await import("./agents.ts");
   const { otherOptionalChoices, redFamilyChoices } = await import("./red-family.ts");
   const { OFFERED_RUNTIMES } = await import("./runtimes.ts");
+  const { observeWslTuningFacts, wslTuningChoices } = await import("./wsl-tuning.ts");
+  const tuningFacts = wslTuningFacts ??
+    (p.env === "wsl" || p.os === "windows" ? await observeWslTuningFacts(p) : undefined);
 
   const agents = availableAgents(p).map((a) => ({
     key: a.key,
@@ -179,6 +183,7 @@ export async function buildSetupSteps(p: Platform) {
     otherOptionalChoices(p),
     OFFERED_RUNTIMES.map((r) => ({ key: r.id, label: r.label, note: r.about })),
     redFamilyChoices(p, agents),
+    tuningFacts ? wslTuningChoices(tuningFacts) : [],
   );
 }
 
@@ -355,6 +360,7 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
     const { availableAgents, isAgentInstalled } = await import("./agents.ts");
     const { otherOptionalChoices, redFamilyChoices } = await import("./red-family.ts");
     const { OFFERED_RUNTIMES } = await import("./runtimes.ts");
+    const { observeWslTuningFacts, wslTuningChoices } = await import("./wsl-tuning.ts");
 
     const agents = availableAgents(p).map((a) => ({
       key: a.key,
@@ -368,6 +374,9 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
       otherOptionalChoices(p),
       OFFERED_RUNTIMES.map((r) => ({ key: r.id, label: r.label, note: r.about })),
       redFamilyChoices(p, agents),
+      p.env === "wsl" || p.os === "windows"
+        ? wslTuningChoices(await observeWslTuningFacts(p))
+        : [],
     );
 
     if (!answers) {

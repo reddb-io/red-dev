@@ -491,7 +491,13 @@ export interface WorkloadPolicy {
   /** Periodic host-disk circuit breaker run from the protected control plane. */
   diskGuardian: string;
   /** The global wall shown by doctor and status surfaces. */
-  capacity: { memoryMax: string; cpuQuota: string };
+  capacity: {
+    memoryMax: string;
+    cpuQuota: string;
+    paneMemoryMax: string;
+    agentMemoryMax: string;
+    buildMemoryMax: string;
+  };
   /** Launch a workload through its cgroup adapter when the platform supports it. */
   launch(kind: WorkloadKind, argv: readonly string[], p: Platform): string[];
 }
@@ -553,6 +559,9 @@ WantedBy=timers.target
     capacity: {
       memoryMax: domains.root.aggregate["MemoryMax"] ?? "unknown",
       cpuQuota: domains.root.aggregate["CPUQuota"] ?? "unknown",
+      paneMemoryMax: domains.pane.scope?.["MemoryMax"] ?? "unknown",
+      agentMemoryMax: domains.agent.scope?.["MemoryMax"] ?? "unknown",
+      buildMemoryMax: domains.build.scope?.["MemoryMax"] ?? "unknown",
     },
     launch(kind, argv, p) {
       if (p.os !== "linux" || !p.caps.systemd) return [...argv];
