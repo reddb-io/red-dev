@@ -1,6 +1,6 @@
 {
   "name": "red-dev",
-  "version": "1.0.121",
+  "version": "1.0.122",
   "description": "One dev environment across Ubuntu 24, Ubuntu 26, WSL and Windows",
   "license": "MIT",
   "private": true,
