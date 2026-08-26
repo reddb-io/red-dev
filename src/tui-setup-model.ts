@@ -67,6 +67,12 @@ export interface Choice {
   key: string;
   label: string;
   note: string;
+  /** False when a page is identifying an item owned by another scope. */
+  selectable?: boolean;
+  /** Inventory glyph used by the RedDB family page. */
+  marker?: "included" | "elsewhere";
+  /** This choice contributes an optional tool to SetupAnswers.apps. */
+  answer?: "apps";
 }
 
 /** How a step reads the answers given so far. */
@@ -108,6 +114,34 @@ export function stepAvailable(q: Question, picked: Picked): boolean {
   return q.available?.(picked) ?? true;
 }
 
+/** Whether Space can change this row. */
+export function choiceSelectable(q: Question, choice: Choice): boolean {
+  return q.multi && choice.selectable !== false;
+}
+
+/** Whether the page has at least one actual choice rather than inventory only. */
+export function stepHasChoices(q: Question): boolean {
+  return q.choices.some((choice) => choiceSelectable(q, choice));
+}
+
+/** Start a mixed inventory/choice page on the first row Space can change. */
+export function stepInitialCursor(q: Question): number {
+  const first = q.choices.findIndex((choice) => choiceSelectable(q, choice));
+  return first < 0 ? 0 : first;
+}
+
+/** Optional tools selected across the generic Tools and RedDB pages. */
+export function selectedSetupApps(steps: readonly Question[], picked: Picked): string[] {
+  const redOptionalApps = steps
+    .find((candidate) => candidate.id === "reddb")
+    ?.choices.filter((choice) => choice.answer === "apps")
+    .map((choice) => choice.key) ?? [];
+  return [
+    ...picked("apps"),
+    ...picked("reddb").filter((key) => redOptionalApps.includes(key)),
+  ];
+}
+
 const FONTS: Choice[] = [
   { key: "firacode", label: "FiraCode", note: "ligatures, the default" },
   { key: "jetbrainsmono", label: "JetBrains Mono", note: "taller x-height" },
@@ -120,6 +154,7 @@ export function questions(
   agents: Choice[],
   apps: Choice[],
   runtimes: Choice[],
+  redApps: Choice[] = [],
 ): Question[] {
   // Annotated rather than inferred: the return type does not reach
   // through `.filter` to type a step's callbacks, so `choicesFrom` and
@@ -220,6 +255,18 @@ export function questions(
       choices: runtimes,
       preset: runtimes.filter((runtime) => runtimeSelectedByDefault(runtime.key)).map((runtime) => runtime.key),
       applies: () => true,
+    },
+    {
+      id: "reddb",
+      title: "RedDB",
+      description:
+        "The RedDB family red-dev keeps together. A dot means the base converge " +
+        "already includes it; an arrow points to a choice on another page, and " +
+        "checkboxes are optional integrations you can untick.",
+      multi: true,
+      choices: redApps,
+      preset: redApps.map((app) => app.key),
+      applies: () => redApps.length > 0,
     },
     {
       id: "apps",
@@ -412,7 +459,7 @@ export function useSetupModel(steps: Question[], wizard: ReturnType<typeof creat
           ? { wallpaper: get("wallpaper")[0] as ThemeSlug }
           : {}),
         font: get("font")[0] ?? "firacode",
-        apps: get("apps"),
+        apps: selectedSetupApps(steps, get),
         runtimes: get("runtimes"),
         agents: get("agents"),
         ...(defaultAgent ? { defaultAgent } : {}),
@@ -451,7 +498,9 @@ export function useSetupModel(steps: Question[], wizard: ReturnType<typeof creat
         return "handled";
       }
       if (input === " " && q.multi) {
-        const k = options[cursor()]!.key;
+        const choice = options[cursor()];
+        if (!choice || !choiceSelectable(q, choice)) return "handled";
+        const k = choice.key;
         const cur = selection();
         setPicked({
           ...picked(),
@@ -473,7 +522,7 @@ export function useSetupModel(steps: Question[], wizard: ReturnType<typeof creat
         const next = adjacent(from, 1, answered);
         if (next === null) return "done";
         setStepIndex(next);
-        setCursor(0);
+        setCursor(stepInitialCursor(steps[next]!));
         // Once per step crossed, so the wizard's own position keeps up
         // with a jump over a question that had nothing to ask.
         for (let i = from; i < next; i++) wizard.next();
@@ -484,7 +533,7 @@ export function useSetupModel(steps: Question[], wizard: ReturnType<typeof creat
         const back = adjacent(from, -1, picked());
         if (back !== null) {
           setStepIndex(back);
-          setCursor(0);
+          setCursor(stepInitialCursor(steps[back]!));
           for (let i = back; i < from; i++) wizard.prev();
         }
         return "handled";
@@ -501,8 +550,9 @@ export function setupSteps(
   agents: Choice[],
   apps: Choice[],
   runtimes: Choice[],
+  redApps: Choice[] = [],
 ): { steps: Question[]; wizard: ReturnType<typeof createWizard> } {
-  const steps = questions(p, agents, apps, runtimes);
+  const steps = questions(p, agents, apps, runtimes, redApps);
   // createWizard creates signals; calling it during render rebuilds them
   // thirty times a second and puts a warning across the interface.
   const wizard = createWizard(
@@ -595,11 +645,14 @@ export function SetupLayout(m: SetupModel, p: Platform, width: number, height: n
             const checked = isRuntimes
               ? m.selection().includes(runtimeId)
               : m.selection().includes(c.key);
+            const selectable = choiceSelectable(q, c);
+            const showNote = !isRuntimes && (q.id !== "reddb" || selectable);
+            const inventoryMarker = c.marker === "elsewhere" ? "→ " : "• ";
             return ListItem({
               primary: isRuntimes
                 ? `${checked ? "[x]" : "[ ]"} ${c.label}  ‹ ${runtimeVersionLabel(runtimeId)} ›`
-                : `${q.multi ? (checked ? "[x] " : "[ ] ") : ""}${c.label}`,
-              ...(!isRuntimes ? { secondary: c.note } : {}),
+                : `${q.multi ? (selectable ? (checked ? "[x] " : "[ ] ") : inventoryMarker) : ""}${c.label}`,
+              ...(showNote ? { secondary: c.note } : {}),
               selected: i === m.cursor(),
             });
           }),
@@ -623,7 +676,7 @@ export function SetupLayout(m: SetupModel, p: Platform, width: number, height: n
       HintBar({
         hints: [
           { shortcut: "up/down", action: "move" },
-          ...(q.multi ? [{ shortcut: "space", action: "toggle" }] : []),
+          ...(stepHasChoices(q) ? [{ shortcut: "space", action: "toggle" }] : []),
           ...(isRuntimes ? [{ shortcut: "left/right", action: "version" }] : []),
           {
             shortcut: "enter",

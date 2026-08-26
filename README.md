@@ -260,6 +260,12 @@ developer works in:
 | [`dit`](https://github.com/reddb-io/dit) | push-to-toggle voice dictation | desktop sessions |
 | [`herdr`](https://herdr.dev) | several agents in one terminal, alive over SSH | Linux and WSL |
 
+First-run setup gives this family its own **RedDB** page instead of mixing it
+into the generic Tools list. A dot identifies products the base converge already
+includes, an arrow points to RedCode's choice on the Agents page, and checkboxes
+control the optional RedSkills integrations for VS Code and Herdr. The Dev,
+Memory and Brain RedSkills payloads are named individually in the inventory.
+
 `red` and `tq` are CLIs, so they are `core` and land on all five targets.
 `red-request`, `red-ui` and `dit` are `desktop`, which also means WSL never
 attempts them: installing a Linux GUI app inside a distro with no display is the

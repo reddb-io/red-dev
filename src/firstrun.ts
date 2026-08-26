@@ -164,20 +164,21 @@ export async function isFirstRun(p: Platform): Promise<boolean> {
 export async function buildSetupSteps(p: Platform) {
   const { setupSteps } = await import("./tui-setup-model.ts");
   const { availableAgents, isAgentInstalled } = await import("./agents.ts");
-  const { toolsInScope, providerFor } = await import("./manifest.ts");
+  const { otherOptionalChoices, redFamilyChoices } = await import("./red-family.ts");
   const { OFFERED_RUNTIMES } = await import("./runtimes.ts");
+
+  const agents = availableAgents(p).map((a) => ({
+    key: a.key,
+    label: a.label,
+    note: isAgentInstalled(a) ? `${a.about} — installed` : a.about,
+  }));
 
   return setupSteps(
     p,
-    availableAgents(p).map((a) => ({
-      key: a.key,
-      label: a.label,
-      note: isAgentInstalled(a) ? `${a.about} — installed` : a.about,
-    })),
-    toolsInScope("optional")
-      .filter((t) => providerFor(t, p).kind !== "skip")
-      .map((t) => ({ key: t.name, label: t.name, note: t.about ?? "" })),
+    agents,
+    otherOptionalChoices(p),
     OFFERED_RUNTIMES.map((r) => ({ key: r.id, label: r.label, note: r.about })),
+    redFamilyChoices(p, agents),
   );
 }
 
@@ -352,20 +353,21 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
   if (columns >= 60) {
     const { runSetupTui } = await import("./tui-setup.ts");
     const { availableAgents, isAgentInstalled } = await import("./agents.ts");
-    const { toolsInScope, providerFor } = await import("./manifest.ts");
+    const { otherOptionalChoices, redFamilyChoices } = await import("./red-family.ts");
     const { OFFERED_RUNTIMES } = await import("./runtimes.ts");
+
+    const agents = availableAgents(p).map((a) => ({
+      key: a.key,
+      label: a.label,
+      note: isAgentInstalled(a) ? `${a.about} — installed` : a.about,
+    }));
 
     const answers = await runSetupTui(
       p,
-      availableAgents(p).map((a) => ({
-        key: a.key,
-        label: a.label,
-        note: isAgentInstalled(a) ? `${a.about} — installed` : a.about,
-      })),
-      toolsInScope("optional")
-        .filter((t) => providerFor(t, p).kind !== "skip")
-        .map((t) => ({ key: t.name, label: t.name, note: t.about ?? "" })),
+      agents,
+      otherOptionalChoices(p),
       OFFERED_RUNTIMES.map((r) => ({ key: r.id, label: r.label, note: r.about })),
+      redFamilyChoices(p, agents),
     );
 
     if (!answers) {
@@ -464,16 +466,41 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
     selectedRuntimes.push(picked.split(" ")[0]!);
   }
 
-  // 4. Extra tools, all of them ticked.
+  // 4. The RedDB family: inventory beside the optional integrations.
+  const { availableAgents } = await import("./agents.ts");
+  const { otherOptionalChoices, redFamilyChoices } = await import("./red-family.ts");
+  const redFamily = redFamilyChoices(
+    p,
+    availableAgents(p).map((agent) => ({
+      key: agent.key,
+      label: agent.label,
+      note: agent.about,
+    })),
+  );
+  log.plain("");
+  log.step("RedDB family:");
+  for (const product of redFamily.filter((choice) => choice.selectable === false)) {
+    const marker = product.marker === "elsewhere" ? "→" : "•";
+    log.plain(`     ${marker} ${product.label} — ${product.note}`);
+  }
+  const redOptional = redFamily.filter((choice) => choice.answer === "apps");
+  const redLabels = redOptional.map((choice) => `${choice.key} — ${choice.note}`);
+  const pickedRedApps = redLabels.length > 0
+    ? await checkbox(
+        "Optional RedDB integrations? (space to untick)",
+        redLabels as [string, ...string[]],
+        redLabels,
+      )
+    : [];
+
+  // 5. Extra tools, all of them ticked.
   //
   // This used to default to none and call empty a good answer. That is
   // true for a list you have to evaluate and wrong for a curated one —
   // the point of an omakase setup is that somebody already chose, and
   // none of these is installed by a plain converge, so this list is the
   // only thing that decides.
-  const { toolsInScope, providerFor } = await import("./manifest.ts");
-  const optional = toolsInScope("optional").filter((t) => providerFor(t, p).kind !== "skip");
-  const appLabels = optional.map((t) => `${t.name} — ${t.about ?? ""}`);
+  const appLabels = otherOptionalChoices(p).map((choice) => `${choice.key} — ${choice.note}`);
   const pickedApps =
     appLabels.length > 0
       ? await checkbox(
@@ -483,7 +510,7 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
         )
       : [];
 
-  // 5. Plugins — things that attach to bash rather than sit beside it.
+  // 6. Plugins — things that attach to bash rather than sit beside it.
   //    The caveat stays visible, but the answer follows the same opt-out
   //    contract as every other install choice.
   log.plain("");
@@ -492,7 +519,7 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
   log.plain("     into; untick it if you prefer the stock line editor.");
   const blesh = await confirm("Enable ble.sh?", true);
 
-  // 6. Paint. Last, because it is the only thing here that changes
+  // 7. Paint. Last, because it is the only thing here that changes
   //    nothing but how it looks — and `red-dev theme` previews these
   //    live, which this linear prompt cannot.
   const font = (await select("Terminal font?", FONTS, FONTS[0])).split(" ")[0]!;
@@ -509,7 +536,7 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
   );
   const wallpaper = wallpaperChoice.startsWith("theme ") ? undefined : wallpaperChoice;
 
-  // 7. And whether that wallpaper reports on the machine it is sitting
+  // 8. And whether that wallpaper reports on the machine it is sitting
   //    on. Asked after the theme because it draws over whatever the
   //    theme chose. It follows the setup's opt-out contract.
   log.plain("");
@@ -522,7 +549,7 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
     theme,
     wallpaper,
     font,
-    apps: pickedApps.map((l) => l.split(" ")[0]!),
+    apps: [...pickedApps, ...pickedRedApps].map((l) => l.split(" ")[0]!),
     runtimes: selectedRuntimes,
     blesh,
   };
@@ -631,4 +658,3 @@ async function writeShellEnvAt(home: string, vars: Record<string, string>): Prom
     "\n";
   await Bun.write(path, body);
 }
-

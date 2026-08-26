@@ -47,7 +47,11 @@ import { withConsoleSelectionSuspended } from "./windows-console-mode.ts";
 // them is edited and nobody notices until an answer differs between the
 // menu and the standalone first run.
 import {
+  choiceSelectable,
   questions,
+  selectedSetupApps,
+  stepHasChoices,
+  stepInitialCursor,
   type Choice,
   type Question,
   type SetupAnswers,
@@ -60,8 +64,9 @@ export async function runSetupTui(
   agents: Choice[],
   apps: Choice[],
   runtimes: Choice[],
+  redApps: Choice[] = [],
 ): Promise<SetupAnswers | null> {
-  const steps = questions(p, agents, apps, runtimes);
+  const steps = questions(p, agents, apps, runtimes, redApps);
   let result: SetupAnswers | null = null;
 
   // Built here, outside the component, and deliberately so.
@@ -98,7 +103,7 @@ export async function runSetupTui(
             ? { wallpaper: get("wallpaper")[0] as ThemeSlug }
             : {}),
           font: get("font")[0] ?? "firacode",
-          apps: get("apps"),
+          apps: selectedSetupApps(steps, get),
           runtimes: get("runtimes"),
           agents: get("agents"),
           blesh: get("plugins").includes("blesh"),
@@ -111,7 +116,7 @@ export async function runSetupTui(
         return;
       }
       setStepIndex(stepIndex() + 1);
-      setCursor(0);
+      setCursor(stepInitialCursor(steps[stepIndex() + 1]!));
       wizard.next();
     };
 
@@ -144,7 +149,9 @@ export async function runSetupTui(
       }
 
       if (input === " " && q.multi) {
-        const k = q.choices[cursor()]!.key;
+        const choice = q.choices[cursor()];
+        if (!choice || !choiceSelectable(q, choice)) return;
+        const k = choice.key;
         const cur = selection();
         setPicked({
           ...picked(),
@@ -168,7 +175,7 @@ export async function runSetupTui(
       if ((key.leftArrow && q.id !== "runtimes") || key.escape) {
         if (stepIndex() > 0) {
           setStepIndex(stepIndex() - 1);
-          setCursor(0);
+          setCursor(stepInitialCursor(steps[stepIndex() - 1]!));
           wizard.prev();
         }
         return;
@@ -258,11 +265,14 @@ export async function runSetupTui(
               const checked = isRuntimes
                 ? selection().includes(runtimeId)
                 : selection().includes(c.key);
+              const selectable = choiceSelectable(q, c);
+              const showNote = !isRuntimes && (q.id !== "reddb" || selectable);
+              const inventoryMarker = c.marker === "elsewhere" ? "→ " : "• ";
               return ListItem({
                 primary: isRuntimes
                   ? `${checked ? "[x]" : "[ ]"} ${c.label}  ‹ ${runtimeVersionLabel(runtimeId)} ›`
-                  : `${q.multi ? (checked ? "[x] " : "[ ] ") : ""}${c.label}`,
-                ...(!isRuntimes ? { secondary: c.note } : {}),
+                  : `${q.multi ? (selectable ? (checked ? "[x] " : "[ ] ") : inventoryMarker) : ""}${c.label}`,
+                ...(showNote ? { secondary: c.note } : {}),
                 selected: i === cursor(),
               });
             }),
@@ -286,7 +296,7 @@ export async function runSetupTui(
         HintBar({
           hints: [
             { shortcut: "up/down", action: "move" },
-            ...(q.multi ? [{ shortcut: "space", action: "toggle" }] : []),
+            ...(stepHasChoices(q) ? [{ shortcut: "space", action: "toggle" }] : []),
             ...(isRuntimes ? [{ shortcut: "left/right", action: "version" }] : []),
             { shortcut: "enter", action: stepIndex() === steps.length - 1 ? "finish" : "next" },
             ...(stepIndex() > 0 && !isRuntimes ? [{ shortcut: "left", action: "back" }] : []),
