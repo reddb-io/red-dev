@@ -95,8 +95,17 @@ fi
 # the prune skip this whole tree.
 _red_zellij_log="${XDG_STATE_HOME:-$HOME/.local/state}/red-dev/zellij/crash-$$.log"
 mkdir -p "${_red_zellij_log%/*}" 2>/dev/null
-RED_IN_ZELLIJ=1 zellij 2>"$_red_zellij_log"
-_red_zellij_status=$?
+if declare -F _red_dev_run_control >/dev/null 2>&1; then
+  RED_IN_ZELLIJ=1 _red_dev_run_control zellij 2>"$_red_zellij_log"
+  _red_zellij_status=$?
+elif [ "${RED_ENV:-server}" = "windows" ]; then
+  RED_IN_ZELLIJ=1 zellij 2>"$_red_zellij_log"
+  _red_zellij_status=$?
+else
+  printf 'red-dev: control-plane guard is unavailable; refusing uncontained zellij\n' \
+    >"$_red_zellij_log"
+  _red_zellij_status=125
+fi
 
 if [ "$_red_zellij_status" -eq 0 ]; then
   rm -f "$_red_zellij_log"

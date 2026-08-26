@@ -203,14 +203,14 @@ else
   unset RED_SHARE
 fi
 
-# zellij sits between shared and init on purpose: after shared, which
-# exports ZELLIJ_CONFIG_DIR, and before init, whose tool activations are
-# the expensive part and would be paid twice — once by the shell zellij
-# replaces, once by the shell inside the pane.
+# Workload policy sits before zellij and init on purpose. It gives the zellij
+# server its protected control slice, then moves each pane into the bounded work
+# plane before init's expensive tool activations run. The scoped pane starts one
+# replacement shell, marked so this ordering does not recurse.
 # red-skills-watch is last of the sourced parts and after `path`, which
 # is what puts red-dev on PATH: it spawns nothing if the command cannot
 # be found, and finding it is the whole point of running after path.
-for _red_part in path shared zellij init aliases functions prompt red-skills-watch; do
+for _red_part in path shared build-resources zellij init aliases functions prompt red-skills-watch; do
   _red_file="$RED_ROOT/config/bash/${_red_part}.sh"
   if [ -r "$_red_file" ]; then
     # shellcheck disable=SC1090

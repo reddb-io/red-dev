@@ -67,7 +67,9 @@ function run(env: Record<string, string>, interactive: boolean): Run {
   const dir = stubDir();
   // Somewhere to leave a crash log that is not the real one under $HOME.
   const stateHome = mkdtempSync(`${tmpdir()}/red-zellij-state-`);
-  const body = `source ${SOURCE}; echo FELLTHROUGH`;
+  // The workload-policy adapter is sourced immediately before zellij.sh
+  // in the managed rc. These tests isolate Zellij's terminal behavior.
+  const body = `_red_dev_run_control() { command "$@"; }; source ${SOURCE}; echo FELLTHROUGH`;
   const argv = interactive
     ? ["script", "-qec", `bash --norc -i -c '${body}'`, "/dev/null"]
     : ["bash", "--norc", "-c", body];

@@ -179,6 +179,7 @@ type ProviderSpec =
         | "wsl-interop"
         | "wsl-runtime-dir"
         | "blesh"
+        | "build-resources"
         | "runtimes"
         | "shared-root"
         | "hotkeys"
@@ -409,6 +410,7 @@ const builtin = (
     | "wsl-runtime-dir"
     | "wsl-sync"
     | "blesh"
+    | "build-resources"
     | "runtimes"
     | "shared-root"
     | "hotkeys"
@@ -836,6 +838,13 @@ export const TOOLS: Tool[] = [
     managed: true,
     u24: builtin("runtimes"),
     win: builtin("runtimes"),
+  },
+  {
+    name: "build-resources",
+    scope: "core",
+    managed: true,
+    u24: builtin("build-resources"),
+    win: skip("build resource containment is managed inside Linux/WSL"),
   },
   {
     // On by default; RED_BLE=0 opts out. See the note in src/blesh.ts
