@@ -2196,7 +2196,7 @@ async function cmdAgentsRun(p: Platform, passthrough: string[]): Promise<number>
   }
 
   try {
-    return await runLaunchTarget(decision.target);
+    return await runLaunchTarget(decision.target, p);
   } catch {
     log.err(`${decision.target.label} could not be started: ${decision.target.executable}`);
     return 1;

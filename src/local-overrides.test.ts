@@ -23,7 +23,7 @@ describe("rc.sh sources the override files", () => {
     // Sourced before them, every alias here would be replaced by the
     // generated aliases.sh a moment later — present in the file and
     // absent from the shell, which is the worst of both.
-    const loop = rc.indexOf("for _red_part in path shared zellij");
+    const loop = rc.indexOf("for _red_part in path shared build-resources zellij");
     const mine = rc.indexOf("for _red_mine in");
     expect(loop).toBeGreaterThan(-1);
     expect(mine).toBeGreaterThan(loop);
