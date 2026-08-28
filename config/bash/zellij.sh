@@ -94,25 +94,77 @@ fi
 # else. A directory entry does not end in .log, so both the listing and
 # the prune skip this whole tree.
 _red_zellij_log="${XDG_STATE_HOME:-$HOME/.local/state}/red-dev/zellij/crash-$$.log"
-mkdir -p "${_red_zellij_log%/*}" 2>/dev/null
+_red_zellij_dir="${_red_zellij_log%/*}"
+_red_zellij_last="$_red_zellij_dir/last-session"
+mkdir -p "$_red_zellij_dir" 2>/dev/null
 if declare -F _red_dev_run_control >/dev/null 2>&1; then
-  RED_IN_ZELLIJ=1 _red_dev_run_control zellij 2>"$_red_zellij_log"
-  _red_zellij_status=$?
+  _red_zellij_launch() { _red_dev_run_control zellij "$@"; }
 elif [ "${RED_ENV:-server}" = "windows" ]; then
-  RED_IN_ZELLIJ=1 zellij 2>"$_red_zellij_log"
-  _red_zellij_status=$?
+  _red_zellij_launch() { zellij "$@"; }
 else
   printf 'red-dev: control-plane guard is unavailable; refusing uncontained zellij\n' \
     >"$_red_zellij_log"
   _red_zellij_status=125
 fi
 
+# Resume before creating. `list-sessions --reverse` is newest-first but mixes
+# live servers with serialized sessions. A live control plane wins even when an
+# exited scratch session was created later; only when every live candidate is
+# gone do we resurrect serialized state. Attach is also the validity probe: a
+# session that disappeared in the listing race or whose serialization cannot be
+# read returns non-zero, and the next candidate gets a chance.
+if declare -F _red_zellij_launch >/dev/null 2>&1; then
+  _red_zellij_sessions="$(
+    RED_IN_ZELLIJ=1 _red_zellij_launch list-sessions --no-formatting --reverse \
+      2>>"$_red_zellij_log"
+  )"
+  _red_zellij_preferred="$(sed -n '1p' "$_red_zellij_last" 2>/dev/null)"
+  _red_zellij_candidates="$(
+    printf '%s\n' "$_red_zellij_preferred"
+    printf '%s\n' "$_red_zellij_sessions" |
+      awk '/ \[Created / && $0 !~ /\(EXITED/ { sub(/ \[Created .*/, ""); print }'
+    printf '%s\n' "$_red_zellij_sessions" |
+      awk '/ \[Created / && $0 ~ /\(EXITED/ { sub(/ \[Created .*/, ""); print }'
+  )"
+  _red_zellij_candidates="$(
+    printf '%s\n' "$_red_zellij_candidates" | awk 'NF && !seen[$0]++'
+  )"
+
+  _red_zellij_status=1
+  while IFS= read -r _red_zellij_session; do
+    [ -n "$_red_zellij_session" ] || continue
+    printf '%s\n' "$_red_zellij_session" >"$_red_zellij_last.tmp-$$" 2>/dev/null &&
+      mv -f "$_red_zellij_last.tmp-$$" "$_red_zellij_last" 2>/dev/null
+    RED_IN_ZELLIJ=1 _red_zellij_launch attach "$_red_zellij_session" \
+      2>>"$_red_zellij_log"
+    _red_zellij_status=$?
+    [ "$_red_zellij_status" -eq 0 ] && break
+  done <<EOF
+$_red_zellij_candidates
+EOF
+
+  # Empty inventory, or every candidate failed its attach/resurrection probe.
+  if [ "$_red_zellij_status" -ne 0 ]; then
+    _red_zellij_session="${RED_ZELLIJ_SESSION:-red-dev-main}"
+    printf '%s\n' "$_red_zellij_session" >"$_red_zellij_last.tmp-$$" 2>/dev/null &&
+      mv -f "$_red_zellij_last.tmp-$$" "$_red_zellij_last" 2>/dev/null
+    RED_IN_ZELLIJ=1 _red_zellij_launch attach --create "$_red_zellij_session" \
+      2>>"$_red_zellij_log"
+    _red_zellij_status=$?
+  fi
+fi
+
 if [ "$_red_zellij_status" -eq 0 ]; then
   rm -f "$_red_zellij_log"
-  unset _red_zellij_status _red_zellij_log
-  # The session ended normally, so the terminal is done — same as if
-  # zellij had replaced this shell to begin with.
-  exit 0
+  unset -f _red_zellij_launch 2>/dev/null
+  unset _red_zellij_status _red_zellij_log _red_zellij_dir _red_zellij_last \
+    _red_zellij_sessions _red_zellij_preferred _red_zellij_candidates \
+    _red_zellij_session
+  # ExitReason::Disconnect currently reaches the shell as status 0, the
+  # same status as an intentional detach. Closing this parent shell on 0
+  # therefore turns a recoverable client disconnect into a closed terminal.
+  # Always retain a recovery prompt; only the person may close the terminal.
+  return 0
 fi
 
 # Undo what zellij turned on and did not turn off.
@@ -141,4 +193,7 @@ else
   rm -f "$_red_zellij_log"
 fi
 printf 'red-dev: set RED_ZELLIJ=0 in ~/.config/red-dev/env.sh to stop trying\n' >&2
-unset _red_zellij_status _red_zellij_log
+unset -f _red_zellij_launch 2>/dev/null
+unset _red_zellij_status _red_zellij_log _red_zellij_dir _red_zellij_last \
+  _red_zellij_sessions _red_zellij_preferred _red_zellij_candidates \
+  _red_zellij_session

@@ -293,7 +293,9 @@ ui {
 // binfmt registration in the wsl scope matters.
 copy_on_select true
 
-// Sessions survive a closed terminal. Reattach with `zellij attach`.
+// Sessions survive a closed terminal. The next interactive shell first
+// attaches to the newest live session, then tries serialized sessions from
+// newest to oldest, and creates a fresh session only when none can resume.
 session_serialization true
 pane_viewport_serialization true
 

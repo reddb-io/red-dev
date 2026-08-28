@@ -37,9 +37,30 @@ function stubDir(): string {
   const stub = `${dir}/zellij`;
   writeFileSync(
     stub,
-    '#!/bin/sh\necho "STUB RED_IN_ZELLIJ=$RED_IN_ZELLIJ"\n' +
-      '[ -n "$STUB_STDERR" ] && echo "$STUB_STDERR" >&2\n' +
-      "exit ${STUB_EXIT:-0}\n",
+    `#!/bin/sh
+if [ "\${1:-}" = "list-sessions" ]; then
+  [ -n "\${STUB_SESSIONS:-}" ] && printf '%s\\n' "$STUB_SESSIONS"
+  exit "\${STUB_LIST_EXIT:-0}"
+fi
+if [ "\${1:-}" = "attach" ]; then
+  shift
+  create=0
+  if [ "\${1:-}" = "--create" ]; then
+    create=1
+    shift
+  fi
+  echo "STUB RED_IN_ZELLIJ=$RED_IN_ZELLIJ ATTACH=\${1:-} CREATE=$create"
+  if [ "\${1:-}" = "\${STUB_BAD_SESSION:-}" ]; then
+    echo "invalid saved session: \${1:-}" >&2
+    exit 7
+  fi
+  [ -n "\${STUB_STDERR:-}" ] && echo "$STUB_STDERR" >&2
+  exit "\${STUB_EXIT:-0}"
+fi
+echo "STUB RED_IN_ZELLIJ=$RED_IN_ZELLIJ NEW"
+[ -n "\${STUB_STDERR:-}" ] && echo "$STUB_STDERR" >&2
+exit "\${STUB_EXIT:-0}"
+`,
   );
   chmodSync(stub, 0o755);
   return dir;
@@ -63,10 +84,13 @@ interface Run {
  * what a person gets — the guard has to tell those apart, so the test
  * has to produce both.
  */
-function run(env: Record<string, string>, interactive: boolean): Run {
+function run(
+  env: Record<string, string>,
+  interactive: boolean,
+  stateHome = mkdtempSync(`${tmpdir()}/red-zellij-state-`),
+): Run {
   const dir = stubDir();
   // Somewhere to leave a crash log that is not the real one under $HOME.
-  const stateHome = mkdtempSync(`${tmpdir()}/red-zellij-state-`);
   // The workload-policy adapter is sourced immediately before zellij.sh
   // in the managed rc. These tests isolate Zellij's terminal behavior.
   const body = `_red_dev_run_control() { command "$@"; }; source ${SOURCE}; echo FELLTHROUGH`;
@@ -127,14 +151,87 @@ describe("zellij autostart", () => {
   test("starts zellij in an interactive terminal", () => {
     const r = run({}, true);
     expect(r.started).toBe(true);
-    // zellij exited 0, so the terminal is done and nothing runs after.
-    expect(r.fellThrough).toBe(false);
+    // A detached or disconnected client must leave a recovery shell behind.
+    expect(r.fellThrough).toBe(true);
   });
 
   test("marks the child so the shell inside it does not start another", () => {
     // The whole recursion guard rests on this variable reaching the
     // pane. Without it, every new pane opens a new zellij, forever.
     expect(run({}, true).out).toContain("STUB RED_IN_ZELLIJ=1");
+  });
+
+  describe("resumes the last valid session", () => {
+    test("prefers the newest live session over serialized exited sessions", () => {
+      const r = run({
+        STUB_SESSIONS:
+          "newer-exited [Created 1m ago] (EXITED - attach to resurrect)\n" +
+          "live session [Created 2h ago]",
+      }, true);
+
+      expect(r.out).toContain("STUB RED_IN_ZELLIJ=1 ATTACH=live session");
+      expect(r.out).not.toContain("ATTACH=newer-exited");
+      expect(r.fellThrough).toBe(true);
+    });
+
+    test("resurrects the newest serialized session when none is live", () => {
+      const r = run({
+        STUB_SESSIONS:
+          "latest [Created 1h ago] (EXITED - attach to resurrect)\n" +
+          "older [Created 2h ago] (EXITED - attach to resurrect)",
+      }, true);
+
+      expect(r.out).toContain("STUB RED_IN_ZELLIJ=1 ATTACH=latest");
+      expect(r.out).not.toContain("ATTACH=older");
+    });
+
+    test("skips an invalid saved session and tries the next candidate", () => {
+      const r = run({
+        STUB_SESSIONS:
+          "broken [Created 1h ago] (EXITED - attach to resurrect)\n" +
+          "healthy [Created 2h ago] (EXITED - attach to resurrect)",
+        STUB_BAD_SESSION: "broken",
+      }, true);
+
+      expect(r.out).toContain("STUB RED_IN_ZELLIJ=1 ATTACH=broken");
+      expect(r.out).toContain("STUB RED_IN_ZELLIJ=1 ATTACH=healthy");
+      expect(r.fellThrough).toBe(true);
+    });
+
+    test("starts a stable main session when no saved session is available", () => {
+      const r = run({}, true);
+
+      expect(r.out).toContain("STUB RED_IN_ZELLIJ=1 ATTACH=red-dev-main CREATE=1");
+      expect(readFileSync(`${r.stateHome}/red-dev/zellij/last-session`, "utf8").trim()).toBe(
+        "red-dev-main",
+      );
+    });
+
+    test(
+      "persists the chosen session and prefers it on the next terminal",
+      () => {
+        const stateHome = mkdtempSync(`${tmpdir()}/red-zellij-state-`);
+        const first = run(
+          { STUB_SESSIONS: "judicious-accordion [Created 2h ago]" },
+          true,
+          stateHome,
+        );
+        expect(first.out).toContain("ATTACH=judicious-accordion");
+
+        const second = run(
+          {
+            STUB_SESSIONS:
+              "newer-session [Created 1m ago]\n" +
+              "judicious-accordion [Created 2h ago]",
+          },
+          true,
+          stateHome,
+        );
+        expect(second.out).toContain("ATTACH=judicious-accordion");
+        expect(second.out).not.toContain("ATTACH=newer-session");
+      },
+      15_000,
+    );
   });
 
   test("falls back to a plain shell when zellij cannot start", () => {
