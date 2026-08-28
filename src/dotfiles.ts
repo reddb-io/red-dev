@@ -320,6 +320,9 @@ const SHIPPED_ZELLIJ_CONFIGS = new Set([
   // ESC[13;2u bytes through in the two modes where typing reaches the
   // pane at all.
   "2aaca2fbc44c5653ac8503274cc88cdd8923b93813a6b988e7ee24a21800f32c",
+  // 1.0.125: session serialization is unchanged, but the managed comment
+  // now describes red-dev's automatic live/serialized resume order.
+  "468e71d7250c2d6a00087aa05c299c4756a06fdf8f049310f89d5425a39ed1c3",
 ]);
 
 /**
