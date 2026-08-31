@@ -49,7 +49,9 @@ if [ "\${1:-}" = "attach" ]; then
     create=1
     shift
   fi
-  echo "STUB RED_IN_ZELLIJ=$RED_IN_ZELLIJ ATTACH=\${1:-} CREATE=$create"
+  stdin_tty=0
+  [ -t 0 ] && stdin_tty=1
+  echo "STUB RED_IN_ZELLIJ=$RED_IN_ZELLIJ ATTACH=\${1:-} CREATE=$create STDIN_TTY=$stdin_tty"
   if [ "\${1:-}" = "\${STUB_BAD_SESSION:-}" ]; then
     echo "invalid saved session: \${1:-}" >&2
     exit 7
@@ -162,6 +164,14 @@ describe("zellij autostart", () => {
   });
 
   describe("resumes the last valid session", () => {
+    test("keeps the terminal on stdin while reading session candidates", () => {
+      const r = run({
+        STUB_SESSIONS: "live [Created 2h ago]",
+      }, true);
+
+      expect(r.out).toContain("ATTACH=live CREATE=0 STDIN_TTY=1");
+    });
+
     test("prefers the newest live session over serialized exited sessions", () => {
       const r = run({
         STUB_SESSIONS:
