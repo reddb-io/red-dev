@@ -131,7 +131,11 @@ if declare -F _red_zellij_launch >/dev/null 2>&1; then
   )"
 
   _red_zellij_status=1
-  while IFS= read -r _red_zellij_session; do
+  # Read candidates on fd 9 so an interactive attach keeps the terminal on
+  # stdin. Feeding this loop with a plain here-document replaces fd 0 with a
+  # pipe for every command in the body. Zellij's stdin threads then spin on
+  # EOF while its output still targets the tty, freezing the terminal client.
+  while IFS= read -r _red_zellij_session <&9; do
     [ -n "$_red_zellij_session" ] || continue
     printf '%s\n' "$_red_zellij_session" >"$_red_zellij_last.tmp-$$" 2>/dev/null &&
       mv -f "$_red_zellij_last.tmp-$$" "$_red_zellij_last" 2>/dev/null
@@ -139,7 +143,7 @@ if declare -F _red_zellij_launch >/dev/null 2>&1; then
       2>>"$_red_zellij_log"
     _red_zellij_status=$?
     [ "$_red_zellij_status" -eq 0 ] && break
-  done <<EOF
+  done 9<<EOF
 $_red_zellij_candidates
 EOF
 
