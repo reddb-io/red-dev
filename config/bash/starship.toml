@@ -1,0 +1,31 @@
+# Written by red-dev. Not a prompt: the shape of the prompt is yours,
+# and this file deliberately sets none of it.
+#
+# What it sets is the two deadlines starship applies to its own work,
+# because starship's defaults are chosen for a native filesystem and a
+# WSL machine is not one. `command_timeout` is 500ms upstream, and a
+# cold `node --version` across a 9p mount or under a Windows antivirus
+# routinely spends more than that; `scan_timeout` is 30ms, which a
+# directory on /mnt/c cannot answer in. Miss either and starship prints
+# a two-line warning above the prompt, once per prompt, after every
+# command you run. That reads as the machine timing out on everything,
+# and it is one component giving up on a deadline that was too tight.
+#
+# Raising them costs what it says: a prompt may now wait longer before
+# it gives up. That is the right trade for a shell, where the version
+# behind the cursor is worth a beat, and the wrong one for the warning
+# spam that made a working machine look broken.
+#
+# It is a starter, not an owned file. red-dev points STARSHIP_CONFIG
+# here only when nothing else has: a `starship.toml` in the shared root
+# wins, and so does one you wrote at ~/.config/starship.toml. Copy this
+# there and it is yours, with red-dev out of the way — see the user
+# layer in .red/contexts/visual/CONTEXT.md.
+
+# Modules that run a program (node, python, rustc, git) get this long to
+# answer before starship drops them from the prompt.
+command_timeout = 2000
+
+# And this long to walk the current directory deciding which modules
+# apply at all.
+scan_timeout = 100

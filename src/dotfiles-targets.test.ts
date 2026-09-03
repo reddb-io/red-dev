@@ -11,6 +11,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { FILES } from "./dotfiles.ts";
 import { deployTargets } from "./dotfiles.ts";
 
 const WSL_HOME = "/home/cyber";
@@ -52,5 +53,36 @@ describe("deployTargets", () => {
     // wrote: the second pass would re-read and re-hook the same
     // .bashrc, and the backup would be of our own edit.
     expect(deployTargets("wsl", WIN_HOME, WIN_HOME)).toHaveLength(1);
+  });
+});
+
+describe("the starship starter", () => {
+  test("ships with the shell, because the warning it silences is per prompt", () => {
+    // starship's own defaults are 500ms for a module that runs a
+    // program and 30ms to scan a directory. A WSL machine misses both,
+    // and says so above every prompt it draws, which reads as a
+    // terminal where every command times out.
+    expect(Object.keys(FILES)).toContain("starship.toml");
+    expect(FILES["starship.toml"]).toContain("command_timeout");
+    expect(FILES["starship.toml"]).toContain("scan_timeout");
+  });
+
+  test("sets deadlines and no prompt at all", () => {
+    // The shape of the prompt is the person's. A starter that arrived
+    // with a format string would be red-dev choosing how their shell
+    // looks, which is a different and unasked-for change.
+    const toml = FILES["starship.toml"] ?? "";
+    for (const owned of ["format", "[character]", "[directory]", "add_newline"]) {
+      expect(toml, owned).not.toContain(owned);
+    }
+  });
+
+  test("is a starter: anything the person already has wins", () => {
+    // shared.sh exports STARSHIP_CONFIG when the shared root carries a
+    // config, and ~/.config/starship.toml is the file somebody wrote by
+    // hand. Either one has to survive an install.
+    const prompt = FILES["prompt.sh"] ?? "";
+    expect(prompt).toContain('[ -z "${STARSHIP_CONFIG:-}" ]');
+    expect(prompt).toContain('[ ! -r "$HOME/.config/starship.toml" ]');
   });
 });

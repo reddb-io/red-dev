@@ -19,6 +19,20 @@ if [[ $- != *i* ]] || [ "${TERM:-dumb}" = "dumb" ]; then
 fi
 
 if command -v starship >/dev/null 2>&1; then
+  # The deadlines, and only where nobody else has spoken.
+  #
+  # starship's defaults assume a native filesystem: 500ms for a module
+  # that runs a program and 30ms to scan the directory. A WSL machine
+  # misses both routinely and starship says so above every prompt it
+  # draws, which is how one component giving up looks like a terminal
+  # where nothing works. shared.sh has already exported STARSHIP_CONFIG
+  # if the shared root carries one, and a file the person wrote at
+  # ~/.config/starship.toml is theirs — either wins over this, which is
+  # a starter and not an owned file.
+  if [ -z "${STARSHIP_CONFIG:-}" ] && [ ! -r "$HOME/.config/starship.toml" ]; then
+    export STARSHIP_CONFIG="${RED_ROOT:-$HOME/.local/share/red-dev}/config/bash/starship.toml"
+  fi
+
   # starship owns the prompt when present. It has to win outright, not
   # merge: two things writing PS1 produce a prompt that is neither.
   eval "$(starship init bash)"

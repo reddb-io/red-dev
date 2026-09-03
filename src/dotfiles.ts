@@ -35,6 +35,7 @@ import zellijSh from "../config/bash/zellij.sh" with { type: "text" };
 import redSkillsWatchSh from "../config/bash/red-skills-watch.sh" with { type: "text" };
 import windowsClipboardSh from "../config/bash/windows-clipboard.sh" with { type: "text" };
 import inputrc from "../config/bash/inputrc.conf" with { type: "text" };
+import starshipToml from "../config/bash/starship.toml" with { type: "text" };
 import zellijBase from "../config/zellij/config.kdl" with { type: "text" };
 import { workloadPolicy } from "./workload-policy.ts";
 
@@ -57,6 +58,10 @@ export const FILES: Record<string, string> = {
   // the text import to resolve, readline does not care what it is
   // called, and INPUTRC points straight at it.
   inputrc: inputrc,
+  // Not a prompt — two deadlines. See the file: starship's defaults are
+  // tight enough that a WSL machine warns above every prompt it draws,
+  // which is what "every command times out" turns out to be.
+  "starship.toml": starshipToml,
 };
 
 /** The line we add to the user's shell rc, and the marker we look for. */
