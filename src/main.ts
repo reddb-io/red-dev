@@ -2132,7 +2132,16 @@ async function cmdAgents(p: Platform, inv: Invocation): Promise<number> {
   const labels = available.map(
     (a) => `${a.key} — ${a.label}, ${a.about}${isAgentInstalled(a) ? "  (installed)" : ""}`,
   );
-  const picked = await checkbox("Which agents?", labels as [string, ...string[]], labels);
+  // Ticked: what red-dev recommends, plus whatever is already here.
+  // Everything else is another vendor's assistant, and a list that
+  // arrives fully ticked installs the ones a managed machine forbids
+  // for anybody who pressed enter. The Agents page in
+  // src/tui-setup-model.ts makes the same choice for the same reason.
+  const marked = labels.filter((_, i) => {
+    const agent = available[i]!;
+    return agent.recommended || isAgentInstalled(agent);
+  });
+  const picked = await checkbox("Which agents?", labels as [string, ...string[]], marked);
   if (picked.length === 0) {
     log.skip("nothing selected");
     return 0;

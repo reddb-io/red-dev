@@ -77,9 +77,42 @@ describe("multi-choice defaults", () => {
     expect(q?.preset).toEqual(["node@24", "bun@1.3", "python@3.13"]);
   });
 
-  test("all agents arrive marked", () => {
-    const q = step("agents");
-    expect(q.preset).toEqual(q.choices.map((choice) => choice.key));
+  test("only the recommended agents arrive marked", () => {
+    // The one opt-in list in the interview. Everything else red-dev
+    // offers is a curated tool it would install anyway; an agent host is
+    // another vendor's account and another vendor's network, and a
+    // managed machine that quietly installed four of them is a support
+    // ticket. Untouched, the answer is the RedDB set and nothing else.
+    const agents: Choice[] = [
+      { key: "claude-code", label: "Claude Code", note: "", recommended: true },
+      { key: "openclaw", label: "OpenClaw", note: "", recommended: false },
+      { key: "hermes", label: "Hermes", note: "" },
+    ];
+    const q = questions(WSL, agents, choices(3), choices(2)).find((c) => c.id === "agents")!;
+    expect(q.preset).toEqual(["claude-code"]);
+    // Still on the page, one keypress away — hidden would be a different
+    // and worse answer than unticked.
+    expect(q.choices.map((choice) => choice.key)).toEqual(["claude-code", "openclaw", "hermes"]);
+    expect(q.multi).toBe(true);
+  });
+
+  test("the page says why the rest are not ticked", () => {
+    // A list that arrives mostly empty with no sentence explaining it
+    // reads like the machine failed to detect anything.
+    expect(step("agents").description).toContain("managed machines");
+  });
+
+  test("what red-dev recommends is the RedDB set, and nothing of anyone else's", () => {
+    // Read off the catalogue rather than restated: a host that becomes
+    // recommended later moves this test with it.
+    expect(AGENTS.filter((a) => a.recommended).map((a) => a.key)).toEqual([
+      "claude-code",
+      "codex",
+      "redcode",
+    ]);
+    for (const key of ["openclaw", "hermes", "gemini", "muse", "pi", "oh-my-pi"]) {
+      expect(AGENTS.find((a) => a.key === key)?.recommended, key).toBe(false);
+    }
   });
 });
 

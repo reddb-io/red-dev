@@ -177,6 +177,8 @@ export async function buildSetupSteps(p: Platform, wslTuningFacts?: WslTuningFac
     key: a.key,
     label: a.label,
     note: isAgentInstalled(a) ? `${a.about} — installed` : a.about,
+    // What the Agents page arrives with ticked. See Choice.recommended.
+    recommended: a.recommended,
   }));
 
   return setupSteps(
@@ -428,6 +430,8 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
       key: a.key,
       label: a.label,
       note: isAgentInstalled(a) ? `${a.about} — installed` : a.about,
+      // What the Agents page arrives with ticked. See Choice.recommended.
+      recommended: a.recommended,
     }));
 
     const given = await runSetupTui(

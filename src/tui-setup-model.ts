@@ -80,6 +80,18 @@ export interface Choice {
   key: string;
   label: string;
   note: string;
+  /**
+   * Ticked when the page is first drawn.
+   *
+   * Read only by the Agents page, and that is the point of it being
+   * here: every other list red-dev offers is curated and arrives fully
+   * ticked, but an agent host is an account, a vendor and a network
+   * call, and plenty of machines are not allowed to have most of them.
+   * A page that arrives with nine assistants ticked asks somebody to
+   * untick eight, and the one they miss is the one their employer
+   * refuses.
+   */
+  recommended?: boolean;
   /** False when a page is identifying an item owned by another scope. */
   selectable?: boolean;
   /** Inventory glyph used by the RedDB family page. */
@@ -251,10 +263,17 @@ export function questions(
       title: "Agents",
       description:
         "Picking any CLI agent also installs red-skills, which registers its " +
-        "marketplace in Claude Code and Codex and generates plugin modules for RedCode.",
+        "marketplace in Claude Code and Codex and generates plugin modules for RedCode. " +
+        "Only the RedDB set arrives ticked: the rest are other vendors' assistants, " +
+        "which plenty of managed machines are not allowed to run. Space adds one.",
       multi: true,
       choices: agents,
-      preset: agents.map((agent) => agent.key),
+      // The one list on this screen that is opt-in rather than opt-out.
+      // Everything else red-dev offers is a curated tool it would
+      // install anyway; an assistant is somebody else's account and
+      // somebody else's network, and a corporate laptop that quietly
+      // installed four of them is a support ticket.
+      preset: agents.filter((agent) => agent.recommended === true).map((agent) => agent.key),
       applies: () => true,
     },
     {
@@ -409,8 +428,9 @@ export function questions(
       description:
         "Follow the colour theme, keep the image the desktop shows today, or " +
         "pin any Red wallpaper independently. A kept or pinned wallpaper stays " +
-        "put when the theme changes; Redwall draws the machine state over " +
-        "whichever art you choose.",
+        "put when the theme changes, and Redwall draws the machine state over " +
+        "whichever art you choose rather than replacing it. Any other picture: " +
+        "`red-dev wallpaper <path or https URL>`.",
       multi: false,
       choices: [
         { key: "theme", label: "Follow the theme", note: "the default" },
@@ -422,7 +442,10 @@ export function questions(
               {
                 key: KEEP_CURRENT_WALLPAPER,
                 label: "Keep the current wallpaper",
-                note: `${facts.currentWallpaper} — imported as it is; Redwall draws over it`,
+                // "kept" rather than "imported": an image somebody else
+                // put there is imported, and red-dev's own art is
+                // pinned, and the row has to be true of both.
+                note: `${facts.currentWallpaper} — kept as it is, and Redwall draws over it`,
               },
             ]
           : []),

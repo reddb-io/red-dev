@@ -598,14 +598,43 @@ export async function currentWallpaper(
 }
 
 /**
+ * The art a Redwall was drawn over, read off its own filename. PURE.
+ *
+ * A Redwall is named `<art key>-<8 hex of its bytes>.png`, and the art
+ * key is either a theme slug or `custom-<sha256>` — the same key
+ * `resolveWallpaperArt` chose when it composed the image. So the
+ * picture underneath is recoverable from the path alone, which is what
+ * lets "keep what is on screen" mean something on a machine whose
+ * screen is a Redwall.
+ *
+ * Read from the file rather than from the preference because the two
+ * can disagree: the preference is what the next repaint would choose,
+ * and this is what the person is actually looking at.
+ */
+export function redwallArtPreference(path: string): string | null {
+  const name = basename(path.replace(/\\/g, "/")).replace(/\.png$/i, "");
+  const key = name.replace(/-[a-f0-9]{8}$/i, "");
+  if (isThemeSlug(key)) return key;
+  const custom = /^custom-([a-f0-9]{64})$/.exec(key);
+  return custom === null ? null : `custom:${custom[1]}`;
+}
+
+/**
  * How the interview names the image it offers to keep, or null when
  * there is nothing to offer.
  *
- * Only an image that is not red-dev's own: a desktop already showing a
- * bundled sheet or a Redwall has no "current" that differs from the
- * answers the question already lists. An import red-dev holds is
- * offered, because somebody re-running the setup who imported a
- * picture last time means exactly that picture.
+ * Offered for every image red-dev can read, including its own. That is
+ * a correction: this used to answer null for a desktop showing a
+ * bundled sheet or a Redwall, on the grounds that those are already
+ * among the answers below it — and the person who had just been shown
+ * their own wallpaper by the previous screen read that as the feature
+ * having disappeared. It also was not quite true. Keeping the art on
+ * screen pins it, and a pinned wallpaper stops following the colour
+ * theme, which is a different outcome from the default however
+ * identical the image looks today.
+ *
+ * Null is left for the one case where keeping really is the default:
+ * a Redwall over art nothing named, which is the theme's own sheet.
  */
 export async function currentWallpaperLabel(
   p: Platform,
@@ -613,9 +642,33 @@ export async function currentWallpaperLabel(
 ): Promise<string | null> {
   const current = await currentWallpaper(p, seams);
   if (current === null) return null;
-  if (current.kind === "external") return basename(current.path.replace(/\\/g, "/"));
-  if (current.kind === "custom") return "the picture imported last time";
-  return null;
+  switch (current.kind) {
+    case "external":
+      return basename(current.path.replace(/\\/g, "/"));
+    case "custom":
+      return "the picture imported last time";
+    case "wallpaper":
+      return `${current.slug}, the Red artwork on screen now`;
+    case "redwall": {
+      const art = await redwallArt(p, current.path);
+      if (art === undefined) return null;
+      return customWallpaperDigest(art) !== null
+        ? "the picture under the Redwall"
+        : `${art}, the art under the Redwall`;
+    }
+  }
+}
+
+/**
+ * What a Redwall on screen was composed over: its own name first, the
+ * recorded preference second, and undefined when neither says.
+ */
+async function redwallArt(p: Platform, path: string): Promise<string | undefined> {
+  const named = redwallArtPreference(path);
+  if (named !== null) return named;
+  const { readPreferences } = await import("./preferences.ts");
+  const recorded = (await readPreferences(p)).wallpaper;
+  return validWallpaperPreference(recorded) ? recorded : undefined;
 }
 
 export interface KeptWallpaper {
@@ -660,11 +713,18 @@ export async function keepCurrentWallpaper(
     case "custom":
       return { preference: current.preference, label: "the picture already imported" };
     case "redwall": {
-      // The art under it is whatever the preference already names.
-      const { readPreferences } = await import("./preferences.ts");
-      const recorded = (await readPreferences(p)).wallpaper;
-      const preference = validWallpaperPreference(recorded) ? recorded : undefined;
-      return { preference, label: "the art under the current Redwall" };
+      // The art under it, read off the Redwall's own name — see
+      // redwallArtPreference. Pinning it is the whole of what keeping a
+      // Redwall can mean: the overlay is regenerated either way, and
+      // importing the composite would draw this morning's Worker count
+      // under tonight's.
+      const preference = await redwallArt(p, current.path);
+      const what = preference === undefined
+        ? "the art under the current Redwall"
+        : customWallpaperDigest(preference) !== null
+          ? "the picture under the current Redwall"
+          : `${preference} — the art under the current Redwall, now pinned`;
+      return { preference, label: what };
     }
   }
 }

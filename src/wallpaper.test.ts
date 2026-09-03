@@ -8,6 +8,7 @@ import { encodePng } from "./png.ts";
 import {
   currentWallpaper,
   currentWallpaperLabel,
+  redwallArtPreference,
   customWallpaperDir,
   imageFormat,
   importCustomWallpaper,
@@ -294,11 +295,15 @@ describe("keeping the desktop's own image", () => {
         kind: "redwall",
         path: redwall,
       });
-      // Nothing to offer the interview for a desktop already showing a
-      // bundled sheet or a Redwall; the import it holds is offered.
-      expect(await currentWallpaperLabel(desktop, { inUse: inUse(sheet) })).toBeNull();
-      expect(await currentWallpaperLabel(desktop, { inUse: inUse(redwall) })).toBeNull();
+      // Every image red-dev can read is offered, its own included:
+      // hiding the row on a machine red-dev had already taken over is
+      // what made the feature look deleted to the person setting up
+      // their second machine.
+      expect(await currentWallpaperLabel(desktop, { inUse: inUse(sheet) })).toContain("dark");
       expect(await currentWallpaperLabel(desktop, { inUse: inUse(custom) })).not.toBeNull();
+      // Except the one case where keeping is the default: a Redwall
+      // over art nothing named and no preference recorded is the theme.
+      expect(await currentWallpaperLabel(desktop, { inUse: inUse(redwall) })).toBeNull();
     });
   });
 
@@ -357,6 +362,36 @@ describe("keeping the desktop's own image", () => {
   test("with nothing on the desktop, keeping it is refused rather than guessed", async () => {
     await onFreshMachine(async () => {
       await expect(keepCurrentWallpaper(desktop, { inUse: inUse(null) })).rejects.toThrow("no desktop wallpaper");
+    });
+  });
+});
+
+describe("the art under a Redwall", () => {
+  test("is read off the Redwall's own name", () => {
+    // A Redwall is `<art key>-<8 hex>.png`, and the key is the slug or
+    // `custom-<sha256>` resolveWallpaperArt chose. That is what lets
+    // "keep what is on screen" mean something on a machine whose screen
+    // is already a Redwall.
+    const digest = "b".repeat(64);
+    expect(redwallArtPreference("/x/redwall/obsidian-e9539de5.png")).toBe("obsidian");
+    expect(redwallArtPreference(`/x/redwall/custom-${digest}-0123abcd.png`)).toBe(`custom:${digest}`);
+    expect(redwallArtPreference("/x/redwall/shown")).toBeNull();
+    expect(redwallArtPreference("/x/redwall/something-else.png")).toBeNull();
+  });
+
+  test("keeping a Redwall pins that art, and the name wins over the record", async () => {
+    await onFreshMachine(async (home) => {
+      const dir = `${home}/.local/share/red-dev/redwall`;
+      mkdirSync(dir, { recursive: true });
+      const path = `${dir}/flare-0123abcd.png`;
+      writeFileSync(path, png());
+      // A record that disagrees is the next repaint's answer; this is
+      // the one on the screen the person is looking at.
+      await writePreferences(desktop, { wallpaper: "marble" });
+      const kept = await keepCurrentWallpaper(desktop, { inUse: async () => path });
+      expect(kept.preference).toBe("flare");
+      expect(kept.label).toContain("flare");
+      expect(await currentWallpaperLabel(desktop, { inUse: async () => path })).toContain("flare");
     });
   });
 });
