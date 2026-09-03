@@ -350,20 +350,64 @@ async function downloadFont(url: string, dest: string): Promise<void> {
   await downloadVerified(url, dest);
 }
 
+/** A font store a machine of this shape has. */
+export type FontSide = "linux" | "windows";
+
 /**
- * Install a Nerd Font into the Windows *user* font store. Per-user
- * install needs no administrator rights: copy the files under
- * %LOCALAPPDATA%\Microsoft\Windows\Fonts and register each face under
- * HKCU. Both halves are required — a file the registry does not know
- * about is invisible to applications.
+ * Every font store this machine has. PURE.
+ *
+ * A WSL machine has two, and until now it was given one: the install
+ * branched to Windows and the distro's own fontconfig was left empty.
+ * That is defensible only while the terminal is the sole thing that
+ * needs the glyphs, and it is not — anything rendering inside the
+ * distro asks fontconfig, from a WSLg window to a script drawing a
+ * chart, and each of them fell back to a font with no icons in it.
+ *
+ * Both sides, then, because the font is a property of the workstation
+ * rather than of one of its halves. Native Windows has no Linux side to
+ * fill and a Linux desktop has no Windows one, so each of those is
+ * still exactly one store.
+ */
+export function fontSides(platform?: Platform): FontSide[] {
+  const os = platform?.os ?? (process.platform === "win32" ? "windows" : "linux");
+  const sides: FontSide[] = [];
+  if (os !== "windows") sides.push("linux");
+  if (os === "windows" || platform?.env === "wsl") sides.push("windows");
+  return sides;
+}
+
+/**
+ * Put a Nerd Font in every store this machine has.
+ *
+ * The Windows half is a per-user install, which needs no administrator
+ * rights: copy the files under %LOCALAPPDATA%\Microsoft\Windows\Fonts
+ * and register each face under HKCU. Both halves of *that* are
+ * required — a file the registry does not know about is invisible to
+ * applications. The Linux half is `~/.local/share/fonts` and `fc-cache`.
+ *
+ * On WSL the Windows store is the one the terminal reads, so its
+ * failure is the row's failure, exactly as before. A distro that cannot
+ * take the font — no fontconfig, no unzip — is reported and does not
+ * take the terminal's glyphs down with it: half a machine with icons
+ * beats a converge that stopped.
  */
 export async function installNerdFont(key: string, platform?: Platform): Promise<void> {
-  if (platform?.os === "linux" && platform.env === "desktop") {
-    await installLinuxNerdFont(key);
-    return;
-  }
+  const sides = fontSides(platform);
+  const decisive = sides.includes("windows") ? "windows" : "linux";
 
-  await installWindowsNerdFont(key);
+  for (const side of sides) {
+    const install = side === "windows" ? installWindowsNerdFont : installLinuxNerdFont;
+    if (side === decisive) {
+      await install(key);
+      continue;
+    }
+    try {
+      await install(key);
+    } catch (err) {
+      log.warn(`nerd font: ${(err as Error).message}`);
+      log.plain("       the terminal's own font store has it; this side does not");
+    }
+  }
 }
 
 async function installWindowsNerdFont(key: string): Promise<void> {

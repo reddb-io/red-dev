@@ -352,9 +352,48 @@ async function checkDelta(): Promise<DriftCheck> {
  * every application blind to them, which surfaces only as a terminal
  * error box.
  */
+/** Any Nerd Font Mono fontconfig can resolve inside this filesystem. */
+async function nerdFontOnLinux(): Promise<string | null> {
+  try {
+    const proc = Bun.spawn(["fc-list", "--format", "%{family}\n"], {
+      stdout: "pipe",
+      stderr: "ignore",
+    });
+    const out = await new Response(proc.stdout).text();
+    await proc.exited;
+    const found = out
+      .split("\n")
+      .flatMap((line) => line.split(","))
+      .map((family) => family.trim())
+      .find((family) => /Nerd Font Mono$/.test(family));
+    return found ?? null;
+  } catch {
+    // No fontconfig is not evidence about the font; the caller says n/a.
+    return null;
+  }
+}
+
+/**
+ * The font, in every store this machine has.
+ *
+ * Both, on WSL. Reporting only the Windows one described a machine
+ * whose distro had no icons as well as one whose distro had them, and
+ * the fix — `red-dev install wsl` — installs into both now.
+ */
 async function checkFont(p: Platform): Promise<DriftCheck> {
-  if (p.os !== "windows" && p.env !== "wsl") {
-    return { name: "nerd font", status: "n/a", detail: "host font store not applicable" };
+  const { fontSides } = await import("./wsl.ts");
+  const sides = fontSides(p);
+
+  if (!sides.includes("windows")) {
+    const found = await nerdFontOnLinux();
+    return found
+      ? { name: "nerd font", status: "ok", detail: `${found}, through fontconfig` }
+      : {
+          name: "nerd font",
+          status: "drift",
+          detail: "no Nerd Font Mono visible to fontconfig",
+          fix: "red-dev install desktop",
+        };
   }
 
   const shell =
@@ -379,14 +418,27 @@ async function checkFont(p: Platform): Promise<DriftCheck> {
     const found = (await new Response(proc.stdout).text()).trim();
     await proc.exited;
 
-    return found
-      ? { name: "nerd font", status: "ok", detail: found }
-      : {
-          name: "nerd font",
-          status: "drift",
-          detail: "no Nerd Font Mono visible to Windows applications",
-          fix: "red-dev install wsl",
-        };
+    // The distro's own store as well, where there is one. A WSL machine
+    // with icons in the terminal and none inside the distro is drift,
+    // and used to be reported as well.
+    const linux = sides.includes("linux") ? await nerdFontOnLinux() : "not a store this machine has";
+    if (found && linux) {
+      return {
+        name: "nerd font",
+        status: "ok",
+        detail: sides.length > 1 ? `${found}, in Windows and in the distro` : found,
+      };
+    }
+    const missing = [
+      ...(found ? [] : ["Windows applications"]),
+      ...(linux ? [] : ["fontconfig in the distro"]),
+    ];
+    return {
+      name: "nerd font",
+      status: "drift",
+      detail: `no Nerd Font Mono visible to ${missing.join(" or ")}`,
+      fix: "red-dev install wsl",
+    };
   } catch (err) {
     return { name: "nerd font", status: "n/a", detail: (err as Error).message };
   }
