@@ -180,9 +180,10 @@ export async function codexRegistration(home: string): Promise<MarketplaceRegist
  * ordinary first converge, not a broken host.
  *
  * The plugins are reinstalled because they came from a marketplace that no
- * longer exists under that name. Which plugins is the manifest's answer,
- * never this table's: a machine that opted `brain` out has no entry for
- * it, and naming it here would reinstall exactly what the operator removed.
+ * longer exists under that name. Which plugins is the activation set's
+ * answer, never this table's: a machine that switched `brain` off has it
+ * in no host, and naming it here would reinstall exactly what the operator
+ * removed.
  */
 export interface RegistrationHost {
   /** The name that appears in an outcome and a log line. */
@@ -261,7 +262,12 @@ export interface RegistrationOptions {
   home?: string;
   /** The path to register. Defaults to `~/.red/skills/current`, or null. */
   source?: string | null;
-  /** The plugin set. Defaults to whatever the manifest declares. */
+  /**
+   * The plugins to reinstall after re-registering. Defaults to the
+   * activation set — what this machine chose, out of what the manifest
+   * declares — never the whole manifest: a plugin switched off must not
+   * come back because the marketplace was re-registered under it.
+   */
   plugins?: readonly string[];
   /** The manifest to derive the plugin set from. Defaults to TOOLS. */
   tools?: readonly Tool[];
@@ -297,7 +303,7 @@ export async function convergeMarketplaceOwnership(
     return [];
   }
 
-  const plugins = opts.plugins ?? (await declaredPlugins(p, opts.tools));
+  const plugins = opts.plugins ?? (await activatedPluginsOf(p, opts.tools));
   const present = opts.present ?? (await presenceProbe());
   const run = opts.run ?? (await defaultRunner());
 
@@ -426,9 +432,9 @@ async function currentSource(): Promise<string | null> {
   return sourceRoot();
 }
 
-async function declaredPlugins(p: Platform, tools?: readonly Tool[]): Promise<string[]> {
-  const { redSkillsPluginNames } = await import("./red-skills-plugins.ts");
-  return redSkillsPluginNames(p, tools);
+async function activatedPluginsOf(p: Platform, tools?: readonly Tool[]): Promise<string[]> {
+  const { resolveActivatedPlugins } = await import("./red-skills-plugins.ts");
+  return resolveActivatedPlugins(p, tools);
 }
 
 async function presenceProbe(): Promise<(cmd: string) => boolean> {

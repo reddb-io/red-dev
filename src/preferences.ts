@@ -82,6 +82,16 @@ export interface Preferences {
   /** mise runtime ids chosen for this workstation. */
   runtimes?: string[];
   /**
+   * The RedSkills plugins switched on in the agent hosts — see
+   * src/red-skills-plugins.ts.
+   *
+   * Absent means `dev` alone, which is what the interview arrives with.
+   * Memory and Brain stay off until chosen, and a plugin that is off is
+   * not installed into any host at all — so none of its hooks or MCP
+   * servers run there. Recorded as the names the hosts use.
+   */
+  redSkillsPlugins?: string[];
+  /**
    * Where the repair ledger used to live, until 2026-08-19.
    *
    * Read by nothing now. On a WSL machine this file is the Windows

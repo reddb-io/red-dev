@@ -130,3 +130,9 @@ unset _RED_CYGPATH
 
 export EDITOR="nvim"
 export SUDO_EDITOR="nvim"
+
+# Turborepo's default is one task per core, which on a workstation that
+# is also running coding agents, a daemon and an editor turns a build
+# into the thing everything else waits for. Two is the ceiling red-dev
+# sets; a repo that needs more sets it in its own turbo.json.
+export TURBO_CONCURRENCY=2

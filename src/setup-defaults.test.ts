@@ -9,7 +9,9 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { questions, type Choice } from "./tui-setup-model.ts";
+import { AGENTS } from "./agents.ts";
+import { preferencesFromAnswers } from "./firstrun.ts";
+import { questions, stepAvailable, type Choice, type SetupAnswers } from "./tui-setup-model.ts";
 import type { Platform } from "./platform.ts";
 
 const WSL: Platform = {
@@ -94,6 +96,85 @@ describe("the wallpaper", () => {
       "cobalt",
       "flare",
     ]);
+  });
+
+  test("offers to keep the desktop's own image, only when there is one", () => {
+    // The desktop's image is a fact observed before the questions are
+    // built. With one, "keep it" sits right under the default; without
+    // one there is nothing to keep and the row is not drawn — a choice
+    // that would resolve to nothing is not a choice.
+    const withOne = questions(WSL, choices(2), choices(3), choices(2), [], [], {
+      currentWallpaper: "img0.jpg",
+    }).find((q) => q.id === "wallpaper")!;
+    expect(withOne.choices.map((choice) => choice.key).slice(0, 3)).toEqual([
+      "theme",
+      "current",
+      "dark",
+    ]);
+    expect(withOne.choices[1]?.note).toContain("img0.jpg");
+    expect(withOne.choices[1]?.note).toContain("Redwall");
+    expect(withOne.preset).toEqual(["theme"]);
+
+    expect(step("wallpaper").choices.map((choice) => choice.key)).not.toContain("current");
+    const none = questions(WSL, choices(2), choices(3), choices(2), [], [], {
+      currentWallpaper: null,
+    }).find((q) => q.id === "wallpaper")!;
+    expect(none.choices.map((choice) => choice.key)).not.toContain("current");
+  });
+});
+
+describe("the RedSkills plugins", () => {
+  const skillHost = AGENTS.find((agent) => !agent.desktopOnly && !agent.multiplexer)!.key;
+  const desktopHost = AGENTS.find((agent) => agent.desktopOnly)!.key;
+  const withAgents = (selected: string[]) => (id: string): string[] =>
+    id === "agents" ? selected : [];
+
+  test("arrive with dev on and memory and brain off", () => {
+    const q = step("redskills");
+    expect(q.multi).toBe(true);
+    expect(q.choices.map((choice) => choice.key)).toEqual(["dev", "memory", "brain"]);
+    expect(q.preset).toEqual(["dev"]);
+  });
+
+  test("say what off means", () => {
+    // The reason memory and brain start off is that each acts on every
+    // session of a host it is installed into; the description has to
+    // say that off means not installed — no hooks, no MCP.
+    expect(step("redskills").description).toContain("hooks");
+    expect(step("redskills").description).toContain("not installed");
+  });
+
+  test("are asked only when a picked host takes skills", () => {
+    const q = step("redskills");
+    expect(stepAvailable(q, withAgents([skillHost]))).toBe(true);
+    expect(stepAvailable(q, withAgents([skillHost, desktopHost]))).toBe(true);
+    expect(stepAvailable(q, withAgents([desktopHost]))).toBe(false);
+    expect(stepAvailable(q, withAgents([]))).toBe(false);
+  });
+
+  test("sit right after the hosts they go into", () => {
+    const order = questions(WSL, choices(2), choices(3), choices(2)).map((q) => q.id);
+    expect(order.indexOf("agents")).toBeLessThan(order.indexOf("redskills"));
+    expect(order.indexOf("redskills")).toBeLessThan(order.indexOf("runtimes"));
+  });
+
+  test("the answer is recorded, and an unasked question leaves the record alone", () => {
+    const base: SetupAnswers = {
+      theme: "dark",
+      font: "firacode",
+      apps: [],
+      runtimes: [],
+      agents: [],
+      blesh: true,
+      redwall: true,
+      share: false,
+      completed: true,
+    };
+    expect(preferencesFromAnswers({ ...base, redSkillsPlugins: ["dev", "memory"] }).redSkillsPlugins)
+      .toEqual(["dev", "memory"]);
+    // Absent, not undefined: writePreferences merges, and a key present
+    // and undefined would erase what an earlier interview recorded.
+    expect("redSkillsPlugins" in preferencesFromAnswers(base)).toBe(false);
   });
 });
 

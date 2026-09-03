@@ -969,11 +969,14 @@ describe("the release assets, over a fake GitHub", () => {
 
   const TAG_URL = "https://api.github.com/repos/reddb-io/red-skills/releases/tags/v3.19.5";
 
+  /** A `gh` that is not logged in, so no test here waits on the real one. */
+  const noGh = ((() => ({ status: 1, stdout: "" })) as unknown) as typeof spawnSync;
+
   test("a release with no package-set manifest is unavailable and downloads nothing", async () => {
     const { fetcher, asked } = net({ [TAG_URL]: { body: { assets: [{ name: "red-skills.tgz", browser_download_url: "https://example.invalid/tgz" }] } } });
     const dest = mkdtempSync(join(tmpdir(), "red-acquire-dest-"));
     rmSync(dest, { recursive: true, force: true });
-    const outcome = await githubAssetProvider({ fetcher, env: {} })({
+    const outcome = await githubAssetProvider({ fetcher, env: {}, probe: noGh })({
       commit: COMMIT_B,
       version: "3.19.5",
       tag: "v3.19.5",
@@ -1004,7 +1007,7 @@ describe("the release assets, over a fake GitHub", () => {
       "https://example.invalid/manifest": { body: manifest },
     });
     const dest = mkdtempSync(join(tmpdir(), "red-acquire-dest-"));
-    const outcome = await githubAssetProvider({ fetcher, env: {} })({
+    const outcome = await githubAssetProvider({ fetcher, env: {}, probe: noGh })({
       commit: COMMIT_B,
       version: "3.19.5",
       tag: "v3.19.5",
@@ -1016,7 +1019,7 @@ describe("the release assets, over a fake GitHub", () => {
 
   test("an untagged commit publishes no assets, and says so rather than guessing a tag", async () => {
     const { fetcher, asked } = net({});
-    const outcome = await githubAssetProvider({ fetcher, env: {} })({
+    const outcome = await githubAssetProvider({ fetcher, env: {}, probe: noGh })({
       commit: COMMIT_B,
       version: null,
       tag: null,

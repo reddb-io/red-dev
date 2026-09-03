@@ -140,6 +140,24 @@ export interface AgentSpec {
   multiplexer?: boolean;
 }
 
+/**
+ * Whether a host takes RedSkills at all.
+ *
+ * The desktop applications host no skills — there is no marketplace,
+ * generator or skills directory to project into — so picking only those
+ * is not a reason to install the package set, and not a reason to ask
+ * which plugins to switch on in it.
+ */
+export function hostsRedSkills(a: AgentSpec): boolean {
+  return a.desktopOnly !== true;
+}
+
+/** The hosts in a selection that RedSkills is wired into. */
+export function redSkillsHostKeys(selected: readonly string[]): string[] {
+  const keys = currentAgentKeys(selected);
+  return AGENTS.filter((a) => keys.includes(a.key) && hostsRedSkills(a)).map((a) => a.key);
+}
+
 export const AGENTS: AgentSpec[] = [
   {
     key: "claude-code",
@@ -265,6 +283,38 @@ export const AGENTS: AgentSpec[] = [
     probeArgs: ["--version"],
   },
   {
+    key: "pi",
+    label: "Pi",
+    about: "badlogic's minimal coding agent",
+    cmd: "pi",
+    recommended: false,
+    // The scoped package: bare `pi` on npm is something else entirely.
+    npm: "@earendil-works/pi-coding-agent",
+    probeArgs: ["--version"],
+  },
+  {
+    // A fork of Pi with an IDE's worth of tooling wired in — LSP, DAP,
+    // a Rust core. Offered beside Pi rather than instead of it: they
+    // share a lineage and a settings layout (`~/.pi/agent` there,
+    // `~/.omp/agent` here) and nothing else, so the choice is the
+    // person's.
+    //
+    // mise's GitHub backend is the publisher's own pinned-install path
+    // (`mise use -g github:can1357/oh-my-pi`), and the releases ship one
+    // bare binary per platform — Linux, macOS and Windows alike — so it
+    // is the one method that reaches every target. The npm package
+    // exists but declares `engines.bun`, and a bin that needs bun to
+    // start is not what `npm install -g` promises, so it is not offered.
+    key: "oh-my-pi",
+    label: "oh-my-pi",
+    about: "Pi fork with the IDE wired in — the `omp` command",
+    cmd: "omp",
+    recommended: false,
+    mise: "github:can1357/oh-my-pi",
+    installer: "https://omp.sh/install",
+    probeArgs: ["--version"],
+  },
+  {
     key: "muse",
     label: "Muse",
     about: "Meta's coding agent",
@@ -323,6 +373,12 @@ export function availableAgents(p: Platform): AgentSpec[] {
       // installing onto a host this scope does not own.
       return p.os === "windows";
     }
+    // mise's GitHub backend resolves the asset for whatever platform it
+    // runs on, so a host that declares mise and nothing narrower is
+    // available everywhere mise is — which, on a machine red-dev set up,
+    // is everywhere. One that also names its release assets is saying
+    // exactly which platforms it ships for, and that list wins.
+    if (a.mise && !a.release) return true;
     if (p.os === "windows") return Boolean(a.release?.windows[p.arch] ?? a.winget ?? a.msstore ?? a.npm);
     return Boolean(a.release?.linux[p.arch] ?? a.installer ?? a.npm);
   });
@@ -799,7 +855,10 @@ export async function installRedSkills(p?: Platform): Promise<void> {
     log.plain("       replacing Git Bash's copied current snapshot with the package set link");
   }
 
-  const acquisition = await acquireRedSkills(p ? { manifestPlatform: p } : {});
+  const { chosenPlugins } = await import("./red-skills-plugins.ts");
+  const acquisition = await acquireRedSkills(
+    p ? { manifestPlatform: p, activated: await chosenPlugins(p) } : {},
+  );
   announce(acquisition);
   if (acquisition.outcome === "refused") throw new RedError(acquisition.reason);
 }

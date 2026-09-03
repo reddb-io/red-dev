@@ -265,6 +265,7 @@ export async function runPluginPhase(
       acquisition: "installed",
       ...(opts.home ? { home: opts.home } : {}),
       ...(opts.manifestPlatform ? { manifestPlatform: opts.manifestPlatform } : {}),
+      ...(opts.activated ? { activated: opts.activated } : {}),
       env,
     });
     return run.code;

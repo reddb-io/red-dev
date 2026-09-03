@@ -568,6 +568,20 @@ describe("the composed set", () => {
     expect(activatedPlugins(["dev", "memory", "brain"])).toEqual(["dev"]);
   });
 
+  test("a machine that chose memory composes it enabled, and its dependency with it", () => {
+    // The choice from the interview reaches the generators through this
+    // file and nowhere else — and since the file is part of the composed
+    // tree, a different choice is a different revision.
+    const carried = ["dev", "memory", "brain"];
+    expect(hostActivationConfig(carried, activatedPlugins(carried, ["memory"]))).toBe(
+      "# Written by red-dev: activation flags for the host-install generator\n" +
+        "# (opencode-host) over the composed RedSkills package set. Not a\n" +
+        "# repository config — /red-setup owns those, and this file enables\n" +
+        "# nothing inside any project.\n" +
+        "plugins:\n  dev:\n    enabled: true\n  memory:\n    enabled: true\n  brain:\n    enabled: false\n",
+    );
+  });
+
   test("nothing inside the set is a link into mise's tree", () => {
     // A linked bin/ resolves ../dist through its real path and finds
     // the core's dist, never the plugin bundles; a linked dist/ makes

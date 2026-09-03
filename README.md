@@ -266,6 +266,28 @@ includes, an arrow points to RedCode's choice on the Agents page, and checkboxes
 control the optional RedSkills integrations for VS Code and Herdr. The Dev,
 Memory and Brain RedSkills payloads are named individually in the inventory.
 
+Which of those plugins the agent hosts switch on is its own **RedSkills** page,
+right after the hosts: `dev` arrives ticked, Memory and Brain arrive off. The
+package set carries every plugin whatever is answered, so a plugin left off is a
+flag to switch on later — but one that is off is not installed into any host at
+all, so none of its hooks or MCP servers run there. Memory needs `dev` and
+brings it along.
+
+Plugins can be switched on and off at any time afterwards:
+
+```bash
+red-dev agents plugins               # what is on, what is off
+red-dev agents plugins add memory    # switch one on (dev comes along if needed)
+red-dev agents plugins remove brain  # switch one off — its hooks and MCP go with it
+red-dev agents plugins dev,memory    # replace the whole set; `none` keeps only the marketplace
+```
+
+Each of those records the choice, rewrites the activation config the generator
+hosts read, and reconciles every host: Claude Code and Codex install the plugin
+that came on and remove the one that went off (`--keep-data`, so nothing it
+stored is deleted), OpenCode, RedCode and pi are regenerated, and the files a
+switched-off plugin left behind are removed. A running host is told to restart.
+
 `red` and `tq` are CLIs, so they are `core` and land on all five targets.
 `red-request`, `red-ui` and `dit` are `desktop`, which also means WSL never
 attempts them: installing a Linux GUI app inside a distro with no display is the
@@ -373,7 +395,7 @@ backed up before anything is removed. The backup goes under
 uninstall sweeps, because a backup an uninstall takes with it is not a backup.
 
 Then the gate. **Nothing is removed until the new package set is active, all
-seven hosts have reported and none is blocked or failed, and every companion has
+eight hosts have reported and none is blocked or failed, and every companion has
 converged** — on the outcomes the converge that ran just observed, not on a
 record from an earlier one and not on the existence of a `current` link. A run
 interrupted anywhere above that gate leaves the previous source exactly where it
@@ -544,7 +566,7 @@ red-dev install --dry-run    # print the plan, touch nothing
 red-dev update               # the tools red-dev declares, RedSkills, mise's tools, the agents, then converge
 red-dev update --system      # and every other package apt or winget owns
 red-dev theme [name]         # dark | light | obsidian | marble | cobalt | flare
-red-dev wallpaper [source]   # theme | Red artwork | absolute PNG path | HTTPS URL
+red-dev wallpaper [source]   # theme | current | Red artwork | absolute image path | HTTPS URL
 red-dev redwall              # redraw the wallpaper carrying this machine's state
 red-dev apps                 # choose optional tools and web apps; untick one to remove it
 red-dev keys                 # search every action and its chord, and run one
@@ -558,6 +580,10 @@ red-dev agents               # choose coding agents, wire in red-skills
 red-dev agents claude-code,codex # unattended agent selection
 red-dev agents default       # which host red-dev hands work to
 red-dev agents default codex # change it
+red-dev agents plugins       # which RedSkills plugins the hosts switch on
+red-dev agents plugins add memory    # switch one on, any time
+red-dev agents plugins remove brain  # switch one off — hooks and MCP go with it
+red-dev agents plugins dev,memory    # replace the set; `none` for the marketplace alone
 red-dev agents run           # start the Default agent
 red-dev agents update        # refresh each host by its publisher's mechanism
 red-dev red-skills install [selector] # acquire the package set: stable | next | version | commit
@@ -655,7 +681,7 @@ deliberately:
 | --- | --- |
 | `red-dev` | the fullscreen interface, then whatever you pick — a line-based menu below 60 columns, and `--help` with no terminal at all |
 | `red-dev theme` | which theme, when given no name |
-| `red-dev wallpaper` | which bundled Red artwork, a custom PNG path/HTTPS URL, or whether to follow the theme |
+| `red-dev wallpaper` | which bundled Red artwork, the image the desktop already shows, a custom image path/HTTPS URL, or whether to follow the theme |
 | `red-dev apps` | which optional tools — all ticked; untick to opt out — and which web apps, where ChatGPT, Claude and GitHub arrive ticked, unticking an installed one removes it, and the last line takes a URL |
 | `red-dev lang` | which runtimes mise should manage, then recommended or latest versions — Java, Ruby and Go start off; the rest are opt-out |
 | `red-dev shell` | whether a terminal lands in WSL or Git Bash |
@@ -1032,8 +1058,9 @@ standardises on bash rather than treating Windows as a separate world.
 It hands over to `red-dev` itself, so you land in the fullscreen interface
 rather than in a converge that already started. Choosing **Install** asks first:
 where to share configuration, which shell the terminal opens, which agents,
-which runtimes, which optional tools, ble.sh, the font, the theme, the wallpaper,
-and Redwall — with
+which RedSkills plugins those hosts switch on, which runtimes, which optional
+tools, ble.sh, the font, the theme, the wallpaper — including keeping the one the
+desktop already shows — and Redwall, with
 the palette previewed while the cursor moves. Previous answers come back
 pre-ticked. Tools and agents are opt-out; Java, Ruby and Go start off because
 they are project-specific toolchains. Agreeing is enter, enter, enter; `q`
@@ -1211,13 +1238,26 @@ A theme changes the things nothing else overrides:
 
 Wallpaper and colour theme are linked by default, not welded together. Choose
 `red-dev wallpaper flare`, for example, to keep Flare's Red artwork while the
-system and editor use another theme. A custom PNG works too:
+system and editor use another theme. The image already on the desktop can be
+kept — `red-dev wallpaper current`, or the same answer on the first-run
+Wallpaper page — and a custom image works too:
 
 ```bash
+red-dev wallpaper current
 red-dev wallpaper '/home/filipe/Pictures/wall.png'
 red-dev wallpaper 'C:\Users\filipe\Pictures\wall.png'
 red-dev wallpaper 'https://example.com/wall.png?variant=wide'
 ```
+
+`current` reads what the desktop shows (GNOME's `picture-uri`, Windows'
+registry), imports it exactly as `red-dev wallpaper <path>` would, and pins it —
+so the colour theme keeps driving the accent, the editor and Redwall's palette
+while the picture stays. A JPEG or BMP (Windows keeps a Settings-chosen
+wallpaper as a JPEG named `TranscodedWallpaper`) is converted to PNG on the way
+with whatever the machine has: ImageMagick, ffmpeg, GdkPixbuf on GNOME,
+System.Drawing on Windows. If the desktop already shows red-dev's own art or a
+Redwall, `current` resolves to the preference that produces it rather than
+importing a picture with the overlay baked in.
 
 The Windows path works from native Windows and WSL. Remote imports require
 HTTPS, follow only HTTPS redirects, time out after 30 seconds, and are capped at
@@ -1226,7 +1266,7 @@ red-dev validates the PNG and copies it under a content-addressed managed name,
 then forgets the original path or URL. The source can move or disappear and a
 query string never lands in preferences. `red-dev wallpaper theme` reconnects
 the wallpaper to the colour theme. When Redwall is enabled, it composes over the
-selected bundled or imported artwork rather than reverting to the theme sheet.
+selected bundled, kept or imported artwork rather than reverting to the theme sheet.
 
 Desktop application is supported on native Windows, WSL's Windows host, and
 Linux GNOME. GNOME also receives the lock-screen setting it exposes; Windows

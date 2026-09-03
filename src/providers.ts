@@ -849,7 +849,8 @@ export async function misePruneSuite(platform: Platform): Promise<void> {
  */
 async function linkRedSkillsCore(platform: Platform): Promise<void> {
   const { convergeRedSkillsPackageSet } = await import("./red-skills-set.ts");
-  convergeRedSkillsPackageSet({ manifestPlatform: platform });
+  const { chosenPlugins } = await import("./red-skills-plugins.ts");
+  convergeRedSkillsPackageSet({ manifestPlatform: platform, activated: await chosenPlugins(platform) });
 }
 
 /**

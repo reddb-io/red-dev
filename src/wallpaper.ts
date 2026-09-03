@@ -28,9 +28,11 @@
  */
 
 import { existsSync, mkdirSync } from "node:fs";
+import { basename } from "node:path";
 import type { Platform } from "./platform.ts";
 import { decodePng } from "./png.ts";
-import { customWallpaperDigest } from "./preferences.ts";
+import { customWallpaperDigest, validWallpaperPreference } from "./preferences.ts";
+import { removeTemp } from "./temp.ts";
 import {
   isThemeSlug,
   resolveThemeSlug,
@@ -122,6 +124,40 @@ export interface WallpaperImportSeams {
     init?: RequestInit,
   ) => Promise<Response>;
   readonly windowsToUnix?: (path: string) => Promise<string | null>;
+  /** Turns a non-PNG image into PNG bytes. Defaults to whatever converter this machine has. */
+  readonly convert?: (bytes: Uint8Array, p: Platform) => Promise<Uint8Array>;
+  /** What the desktop is showing. Defaults to asking the OS. */
+  readonly inUse?: (p: Platform) => Promise<string | null>;
+}
+
+/** The eight bytes every PNG starts with. */
+export function isPng(bytes: Uint8Array): boolean {
+  return bytes.length >= 8 &&
+    bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47 &&
+    bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a;
+}
+
+/**
+ * What an image is, from its first bytes, for the sentence that says a
+ * converter was needed and for the extension a converter is handed.
+ *
+ * Sniffed rather than read off the path, because the one file this most
+ * often meets has no extension at all: Windows keeps the wallpaper set
+ * through Settings as `TranscodedWallpaper`, a JPEG under a name that
+ * says nothing.
+ */
+export function imageFormat(bytes: Uint8Array): { name: string; ext: string } {
+  if (isPng(bytes)) return { name: "PNG", ext: "png" };
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return { name: "JPEG", ext: "jpg" };
+  if (bytes[0] === 0x42 && bytes[1] === 0x4d) return { name: "BMP", ext: "bmp" };
+  if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) return { name: "GIF", ext: "gif" };
+  if (
+    bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+    bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50
+  ) {
+    return { name: "WebP", ext: "webp" };
+  }
+  return { name: "an unrecognised format", ext: "img" };
 }
 
 function windowsAbsolute(path: string): boolean {
@@ -223,7 +259,14 @@ export async function importCustomWallpaper(
   p: Platform,
   seams: WallpaperImportSeams = {},
 ): Promise<CustomWallpaperImport> {
-  const bytes = await customWallpaperBytes(source.trim(), p, seams);
+  let bytes = await customWallpaperBytes(source.trim(), p, seams);
+  // Anything that is not a PNG is turned into one first, because the
+  // codec in src/png.ts is the whole of what Redwall can compose over
+  // and what red-dev can validate. The desktop's own wallpaper is the
+  // case that matters: Ubuntu's and Windows' defaults are JPEGs, and
+  // "keep the current wallpaper" would otherwise be an answer that
+  // works only for people who already chose a PNG.
+  if (!isPng(bytes)) bytes = await (seams.convert ?? convertToPng)(bytes, p);
   decodePng(bytes); // validates format, checksum, encoding and bounded dimensions
   const digest = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
   const dir = await customWallpaperDir(p);
@@ -381,6 +424,249 @@ export async function sweepRetiredWallpapers(p: Platform): Promise<string[]> {
     removed.push(name);
   }
   return removed;
+}
+
+// ---------------------------------------------------------- conversion
+
+/**
+ * GdkPixbuf through PyGObject, which every GNOME desktop carries.
+ *
+ * ImageMagick and ffmpeg are tried first because they are the tools a
+ * person would reach for; this is the one that is there on a machine
+ * nobody installed anything on, since GNOME's own settings dialogs are
+ * written against it.
+ */
+const GDK_PIXBUF_CONVERT = [
+  "import sys, gi",
+  "gi.require_version('GdkPixbuf', '2.0')",
+  "from gi.repository import GdkPixbuf",
+  "GdkPixbuf.Pixbuf.new_from_file(sys.argv[1]).savev(sys.argv[2], 'png', [], [])",
+].join("\n");
+
+/** PowerShell's answer, through System.Drawing, which every Windows has. */
+function drawingConvertScript(input: string, output: string): string {
+  const quote = (path: string) => `'${path.replace(/'/g, "''")}'`;
+  return [
+    "Add-Type -AssemblyName System.Drawing;",
+    `$image = [System.Drawing.Image]::FromFile(${quote(input)});`,
+    `$image.Save(${quote(output)}, [System.Drawing.Imaging.ImageFormat]::Png);`,
+    "$image.Dispose()",
+  ].join(" ");
+}
+
+/**
+ * Every way this machine might turn an image into a PNG, in the order to
+ * try them. Each answers whether it ran to completion; the caller checks
+ * what it wrote.
+ *
+ * Linux converters are not offered on native Windows, where `convert` is
+ * the filesystem tool and would happily "succeed" at something else.
+ * PowerShell is offered from WSL as well as natively, because on WSL the
+ * files sit on the Windows disk — `customWallpaperDir` is under
+ * `imageRoot`, which is the host's — so the host can read them.
+ */
+function pngConverters(
+  p: Platform,
+  input: string,
+  output: string,
+): Array<{ name: string; run: () => Promise<boolean> }> {
+  const local = (name: string, argv: string[]) => ({
+    name,
+    run: async () => (Bun.which(argv[0]!) ? await run(argv) : false),
+  });
+  const out: Array<{ name: string; run: () => Promise<boolean> }> = [];
+  if (p.os !== "windows") {
+    out.push(local("ImageMagick", ["magick", input, output]));
+    out.push(local("ImageMagick", ["convert", input, output]));
+    out.push(local("ffmpeg", ["ffmpeg", "-y", "-loglevel", "error", "-i", input, output]));
+    out.push(local("GdkPixbuf", ["python3", "-c", GDK_PIXBUF_CONVERT, input, output]));
+  }
+  if (p.os === "windows" || p.env === "wsl") {
+    out.push({
+      name: "PowerShell",
+      run: async () => {
+        const [winInput, winOutput] = await Promise.all([
+          windowsPathFor(input, p),
+          windowsPathFor(output, p),
+        ]);
+        if (winInput === null || winOutput === null) return false;
+        return await runHidden(
+          await imageRoot(p),
+          powershellCommand(drawingConvertScript(winInput, winOutput)),
+          p,
+        );
+      },
+    });
+  }
+  return out;
+}
+
+/**
+ * Turn image bytes into PNG bytes with whatever this machine has.
+ *
+ * Nothing is vendored for this: a JPEG decoder is a codec of its own,
+ * and the machines this runs on all carry one already — ImageMagick or
+ * ffmpeg where somebody installed them, GdkPixbuf on every GNOME
+ * desktop, System.Drawing on every Windows. The scratch files live
+ * beside the imported wallpapers rather than in the system temp
+ * directory, because on WSL that is the one place PowerShell can read
+ * from and this side can write to.
+ *
+ * The sentence on failure names the format and the converters, since
+ * the person's next move is to install one of them or convert the file
+ * themselves.
+ */
+export async function convertToPng(bytes: Uint8Array, p: Platform): Promise<Uint8Array> {
+  const format = imageFormat(bytes);
+  const dir = await customWallpaperDir(p);
+  mkdirSync(dir, { recursive: true });
+  const stem = `${dir}/.convert-${process.pid}`;
+  const input = `${stem}.${format.ext}`;
+  const output = `${stem}.png`;
+  await Bun.write(input, bytes);
+  try {
+    const converters = pngConverters(p, input, output);
+    for (const converter of converters) {
+      removeTemp(output);
+      if (!(await converter.run()) || !existsSync(output)) continue;
+      const converted = await Bun.file(output).bytes();
+      if (isPng(converted)) return converted;
+    }
+    const names = [...new Set(converters.map((c) => c.name))].join(", ");
+    throw new Error(
+      `the image is ${format.name}, not PNG, and nothing here could convert it (tried ${names})`,
+    );
+  } finally {
+    removeTemp(input);
+    removeTemp(output);
+  }
+}
+
+// --------------------------------------------------- the desktop's own
+
+/**
+ * What the desktop is showing, and whose it is.
+ *
+ * `external` is an image somebody else put there, which is the one
+ * "keep the current wallpaper" imports. The other three are red-dev's
+ * own — a bundled sheet, an import it already holds, or a Redwall it
+ * drew — and keeping those means naming the preference that already
+ * produces them, never re-importing an image with the overlay baked in.
+ */
+export type CurrentWallpaper =
+  | { kind: "external"; path: string }
+  | { kind: "wallpaper"; path: string; slug: ThemeSlug }
+  | { kind: "custom"; path: string; preference: string }
+  | { kind: "redwall"; path: string };
+
+function comparable(path: string, p: Platform): string {
+  const slashes = path.replace(/\\/g, "/").replace(/\/+$/, "");
+  return p.os === "windows" || p.env === "wsl" ? slashes.toLowerCase() : slashes;
+}
+
+/** The image on the desktop right now, classified, or null when there is none to read. */
+export async function currentWallpaper(
+  p: Platform,
+  seams: WallpaperImportSeams = {},
+): Promise<CurrentWallpaper | null> {
+  if (p.env === "server") return null;
+  let path: string | null;
+  try {
+    path = await (seams.inUse ?? wallpaperPathInUse)(p);
+  } catch {
+    return null;
+  }
+  // Already this side's spelling: under WSL `wallpaperPathInUse` has
+  // translated it, and natively a Windows path is what existsSync reads.
+  if (!path || !existsSync(path)) return null;
+
+  const root = comparable(await imageRoot(p), p);
+  const at = comparable(path, p);
+  if (!at.startsWith(`${root}/`)) return { kind: "external", path };
+
+  const name = basename(at);
+  if (at.startsWith(`${root}/wallpapers/`)) {
+    const slug = name.split("-")[0] ?? "";
+    if (isThemeSlug(slug)) return { kind: "wallpaper", path, slug };
+  }
+  if (at.startsWith(`${root}/custom-wallpapers/`)) {
+    const digest = name.replace(/\.png$/, "");
+    if (/^[a-f0-9]{64}$/.test(digest)) return { kind: "custom", path, preference: `custom:${digest}` };
+  }
+  if (at.startsWith(`${root}/redwall/`)) return { kind: "redwall", path };
+  return { kind: "external", path };
+}
+
+/**
+ * How the interview names the image it offers to keep, or null when
+ * there is nothing to offer.
+ *
+ * Only an image that is not red-dev's own: a desktop already showing a
+ * bundled sheet or a Redwall has no "current" that differs from the
+ * answers the question already lists. An import red-dev holds is
+ * offered, because somebody re-running the setup who imported a
+ * picture last time means exactly that picture.
+ */
+export async function currentWallpaperLabel(
+  p: Platform,
+  seams: WallpaperImportSeams = {},
+): Promise<string | null> {
+  const current = await currentWallpaper(p, seams);
+  if (current === null) return null;
+  if (current.kind === "external") return basename(current.path.replace(/\\/g, "/"));
+  if (current.kind === "custom") return "the picture imported last time";
+  return null;
+}
+
+export interface KeptWallpaper {
+  /** What to record: a slug, a `custom:<sha256>`, or undefined to follow the theme. */
+  readonly preference: string | undefined;
+  /** One line for the person, naming what was kept. */
+  readonly label: string;
+}
+
+/**
+ * Keep the image the desktop shows today, as a managed wallpaper.
+ *
+ * Someone else's image is imported under its content digest — converted
+ * to PNG on the way when it is not one — and pinned, exactly as
+ * `red-dev wallpaper /path/to/file` would pin it. Pinned rather than
+ * copied over the theme's sheet, because pinning is the mechanism that
+ * already survives a theme change: the colour theme keeps driving the
+ * accent, the editor and the Redwall's palette, and the picture stays.
+ *
+ * red-dev's own images resolve to the preference that produces them. A
+ * Redwall in particular is never imported: the state it shows is baked
+ * into its pixels, and pinning it would draw this morning's Worker
+ * count under tonight's.
+ */
+export async function keepCurrentWallpaper(
+  p: Platform,
+  seams: WallpaperImportSeams = {},
+): Promise<KeptWallpaper> {
+  const current = await currentWallpaper(p, seams);
+  if (current === null) throw new Error("no desktop wallpaper could be read on this machine");
+  switch (current.kind) {
+    case "external": {
+      const imported = await importCustomWallpaper(current.path, p, seams);
+      const name = basename(current.path.replace(/\\/g, "/"));
+      return {
+        preference: imported.preference,
+        label: `${name} (kept — ${Math.ceil(imported.bytes / 1024)} KiB imported)`,
+      };
+    }
+    case "wallpaper":
+      return { preference: current.slug, label: `${current.slug} — the Red artwork already shown` };
+    case "custom":
+      return { preference: current.preference, label: "the picture already imported" };
+    case "redwall": {
+      // The art under it is whatever the preference already names.
+      const { readPreferences } = await import("./preferences.ts");
+      const recorded = (await readPreferences(p)).wallpaper;
+      const preference = validWallpaperPreference(recorded) ? recorded : undefined;
+      return { preference, label: "the art under the current Redwall" };
+    }
+  }
 }
 
 // ------------------------------------------------------------ apply

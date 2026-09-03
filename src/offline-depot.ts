@@ -863,6 +863,13 @@ export interface DepotImportOptions {
    * is nothing to disagree about.
    */
   plugins?: readonly string[];
+  /**
+   * What this machine chose to switch on. Defaults to `dev` alone, which
+   * is the one activation a depot ever carries: a machine that chose
+   * Memory or Brain cannot take a depot, and is told so rather than
+   * handed a set that disagrees with its hosts.
+   */
+  activated?: readonly string[];
 }
 
 export interface DepotImportReport {
@@ -1052,7 +1059,7 @@ export async function importDepot(opts: DepotImportOptions): Promise<DepotImport
   // happen here. A depot that says `dev` handed to a machine that would
   // switch on Memory is a disagreement to stop on, not to average out.
   const carried = opts.plugins ?? depot.activated;
-  const wouldActivate = activatedPlugins(carried);
+  const wouldActivate = activatedPlugins(carried, opts.activated);
   if (JSON.stringify(wouldActivate) !== JSON.stringify(depot.activated)) {
     return {
       ok: false,

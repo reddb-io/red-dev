@@ -33,7 +33,6 @@ import { summary } from "./platform.ts";
 import { CenteredScreen, centeredFrame, Surface } from "./tui-chrome.ts";
 import { muted, ui } from "./tui-theme.ts";
 import { swatches } from "./themes.ts";
-import type { ThemeSlug } from "./themes.ts";
 import {
   runtimeVersionLabel,
   selectedRuntimeId,
@@ -55,6 +54,7 @@ import {
   type Choice,
   type Question,
   type SetupAnswers,
+  type SetupFacts,
 } from "./tui-setup-model.ts";
 
 
@@ -66,8 +66,9 @@ export async function runSetupTui(
   runtimes: Choice[],
   redApps: Choice[] = [],
   wslTuning: Choice[] = [],
+  facts: SetupFacts = {},
 ): Promise<SetupAnswers | null> {
-  const steps = questions(p, agents, apps, runtimes, redApps, wslTuning);
+  const steps = questions(p, agents, apps, runtimes, redApps, wslTuning, facts);
   let result: SetupAnswers | null = null;
 
   // Built here, outside the component, and deliberately so.
@@ -101,12 +102,13 @@ export async function runSetupTui(
         result = {
           theme: get("theme")[0] ?? "tokyo-night",
           ...(get("wallpaper")[0] && get("wallpaper")[0] !== "theme"
-            ? { wallpaper: get("wallpaper")[0] as ThemeSlug }
+            ? { wallpaper: get("wallpaper")[0] as string }
             : {}),
           font: get("font")[0] ?? "firacode",
           apps: selectedSetupApps(steps, get),
           runtimes: get("runtimes"),
           agents: get("agents"),
+          redSkillsPlugins: get("redskills"),
           blesh: get("plugins").includes("blesh"),
           redwall: get("redwall")[0] === "yes",
           share: get("share")[0] === "yes",

@@ -209,6 +209,8 @@ export interface WatchOptions {
   trigger?: Trigger;
   intervalMs?: number;
   manifestPlatform?: Platform;
+  /** The plugins the machine chose to switch on. Defaults to `dev` alone. */
+  activated?: readonly string[];
   /** The take, injected for the tests. Defaults to the staged update. */
   take?: () => Promise<WatchResult>;
   /** red-dev's own upgrade, injected for the tests. */
@@ -298,6 +300,7 @@ async function defaultTake(opts: WatchOptions): Promise<WatchResult> {
   const { runStagedUpdate } = await import("./staged-update.ts");
   const staged = await runStagedUpdate({
     ...(opts.manifestPlatform ? { manifestPlatform: opts.manifestPlatform } : {}),
+    ...(opts.activated ? { activated: opts.activated } : {}),
     trigger: opts.trigger ?? "unknown",
   });
 

@@ -90,7 +90,7 @@ import { dirname, join, relative, resolve } from "node:path";
 
 import { log } from "./log.ts";
 import type { Platform } from "./platform.ts";
-import { redSkillsPluginNames } from "./red-skills-plugins.ts";
+import { activatedPlugins, redSkillsPluginNames } from "./red-skills-plugins.ts";
 import {
   overlaysIntoTree,
   redSkillsRoot,
@@ -386,6 +386,8 @@ export interface CheckoutSyncOptions {
   /** Defaults to the checkout's own `bun run build`. */
   build?: AssetBuilder;
   plugins?: readonly string[];
+  /** The plugins the machine chose to switch on. Defaults to `dev` alone. */
+  activated?: readonly string[];
   platform?: NodeJS.Platform;
   manifestPlatform?: Platform;
   env?: NodeJS.ProcessEnv;
@@ -483,6 +485,7 @@ export async function syncRedSkillsCheckout(opts: CheckoutSyncOptions): Promise<
           identity,
           staging,
           plugins,
+          ...(opts.activated ? { activated: opts.activated } : {}),
           run,
           ...(opts.assets ? { assets: opts.assets } : {}),
           ...(opts.build ? { build: opts.build } : {}),
@@ -510,6 +513,7 @@ export async function syncRedSkillsCheckout(opts: CheckoutSyncOptions): Promise<
     home,
     checkout: { tree: join(staging, "tree"), identity: checkoutPackageIdentity(identity) },
     ...(opts.platform ? { platform: opts.platform } : {}),
+    ...(opts.activated ? { activated: opts.activated } : {}),
     ...(opts.stageOnly === true ? { stageOnly: true } : {}),
     env,
   });
@@ -561,6 +565,7 @@ async function assemble(req: {
   identity: CheckoutIdentity;
   staging: string;
   plugins: readonly string[];
+  activated?: readonly string[];
   run: CommandRunner;
   assets?: AssetProvider;
   build?: AssetBuilder;
@@ -652,7 +657,11 @@ async function assemble(req: {
   const config = join(tree, ".red", "config.yaml");
   if (!existsSync(config)) {
     mkdirSync(dirname(config), { recursive: true });
-    writeFileSync(config, hostActivationConfig(plugins), "utf8");
+    writeFileSync(
+      config,
+      hostActivationConfig(plugins, activatedPlugins(plugins, req.activated)),
+      "utf8",
+    );
   }
 
   const record: CheckoutReceipt = {

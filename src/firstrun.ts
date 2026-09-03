@@ -16,7 +16,7 @@
 import { log } from "./log.ts";
 import type { StepOutcome } from "./converge.ts";
 import type { Platform } from "./platform.ts";
-import type { SetupAnswers } from "./tui-setup-model.ts";
+import type { SetupAnswers, SetupFacts } from "./tui-setup-model.ts";
 import { readPreferences, writePreferences, type Preferences } from "./preferences.ts";
 import { DEFAULT_THEME, themeNames } from "./themes.ts";
 import { checkbox, confirm, interactive, select } from "./ui.ts";
@@ -55,8 +55,6 @@ export interface SetupProgressObserver {
 
 type SetupChoices = { agents?: string[]; runtimes: string[]; apps: string[] };
 
-const NON_SKILL_HOSTS = new Set(["claude-desktop", "codex-desktop", "t3code"]);
-
 /**
  * What the interview's answers mean as recorded preferences.
  *
@@ -76,6 +74,10 @@ export function preferencesFromAnswers(answers: SetupAnswers): Preferences {
     redwall: answers.redwall,
     agents: answers.agents,
     runtimes: answers.runtimes,
+    // Conditional like the Default agent below: an interview that never
+    // asked — no host that takes skills was picked — must leave a
+    // recorded choice alone rather than erase it.
+    ...(answers.redSkillsPlugins ? { redSkillsPlugins: answers.redSkillsPlugins } : {}),
     // Conditional, and that is the whole of how the choice survives a
     // converge: writePreferences merges, but a key present and
     // undefined overwrites the stored value with nothing. An interview
@@ -101,7 +103,7 @@ export async function setupPlan(
    */
   hasNode?: () => Promise<boolean>,
 ): Promise<SetupPlanStep[]> {
-  const { agentInstallMethod, availableAgents } = await import("./agents.ts");
+  const { agentInstallMethod, availableAgents, hostsRedSkills } = await import("./agents.ts");
   const agents = choices.agents ?? [];
   const available = availableAgents(p);
   const chosen = agents
@@ -129,7 +131,7 @@ export async function setupPlan(
     ...runtimes.map((key) => ({ key, tool: key, kind: "runtime" as const })),
     ...chosen.map((agent) => ({ key: agent.key, tool: agent.label, kind: "agent" as const })),
   ];
-  if (chosen.some((agent) => !NON_SKILL_HOSTS.has(agent.key))) {
+  if (chosen.some(hostsRedSkills)) {
     plan.push({ key: "red-skills", tool: "red-skills", kind: "red-skills" });
   }
   return plan;
@@ -184,7 +186,66 @@ export async function buildSetupSteps(p: Platform, wslTuningFacts?: WslTuningFac
     OFFERED_RUNTIMES.map((r) => ({ key: r.id, label: r.label, note: r.about })),
     redFamilyChoices(p, agents),
     tuningFacts ? wslTuningChoices(tuningFacts) : [],
+    await setupFacts(p),
   );
+}
+
+/**
+ * What the questions are phrased around, observed once before they are
+ * built.
+ *
+ * The current wallpaper is looked up here rather than inside the
+ * question, because a question is a value and looking at the desktop
+ * spawns a process — under WSL a hidden PowerShell. Asked once, for both
+ * interfaces, and never fatal: a desktop that cannot be read is a
+ * desktop with nothing to keep, which the question then does not offer.
+ */
+export async function setupFacts(p: Platform): Promise<SetupFacts> {
+  const { currentWallpaperLabel } = await import("./wallpaper.ts");
+  try {
+    return { currentWallpaper: await currentWallpaperLabel(p) };
+  } catch {
+    return { currentWallpaper: null };
+  }
+}
+
+/**
+ * Turn "keep the current wallpaper" into something that can be recorded.
+ *
+ * `current` names the desktop of the moment, and a preference that said
+ * so would mean something different every time it was read. So it is
+ * resolved here, before anything is written: the image is imported
+ * under its digest — converted to PNG on the way when it is not one —
+ * and the answer becomes the pin `red-dev wallpaper <path>` would have
+ * produced, which is the mechanism that already survives a theme change.
+ *
+ * Never fatal. A desktop that could not be read or an image nothing
+ * here can convert is said out loud, and the answer falls back to
+ * following the theme — the default the person would have had by not
+ * answering — rather than stopping a first run over a picture.
+ */
+export async function resolveSetupWallpaper(p: Platform, answers: SetupAnswers): Promise<SetupAnswers> {
+  const wallpaper = await resolveKeptWallpaper(p, answers.wallpaper);
+  return wallpaper === answers.wallpaper ? answers : { ...answers, wallpaper };
+}
+
+/** The wallpaper answer alone, resolved the same way — the linear prompt's half of it. */
+async function resolveKeptWallpaper(
+  p: Platform,
+  wallpaper: string | undefined,
+): Promise<string | undefined> {
+  const { KEEP_CURRENT_WALLPAPER } = await import("./tui-setup-model.ts");
+  if (wallpaper !== KEEP_CURRENT_WALLPAPER) return wallpaper;
+  const { keepCurrentWallpaper } = await import("./wallpaper.ts");
+  try {
+    const kept = await keepCurrentWallpaper(p);
+    log.ok(`wallpaper: ${kept.label}`);
+    return kept.preference;
+  } catch (err) {
+    log.warn(`wallpaper: could not keep the current one — ${(err as Error).message}`);
+    log.plain("       following the colour theme instead; `red-dev wallpaper current` retries it");
+    return undefined;
+  }
 }
 
 /**
@@ -196,9 +257,10 @@ export async function buildSetupSteps(p: Platform, wslTuningFacts?: WslTuningFac
 export async function applySetupAnswers(
   p: Platform,
   inv: { scope?: string | undefined },
-  answers: SetupAnswers,
+  given: SetupAnswers,
   observer: SetupProgressObserver = {},
 ): Promise<{ answers: SetupAnswers }> {
+  const answers = await resolveSetupWallpaper(p, given);
   if (answers.share) {
     const { chooseSharedRoot } = await import("./shared-root.ts");
     try {
@@ -334,7 +396,7 @@ export async function carryOutChoices(
     if (skills) {
       observer.stepStart?.(skills);
       try {
-        await installRedSkills();
+        await installRedSkills(p);
         observer.stepEnd?.({ tool: skills.tool, outcome: "installed" });
       } catch (err) {
         const detail = (err as Error).message;
@@ -368,7 +430,7 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
       note: isAgentInstalled(a) ? `${a.about} — installed` : a.about,
     }));
 
-    const answers = await runSetupTui(
+    const given = await runSetupTui(
       p,
       agents,
       otherOptionalChoices(p),
@@ -377,14 +439,16 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
       p.env === "wsl" || p.os === "windows"
         ? wslTuningChoices(await observeWslTuningFacts(p))
         : [],
+      await setupFacts(p),
     );
 
-    if (!answers) {
+    if (!given) {
       // Left early: no answers recorded, so the next run asks again
       // rather than silently keeping half a set.
       log.skip("setup skipped — run `red-dev` when you want to choose");
       return null;
     }
+    const answers = await resolveSetupWallpaper(p, given);
 
     // Established before the converge writes anything, which is the
     // whole point of asking it first: configuration should be born in
@@ -475,6 +539,19 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
     selectedRuntimes.push(picked.split(" ")[0]!);
   }
 
+  // 3b. Which RedSkills plugins the agent hosts switch on. Asked here
+  //     rather than beside the paint because it decides what runs in
+  //     every agent session: a plugin that is off is not installed into
+  //     any host, so none of its hooks or MCP servers run there.
+  const { DEFAULT_ACTIVATED_PLUGINS, PLUGIN_CHOICES } = await import("./red-skills-plugins.ts");
+  const pluginLabels = PLUGIN_CHOICES.map((plugin) => `${plugin.key} — ${plugin.note}`);
+  const pickedPlugins = await checkbox(
+    "RedSkills plugins to switch on in the agent hosts? (memory brings dev along)",
+    pluginLabels as [string, ...string[]],
+    pluginLabels.filter((label) => DEFAULT_ACTIVATED_PLUGINS.includes(label.split(" ")[0]!)),
+  );
+  const redSkillsPlugins = pickedPlugins.map((label) => label.split(" ")[0]!);
+
   // 4. The RedDB family: inventory beside the optional integrations.
   const { availableAgents } = await import("./agents.ts");
   const { otherOptionalChoices, redFamilyChoices } = await import("./red-family.ts");
@@ -538,12 +615,26 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
     DEFAULT_THEME,
   );
 
+  const facts = await setupFacts(p);
+  const keepCurrent = facts.currentWallpaper
+    ? `current — keep ${facts.currentWallpaper}; Redwall draws over it`
+    : null;
   const wallpaperChoice = await select(
     "Wallpaper?",
-    ["theme — follow the colour theme", ...themeNames()] as [string, ...string[]],
+    [
+      "theme — follow the colour theme",
+      ...(keepCurrent ? [keepCurrent] : []),
+      ...themeNames(),
+    ] as [string, ...string[]],
     "theme — follow the colour theme",
   );
-  const wallpaper = wallpaperChoice.startsWith("theme ") ? undefined : wallpaperChoice;
+  let wallpaper: string | undefined = wallpaperChoice.startsWith("theme ")
+    ? undefined
+    : wallpaperChoice.split(" ")[0]!;
+  if (wallpaperChoice === keepCurrent) {
+    const { KEEP_CURRENT_WALLPAPER } = await import("./tui-setup-model.ts");
+    wallpaper = KEEP_CURRENT_WALLPAPER;
+  }
 
   // 8. And whether that wallpaper reports on the machine it is sitting
   //    on. Asked after the theme because it draws over whatever the
@@ -553,6 +644,10 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
   log.plain("     Workers running, and the address this machine answers on —");
   log.plain("     so the lock screen reports without being unlocked.");
   const redwall = await confirm("Enable Redwall?", true);
+
+  // `current` is resolved into a recorded pin before anything is
+  // written, the same way the fullscreen interview resolves it.
+  wallpaper = await resolveKeptWallpaper(p, wallpaper);
 
   const choices: FirstRunChoices = {
     theme,
@@ -571,6 +666,7 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
     blesh,
     redwall,
     runtimes: choices.runtimes,
+    redSkillsPlugins,
     ...(terminalShell ? { terminalShell } : {}),
     ...(terminalShell === "wsl" && process.env["WSL_DISTRO_NAME"]
       ? { distro: process.env["WSL_DISTRO_NAME"] }

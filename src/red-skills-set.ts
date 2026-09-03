@@ -954,12 +954,15 @@ export function candidateFromMise(installsRoot: string, plugins: readonly string
  * not hand a plugin list to are held to the same activation as the four
  * it does.
  */
+/** The first line of every activation config red-dev writes — what marks it as red-dev's to rewrite. */
+export const ACTIVATION_CONFIG_HEADER = "# Written by red-dev: activation flags for the host-install generator";
+
 export function hostActivationConfig(
   plugins: readonly string[],
   activated: readonly string[] = plugins,
 ): string {
   const lines = [
-    "# Written by red-dev: activation flags for the host-install generator",
+    ACTIVATION_CONFIG_HEADER,
     "# (opencode-host) over the composed RedSkills package set. Not a",
     "# repository config — /red-setup owns those, and this file enables",
     "# nothing inside any project.",
@@ -986,6 +989,8 @@ export function hostActivationConfig(
 export function composeSet(
   candidate: Extract<MiseCandidate, { kind: "ready" }>,
   dest: string,
+  /** What the machine chose to switch on. Defaults to `dev` alone. */
+  activated?: readonly string[],
 ): { ok: true } | { ok: false; reason: string } {
   const gaps = corePayloadGaps(candidate.core);
   if (gaps.length > 0) {
@@ -1015,7 +1020,7 @@ export function composeSet(
   if (!existsSync(config)) {
     mkdirSync(dirname(config), { recursive: true });
     const carried = Object.keys(candidate.plugins);
-    writeFileSync(config, hostActivationConfig(carried, activatedPlugins(carried)), "utf8");
+    writeFileSync(config, hostActivationConfig(carried, activatedPlugins(carried, activated)), "utf8");
   }
   restoreScriptModes(dest);
   return { ok: true };
@@ -1245,6 +1250,13 @@ export interface PackageSetConvergeOptions {
   installsRoot?: string;
   /** The plugins the composed set must carry. Defaults to the manifest's. */
   plugins?: readonly string[];
+  /**
+   * The plugins the machine chose to switch on, written into the
+   * activation config the generators read. Defaults to `dev` alone —
+   * see src/red-skills-plugins.ts. Part of the composed tree, so a
+   * different choice composes a different revision.
+   */
+  activated?: readonly string[];
   platform?: NodeJS.Platform;
   /** The red-dev platform, used only to derive the plugin set. */
   manifestPlatform?: Platform;
@@ -1412,7 +1424,7 @@ export function convergeRedSkillsPackageSet(
   // Compose into a staging directory first, because the key — and so
   // the directory's final name — is the digest of what was composed.
   const staging = redSkillsSetDir(home, `.tmp-${candidate.version}`);
-  const composed = composeSet(candidate, staging);
+  const composed = composeSet(candidate, staging, opts.activated);
   if (!composed.ok) {
     rmSync(staging, { recursive: true, force: true });
     return refuse("artifact", composed.reason);

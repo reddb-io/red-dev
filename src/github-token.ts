@@ -52,7 +52,13 @@ function tokenFromGh(run = spawnSync): string | null {
     const result = run("gh", ["auth", "token"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
-      timeout: 5_000,
+      // Two seconds, not five: a token read is a local file read, and a
+      // `gh` that takes longer is one talking to the network — its
+      // update notifier, which is switched off below because on a
+      // runner with no egress that call is exactly the five seconds a
+      // test is allowed. A prompt is refused for the same reason.
+      timeout: 2_000,
+      env: { ...process.env, GH_NO_UPDATE_NOTIFIER: "1", GH_PROMPT_DISABLED: "1" },
     });
     if (result.status !== 0) return null;
     const token = (result.stdout ?? "").trim();

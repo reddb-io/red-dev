@@ -265,7 +265,7 @@ describe("the gate the cleanup waits behind", () => {
     expect(gate.ok).toBe(true);
     if (gate.ok) {
       expect(gate.witness).toContain(ADOPTED_SET.version);
-      expect(gate.witness).toContain("7 hosts");
+      expect(gate.witness).toContain("8 hosts");
     }
   });
 });

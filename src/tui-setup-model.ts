@@ -34,7 +34,8 @@ import {
 import { CenteredScreen, centeredFrame, Surface } from "./tui-chrome.ts";
 import { muted, ui } from "./tui-theme.ts";
 import { DEFAULT_THEME, swatches, THEMES, themeNames } from "./themes.ts";
-import type { ThemeSlug } from "./themes.ts";
+import { redSkillsHostKeys } from "./agents.ts";
+import { DEFAULT_ACTIVATED_PLUGINS, PLUGIN_CHOICES } from "./red-skills-plugins.ts";
 import {
   runtimeSelectedByDefault,
   runtimeVersionLabel,
@@ -45,12 +46,24 @@ import {
 
 export interface SetupAnswers {
   theme: string;
-  /** Fixed Red wallpaper, or undefined to follow the theme. */
-  wallpaper?: ThemeSlug;
+  /**
+   * A pinned Red wallpaper slug, `current` to keep whatever the desktop
+   * shows today, or undefined to follow the theme.
+   *
+   * `current` is an instruction, not a preference: it is resolved into
+   * a managed `custom:<sha256>` import before anything is recorded —
+   * see resolveSetupWallpaper in src/firstrun.ts.
+   */
+  wallpaper?: string;
   font: string;
   apps: string[];
   runtimes: string[];
   agents: string[];
+  /**
+   * The RedSkills plugins the agent hosts switch on — see
+   * src/red-skills-plugins.ts. Absent when the interview never asked.
+   */
+  redSkillsPlugins?: string[];
   /** The one host red-dev hands work to. Absent when nothing was chosen. */
   defaultAgent?: string;
   blesh: boolean;
@@ -149,6 +162,19 @@ const FONTS: Choice[] = [
   { key: "caskaydiacove", label: "Caskaydia Cove", note: "Microsoft's Cascadia" },
 ];
 
+/** Facts about this machine the questions are phrased around. */
+export interface SetupFacts {
+  /**
+   * The image the desktop shows right now, named for the person — or
+   * null when there is none red-dev can keep: a server, a desktop it
+   * could not read, or one already showing red-dev's own art.
+   */
+  currentWallpaper?: string | null;
+}
+
+/** The wallpaper answer that keeps the desktop's own image. */
+export const KEEP_CURRENT_WALLPAPER = "current";
+
 export function questions(
   p: Platform,
   agents: Choice[],
@@ -156,6 +182,7 @@ export function questions(
   runtimes: Choice[],
   redApps: Choice[] = [],
   wslTuning: Choice[] = [],
+  facts: SetupFacts = {},
 ): Question[] {
   // Annotated rather than inferred: the return type does not reach
   // through `.filter` to type a step's callbacks, so `choicesFrom` and
@@ -258,6 +285,36 @@ export function questions(
       available: (picked) => needsDefaultAgentChoice(picked("agents")),
     },
     {
+      // Right after the hosts, because it is about what goes into them.
+      //
+      // The package set carries every plugin whatever is answered here,
+      // so a plugin left off costs nothing and is a flag to switch on
+      // later. What the answer decides is which of them the hosts
+      // install — and a plugin that is not installed into a host runs
+      // none of its hooks or MCP servers there, which is the reason
+      // Memory and Brain start off: each of them acts on every session
+      // of a host it is in, and that is not a thing to switch on because
+      // it happened to be in the tarball.
+      id: "redskills",
+      title: "RedSkills",
+      description:
+        "Which RedSkills plugins the agent hosts switch on. The package set " +
+        "carries all of them either way; a plugin left off is not installed " +
+        "into any host, so none of its hooks or MCP servers run. Memory needs " +
+        "dev and brings it along. Change it later with `red-dev agents plugins`.",
+      multi: true,
+      choices: PLUGIN_CHOICES.map((plugin) => ({
+        key: plugin.key,
+        label: plugin.label,
+        note: plugin.note,
+      })),
+      preset: [...DEFAULT_ACTIVATED_PLUGINS],
+      applies: () => true,
+      // Hidden when nothing picked on the Agents page hosts skills: the
+      // desktop applications take no plugin, so there is nothing to ask.
+      available: (picked) => redSkillsHostKeys(picked("agents")).length > 0,
+    },
+    {
       id: "runtimes",
       title: "Runtimes",
       description:
@@ -350,12 +407,25 @@ export function questions(
       id: "wallpaper",
       title: "Wallpaper",
       description:
-        "Follow the colour theme, or pin any Red wallpaper independently. " +
-        "A pinned wallpaper stays put when the theme changes; Redwall draws " +
-        "the machine state over whichever art you choose.",
+        "Follow the colour theme, keep the image the desktop shows today, or " +
+        "pin any Red wallpaper independently. A kept or pinned wallpaper stays " +
+        "put when the theme changes; Redwall draws the machine state over " +
+        "whichever art you choose.",
       multi: false,
       choices: [
         { key: "theme", label: "Follow the theme", note: "the default" },
+        // Offered only when there is something to keep. A desktop red-dev
+        // could not read, or one already showing red-dev's own art, has
+        // no "current" that differs from the answers below it.
+        ...(facts.currentWallpaper
+          ? [
+              {
+                key: KEEP_CURRENT_WALLPAPER,
+                label: "Keep the current wallpaper",
+                note: `${facts.currentWallpaper} — imported as it is; Redwall draws over it`,
+              },
+            ]
+          : []),
         ...themeNames().map((name) => ({
           key: name,
           label: THEMES[name].name,
@@ -470,12 +540,13 @@ export function useSetupModel(steps: Question[], wizard: ReturnType<typeof creat
       return {
         theme: get("theme")[0] ?? DEFAULT_THEME,
         ...(get("wallpaper")[0] && get("wallpaper")[0] !== "theme"
-          ? { wallpaper: get("wallpaper")[0] as ThemeSlug }
+          ? { wallpaper: get("wallpaper")[0] as string }
           : {}),
         font: get("font")[0] ?? "firacode",
         apps: selectedSetupApps(steps, get),
         runtimes: get("runtimes"),
         agents: get("agents"),
+        redSkillsPlugins: get("redskills"),
         ...(defaultAgent ? { defaultAgent } : {}),
         blesh: get("plugins").includes("blesh"),
         redwall: get("redwall")[0] === "yes",
@@ -566,8 +637,9 @@ export function setupSteps(
   runtimes: Choice[],
   redApps: Choice[] = [],
   wslTuning: Choice[] = [],
+  facts: SetupFacts = {},
 ): { steps: Question[]; wizard: ReturnType<typeof createWizard> } {
-  const steps = questions(p, agents, apps, runtimes, redApps, wslTuning);
+  const steps = questions(p, agents, apps, runtimes, redApps, wslTuning, facts);
   // createWizard creates signals; calling it during render rebuilds them
   // thirty times a second and puts a warning across the interface.
   const wizard = createWizard(

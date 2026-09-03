@@ -83,7 +83,7 @@ import { sha256Hex } from "./checksum.ts";
 import { githubAuthHeaders } from "./github-token.ts";
 import { log } from "./log.ts";
 import type { Platform } from "./platform.ts";
-import { redSkillsPluginNames } from "./red-skills-plugins.ts";
+import { activatedPlugins, redSkillsPluginNames } from "./red-skills-plugins.ts";
 import { redSkillsRoot } from "./red-skills-root.ts";
 import {
   convergeRedSkillsPackageSet,
@@ -755,11 +755,23 @@ interface ReleaseAsset {
  * writing is an artifact some later line can install.
  */
 export function githubAssetProvider(
-  opts: { fetcher?: typeof fetch; repo?: string; env?: NodeJS.ProcessEnv } = {},
+  opts: {
+    fetcher?: typeof fetch;
+    repo?: string;
+    env?: NodeJS.ProcessEnv;
+    /**
+     * How `gh auth token` is asked, when the environment carries no
+     * token. Injected for the tests that hand this a fake GitHub: a
+     * fake network with a real `gh` underneath it is a test whose
+     * duration belongs to whichever runner it lands on.
+     */
+    probe?: typeof spawnSync;
+  } = {},
 ): AssetProvider {
   const fetcher = opts.fetcher ?? fetch;
   const repo = opts.repo ?? REDSKILLS_REPO;
   const env = opts.env ?? process.env;
+  const probe = opts.probe ?? spawnSync;
 
   return async (req) => {
     if (!req.tag) {
@@ -774,7 +786,7 @@ export function githubAssetProvider(
     // 60 an hour for everything sharing the IP. See src/github-token.ts.
     const headers: Record<string, string> = {
       Accept: "application/vnd.github+json",
-      ...githubAuthHeaders(env),
+      ...githubAuthHeaders(env, probe),
     };
 
     let release: { assets?: ReleaseAsset[] };
@@ -935,8 +947,10 @@ export interface StageRequest {
   assets: string;
   /** Where the candidate manifest set is assembled. */
   dest: string;
-  /** The plugins the activation config enables. */
+  /** The plugins the set carries, named in the activation config. */
   plugins: readonly string[];
+  /** The plugins the machine chose to switch on. Defaults to `dev` alone. */
+  activated?: readonly string[];
 }
 
 /**
@@ -980,7 +994,11 @@ export function stageCandidate(
   const config = join(tree, ".red", "config.yaml");
   if (!existsSync(config)) {
     mkdirSync(dirname(config), { recursive: true });
-    writeFileSync(config, hostActivationConfig(req.plugins), "utf8");
+    writeFileSync(
+      config,
+      hostActivationConfig(req.plugins, activatedPlugins(req.plugins, req.activated)),
+      "utf8",
+    );
   }
   return { ok: true, dir: req.dest };
 }
@@ -996,8 +1014,10 @@ export interface AcquireOptions {
   assets?: AssetProvider;
   verifier?: SignatureVerifier;
   url?: string;
-  /** The plugins the staged activation config enables. Defaults to the manifest's. */
+  /** The plugins the staged activation config names. Defaults to the manifest's. */
   plugins?: readonly string[];
+  /** The plugins the machine chose to switch on. Defaults to `dev` alone. */
+  activated?: readonly string[];
   platform?: NodeJS.Platform;
   manifestPlatform?: Platform;
   env?: NodeJS.ProcessEnv;
@@ -1186,7 +1206,13 @@ export async function acquireRedSkills(opts: AcquireOptions = {}): Promise<Acqui
   }
 
   const plugins = opts.plugins ?? redSkillsPluginNames(opts.manifestPlatform ?? manifestPlatformOf(opts.platform));
-  const staged = stageCandidate({ snapshot: snapshot.path, assets: candidate, dest: candidate, plugins });
+  const staged = stageCandidate({
+    snapshot: snapshot.path,
+    assets: candidate,
+    dest: candidate,
+    plugins,
+    ...(opts.activated ? { activated: opts.activated } : {}),
+  });
   if (!staged.ok) {
     return nothing("refused", staged.reason, "tree", {
       selector,
@@ -1221,6 +1247,7 @@ export async function acquireRedSkills(opts: AcquireOptions = {}): Promise<Acqui
     source: candidate,
     verifier,
     ...(opts.platform ? { platform: opts.platform } : {}),
+    ...(opts.activated ? { activated: opts.activated } : {}),
     ...(opts.stageOnly === true ? { stageOnly: true } : {}),
   });
   if (converged.refused) {

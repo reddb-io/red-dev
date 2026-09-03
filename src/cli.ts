@@ -173,12 +173,13 @@ export function buildCli(): CLI {
         ],
       },
       wallpaper: {
-        description: "choose bundled art or import a PNG independently from the colour theme",
+        description:
+          "choose bundled art, keep the image the desktop shows, or import one independently from the colour theme",
         positional: [
           {
             name: "wallpaper_name",
             description:
-              `theme, ${themeNames().join(", ")}, or an absolute PNG path/HTTPS URL`,
+              `theme, current, ${themeNames().join(", ")}, or an absolute image path/HTTPS URL`,
             required: false,
           },
         ],
@@ -259,12 +260,18 @@ export function buildCli(): CLI {
           {
             name: "agent_selection",
             description:
-              "comma-separated agent keys for an unattended install, or `default`, `run`, `update`",
+              "comma-separated agent keys for an unattended install, or `default`, `run`, `update`, `plugins`",
             required: false,
           },
           {
             name: "agent_key",
-            description: "with `default`: the one host red-dev hands work to",
+            description:
+              "with `default`: the one host red-dev hands work to; with `plugins`: `add`, `remove`, `none`, or the comma-separated plugins to switch on",
+            required: false,
+          },
+          {
+            name: "plugin_names",
+            description: "with `plugins add` or `plugins remove`: the comma-separated RedSkills plugins",
             required: false,
           },
         ],
@@ -402,6 +409,15 @@ export interface Invocation {
   /** `agents update` — refresh every installed host, each its own way. */
   agentUpdate: boolean;
   /**
+   * `agents plugins [add|remove|none|names] [names]` — which RedSkills
+   * plugins the hosts switch on. With nothing it reports; `add` and
+   * `remove` change the set by the names after them; a comma-separated
+   * list or `none` replaces it. Either way the hosts are re-wired.
+   */
+  agentPlugins: boolean;
+  agentPluginVerb: "add" | "remove" | "set" | undefined;
+  agentPluginNames: string[] | undefined;
+  /**
    * Everything after `--`: arguments for the program red-dev starts,
    * not for red-dev. Kept verbatim, including flags red-dev would never
    * add itself — see src/agent-launch.ts.
@@ -438,6 +454,23 @@ function clampOpacity(raw: unknown, errors: string[]): number {
     return 90;
   }
   return Math.round(raw);
+}
+
+/** `agents plugins add memory`, `agents plugins remove brain`, `agents plugins dev,memory`, `agents plugins none`. */
+function pluginVerb(
+  active: boolean,
+  first: unknown,
+  second: unknown,
+): Pick<Invocation, "agentPluginVerb" | "agentPluginNames"> {
+  const names = (raw: unknown): string[] =>
+    typeof raw === "string" ? raw.split(",").map((value) => value.trim()).filter(Boolean) : [];
+  if (!active || typeof first !== "string") {
+    return { agentPluginVerb: undefined, agentPluginNames: undefined };
+  }
+  if (first === "add" || first === "remove") {
+    return { agentPluginVerb: first, agentPluginNames: names(second) };
+  }
+  return { agentPluginVerb: "set", agentPluginNames: first === "none" ? [] : names(first) };
 }
 
 export function parseArgs(cli: CLI, argv: string[]): Invocation {
@@ -484,6 +517,7 @@ export function parseArgs(cli: CLI, argv: string[]): Invocation {
   const agentDefault = rawAgents === "default";
   const agentRun = rawAgents === "run";
   const agentUpdate = rawAgents === "update";
+  const agentPlugins = rawAgents === "plugins";
   return {
     command: r.command[0] ?? null,
     // `theme <name>` and `plan <scope>` both land in the positional map
@@ -493,7 +527,7 @@ export function parseArgs(cli: CLI, argv: string[]): Invocation {
     redSkillsPhase: typeof pos["phase"] === "string" ? pos["phase"] : undefined,
     redSkillsSelector: typeof pos["selector"] === "string" ? pos["selector"] : undefined,
     agentKeys:
-      typeof rawAgents === "string" && !agentDefault && !agentRun && !agentUpdate
+      typeof rawAgents === "string" && !agentDefault && !agentRun && !agentUpdate && !agentPlugins
         ? rawAgents.split(",").map((value) => value.trim()).filter(Boolean)
         : undefined,
     agentDefault,
@@ -501,6 +535,8 @@ export function parseArgs(cli: CLI, argv: string[]): Invocation {
       agentDefault && typeof pos["agent_key"] === "string" ? pos["agent_key"] : undefined,
     agentRun,
     agentUpdate,
+    agentPlugins,
+    ...pluginVerb(agentPlugins, pos["agent_key"], pos["plugin_names"]),
     passthrough,
     runtimeIds:
       typeof pos["runtime_selection"] === "string"

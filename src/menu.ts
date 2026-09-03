@@ -82,7 +82,8 @@ async function themeMenu(p: Platform, h: Handlers): Promise<void> {
 async function wallpaperMenu(p: Platform, h: Handlers): Promise<void> {
   const prefs = await readPreferences(p);
   const follow = "theme — follow the colour theme";
-  const custom = "custom — import an absolute PNG path or HTTPS URL";
+  const keep = "current — keep the image the desktop shows now";
+  const custom = "custom — import an absolute image path or HTTPS URL";
   const labels = themeNames().map((name) => `${name} — ${themeFor(name)!.name}`);
   const current = prefs.wallpaper?.startsWith("custom:")
     ? custom
@@ -91,12 +92,16 @@ async function wallpaperMenu(p: Platform, h: Handlers): Promise<void> {
       : follow;
   const picked = await select(
     `Wallpaper? (current: ${prefs.wallpaper?.startsWith("custom:") ? "custom" : prefs.wallpaper ?? "follows theme"})`,
-    options(follow, ...labels, custom, BACK),
+    options(follow, keep, ...labels, custom, BACK),
     current,
   );
   if (picked === BACK) return;
+  if (picked === keep) {
+    await h.applyWallpaper("current");
+    return;
+  }
   if (picked === custom) {
-    const source = await text("Absolute PNG path or HTTPS URL?");
+    const source = await text("Absolute image path or HTTPS URL?");
     if (source.trim()) await h.applyWallpaper(source);
     return;
   }

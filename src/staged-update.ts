@@ -407,6 +407,8 @@ export interface StagedUpdateOptions {
   env?: NodeJS.ProcessEnv;
   /** The red-dev platform the host and companion walks need. */
   manifestPlatform?: Platform;
+  /** The plugins the machine chose to switch on. Defaults to `dev` alone. */
+  activated?: readonly string[];
   /**
    * Who started this run. Defaults to `unknown`, which is unattended —
    * see `src/trigger.ts`. It decides what the converge below is allowed
@@ -667,6 +669,7 @@ function defaultAcquire(
       stageOnly,
       ...(opts.selector ? { selector: opts.selector } : {}),
       ...(opts.manifestPlatform ? { manifestPlatform: opts.manifestPlatform } : {}),
+      ...(opts.activated ? { activated: opts.activated } : {}),
       ...(opts.env ? { env: opts.env } : {}),
     });
     announce(acquisition);

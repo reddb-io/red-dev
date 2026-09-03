@@ -49,6 +49,7 @@ import {
   type HostReconcileOptions,
   reconciliationFailed,
   stuckHosts,
+  alignActivationConfig,
 } from "./red-skills-hosts.ts";
 
 const UBUNTU: Platform = {
@@ -70,7 +71,7 @@ const MARKETPLACE_HOSTS = ["claude", "codex"];
 /** The hosts a generator inside the set wires. */
 const GENERATOR_HOSTS = ["opencode", "redcode", "pi"];
 /** The hosts red-dev projects itself, because the set ships no generator. */
-const PROJECTED_HOSTS = ["gemini", "hermes"];
+const PROJECTED_HOSTS = ["gemini", "hermes", "omp"];
 
 const STAMPED_AT = "2026-08-18T00:00:00.000Z";
 
@@ -413,7 +414,7 @@ function lines(calls: readonly string[][]): string[] {
 
 // -------------------------------------------------------------- the seven
 
-describe("the seven adapters Spec #201 settled", () => {
+describe("the adapters Spec #201 settled, and omp beside them", () => {
   test("are the ones in the table, by name and in walk order", () => {
     expect(HOST_ADAPTERS.map((a) => a.name)).toEqual([
       "claude",
@@ -423,6 +424,7 @@ describe("the seven adapters Spec #201 settled", () => {
       "gemini",
       "pi",
       "hermes",
+      "omp",
     ]);
   });
 
@@ -471,6 +473,82 @@ describe("the seven adapters Spec #201 settled", () => {
   });
 });
 
+// ------------------------------------------------- switching one on and off
+
+describe("a plugin switched on or off after the first reconcile", () => {
+  const BOTH = ["dev", "memory"];
+
+  test("comes into the marketplace hosts by install, and goes by remove", async () => {
+    const m = machine();
+    const first = runner(m);
+    await reconcile(m, { run: first.run, plugins: ACTIVATED });
+    expect(lines(first.calls).join("\n")).not.toContain("memory@red-skills");
+
+    // On: a host that holds dev is asked to install memory, not to update
+    // a plugin it does not have.
+    const on = runner(m);
+    await reconcile(m, { run: on.run, plugins: BOTH });
+    const onLines = lines(on.calls);
+    expect(onLines).toContain("claude plugin install memory@red-skills");
+    expect(onLines).toContain("claude plugin update dev@red-skills");
+    expect(onLines).toContain("codex plugin add memory@red-skills");
+    expect(onLines.join("\n")).not.toContain("plugin remove --keep-data");
+
+    // Off: removed, with its data kept, before the marketplace is re-read.
+    const off = runner(m);
+    await reconcile(m, { run: off.run, plugins: ACTIVATED });
+    const offLines = lines(off.calls);
+    expect(offLines).toContain("claude plugin remove --keep-data memory@red-skills");
+    expect(offLines).toContain("codex plugin remove memory@red-skills");
+    expect(offLines.indexOf("claude plugin remove --keep-data memory@red-skills")).toBeLessThan(
+      offLines.indexOf("claude plugin marketplace update red-skills"),
+    );
+    expect(offLines).not.toContain("claude plugin install memory@red-skills");
+    expect(offLines).not.toContain("claude plugin update memory@red-skills");
+  });
+
+  test("reaches the generator hosts through the set's activation config, and takes its files with it", async () => {
+    const m = machine();
+    await reconcile(m, { run: runner(m).run, plugins: ACTIVATED });
+    const config = join(m.tree, ".red", "config.yaml");
+    const skill = (host: string) => join(m.config, host, "skills", "memory-only", "SKILL.md");
+    expect(readFileSync(config, "utf8")).toContain("  memory:\n    enabled: false\n");
+    expect(existsSync(skill("opencode"))).toBe(false);
+
+    await reconcile(m, { run: runner(m).run, plugins: BOTH });
+    expect(readFileSync(config, "utf8")).toContain("  memory:\n    enabled: true\n");
+    for (const host of ["opencode", "redcode"]) expect(existsSync(skill(host)), host).toBe(true);
+
+    // Off again: the generator re-renders without memory, and the files
+    // it wrote for memory last time — which it does not clean up itself —
+    // are removed because the previous record owned them and this one
+    // does not.
+    await reconcile(m, { run: runner(m).run, plugins: ACTIVATED });
+    expect(readFileSync(config, "utf8")).toContain("  memory:\n    enabled: false\n");
+    for (const host of ["opencode", "redcode"]) {
+      expect(existsSync(skill(host)), host).toBe(false);
+      expect(existsSync(join(m.config, host, "skills", "shipped", "SKILL.md")), host).toBe(true);
+    }
+  });
+
+  test("a set that ships its own activation config keeps it", () => {
+    const m = machine();
+    const config = join(m.tree, ".red", "config.yaml");
+    writeFileSync(config, "# the publisher's own\nplugins:\n  dev:\n    enabled: true\n  memory:\n    enabled: true\n");
+    const said = alignActivationConfig(m.tree, ACTIVATED);
+    expect(said).toContain("the set's own activation config");
+    expect(readFileSync(config, "utf8")).toContain("# the publisher's own");
+  });
+
+  test("nothing is rewritten when the config already says so", () => {
+    const m = machine();
+    const config = join(m.tree, ".red", "config.yaml");
+    const before = readFileSync(config, "utf8");
+    expect(alignActivationConfig(m.tree, ACTIVATED)).toBeNull();
+    expect(readFileSync(config, "utf8")).toBe(before);
+  });
+});
+
 // -------------------------------------------------------------- only `dev`
 
 describe("only the dev plugin is activated", () => {
@@ -496,7 +574,8 @@ describe("only the dev plugin is activated", () => {
 
     const gemini = join(m.home, ".gemini", "extensions", "red-skills", "skills");
     const hermes = join(m.home, ".hermes", "skills", "red-skills");
-    for (const root of [gemini, hermes]) {
+    const omp = join(m.home, ".omp", "agent", "skills", "red-skills");
+    for (const root of [gemini, hermes, omp]) {
       expect(existsSync(join(root, "shipped", "SKILL.md")), root).toBe(true);
       expect(existsSync(join(root, "also-shipped", "SKILL.md")), root).toBe(true);
       expect(existsSync(join(root, "memory-only")), root).toBe(false);
@@ -605,7 +684,7 @@ describe("state that moved under a host", () => {
     expect(statusOf(out, "opencode")).toBe("reconciled");
     expect(lines(calls)).toEqual([`${m.tree}/scripts/install-opencode.sh --global --host opencode`]);
     expect(existsSync(join(m.config, "opencode", "skills", "shipped", "SKILL.md"))).toBe(true);
-    for (const other of ["redcode", "gemini", "pi", "hermes", "claude", "codex"]) {
+    for (const other of ["redcode", "gemini", "pi", "hermes", "omp", "claude", "codex"]) {
       expect(statusOf(out, other), other).toBe("current");
     }
   });
@@ -792,6 +871,8 @@ function hostContext(m: Machine, os: AdapterContext["os"] = "linux"): AdapterCon
   return {
     os,
     plugins: ACTIVATED,
+    added: [],
+    retired: [],
     source: m.tree,
     setDigest: "0".repeat(64),
     setVersion: "v9.9.9",
@@ -1382,7 +1463,7 @@ describe("what doctor is told", () => {
 
     const report = redSkillsHostReport(m.home);
     expect(report.hosts.map((h) => h.host)).toEqual(["hermes"]);
-    expect(report.unrecorded).toEqual(["claude", "codex", "opencode", "redcode", "gemini", "pi"]);
+    expect(report.unrecorded).toEqual(["claude", "codex", "opencode", "redcode", "gemini", "pi", "omp"]);
     expect(redSkillsHostRows(report).some((r) => r.status === "n/a")).toBe(true);
   });
 

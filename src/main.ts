@@ -1021,8 +1021,10 @@ async function cmdRedSkills(p: Platform, inv: Invocation): Promise<number> {
     const { watchRedSkills, announceWatch } = await import("./red-skills-watch.ts");
     const { triggerOf } = await import("./trigger.ts");
     const { interactive } = await import("./ui.ts");
+    const { chosenPlugins } = await import("./red-skills-plugins.ts");
     const result = await watchRedSkills({
       manifestPlatform: p,
+      activated: await chosenPlugins(p),
       force: inv.redSkillsSelector !== "due",
       // `force` used to be the only thing this line carried, and it
       // decides a debounce. What the converge downstream actually needs
@@ -1039,8 +1041,10 @@ async function cmdRedSkills(p: Platform, inv: Invocation): Promise<number> {
     );
     return 1;
   }
+  const { chosenPlugins } = await import("./red-skills-plugins.ts");
   return await runPluginPhase(phase, {
     manifestPlatform: p,
+    activated: await chosenPlugins(p),
     ...(inv.redSkillsSelector ? { selector: inv.redSkillsSelector } : {}),
   });
 }
@@ -1086,7 +1090,12 @@ async function cmdRedSkillsSync(p: Platform, inv: Invocation): Promise<number> {
   const { announceCheckout, syncRedSkillsCheckout } = await import("./red-skills-checkout.ts");
   const { reconcileRedSkills } = await import("./red-skills-acquire.ts");
 
-  const synced = await syncRedSkillsCheckout({ dir, manifestPlatform: p });
+  const { chosenPlugins } = await import("./red-skills-plugins.ts");
+  const synced = await syncRedSkillsCheckout({
+    dir,
+    manifestPlatform: p,
+    activated: await chosenPlugins(p),
+  });
   announceCheckout(synced);
   if (synced.outcome === "refused") return 1;
 
@@ -1132,7 +1141,8 @@ async function cmdUpdate(p: Platform, inv: Invocation): Promise<number> {
       // is the one stage `red-dev update` answers with; a stage that
       // returned a number here would give the run two verdicts.
       const { runStagedUpdate } = await import("./staged-update.ts");
-      await runStagedUpdate({ manifestPlatform: p });
+      const { chosenPlugins } = await import("./red-skills-plugins.ts");
+      await runStagedUpdate({ manifestPlatform: p, activated: await chosenPlugins(p) });
 
       const { updateRedSkills } = await import("./agents.ts");
       await updateRedSkills(p);
@@ -1286,11 +1296,11 @@ async function cmdWallpaper(p: Platform, inv: Invocation, name?: string): Promis
     "./preferences.ts"
   );
   const prefs = await readPreferences(p);
-  const choices = ["theme", ...themeNames(), "custom"] as [string, ...string[]];
+  const choices = ["theme", "current", ...themeNames(), "custom"] as [string, ...string[]];
   let chosen =
     name ??
     (await select(
-      "Wallpaper? ('theme' follows the colour theme; 'custom' imports a PNG)",
+      "Wallpaper? ('theme' follows the colour theme; 'current' keeps what the desktop shows; 'custom' imports an image)",
       choices,
       prefs.wallpaper && themeFor(prefs.wallpaper)
         ? prefs.wallpaper
@@ -1300,10 +1310,10 @@ async function cmdWallpaper(p: Platform, inv: Invocation, name?: string): Promis
     ));
   if (chosen === "custom") {
     if (!interactive()) {
-      log.err("custom wallpaper needs an absolute PNG path or HTTPS URL");
+      log.err("custom wallpaper needs an absolute image path or HTTPS URL");
       return 1;
     }
-    chosen = await text("Absolute PNG path or HTTPS URL?");
+    chosen = await text("Absolute image path or HTTPS URL?");
   }
 
   const colourSlug = (await contextFor(p, inv, "theme")).theme;
@@ -1312,6 +1322,19 @@ async function cmdWallpaper(p: Platform, inv: Invocation, name?: string): Promis
   if (chosen === "theme") {
     preference = undefined;
     label = `${colourSlug} (follows theme)`;
+  } else if (chosen === "current") {
+    // The image on the desktop today, kept as a managed import so the
+    // colour theme can move without taking it along — and so Redwall
+    // has PNG bytes to compose over. See keepCurrentWallpaper.
+    try {
+      const { keepCurrentWallpaper } = await import("./wallpaper.ts");
+      const kept = await keepCurrentWallpaper(p);
+      preference = kept.preference;
+      label = kept.label;
+    } catch (err) {
+      log.err(`wallpaper: ${(err as Error).message}`);
+      return 1;
+    }
   } else if (themeFor(chosen)) {
     preference = chosen;
     label = chosen;
@@ -1320,7 +1343,7 @@ async function cmdWallpaper(p: Platform, inv: Invocation, name?: string): Promis
       const { importCustomWallpaper } = await import("./wallpaper.ts");
       const imported = await importCustomWallpaper(chosen, p);
       preference = imported.preference;
-      label = `custom PNG (${Math.ceil(imported.bytes / 1024)} KiB imported)`;
+      label = `custom image (${Math.ceil(imported.bytes / 1024)} KiB imported as PNG)`;
     } catch (err) {
       log.err(`wallpaper: ${(err as Error).message}`);
       return 1;
@@ -2040,6 +2063,7 @@ async function cmdAgents(p: Platform, inv: Invocation): Promise<number> {
   if (inv.agentDefault) return await cmdAgentsDefault(p, inv.agentDefaultKey);
   if (inv.agentRun) return await cmdAgentsRun(p, inv.passthrough);
   if (inv.agentUpdate) return await cmdAgentsUpdate(p);
+  if (inv.agentPlugins) return await cmdAgentsPlugins(p, inv.agentPluginVerb, inv.agentPluginNames);
 
   if (inv.agentKeys !== undefined) {
     inv = { ...inv, agentKeys: currentAgentKeys(inv.agentKeys) };
@@ -2198,6 +2222,102 @@ async function settleDefaultAgent(p: Platform, keys: string[], ask: boolean): Pr
     labels[0]!,
   );
   await writePreferences(p, { defaultAgent: picked.split(" ")[0]! });
+}
+
+/**
+ * `red-dev agents plugins [names]` — report which RedSkills plugins the
+ * hosts switch on, or choose again.
+ *
+ * The choice the interview made, reachable afterwards. Recording it is
+ * not enough on its own: the activation config lives inside the
+ * composed package set, so the set is recomposed — a different choice is
+ * a different revision — and the hosts are reconciled against it, which
+ * is what installs a plugin that was off or removes one that was on.
+ * `none` is an answer too: a machine that wants the marketplace and no
+ * plugin at all.
+ */
+async function cmdAgentsPlugins(
+  p: Platform,
+  verb: "add" | "remove" | "set" | undefined,
+  names: string[] | undefined,
+): Promise<number> {
+  const { PLUGIN_CHOICES, PLUGIN_DEPENDENCIES, chosenPlugins, resolveActivatedPlugins } =
+    await import("./red-skills-plugins.ts");
+  const offered = PLUGIN_CHOICES.map((plugin) => plugin.key);
+
+  if (verb === undefined || names === undefined) {
+    const chosen = await chosenPlugins(p);
+    const activated = await resolveActivatedPlugins(p);
+    log.ok(`red-skills plugins: ${activated.join(", ") || "none"} switched on`);
+    if (chosen.join(",") !== activated.join(",")) {
+      log.plain(`       chosen ${chosen.join(", ") || "none"}; dependencies brought the rest along`);
+    }
+    for (const plugin of PLUGIN_CHOICES) {
+      const on = activated.includes(plugin.key);
+      log.plain(`     ${on ? "[x]" : "[ ]"} ${plugin.key} — ${plugin.note}`);
+    }
+    log.plain("     change it: red-dev agents plugins add memory | remove brain | dev,memory | none");
+    return 0;
+  }
+
+  const unknown = names.filter((name) => !offered.includes(name));
+  if (unknown.length > 0) {
+    log.err(`unknown RedSkills plugin(s): ${unknown.join(", ")}`);
+    log.plain(`     offered: ${offered.join(", ")}, or none`);
+    return 1;
+  }
+  if ((verb === "add" || verb === "remove") && names.length === 0) {
+    log.err(`red-dev agents plugins ${verb} needs plugin names: ${offered.join(", ")}`);
+    return 1;
+  }
+
+  // `add` and `remove` edit the recorded choice; a list replaces it.
+  // Removing a dependency removes what needs it as well — `remove dev`
+  // is not a request to keep memory running without its foundation.
+  const held = await chosenPlugins(p);
+  let wanted: string[];
+  if (verb === "add") {
+    wanted = [...held, ...names.filter((name) => !held.includes(name))];
+  } else if (verb === "remove") {
+    const dropping = new Set(names);
+    for (const name of held) {
+      if ((PLUGIN_DEPENDENCIES[name] ?? []).some((dep) => dropping.has(dep))) dropping.add(name);
+    }
+    wanted = held.filter((name) => !dropping.has(name));
+    const also = [...dropping].filter((name) => !names.includes(name) && held.includes(name));
+    if (also.length > 0) log.plain(`       ${also.join(", ")} needs what is being removed, so it goes too`);
+  } else {
+    wanted = names;
+  }
+  wanted = offered.filter((name) => wanted.includes(name));
+  for (const name of wanted) {
+    const brought = (PLUGIN_DEPENDENCIES[name] ?? []).filter((dep) => !wanted.includes(dep));
+    if (brought.length > 0) log.plain(`       ${name} needs ${brought.join(", ")}, which comes along`);
+  }
+
+  const { writePreferences } = await import("./preferences.ts");
+  await writePreferences(p, { redSkillsPlugins: wanted });
+  const activated = await resolveActivatedPlugins(p);
+  log.ok(`red-skills plugins: ${activated.join(", ") || "none"} switched on`);
+
+  // Recompose, then reconcile — the same two moves a converge makes,
+  // in the same order, because the hosts are reconciled against the
+  // set's digest and the activation config is part of that digest.
+  const { convergeRedSkillsPackageSet } = await import("./red-skills-set.ts");
+  const composed = convergeRedSkillsPackageSet({ manifestPlatform: p, activated: wanted });
+  if (composed.refused) {
+    log.warn(`red-skills package set: ${composed.refused.reason}`);
+  }
+  const { reconcileSkillHosts, stuckHosts } = await import("./red-skills-hosts.ts");
+  const hosts = await reconcileSkillHosts(p);
+  const restart = hosts.filter((host) => host.reload === "restart-needed").map((host) => host.host);
+  if (restart.length > 0) log.plain(`       restart ${restart.join(", ")} to load the change`);
+  const stuck = stuckHosts(hosts);
+  if (stuck.length > 0) {
+    log.warn(`red-skills: not reconciled in ${stuck.map((host) => host.host).join(", ")}`);
+    return 1;
+  }
+  return 0;
 }
 
 /**

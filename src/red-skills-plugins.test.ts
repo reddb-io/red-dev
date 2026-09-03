@@ -28,6 +28,10 @@ import { convergeMiseConfig, miseConfigPath, miseEntries, miseToolNames } from "
 import type { Platform } from "./platform.ts";
 import { REDSKILLS_CORE_SPEC } from "./red-skills-set.ts";
 import {
+  activatedPlugins,
+  chosenPluginsFrom,
+  DEFAULT_ACTIVATED_PLUGINS,
+  PLUGIN_CHOICES,
   redSkillsPluginEntries,
   redSkillsPluginNames,
   REDSKILLS_PLUGIN_PREFIX,
@@ -169,8 +173,10 @@ describe("the set is derived, not written down", () => {
       const src = readFileSync(`${import.meta.dir}/${file}`, "utf8");
       expect(src, file).not.toContain(`["dev", "memory", "brain"]`);
     }
+    // The registration derives what it reinstalls from the activation
+    // set, which is itself derived from the manifest.
     expect(readFileSync(`${import.meta.dir}/red-skills-registration.ts`, "utf8")).toContain(
-      "redSkillsPluginNames",
+      "resolveActivatedPlugins",
     );
   });
 });
@@ -193,7 +199,11 @@ const SOURCE = "/home/someone/.red/skills/current";
  * spelling that moves there moves here too rather than being asserted
  * against a copy of it.
  */
-async function hostCalls(name: string, tools: readonly Tool[]): Promise<string[][]> {
+async function hostCalls(
+  name: string,
+  tools: readonly Tool[],
+  plugins?: readonly string[],
+): Promise<string[][]> {
   const host = REGISTRATION_HOSTS.find((h) => h.name === name);
   if (!host) throw new Error(`no host named ${name}`);
   const { calls, run } = recorder();
@@ -204,35 +214,47 @@ async function hostCalls(name: string, tools: readonly Tool[]): Promise<string[]
     present: () => true,
     run,
     tools,
+    ...(plugins ? { plugins } : {}),
   });
   return calls;
 }
 
-function claudeCalls(tools: readonly Tool[]): Promise<string[][]> {
-  return hostCalls("claude", tools);
+function claudeCalls(tools: readonly Tool[], plugins?: readonly string[]): Promise<string[][]> {
+  return hostCalls("claude", tools, plugins);
 }
 
-function codexCalls(tools: readonly Tool[]): Promise<string[][]> {
-  return hostCalls("codex", tools);
+function codexCalls(tools: readonly Tool[], plugins?: readonly string[]): Promise<string[][]> {
+  return hostCalls("codex", tools, plugins);
 }
 
 describe("the loops that reinstall the plugins a registration replaced", () => {
-  test("Claude installs one plugin per manifest entry, in manifest order", async () => {
-    // Order included: the manifest is where the dependency order between
-    // plugins is expressed — memory builds on dev — so a repair that
-    // installs them in some other order is one that can fail on a clean
-    // host for a reason nothing on screen explains.
-    expect(installedBy(await claudeCalls(TOOLS))).toEqual(DECLARED);
+  test("Claude reinstalls the activated plugins, in manifest order", async () => {
+    // The activation set and never the whole manifest: a plugin the
+    // person switched off is in no host, and a re-registration that
+    // brought it back would be the marketplace undoing a choice. Order
+    // included: memory builds on dev, and a repair that installs them
+    // in some other order can fail on a clean host for a reason nothing
+    // on screen explains.
+    const activated = activatedPlugins(DECLARED, ["dev", "memory", "brain"]);
+    expect(activated).toEqual(DECLARED);
+    expect(installedBy(await claudeCalls(TOOLS, activated))).toEqual(DECLARED);
   });
 
   test("Codex installs the same set from the same source", async () => {
-    expect(installedBy(await codexCalls(TOOLS))).toEqual(DECLARED);
+    const activated = activatedPlugins(DECLARED, ["dev", "memory", "brain"]);
+    expect(installedBy(await codexCalls(TOOLS, activated))).toEqual(DECLARED);
+  });
+
+  test("a machine that chose nothing beyond dev reinstalls dev alone", async () => {
+    expect(installedBy(await claudeCalls(TOOLS, activatedPlugins(DECLARED)))).toEqual(["dev"]);
+    expect(installedBy(await codexCalls(TOOLS, activatedPlugins(DECLARED)))).toEqual(["dev"]);
   });
 
   test("a fixture manifest moves both loops with it", async () => {
     const fixture = fixtureManifest("dev", "sparkle");
-    expect(installedBy(await claudeCalls(fixture))).toEqual(["dev", "sparkle"]);
-    expect(installedBy(await codexCalls(fixture))).toEqual(["dev", "sparkle"]);
+    const activated = activatedPlugins(["dev", "sparkle"], ["dev", "sparkle"]);
+    expect(installedBy(await claudeCalls(fixture, activated))).toEqual(["dev", "sparkle"]);
+    expect(installedBy(await codexCalls(fixture, activated))).toEqual(["dev", "sparkle"]);
   });
 
   test("opting a plugin out installs nothing for it", async () => {
@@ -241,7 +263,8 @@ describe("the loops that reinstall the plugins a registration replaced", () => {
     expect(dropped.length).toBeGreaterThan(0);
 
     const fixture = fixtureManifest(kept);
-    for (const calls of [await claudeCalls(fixture), await codexCalls(fixture)]) {
+    const activated = activatedPlugins([kept], [kept]);
+    for (const calls of [await claudeCalls(fixture, activated), await codexCalls(fixture, activated)]) {
       expect(installedBy(calls)).toEqual([kept]);
       for (const name of dropped) {
         expect(calls.flat().join(" ")).not.toContain(`${name}@red-skills`);
@@ -301,5 +324,61 @@ describe("opting a plugin out", () => {
     const tools = fixtureManifest(...DECLARED);
     expect(convergeMiseConfig(UBUNTU, { home, tools }).changed).toBe(true);
     expect(convergeMiseConfig(UBUNTU, { home, tools }).changed).toBe(false);
+  });
+});
+
+/**
+ * Which of the carried plugins the hosts switch on.
+ *
+ * The set carries every payload; the interview decides which of them a
+ * host installs. Off means not installed into the host at all — so none
+ * of the plugin's hooks or MCP servers run there — which is why Memory
+ * and Brain start off and only `dev` is on by itself.
+ */
+describe("which plugins the hosts switch on", () => {
+  const carried = ["dev", "memory", "brain"];
+
+  test("dev alone, unless the machine chose otherwise", () => {
+    expect(activatedPlugins(carried)).toEqual(["dev"]);
+    expect([...DEFAULT_ACTIVATED_PLUGINS]).toEqual(["dev"]);
+  });
+
+  test("a chosen plugin is switched on, in manifest order", () => {
+    // Manifest order rather than the order it was asked in: the hosts
+    // install in this order, and memory declares dev.
+    expect(activatedPlugins(carried, ["brain", "dev"])).toEqual(["dev", "brain"]);
+    expect(activatedPlugins(carried, ["dev", "memory", "brain"])).toEqual(carried);
+  });
+
+  test("memory brings dev along", () => {
+    expect(activatedPlugins(carried, ["memory"])).toEqual(["dev", "memory"]);
+  });
+
+  test("nothing chosen switches nothing on", () => {
+    expect(activatedPlugins(carried, [])).toEqual([]);
+  });
+
+  test("a choice the manifest does not carry activates nothing for it", () => {
+    // A stale preference is not a host command: the row is the opt-out,
+    // and a name with no row installs nothing.
+    expect(activatedPlugins(["dev"], ["dev", "sparkle"])).toEqual(["dev"]);
+  });
+
+  test("the recorded choice is read defensively", () => {
+    // The preferences file is JSON a person edits. Anything that is not
+    // a list of names is the default — never everything off, never
+    // everything on.
+    expect(chosenPluginsFrom(undefined)).toEqual(["dev"]);
+    expect(chosenPluginsFrom("memory")).toEqual(["dev"]);
+    expect(chosenPluginsFrom({ memory: true })).toEqual(["dev"]);
+    expect(chosenPluginsFrom(["memory", 3, "../etc", "Brain"])).toEqual(["memory"]);
+    expect(chosenPluginsFrom([])).toEqual([]);
+  });
+
+  test("the interview offers exactly what the manifest declares", () => {
+    // A plugin the manifest carries and the interview does not offer is
+    // a plugin nobody can switch on; one offered and not carried is a
+    // choice that does nothing. The two lists are one fact.
+    expect(PLUGIN_CHOICES.map((plugin) => plugin.key)).toEqual(DECLARED);
   });
 });

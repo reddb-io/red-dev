@@ -106,8 +106,8 @@ import {
   type Step,
 } from "./owned-state.ts";
 import type { Platform } from "./platform.ts";
+import { ACTIVATION_CONFIG_HEADER, hostActivationConfig } from "./red-skills-set.ts";
 import type { Tool } from "./manifest.ts";
-import { activatedPlugins } from "./red-skills-plugins.ts";
 
 /**
  * One command in a host's reconciliation.
@@ -163,8 +163,18 @@ export function missingCapabilities(capabilities: readonly HostCapability[] = []
 
 /** What every adapter is a function of. */
 export interface AdapterContext {
-  /** The plugins to activate — `dev` alone. */
+  /** The plugins to activate — `dev` alone unless the machine chose more. */
   plugins: readonly string[];
+  /**
+   * Of those, the ones this host has no record of holding yet, and the
+   * ones its record holds that are no longer activated. A marketplace
+   * host installs the first and removes the second; the generators
+   * re-render from the activation config and need neither. Both empty
+   * for a host with no record — its plugins were installed by the
+   * registration, and asking it to install them again is not a plan.
+   */
+  added: readonly string[];
+  retired: readonly string[];
   /** The resolved package set: `~/.red/skills/current`, followed. */
   source: string;
   /** That set's whole-set digest, which is what a record is keyed on. */
@@ -368,8 +378,16 @@ const claude: HostAdapter = {
     plan({
       mode: "marketplace",
       steps: [
+        // Retired first, so a plugin switched off is gone before the
+        // marketplace is re-read; `--keep-data` because switching a plugin
+        // off is not a request to delete what it stored for you.
+        ...ctx.retired.map((p) => may("claude", "plugin", "remove", "--keep-data", `${p}@${MARKETPLACE}`)),
         must("claude", "plugin", "marketplace", "update", MARKETPLACE),
-        ...ctx.plugins.map((p) => must("claude", "plugin", "update", `${p}@${MARKETPLACE}`)),
+        ...ctx.plugins.map((p) =>
+          ctx.added.includes(p)
+            ? must("claude", "plugin", "install", `${p}@${MARKETPLACE}`)
+            : must("claude", "plugin", "update", `${p}@${MARKETPLACE}`),
+        ),
       ],
       // Claude's own store, in JSON, so a registration the CLI failed to
       // take out can still be removed without rewriting the file.
@@ -404,6 +422,7 @@ const codex: HostAdapter = {
     plan({
       mode: "marketplace",
       steps: [
+        ...ctx.retired.map((p) => may("codex", "plugin", "remove", `${p}@${MARKETPLACE}`)),
         may("codex", "plugin", "marketplace", "upgrade", MARKETPLACE),
         ...ctx.plugins.flatMap((p) => [
           may("codex", "plugin", "remove", `${p}@${MARKETPLACE}`),
@@ -907,98 +926,121 @@ async function geminiCheck(ctx: AdapterContext, desired: HostPlan): Promise<Host
  * as `unsupported` in the outcome, in the record, in doctor and in the page
  * Hermes itself reads, and the skills are verified on their own terms.
  */
-const hermes: HostAdapter = {
-  name: "hermes",
-  cmd: "hermes",
-  plan: (ctx) => {
-    const script = generator(ctx.source, "install-hermes.sh");
-    if (existsSync(script)) {
-      // The day RedSkills ships one, it wins, for the reason Gemini's does:
-      // a generator lives beside the skills it renders, and this does not.
-      return plan({
-        mode: "generator",
-        steps: [must(script, "--source-dir", ctx.source, "--user")],
-        manifests: manifestCandidates(ctx, "hermes"),
-      });
-    }
-
-    const skills = setSkills(ctx);
-    if (skills.length === 0) {
-      return plan({ mode: "skills", blocked: "the package set carries no skills to project" });
-    }
-
-    // Before a byte is written: a skill missing the file it tells the model
-    // to read is a skill that fails in the middle of somebody's session,
-    // and a home holding half of one is worse than a host left unwired.
-    const dangling = danglingAsset(skills);
-    if (dangling !== undefined) {
-      return plan({
-        mode: "skills",
-        blocked: `the ${dangling.what} names ${dangling.path}, which the package set does not carry`,
-      });
-    }
-
-    const dir = hermesSkillsDir(ctx);
-    const capabilities = hermesCapabilities(ctx);
-    return plan({
-      mode: "skills",
-      // The one file red-dev writes rather than copies: what this host has
-      // and, as importantly, what it does not. A model told it has skills
-      // and nothing else stops waiting for a hook that will never fire.
-      writes: [{ path: join(dir, "REDSKILLS.md"), bytes: hermesContext(ctx, skills, capabilities) }],
-      copies: skills.map((skill) => ({ from: skill.path, to: join(dir, skill.name) })),
-      // The directory itself, not only what is in it: red-dev made it, so
-      // removing RedSkills has to leave `~/.hermes/skills` the way it found
-      // it rather than with our empty shell still sitting in it.
-      expect: [{ kind: "path", path: dir }],
-      capabilities,
-    });
-  },
-  check: (ctx, desired) => hermesCheck(ctx, desired),
-  remove: (ctx) => {
-    const script = generator(ctx.source, "install-hermes.sh");
-    return existsSync(script) ? [must(script, "--uninstall", "--user")] : [];
-  },
-};
-
-/** The directory red-dev owns outright under Hermes's skills path. */
-function hermesSkillsDir(ctx: AdapterContext): string {
-  return join(ctx.home, ".hermes", "skills", MARKETPLACE);
+/**
+ * A host the set ships no generator for, projected by red-dev itself.
+ *
+ * Hermes and omp both read a directory of skills and nothing red-dev can
+ * hand them beyond that — no MCP surface it writes, no hook runner, no
+ * agent loader. So each gets the skills copied under a directory of its
+ * own, an index that says what arrived and what did not, and a check
+ * that reads every projected file back. The generator branch is there
+ * for the day RedSkills ships a script for either: the moment
+ * `install-<host>.sh` appears in the tree, the projection steps aside.
+ */
+interface ProjectedHostSpec {
+  /** Key in the registry, and the name in a log line. */
+  name: string;
+  /** The command that has to be on PATH for this host to exist. */
+  cmd: string;
+  /** The generator that would take over, if the set ever carries it. */
+  script: string;
+  /** How the host is named in a capability sentence. */
+  who: string;
+  /** Where the skills go. */
+  dir: (ctx: AdapterContext) => string;
 }
 
+function projectedHost(spec: ProjectedHostSpec): HostAdapter {
+  return {
+    name: spec.name,
+    cmd: spec.cmd,
+    plan: (ctx) => {
+      const script = generator(ctx.source, spec.script);
+      if (existsSync(script)) {
+        return plan({
+          mode: "generator",
+          steps: [must(script, "--source-dir", ctx.source, "--user")],
+          manifests: manifestCandidates(ctx, spec.name),
+        });
+      }
+
+      const skills = setSkills(ctx);
+      if (skills.length === 0) {
+        return plan({ mode: "skills", blocked: "the package set carries no skills to project" });
+      }
+
+      const dangling = danglingAsset(skills);
+      if (dangling !== undefined) {
+        return plan({
+          mode: "skills",
+          blocked: `the ${dangling.what} names ${dangling.path}, which the package set does not carry`,
+        });
+      }
+
+      const dir = spec.dir(ctx);
+      const capabilities = projectedCapabilities(ctx, spec.who);
+      return plan({
+        mode: "skills",
+        writes: [{ path: join(dir, "REDSKILLS.md"), bytes: hermesContext(ctx, skills, capabilities) }],
+        copies: skills.map((skill) => ({ from: skill.path, to: join(dir, skill.name) })),
+        expect: [{ kind: "path", path: dir }],
+        capabilities,
+      });
+    },
+    check: (ctx, desired) => projectedCheck(ctx, desired, spec.dir(ctx)),
+    remove: (ctx) => {
+      const script = generator(ctx.source, spec.script);
+      return existsSync(script) ? [must(script, "--uninstall", "--user")] : [];
+    },
+  };
+}
+
+const hermes: HostAdapter = projectedHost({
+  name: "hermes",
+  cmd: "hermes",
+  script: "install-hermes.sh",
+  who: "Hermes",
+  dir: (ctx) => join(ctx.home, ".hermes", "skills", MARKETPLACE),
+});
+
 /**
- * What the set carries, and what a skills-only host does with each of it.
- *
- * Three of the four are the same shape — carried by the set, refused by the
- * host — and the distinction that matters in every one of them is between
- * a capability this host cannot be given and one nobody was given, because
- * only the second is fixed by shipping a better set.
+ * omp — oh-my-pi — whose agent directory is Pi's layout under a name of
+ * its own: `~/.omp/agent`, relocated by `PI_CODING_AGENT_DIR`. Skills go
+ * under it the way Pi's do, in a directory named for the marketplace so
+ * nothing the person put beside it is ever mistaken for red-dev's.
  */
-function hermesCapabilities(ctx: AdapterContext): HostCapability[] {
+const omp: HostAdapter = projectedHost({
+  name: "omp",
+  cmd: "omp",
+  script: "install-omp.sh",
+  who: "omp",
+  dir: (ctx) => join(ctx.home, ".omp", "agent", "skills", MARKETPLACE),
+});
+
+function projectedCapabilities(ctx: AdapterContext, who: string): HostCapability[] {
   return [
     { name: "skills", state: "projected" },
     beyondHermes(
       "mcp",
       Object.keys(declaredMcp(ctx)).length,
-      "Hermes starts no MCP server of its own",
+      `${who}'s MCP config is not written by red-dev`,
       "the package set declares no MCP server",
     ),
     beyondHermes(
       "hooks",
       ctx.plugins.flatMap((p) => pluginHooks(pluginDir(ctx, p))).length,
-      "Hermes runs no hook of its own",
+      `${who} runs no hook of red-dev's`,
       "the package set declares no hook",
     ),
     beyondHermes(
       "agents",
       setAgents(ctx).length,
-      "Hermes loads no agent of its own",
+      `${who} loads no agent of red-dev's`,
       "the package set carries no agent",
     ),
   ];
 }
 
-/** One capability this host cannot take: unsupported if carried, absent if not. */
 function beyondHermes(name: string, carried: number, cannot: string, none: string): HostCapability {
   if (carried === 0) return { name, state: "absent", reason: none };
   const what = carried === 1 ? "the one the set carries is" : `the ${carried} the set carries are`;
@@ -1068,10 +1110,9 @@ function danglingAsset(skills: readonly SetSkill[]): DeclaredPath | undefined {
  * A generator in the tree answers for its own tree, so this stands down
  * for it: its install manifest is what verification reads, generically.
  */
-async function hermesCheck(ctx: AdapterContext, desired: HostPlan): Promise<HostCheck> {
+async function projectedCheck(ctx: AdapterContext, desired: HostPlan, dir: string): Promise<HostCheck> {
   if (desired.mode !== "skills") return { ok: true, witness: "" };
 
-  const dir = hermesSkillsDir(ctx);
   const index = join(dir, "REDSKILLS.md");
   if (!existsSync(index)) return { ok: false, reason: `${index} is not there` };
 
@@ -1184,6 +1225,7 @@ export const HOST_ADAPTERS: readonly HostAdapter[] = [
   gemini,
   pi,
   hermes,
+  omp,
 ];
 
 // ------------------------------------------------------------- the registry
@@ -1360,7 +1402,11 @@ export interface HostReconcileOptions {
   setDigest?: string;
   /** The set's version. Defaults to the recorded one, or the directory name. */
   setVersion?: string;
-  /** The activation set. Defaults to `dev`, out of what the manifest declares. */
+  /**
+   * The activation set. Defaults to what this machine chose in the
+   * interview — `dev` alone when nothing was chosen — out of what the
+   * manifest declares. See src/red-skills-plugins.ts.
+   */
   plugins?: readonly string[];
   /** The manifest to derive the plugin set from. Defaults to TOOLS. */
   tools?: readonly Tool[];
@@ -1457,13 +1503,13 @@ export async function reconcileSkillHosts(
   const identity = opts.setDigest !== undefined && opts.setVersion !== undefined
     ? { digest: opts.setDigest, version: opts.setVersion }
     : await setIdentity(home, source);
-  const plugins = opts.plugins ?? activatedPlugins(await declaredPlugins(p, opts.tools));
+  const plugins = opts.plugins ?? (await activatedPluginsOf(p, opts.tools));
   const present = opts.present ?? (await presenceProbe());
   const running = opts.running ?? runningProbe;
   const run = opts.run ?? (await defaultRunner());
   const now = opts.now ?? (() => new Date().toISOString());
 
-  const ctx: AdapterContext = {
+  const shared = {
     plugins,
     source,
     setDigest: opts.setDigest ?? identity.digest,
@@ -1473,6 +1519,11 @@ export async function reconcileSkillHosts(
     config: opts.config ?? configOf(home),
     os: opts.os ?? platformOs(),
   };
+
+  // The generators read the activation out of the set itself, so the
+  // set has to say what this machine chose before any of them runs.
+  const aligned = alignActivationConfig(source, plugins);
+  if (aligned !== null) log.warn(`red-skills: ${aligned}`);
 
   const registry = readHostRegistry(home);
   const out: HostOutcome[] = [];
@@ -1485,6 +1536,8 @@ export async function reconcileSkillHosts(
       continue;
     }
 
+    const recorded = registry.hosts[adapter.name];
+    const ctx: AdapterContext = { ...shared, ...activationDelta(recorded, plugins) };
     const desired = adapter.plan(ctx);
     if (desired.blocked !== undefined) {
       log.warn(`${adapter.name}: ${desired.blocked}`);
@@ -1498,7 +1551,6 @@ export async function reconcileSkillHosts(
       continue;
     }
 
-    const recorded = registry.hosts[adapter.name];
     if (recorded && (await isCurrent(recorded, ctx, desired, adapter))) {
       log.skip(`${adapter.name}: red-skills already at ${ctx.setVersion}`);
       out.push({
@@ -1529,6 +1581,15 @@ export async function reconcileSkillHosts(
       continue;
     }
 
+    // What the last reconciliation owned and this one no longer does —
+    // a plugin's generated files after it was switched off — comes out,
+    // because nothing else on the machine will ever claim it. Only what
+    // the record names, never a guess about a directory's other files.
+    if (recorded) {
+      const stale = retiredOwned(recorded.owned, verified.owned);
+      if (stale.length > 0) log.plain(`       ${adapter.name}: removed ${stale.length} file(s) of a plugin switched off`);
+    }
+
     // Never a signal, never a kill: a session that is up keeps its
     // process and is told, in the record and in doctor, that what is on
     // disk under it is newer than what it loaded.
@@ -1556,6 +1617,74 @@ export async function reconcileSkillHosts(
   }
 
   return out;
+}
+
+/**
+ * What changed in a host's activation since its record was written.
+ *
+ * Nothing, for a host with no record: its plugins were installed by the
+ * registration, and telling a marketplace to install what it already
+ * holds is an error on some hosts and a no-op on others — neither is a
+ * fact worth a step.
+ */
+function activationDelta(
+  record: HostRecord | undefined,
+  plugins: readonly string[],
+): { added: string[]; retired: string[] } {
+  if (!record) return { added: [], retired: [] };
+  return {
+    added: plugins.filter((p) => !record.plugins.includes(p)),
+    retired: record.plugins.filter((p) => !plugins.includes(p)),
+  };
+}
+
+/**
+ * Make the set's activation config say what this machine chose.
+ *
+ * The generators read `<set>/.red/config.yaml` and nothing else — the
+ * script takes no flag for it — so a choice made after the set was
+ * composed reaches them only through that file. It is red-dev's own file,
+ * written at composition or staging with a header saying so, and only
+ * one carrying that header is rewritten: a set that ships its own is the
+ * publisher's to decide, and is reported rather than replaced. Answers
+ * the sentence to say when it could not, or null.
+ */
+export function alignActivationConfig(source: string, plugins: readonly string[]): string | null {
+  const pluginsDir = join(source, "plugins");
+  if (!existsSync(pluginsDir)) return null;
+  const carried = listing(pluginsDir).filter((name) => statSync(join(pluginsDir, name)).isDirectory());
+  const file = join(source, ".red", "config.yaml");
+  const wanted = hostActivationConfig(carried, carried.filter((name) => plugins.includes(name)));
+  let current: string | null = null;
+  try {
+    current = readFileSync(file, "utf8");
+  } catch {
+    current = null;
+  }
+  if (current === wanted) return null;
+  if (current !== null && !current.startsWith(ACTIVATION_CONFIG_HEADER)) {
+    return `${file} is the set's own activation config, so the generator hosts keep what it enables`;
+  }
+  try {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, wanted, "utf8");
+    return null;
+  } catch (err) {
+    return `could not write ${file}: ${(err as Error).message}`;
+  }
+}
+
+/** Remove the paths a previous record owned that the new one does not. */
+function retiredOwned(before: readonly OwnedEntry[], after: readonly OwnedEntry[]): string[] {
+  const kept = new Set(after.map(ownedKey));
+  const removed: string[] = [];
+  for (const entry of before) {
+    if (entry.kind !== "path" || kept.has(ownedKey(entry))) continue;
+    if (!existsSync(entry.path)) continue;
+    rmSync(entry.path, { recursive: true, force: true });
+    removed.push(entry.path);
+  }
+  return removed;
 }
 
 /**
@@ -1719,7 +1848,7 @@ export async function removeSkillHosts(
   const home = opts.home ?? homeOf();
   const adapters = opts.adapters ?? HOST_ADAPTERS;
   const source = opts.source !== undefined ? opts.source : await currentSource();
-  const plugins = opts.plugins ?? activatedPlugins(await declaredPlugins(p, opts.tools));
+  const plugins = opts.plugins ?? (await activatedPluginsOf(p, opts.tools));
   const present = opts.present ?? (await presenceProbe());
   const run = opts.run ?? (await defaultRunner());
 
@@ -1737,6 +1866,8 @@ export async function removeSkillHosts(
     if (source !== null && present(adapter.cmd)) {
       const ctx: AdapterContext = {
         plugins,
+        added: [],
+        retired: [],
         source,
         setDigest: record.setDigest,
         setVersion: record.setVersion,
@@ -1898,9 +2029,9 @@ async function currentSource(): Promise<string | null> {
   return resolvedSource();
 }
 
-async function declaredPlugins(p: Platform, tools?: readonly Tool[]): Promise<string[]> {
-  const { redSkillsPluginNames } = await import("./red-skills-plugins.ts");
-  return redSkillsPluginNames(p, tools);
+async function activatedPluginsOf(p: Platform, tools?: readonly Tool[]): Promise<string[]> {
+  const { resolveActivatedPlugins } = await import("./red-skills-plugins.ts");
+  return resolveActivatedPlugins(p, tools);
 }
 
 async function presenceProbe(): Promise<(cmd: string) => boolean> {

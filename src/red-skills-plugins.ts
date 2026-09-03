@@ -71,13 +71,20 @@ export function redSkillsPluginNames(p: Platform, tools: readonly Tool[] = TOOLS
 }
 
 /**
- * The one plugin switched on in the coder hosts.
+ * The plugin switched on in the coder hosts when nobody chose otherwise.
  *
  * Spec #201 draws the line here: the package set carries every payload, so
  * that activating another one later is a flag rather than a download, and
- * exactly one of them is switched on. `dev` is the global process surface
- * everybody wants; Memory, Brain and the maintainer-only behaviour must not
- * start acting on a machine because they happened to be in the tarball.
+ * only what was chosen is switched on. `dev` is the global process surface
+ * everybody wants; Memory and Brain must not start acting on a machine
+ * because they happened to be in the tarball — each of them ships hooks
+ * and MCP servers that run on every session of a host they are installed
+ * into, so "off" has to mean not installed there at all.
+ *
+ * The choice is made in the interview and recorded as a preference
+ * (`redSkillsPlugins`); the offline depot alone stays pinned to this one,
+ * because a depot is a signed medium and its activation is part of what
+ * was signed.
  *
  * It lives beside the manifest projection rather than beside the host
  * adapters because both sides need it and neither may own it: the set is
@@ -87,7 +94,97 @@ export function redSkillsPluginNames(p: Platform, tools: readonly Tool[] = TOOLS
  */
 export const ACTIVATED_PLUGIN = "dev";
 
-/** The activation set, out of everything the machine carries locally. */
-export function activatedPlugins(declared: readonly string[]): string[] {
-  return declared.filter((name) => name === ACTIVATED_PLUGIN);
+/** What the interview arrives with: `dev` on, everything else off. */
+export const DEFAULT_ACTIVATED_PLUGINS: readonly string[] = [ACTIVATED_PLUGIN];
+
+/**
+ * What a plugin needs switched on beside it.
+ *
+ * `memory` declares `dev` in its plugin.json, and a host handed the
+ * dependent without its dependency is a host that fails on a clean
+ * machine for a reason nothing on screen explains. Spelled here rather
+ * than read out of the tree because the choice is made before any tree
+ * exists on the machine.
+ */
+export const PLUGIN_DEPENDENCIES: Readonly<Record<string, readonly string[]>> = {
+  memory: ["dev"],
+};
+
+export interface PluginChoice {
+  /** The name the hosts know it by. */
+  key: string;
+  label: string;
+  note: string;
+}
+
+/** The plugins the interview offers, in the order the manifest installs them. */
+export const PLUGIN_CHOICES: readonly PluginChoice[] = [
+  {
+    key: "dev",
+    label: "dev",
+    note: "engineering skills, hooks and MCPs for coding agents — the default",
+  },
+  {
+    key: "memory",
+    label: "memory",
+    note: "governed operational memory on top of dev — session hooks and a recall MCP; off unless chosen",
+  },
+  {
+    key: "brain",
+    label: "brain",
+    note: "a project-local knowledge repository — its own hooks and MCP; off unless chosen",
+  },
+];
+
+/**
+ * The activation set, out of everything the machine carries locally.
+ *
+ * `chosen` is what the person asked for; the answer is that closed over
+ * the dependencies and narrowed to what the manifest declares, in
+ * manifest order — which is the order the plugins have to be installed
+ * in. Asking for `memory` alone therefore activates `dev, memory`, and
+ * asking for a plugin the manifest does not carry activates nothing for
+ * it rather than failing: the row is the opt-out this product already
+ * has, and a stale preference must not turn into a host command.
+ */
+export function activatedPlugins(
+  declared: readonly string[],
+  chosen: readonly string[] = DEFAULT_ACTIVATED_PLUGINS,
+): string[] {
+  const wanted = new Set<string>();
+  const add = (name: string): void => {
+    if (wanted.has(name)) return;
+    wanted.add(name);
+    for (const dependency of PLUGIN_DEPENDENCIES[name] ?? []) add(dependency);
+  };
+  for (const name of chosen) add(name);
+  return declared.filter((name) => wanted.has(name));
+}
+
+/**
+ * The recorded choice, read defensively.
+ *
+ * The preferences file is JSON a person edits. Anything that is not a
+ * list of plugin names is the default rather than an error — a corrupt
+ * field must not switch every plugin off, and must not switch one on.
+ */
+export function chosenPluginsFrom(recorded: unknown): string[] {
+  if (!Array.isArray(recorded)) return [...DEFAULT_ACTIVATED_PLUGINS];
+  return recorded.filter(
+    (name): name is string => typeof name === "string" && /^[a-z][a-z0-9-]*$/.test(name),
+  );
+}
+
+/** What this machine chose to switch on, or the default when nothing was chosen. */
+export async function chosenPlugins(p: Platform): Promise<string[]> {
+  const { readPreferences } = await import("./preferences.ts");
+  return chosenPluginsFrom((await readPreferences(p)).redSkillsPlugins);
+}
+
+/** The activation set for this machine: its choice over what its manifest declares. */
+export async function resolveActivatedPlugins(
+  p: Platform,
+  tools: readonly Tool[] = TOOLS,
+): Promise<string[]> {
+  return activatedPlugins(redSkillsPluginNames(p, tools), await chosenPlugins(p));
 }
