@@ -19,6 +19,16 @@ import {
   rmSync,
 } from "node:fs";
 import { formatBytes, formatDuration, log, logIsCaptured, RedError } from "./log.ts";
+import {
+  aptPolicy,
+  downgradeLine,
+  downgradeOf,
+  fullUpgradePlan,
+  plannedDowngrades,
+  refusedLine,
+  type AptDowngrade,
+  type FullUpgradePlan,
+} from "./apt-upgrade.ts";
 import { parseChecksums, pickChecksumAsset, sha256Hex, verifyChecksum } from "./checksum.ts";
 import { providerFor, TOOLS, type Provider, type Tool } from "./manifest.ts";
 import { convergeMiseConfig, miseEntries, releaseAgeExcludes } from "./mise-config.ts";
@@ -254,8 +264,12 @@ async function run(
   return code;
 }
 
-async function capture(cmd: string[]): Promise<string> {
-  const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
+async function capture(cmd: string[], env?: Record<string, string | undefined>): Promise<string> {
+  const proc = Bun.spawn(cmd, {
+    stdout: "pipe",
+    stderr: "pipe",
+    ...(env ? { env } : {}),
+  });
   const out = await new Response(proc.stdout).text();
   await proc.exited;
   return out;
@@ -1595,6 +1609,32 @@ export function installRefreshesDeclared(
  * machine. Kept, because on a workstation somebody set up entirely
  * through red-dev it is genuinely convenient — but typed, not implied.
  */
+/**
+ * Ask apt what a whole-machine upgrade would move backwards.
+ *
+ * Unprivileged, both calls: `-s` changes nothing and `policy` reads
+ * configuration, so finding out what an upgrade would do must not cost
+ * a password prompt. `C` because both outputs are parsed and both are
+ * translated — a machine in another locale would otherwise read zero
+ * downgrades out of a plan that has one, and pass no flag where the
+ * operator's pin asked for it.
+ *
+ * A simulation that cannot be read leaves the plan clean, which runs
+ * exactly the command this always ran: the real upgrade is still the
+ * thing that reports its own failure, and guessing at a downgrade
+ * nobody could observe is not better than letting apt say so.
+ */
+async function plannedFullUpgrade(
+  env: Record<string, string | undefined>,
+): Promise<FullUpgradePlan> {
+  const readable = { ...env, LC_ALL: "C" };
+  const downgrades: AptDowngrade[] = [];
+  for (const name of plannedDowngrades(await capture(["apt-get", "-s", "full-upgrade"], readable))) {
+    downgrades.push(downgradeOf(name, aptPolicy(await capture(["apt-cache", "policy", name], readable))));
+  }
+  return fullUpgradePlan(downgrades);
+}
+
 export async function systemUpdate(p: Platform, opts: { whole?: boolean } = {}): Promise<void> {
   const whole = opts.whole === true;
 
@@ -1604,7 +1644,24 @@ export async function systemUpdate(p: Platform, opts: { whole?: boolean } = {}):
 
     if (whole) {
       log.step("apt full-upgrade — every package on this machine, because --system was asked for");
-      const upgrade = await spawnLogged(["sudo", "-E", "apt-get", "full-upgrade", "-y"], { env });
+
+      // What the plan does to versions that go backwards, before the
+      // plan runs. `apt-get -y` refuses the whole upgrade over one
+      // downgrade, so on a machine that pins a package below its
+      // installed version — Ubuntu's Firefox snap stub against the
+      // mozillateam PPA is the usual one — nothing upgraded at all,
+      // kernels included. See src/apt-upgrade.ts.
+      const plan = await plannedFullUpgrade(env);
+      if (plan.kind === "refused") {
+        for (const downgrade of plan.unexplained) log.warn(refusedLine(downgrade));
+        log.plain("       apt will not do that under -y, and red-dev will not authorise a");
+        log.plain("       downgrade this machine never pinned. Take it yourself with");
+        log.plain("       `sudo apt-get full-upgrade --allow-downgrades` if that is what you want.");
+        throw new RedError("apt full-upgrade would downgrade a package nothing on this machine pinned");
+      }
+      for (const downgrade of plan.downgrades) log.plain(`       ${downgradeLine(downgrade)}`);
+
+      const upgrade = await spawnLogged(plan.argv, { env });
       if (upgrade !== 0) throw new RedError("apt full-upgrade failed");
       log.step("apt autoremove");
       await run(["sudo", "-E", "apt-get", "autoremove", "-y"], { allowFailure: true });
