@@ -14,7 +14,7 @@ const LINUX_SYSTEMD: Platform = {
   arch: "x64",
   caps: { apt: true, gui: false, systemd: true, winget: true, flatpak: false },
 };
-const WORKSTATION = { totalMemoryBytes: 20 * 1024 ** 3, logicalCpus: 10 };
+const WORKSTATION = { totalMemoryBytes: 20 * 1024 ** 3, logicalCpus: 10, hostDiskGuardian: true };
 
 describe("workload policy", () => {
   test("keeps Zellij protected while every ordinary pane enters the bounded work plane", async () => {
@@ -156,7 +156,7 @@ describe("workload policy", () => {
       chmodSync(`${bin}/df`, 0o755);
       chmodSync(`${bin}/systemctl`, 0o755);
       const guardian = `${dir}/disk-guardian.sh`;
-      writeFileSync(guardian, policy.diskGuardian);
+      writeFileSync(guardian, policy.diskGuardian ?? "");
 
       const proc = Bun.spawn(["/bin/sh", guardian], {
         env: {
@@ -196,7 +196,7 @@ describe("workload policy", () => {
       chmodSync(`${bin}/df`, 0o755);
       chmodSync(`${bin}/systemctl`, 0o755);
       const guardian = `${dir}/disk-guardian.sh`;
-      writeFileSync(guardian, workloadPolicy(WORKSTATION).diskGuardian);
+      writeFileSync(guardian, workloadPolicy(WORKSTATION).diskGuardian ?? "");
 
       const proc = Bun.spawn(["/bin/sh", guardian], {
         env: {
@@ -231,7 +231,7 @@ describe("workload policy", () => {
       chmodSync(`${bin}/df`, 0o755);
       chmodSync(`${bin}/systemctl`, 0o755);
       const guardian = `${dir}/disk-guardian.sh`;
-      writeFileSync(guardian, workloadPolicy(WORKSTATION).diskGuardian);
+      writeFileSync(guardian, workloadPolicy(WORKSTATION).diskGuardian ?? "");
 
       const proc = Bun.spawn(["/bin/sh", guardian], {
         env: {
@@ -269,7 +269,7 @@ describe("workload policy", () => {
       chmodSync(`${bin}/df`, 0o755);
       chmodSync(`${bin}/systemctl`, 0o755);
       const guardian = `${dir}/disk-guardian.sh`;
-      writeFileSync(guardian, policy.diskGuardian);
+      writeFileSync(guardian, policy.diskGuardian ?? "");
 
       const proc = Bun.spawn(["/bin/sh", guardian], {
         env: {
@@ -571,12 +571,15 @@ describe("workload policy", () => {
     expect(FILES["zellij.sh"]).toContain("_red_dev_run_control zellij");
     expect(FILES["zellij.sh"]).toContain("refusing uncontained zellij");
     expect(FILES["zellij.sh"]).not.toContain("--slice=red-dev-interactive.slice");
-    expect(policy.diskGuardian).toContain("systemctl --user freeze");
-    expect(policy.systemd["red-dev-disk-guardian.service"]).toContain(
+    // No Windows host disk unless the caller says so: the guardian reads
+    // a missing /mnt/c as a critical one and freezes agents and builds.
+    expect(policy.diskGuardian).toBeNull();
+    expect(policy.systemd["red-dev-disk-guardian.timer"]).toBeUndefined();
+    const wsl = workloadPolicy(WORKSTATION);
+    expect(wsl.diskGuardian).toContain("systemctl --user freeze");
+    expect(wsl.systemd["red-dev-disk-guardian.timer"]).toContain("OnUnitActiveSec=10s");
+    expect(wsl.systemd["red-dev-disk-guardian.service"]).toContain(
       "Slice=red-dev-interactive.slice",
-    );
-    expect(policy.systemd["red-dev-disk-guardian.timer"]).toContain(
-      "OnUnitActiveSec=10s",
     );
   });
 });

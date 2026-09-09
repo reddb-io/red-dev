@@ -523,6 +523,14 @@ export async function configureAlacritty(opts: AlacrittyOptions): Promise<void> 
   const sep = opts.platform.os === "windows" ? "\\" : "/";
   const main = `${dir}${sep}alacritty.toml`;
 
+  // A native desktop draws Alacritty itself, and on GNOME under Wayland
+  // that is where the pointer disappears over the window. See
+  // src/pointer-theme.ts for why one environment.d file is the fix.
+  if (opts.platform.env === "desktop") {
+    const { pinPointerTheme } = await import("./pointer-theme.ts");
+    await pinPointerTheme(process.env["HOME"] ?? "");
+  }
+
   // Under WSL these files are written through Windows, not through
   // /mnt/c, and that is not caution — it is a bug this project can
   // otherwise not see.

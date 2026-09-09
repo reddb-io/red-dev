@@ -1,10 +1,11 @@
 import { totalmem } from "node:os";
-import { chmodSync, existsSync, mkdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { log } from "./log.ts";
 import type { Platform } from "./platform.ts";
 import { localPath } from "./shared-root.ts";
 import { powershellBin, windowsUserProfile } from "./wsl.ts";
 import {
+  HOST_DISK_GUARDIAN_UNITS,
   hostDiskThresholds,
   workloadLogicalCpuCount,
   workloadPolicy,
@@ -445,10 +446,11 @@ export function assessBuildResources(
   const isolation = workloadPolicy({
     totalMemoryBytes: observed.totalMemoryBytes,
     logicalCpus: observed.logicalCpus,
+    hostDiskGuardian: p.env === "wsl",
   });
   const sliceCurrent =
     observed.workloadShell === isolation.shell &&
-    observed.diskGuardian === isolation.diskGuardian &&
+    (isolation.diskGuardian === null || observed.diskGuardian === isolation.diskGuardian) &&
     Object.entries(isolation.systemd).every(([path, content]) =>
       observed.systemd.some((entry) => entry.path === path && entry.content === content)
     );
@@ -468,6 +470,17 @@ export function assessBuildResources(
           fix: "red-dev install core",
         },
   );
+  if (p.env !== "wsl" && strayHostDiskGuardian(observed)) {
+    // The one thing the guardian must never do: run where `df /mnt/c`
+    // has no answer. It reads a missing host disk as a critical one and
+    // freezes the agent and build slices every ten seconds.
+    findings.push({
+      name: "host disk guard",
+      status: "drift",
+      detail: "a Windows host disk guardian is installed, and this machine has no Windows host — it freezes agents and builds",
+      fix: "red-dev install core",
+    });
+  }
   if (p.env === "wsl") {
     findings.push(assessHostDiskGuard(observed.hostDiskGuard));
     const hostPlan = wslHostConfigPlan(
@@ -499,9 +512,12 @@ async function resourceObservation(home: string, p: Platform): Promise<BuildReso
   const systemd = `${home}/.config/systemd/user`;
   const totalMemoryBytes = totalmem();
   const logicalCpus = workloadLogicalCpuCount();
-  const isolation = workloadPolicy({ totalMemoryBytes, logicalCpus });
+  const isolation = workloadPolicy({ totalMemoryBytes, logicalCpus, hostDiskGuardian: p.env === "wsl" });
+  // The guardian's units are read everywhere, so a machine that must not
+  // have them can be told it still does.
+  const unitPaths = [...new Set([...Object.keys(isolation.systemd), ...HOST_DISK_GUARDIAN_UNITS])];
   const systemdFiles = await Promise.all(
-    Object.keys(isolation.systemd).map(async (path) => ({
+    unitPaths.map(async (path) => ({
       path,
       content: await read(`${systemd}/${path}`),
     })),
@@ -629,6 +645,44 @@ async function reloadUserUnits(): Promise<boolean> {
   return (await child.exited) === 0;
 }
 
+/** Whether a guardian is on a machine that has no Windows host disk for it to watch. PURE. */
+function strayHostDiskGuardian(observed: BuildResourceObservation): boolean {
+  if (observed.diskGuardian !== null && observed.diskGuardian !== undefined) return true;
+  const units: readonly string[] = HOST_DISK_GUARDIAN_UNITS;
+  return observed.systemd.some((entry) => units.includes(entry.path) && entry.content !== null);
+}
+
+async function runQuiet(argv: string[]): Promise<boolean> {
+  const child = spawn(argv, { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+  return (await child.exited) === 0;
+}
+
+/**
+ * Take a guardian off a machine that is not WSL.
+ *
+ * Earlier releases installed it on every Linux host with a user
+ * systemd. Without /mnt/c its `df` fails, it reads that as a critical
+ * host disk, and it freezes the agent and build slices on every tick —
+ * every agent and build on the machine stops, ten seconds after any
+ * thaw. The timer goes first, so nothing re-freezes behind the thaw.
+ */
+async function removeStrayDiskGuardian(home: string): Promise<boolean> {
+  const systemd = `${home}/.config/systemd/user`;
+  const files = [
+    `${home}/.local/share/red-dev/bin/disk-guardian.sh`,
+    ...HOST_DISK_GUARDIAN_UNITS.map((unit) => `${systemd}/${unit}`),
+  ];
+  if (!files.some((path) => existsSync(path))) return false;
+  await runQuiet(["systemctl", "--user", "disable", "--now", "red-dev-disk-guardian.timer"]);
+  await runQuiet(["systemctl", "--user", "stop", "red-dev-disk-guardian.service"]);
+  for (const path of files) rmSync(path, { force: true });
+  for (const marker of ["disk-guardian-frozen", "disk-guardian-last"]) {
+    rmSync(`${home}/.local/state/red-dev/${marker}`, { force: true });
+  }
+  await runQuiet(["systemctl", "--user", "thaw", "red-dev-heavy-builds.slice", "red-dev-heavy-agents.slice"]);
+  return true;
+}
+
 async function enableDiskGuardianTimer(): Promise<boolean> {
   const child = spawn([
     "systemctl", "--user", "enable", "--now", "red-dev-disk-guardian.timer",
@@ -662,7 +716,7 @@ export async function convergeBuildResources(
     totalMemoryBytes,
     logicalCpus,
   });
-  const isolation = workloadPolicy({ totalMemoryBytes, logicalCpus });
+  const isolation = workloadPolicy({ totalMemoryBytes, logicalCpus, hostDiskGuardian: p.env === "wsl" });
   const managedDir = `${home}/.config/red-dev`;
   const cargoDir = `${home}/.cargo`;
   mkdirSync(managedDir, { recursive: true });
@@ -700,13 +754,18 @@ export async function convergeBuildResources(
   const units = Object.entries(isolation.systemd).map(([path, content]) =>
     [`${systemd}/${path}`, content] as const
   );
-  const guardianDir = `${home}/.local/share/red-dev/bin`;
-  const guardianPath = `${guardianDir}/disk-guardian.sh`;
-  mkdirSync(guardianDir, { recursive: true });
-  const guardianChanged = await writeIfChanged(guardianPath, isolation.diskGuardian);
-  chmodSync(guardianPath, 0o755);
+  let changed = 0;
+  if (isolation.diskGuardian !== null) {
+    const guardianDir = `${home}/.local/share/red-dev/bin`;
+    const guardianPath = `${guardianDir}/disk-guardian.sh`;
+    mkdirSync(guardianDir, { recursive: true });
+    if (await writeIfChanged(guardianPath, isolation.diskGuardian)) changed++;
+    chmodSync(guardianPath, 0o755);
+  } else if (await removeStrayDiskGuardian(home)) {
+    changed++;
+    log.ok("Windows host disk guardian removed — this is not WSL, and it was freezing agents and builds");
+  }
 
-  let changed = guardianChanged ? 1 : 0;
   for (const [path, content] of units) {
     mkdirSync(path.slice(0, path.lastIndexOf("/")), { recursive: true });
     if (await writeIfChanged(path, content)) changed++;
@@ -715,7 +774,7 @@ export async function convergeBuildResources(
     log.warn("build resource files were written, but the systemd user manager did not reload them");
     return;
   }
-  if (!(await enableDiskGuardianTimer())) {
+  if (isolation.diskGuardian !== null && !(await enableDiskGuardianTimer())) {
     log.warn("disk guardian was installed, but its timer could not be enabled");
     return;
   }

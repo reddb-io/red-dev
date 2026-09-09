@@ -28,6 +28,7 @@ import {
   routerPort,
   routerServeCommand,
   routerServeEnv,
+  ROUTER_EXIT_NOT_INSTALLED,
   routerUnit,
   routerUnitPath,
   routerWrapper,
@@ -152,6 +153,15 @@ describe("the systemd unit", () => {
     expect(unit).not.toContain("Restart=always");
     expect(unit).toContain("WantedBy=default.target");
   });
+
+  test("a missing package is not restarted into, and a broken server stops after five tries", () => {
+    // `serve` exits 3 when there is nothing to run; a restart cannot
+    // install a package, and five seconds later it would be the same
+    // line in the journal.
+    expect(unit).toContain(`RestartPreventExitStatus=${ROUTER_EXIT_NOT_INSTALLED}`);
+    expect(unit).toContain("StartLimitIntervalSec=300");
+    expect(unit).toContain("StartLimitBurst=5");
+  });
 });
 
 describe("the Windows side", () => {
@@ -204,14 +214,19 @@ describe("converging the service", () => {
     expect(readFileSync(routerUnitPath(home), "utf8")).toBe(routerUnit("/home/me/.local/bin/red-dev", "/usr/bin"));
     expect(calls).toEqual([
       ["systemctl", "--user", "daemon-reload"],
+      ["systemctl", "--user", "reset-failed", ROUTER_SERVICE],
       ["systemctl", "--user", "enable", "--now", ROUTER_SERVICE],
     ]);
 
     calls.length = 0;
     expect(await convergeRouterAutostart(UBUNTU, seams)).toBe("unchanged");
     // Enabling an enabled unit is a no-op, and it is what catches a
-    // service somebody stopped by hand. No reload, no restart.
-    expect(calls).toEqual([["systemctl", "--user", "enable", "--now", ROUTER_SERVICE]]);
+    // service somebody stopped by hand. No reload, no restart. The
+    // reset clears a start limit, so a fixed install can start again.
+    expect(calls).toEqual([
+      ["systemctl", "--user", "reset-failed", ROUTER_SERVICE],
+      ["systemctl", "--user", "enable", "--now", ROUTER_SERVICE],
+    ]);
   });
 
   test("a unit whose text moved restarts the running service, which is reading the old one", async () => {
@@ -224,6 +239,7 @@ describe("converging the service", () => {
     expect(await convergeRouterAutostart(UBUNTU, { home, env: {}, binary: "/new/red-dev", run })).toBe("installed");
     expect(calls).toEqual([
       ["systemctl", "--user", "daemon-reload"],
+      ["systemctl", "--user", "reset-failed", ROUTER_SERVICE],
       ["systemctl", "--user", "enable", "--now", ROUTER_SERVICE],
       ["systemctl", "--user", "restart", ROUTER_SERVICE],
     ]);
@@ -287,13 +303,24 @@ describe("what doctor says", () => {
   });
 
   test("a running service and a silent port points at the journal, not at the converge", async () => {
-    const [check] = await inspectRouter(UBUNTU, { env: {}, run: systemctl(true, true), answering: async () => false });
+    const [check] = await inspectRouter(UBUNTU, { env: {}, run: systemctl(true, true), answering: async () => false, packageDir: () => "/pkg" });
     expect(check?.status).toBe("drift");
     expect(check?.fix).toContain("journalctl");
   });
 
+  test("a package mise never installed is named, not the journal", async () => {
+    const [check] = await inspectRouter(UBUNTU, {
+      env: {},
+      run: systemctl(true, false),
+      answering: async () => false,
+      packageDir: () => null,
+    });
+    expect(check?.status).toBe("drift");
+    expect(check?.fix).toBe("red-dev install 9router");
+  });
+
   test("a foreground `9router` somebody left running is not a service", async () => {
-    const [check] = await inspectRouter(UBUNTU, { env: {}, run: systemctl(false, false), answering: async () => true });
+    const [check] = await inspectRouter(UBUNTU, { env: {}, run: systemctl(false, false), answering: async () => true, packageDir: () => "/pkg" });
     expect(check?.status).toBe("drift");
     expect(check?.fix).toBe("red-dev install core");
   });

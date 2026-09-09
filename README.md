@@ -273,6 +273,13 @@ TTY drops into a tray mode that has no tray to drop into. The service binds
 by default — and each side of a WSL boundary runs its own, because under NAT
 networking a Windows loopback port is not reachable from the distro.
 
+The service is bounded. When mise has not put the package down, `serve` exits
+with a status the unit refuses to restart on, and the converge and `doctor`
+both say so and name `red-dev install 9router`; anything else that fails five
+times in five minutes stops being retried until the next `red-dev install`
+clears it. A server that is restarted every five seconds into the same missing
+file is not a service, it is a journal filling up.
+
 ```bash
 red-dev 9router                 # declared? running? answering? — and the two URLs
 red-dev 9router serve           # the server in the foreground, what the unit runs

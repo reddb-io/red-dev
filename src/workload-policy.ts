@@ -18,7 +18,20 @@ export type WorkloadKind = "control" | "pane" | "agent" | "build";
 export interface WorkloadPolicyFacts {
   totalMemoryBytes: number;
   logicalCpus: number;
+  /**
+   * Whether this machine has a Windows host disk to guard — WSL, and
+   * nothing else. The guardian polls `df /mnt/c` and freezes the agent
+   * and build slices when the answer is missing, which on a native Linux
+   * box is every ten seconds forever. Off unless the caller says so.
+   */
+  hostDiskGuardian?: boolean;
 }
+
+/** The units the guardian owns, for the converge that has to take them away. */
+export const HOST_DISK_GUARDIAN_UNITS = [
+  "red-dev-disk-guardian.service",
+  "red-dev-disk-guardian.timer",
+] as const;
 export interface HostDiskThresholds {
   reserveKiB: number;
   floorKiB: number;
@@ -488,8 +501,11 @@ export interface WorkloadPolicy {
   systemd: Readonly<Record<string, string>>;
   /** Shell adapter installed before Zellij and expensive tool activation. */
   shell: string;
-  /** Periodic host-disk circuit breaker run from the protected control plane. */
-  diskGuardian: string;
+  /**
+   * Periodic host-disk circuit breaker run from the protected control
+   * plane. Null where there is no Windows host disk to watch.
+   */
+  diskGuardian: string | null;
   /** The global wall shown by doctor and status surfaces. */
   capacity: {
     memoryMax: string;
@@ -515,20 +531,9 @@ export function workloadPolicy(
   },
 ): WorkloadPolicy {
   const domains = resourceDomains(facts);
-  return {
-    systemd: {
-      [domains.root.slice]: renderSlice(domains.root),
-      [domains.work.slice]: renderSlice(domains.work),
-      [domains.control.slice]: renderSlice(domains.control),
-      [domains.pane.slice]: renderSlice(domains.pane),
-      [domains.agent.slice]: renderSlice(domains.agent),
-      [domains.build.slice]: renderSlice(domains.build),
-      "redskilled.service.d/50-red-dev-heavy-slice.conf":
-        renderAttachment("Service", domains.control, false),
-      "red-worker-.service.d/50-red-dev-heavy-slice.conf":
-        renderAttachment("Service", domains.agent, true),
-      "red-fleet-.scope.d/50-red-dev-heavy-slice.conf":
-        renderAttachment("Scope", domains.agent, false),
+  const guardian = facts.hostDiskGuardian === true;
+  const guardianUnits: Record<string, string> = guardian
+    ? {
       "red-dev-disk-guardian.service": `# Managed by red-dev.
 [Unit]
 Description=red-dev Windows host disk guardian
@@ -553,9 +558,26 @@ Unit=red-dev-disk-guardian.service
 [Install]
 WantedBy=timers.target
 `,
+    }
+    : {};
+  return {
+    systemd: {
+      [domains.root.slice]: renderSlice(domains.root),
+      [domains.work.slice]: renderSlice(domains.work),
+      [domains.control.slice]: renderSlice(domains.control),
+      [domains.pane.slice]: renderSlice(domains.pane),
+      [domains.agent.slice]: renderSlice(domains.agent),
+      [domains.build.slice]: renderSlice(domains.build),
+      "redskilled.service.d/50-red-dev-heavy-slice.conf":
+        renderAttachment("Service", domains.control, false),
+      "red-worker-.service.d/50-red-dev-heavy-slice.conf":
+        renderAttachment("Service", domains.agent, true),
+      "red-fleet-.scope.d/50-red-dev-heavy-slice.conf":
+        renderAttachment("Scope", domains.agent, false),
+      ...guardianUnits,
     },
     shell: renderShell(domains),
-    diskGuardian: renderDiskGuardian(),
+    diskGuardian: guardian ? renderDiskGuardian() : null,
     capacity: {
       memoryMax: domains.root.aggregate["MemoryMax"] ?? "unknown",
       cpuQuota: domains.root.aggregate["CPUQuota"] ?? "unknown",

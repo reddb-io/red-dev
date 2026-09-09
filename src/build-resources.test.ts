@@ -103,7 +103,7 @@ describe("Cargo user layer", () => {
 describe("workload isolation", () => {
   test("doctor reports both layers from the same expected bytes", () => {
     const policy = { cargoJobs: 5, rustTestThreads: 2, nextestThreads: 5 };
-    const isolation = workloadPolicy({ totalMemoryBytes: 20 * GIB, logicalCpus: 10 });
+    const isolation = workloadPolicy({ totalMemoryBytes: 20 * GIB, logicalCpus: 10, hostDiskGuardian: true });
     expect(assessBuildResources(LINUX_SYSTEMD, policy, {
       cargoDefaults: renderCargoDefaults(policy),
       cargoHome: "include = [{ path = \"../.config/red-dev/cargo.toml\", optional = true }]\n",
@@ -135,9 +135,39 @@ describe("workload isolation", () => {
     ]);
   });
 
-  test("doctor reports a disabled disk guardian as drift", () => {
+  test("a native Linux desktop must not carry the Windows host disk guardian", () => {
+    const desktop: Platform = { ...LINUX_SYSTEMD, env: "desktop", caps: { ...LINUX_SYSTEMD.caps, gui: true } };
     const policy = { cargoJobs: 5, rustTestThreads: 2, nextestThreads: 5 };
     const isolation = workloadPolicy({ totalMemoryBytes: 20 * GIB, logicalCpus: 10 });
+    const observe = (guardian: string | null) => ({
+      cargoDefaults: renderCargoDefaults(policy),
+      cargoHome: `include = ["../.config/red-dev/cargo.toml"]\n`,
+      workloadShell: isolation.shell,
+      diskGuardian: guardian,
+      systemd: Object.entries(isolation.systemd).map(([path, content]) => ({ path, content })),
+      totalMemoryBytes: 20 * GIB,
+      logicalCpus: 10,
+    });
+
+    // Without one, the isolation is current and nothing mentions a host disk.
+    const clean = assessBuildResources(desktop, policy, observe(null));
+    expect(clean).toContainEqual(expect.objectContaining({ name: "workload isolation", status: "ok" }));
+    expect(clean.some((f) => f.name === "host disk guard")).toBe(false);
+
+    // A guardian left by an earlier release is drift, because it freezes
+    // agents and builds every ten seconds on a machine with no /mnt/c.
+    const stray = assessBuildResources(desktop, policy, observe("#!/bin/sh\ndf -Pk /mnt/c\n"));
+    expect(stray).toContainEqual({
+      name: "host disk guard",
+      status: "drift",
+      detail: "a Windows host disk guardian is installed, and this machine has no Windows host — it freezes agents and builds",
+      fix: "red-dev install core",
+    });
+  });
+
+  test("doctor reports a disabled disk guardian as drift", () => {
+    const policy = { cargoJobs: 5, rustTestThreads: 2, nextestThreads: 5 };
+    const isolation = workloadPolicy({ totalMemoryBytes: 20 * GIB, logicalCpus: 10, hostDiskGuardian: true });
     const findings = assessBuildResources(LINUX_SYSTEMD, policy, {
       cargoDefaults: renderCargoDefaults(policy),
       cargoHome: `include = ["../.config/red-dev/cargo.toml"]\n`,
