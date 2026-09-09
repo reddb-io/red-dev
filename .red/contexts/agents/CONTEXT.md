@@ -40,6 +40,12 @@ red-dev's own agent skill — how the product lays out managed paths and state, 
 
 _Avoid_: red-dev skill (ambiguous with RedSkills), diagnose skill (one use of it, not the thing)
 
+## AI router
+
+The one local endpoint every **Agent host** on a workstation may be configured against: 9router (`npm:9router`, mise-owned, `http://localhost:20128/v1`), which translates between the OpenAI and Claude wire formats and routes each request across the providers the person connected, falling back subscription → cheap → free. It is a `core` manifest row on every target rather than an Agents-page choice, because it is what the hosts are configured against and a workstation where only some hosts route through it is two environments under one name (decision of 2026-09-08). red-dev installs it, keeps it current, and **keeps it running** as a standing service — a systemd user unit on Linux and WSL, a Startup-folder shortcut on Windows, both running `red-dev 9router serve` rather than the package's own launcher (decision of 2026-09-08: the launcher kills unrelated `next-server` processes, self-updates through npm, and needs a TTY or a tray). Loopback by default; one router per side of a WSL boundary; `RED_9ROUTER=0` turns the service off and leaves the package. red-dev does not connect a provider or rewrite any host's endpoint — those are the person's, in the router's dashboard.
+
+_Avoid_: proxy (it also translates formats and tracks quota), gateway (reserved for RedDB's own server surfaces)
+
 ## MCP posture
 
 CLI-first: every required capability has a stable CLI path; MCP is optional acceleration. An MCP failure never brings down a required item's readiness — the item stays `healthy` with a `degraded(reason, fallback, remediation)` state pointing at the CLI fallback.

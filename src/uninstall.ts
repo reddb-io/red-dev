@@ -328,6 +328,18 @@ export async function removeConfiguration(p: Platform): Promise<string[]> {
     log.warn(`redwall hook: ${(err as Error).message}`);
   }
 
+  // The router's service, before the fragment below stops mise from
+  // knowing about the package: a unit whose ExecStart names a red-dev
+  // that is about to go would restart into failure every five seconds.
+  // Only what red-dev put around the package — ~/.9router holds the
+  // credentials the person entered, and stays.
+  try {
+    const { removeRouterAutostart } = await import("./nine-router.ts");
+    removed.push(...(await removeRouterAutostart(p)));
+  } catch (err) {
+    log.warn(`9router: ${(err as Error).message}`);
+  }
+
   const targets = [
     `${home}/.local/share/red-dev`,
     `${home}/.config/red-dev`,

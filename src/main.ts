@@ -1748,6 +1748,33 @@ async function cmdSsh(p: Platform, inv: Invocation): Promise<number> {
  * not: a headless server cannot browse, and a spawn that quietly fails
  * there would be worse than the address it could have copied.
  */
+/**
+ * `red-dev 9router [serve]`.
+ *
+ * `serve` is the unit's ExecStart and the shortcut's target, so it runs
+ * in the foreground and its exit code is the server's. Anything else is
+ * a report, and an unknown verb says so rather than starting a server
+ * the person did not ask for.
+ */
+async function cmdRouter(p: Platform, inv: Invocation): Promise<number> {
+  const { inspectRouter, serveRouter, routerHost, routerPort } = await import("./nine-router.ts");
+  const verb = inv.routerVerb;
+  if (verb === "serve") return await serveRouter(p);
+  if (verb !== undefined) {
+    log.err(`unknown verb '${verb}' (expected: serve, or nothing for a report)`);
+    return 1;
+  }
+  const checks = await inspectRouter(p);
+  for (const check of checks) {
+    const mark = check.status === "ok" ? log.ok : check.status === "drift" ? log.warn : log.skip;
+    mark(`${check.name}: ${check.detail}`);
+    if (check.fix) log.plain(`       fix: ${check.fix}`);
+  }
+  log.plain(`       endpoint for the agents: http://${routerHost()}:${routerPort()}/v1`);
+  log.plain(`       dashboard: http://${routerHost()}:${routerPort()}/dashboard`);
+  return checks.every((c) => c.status !== "drift") ? 0 : 1;
+}
+
 async function cmdLearn(p: Platform): Promise<number> {
   const { browseArgv, LEARN, learnLines } = await import("./learn.ts");
 
@@ -2741,6 +2768,8 @@ async function main(): Promise<number> {
       return await cmdLearn(p);
     case "red-skills":
       return await cmdRedSkills(p, inv);
+    case "9router":
+      return await cmdRouter(p, inv);
     case "agents":
       return await cmdAgents(p, inv);
     case "lang":

@@ -53,6 +53,10 @@ const ALLOWED = new Map<string, string>([
     "`red-dev agents run` hands the terminal to the Default agent, which draws its own full-screen interface and reads the keyboard — neither survives a pipe. Nothing reaches it but that command typed at a shell: the menu has no agents entry, and the flag that selects it exists only when `agents run` is parsed from argv.",
   ],
   [
+    "nine-router.ts",
+    "`red-dev 9router serve` is the foreground server a systemd unit or a Startup shortcut runs, and its output is the server's log — the journal on Linux, nothing on Windows. It is reached only from that verb typed at a shell or written into a unit; the converge's builtin writes the unit and never calls serve, and the menu has no router entry.",
+  ],
+  [
     "wsl-provision.ts",
     "`wsl --install` and `--set-version` prompt for a UNIX username and take minutes. They need real stdin, which spawnLogged's captured branch sets to ignore — so routing them through it would hang rather than tear. Known gap: reachable from the TUI menu, where it WOULD tear. Not fixed here because the fix is to refuse the capture, not to pipe it.",
   ],
