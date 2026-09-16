@@ -502,6 +502,17 @@ export const TOOLS: Tool[] = [
     win: skip("Windows expands archives natively"),
   },
   {
+    // Core, not optional: red-dev's own repositories carry a justfile,
+    // and a machine that converged without `just` fails its first
+    // `just dev` with "command not found" — which reads as a broken
+    // checkout rather than as an unticked box on a page nobody revisits.
+    name: "just",
+    about: "command runner; a Makefile without the Make",
+    scope: "core",
+    u24: apt("just"),
+    win: winget("Casey.Just"),
+  },
+  {
     name: "ripgrep",
     cmd: ["rg"],
     scope: "core",
@@ -926,11 +937,24 @@ export const TOOLS: Tool[] = [
   },
   { name: "flatpak", scope: "desktop", u24: apt("flatpak"), win: skip(NO_GUI) },
   {
-    // Zellij's configured copy command targets wl-copy on real Linux
-    // desktops. WSL and native Windows use their own clipboard bridges.
+    // Zellij's configured copy command on a Linux desktop is
+    // config/bash/linux-clipboard.sh, which picks wl-copy under Wayland
+    // and xclip under X11 at the moment of the copy. Both are installed
+    // because the session type is decided at login, not at converge: an
+    // Xorg session on a machine that converged under Wayland — the
+    // NVIDIA default on some installs, and a GDM menu choice on all of
+    // them — used to get a copy_command that could not connect to
+    // anything, and a "Copied!" that copied nothing. WSL and native
+    // Windows use their own clipboard bridges.
     name: "wl-clipboard",
     scope: "desktop",
     u24: apt("wl-clipboard"),
+    win: skip(NO_GUI),
+  },
+  {
+    name: "xclip",
+    scope: "desktop",
+    u24: apt("xclip"),
     win: skip(NO_GUI),
   },
   {
@@ -1106,13 +1130,6 @@ export const TOOLS: Tool[] = [
     managed: true,
     u24: builtin("red-skills-herdr"),
     win: skip("herdr has no stable Windows build"),
-  },
-  {
-    name: "just",
-    about: "command runner; a Makefile without the Make",
-    scope: "optional",
-    u24: apt("just"),
-    win: winget("Casey.Just"),
   },
   {
     name: "duf",

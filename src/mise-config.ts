@@ -418,6 +418,22 @@ export function miseToolNames(p: Platform, tools: readonly Tool[] = TOOLS): stri
   return miseEntries(p, tools).map((e) => e.alias ?? e.spec);
 }
 
+/**
+ * The same tools, spelled the way mise resolves them without help. PURE.
+ *
+ * `mise prune --tools <name>` looks the name up in the active config,
+ * and an alias only exists there once the conf.d fragment has been
+ * written. On a machine where it has not — every machine before the
+ * fragment existed, and any whose `red-dev install` never reached it —
+ * `mise prune --tools redcode` matches nothing and exits 0, which is
+ * how one host collected fifteen versions of RedCode and 2.9 GB while
+ * every update reported a successful prune. The backend-qualified spec
+ * needs no alias to resolve, so retention is named by spec.
+ */
+export function miseToolSpecs(p: Platform, tools: readonly Tool[] = TOOLS): string[] {
+  return miseEntries(p, tools).map((e) => e.spec);
+}
+
 export interface ConvergeMiseConfigResult {
   path: string;
   changed: boolean;

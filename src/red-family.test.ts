@@ -93,7 +93,7 @@ describe("the dedicated RedDB setup page", () => {
     const generic = otherOptionalChoices(DESKTOP).map((choice) => choice.key);
     expect(generic).not.toContain("red-skills-vscode");
     expect(generic).not.toContain("red-skills-herdr");
-    expect(generic).toContain("just");
+    expect(generic).toContain("duf");
   });
 
   test("sits between runtimes and generic tools", () => {

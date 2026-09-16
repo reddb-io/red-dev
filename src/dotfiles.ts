@@ -34,6 +34,7 @@ import sharedSh from "../config/bash/shared.sh" with { type: "text" };
 import zellijSh from "../config/bash/zellij.sh" with { type: "text" };
 import redSkillsWatchSh from "../config/bash/red-skills-watch.sh" with { type: "text" };
 import windowsClipboardSh from "../config/bash/windows-clipboard.sh" with { type: "text" };
+import linuxClipboardSh from "../config/bash/linux-clipboard.sh" with { type: "text" };
 import inputrc from "../config/bash/inputrc.conf" with { type: "text" };
 import starshipToml from "../config/bash/starship.toml" with { type: "text" };
 import zellijBase from "../config/zellij/config.kdl" with { type: "text" };
@@ -54,6 +55,7 @@ export const FILES: Record<string, string> = {
   "zellij.sh": zellijSh,
   "red-skills-watch.sh": redSkillsWatchSh,
   "windows-clipboard.sh": windowsClipboardSh,
+  "linux-clipboard.sh": linuxClipboardSh,
   // Deployed without the .conf suffix: the repo needs an extension for
   // the text import to resolve, readline does not care what it is
   // called, and INPUTRC points straight at it.
@@ -328,6 +330,14 @@ const SHIPPED_ZELLIJ_CONFIGS = new Set([
   // 1.0.125: session serialization is unchanged, but the managed comment
   // now describes red-dev's automatic live/serialized resume order.
   "468e71d7250c2d6a00087aa05c299c4756a06fdf8f049310f89d5425a39ed1c3",
+  // The three bases above as a Linux desktop received them: each plus
+  // the generated `copy_command "wl-copy"`. Without these a desktop
+  // machine could never be moved off wl-copy, because the file on disk
+  // was never byte-for-byte any of the bare bases — it always carried
+  // the one generated line. 0.22.0, 0.23.x and 1.0.125 in that order.
+  "77cebc27b626c988458567d7a2947084915644c3572618629061f2c91c0fb8b8",
+  "a34b6850436b42e61b5cfa6b1c477cfbcde3e2b1f88d43b9fffbf28c401eed9c",
+  "f2861f1902b9b14cc444991b243de765a2db69dffe1bc45f72de08cd2ff61c63",
 ]);
 
 /**
@@ -355,6 +365,24 @@ export function wslClipboardCommand(): string {
   return wslClipboardArgv().join(" ");
 }
 
+/**
+ * The Linux desktop bridge: wl-copy under Wayland, xclip or xsel under
+ * X11, decided at the moment of the copy rather than at converge.
+ *
+ * `wl-copy` was written straight into config.kdl, and it was right only
+ * on machines whose sessions were Wayland every single time. An Xorg
+ * session has no compositor to reach, wl-copy fails, and zellij still
+ * reports "Copied!". The session type is a login-time fact, so the only
+ * place it can be read correctly is inside the copy itself.
+ */
+export function linuxClipboardArgv(): readonly string[] {
+  return ["bash", `${home()}/.local/share/red-dev/config/bash/linux-clipboard.sh`];
+}
+
+export function linuxClipboardCommand(): string {
+  return linuxClipboardArgv().join(" ");
+}
+
 /** Native Windows fallback. WSL uses the faster helper above because Zellij
  * terminates commands after one second; PowerShell startup inside WSL can
  * exceed that deadline. */
@@ -377,8 +405,8 @@ export function windowsClipboardCommand(): string {
  * The three routes, and the one target that has none.
  *
  * This is the whole clipboard layer of the product, in one function: the
- * WSL bridge, the native Windows bridge, and `wl-copy` on a Linux
- * desktop. A server gets null, because a copy_command naming a program
+ * WSL bridge, the native Windows bridge, and the Linux desktop bridge
+ * that picks wl-copy or xclip by session type. A server gets null, because a copy_command naming a program
  * that is not installed is the same silent failure as no clipboard at
  * all, pointed the other way — and there is no display there to have a
  * clipboard on.
@@ -396,9 +424,10 @@ export function windowsClipboardCommand(): string {
 export function clipboardArgvFor(p: Platform): readonly string[] | null {
   if (p.env === "wsl") return wslClipboardArgv();
   if (p.os === "windows") return windowsClipboardArgv();
-  // wl-copy, not xclip: the desktop targets are Wayland sessions, and
-  // wl-copy takes UTF-8 on stdin with no encoding step in between.
-  if (p.env === "desktop") return ["wl-copy"];
+  // Not wl-copy by name: whether this is a Wayland or an X11 session is
+  // decided at login, and a copy_command has to be right at every login
+  // after the converge that wrote it.
+  if (p.env === "desktop") return linuxClipboardArgv();
   return null;
 }
 

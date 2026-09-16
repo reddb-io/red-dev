@@ -12,7 +12,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { escapedSequence, IMAGE_PASTE_INPUT } from "./actions/index.ts";
 import { zellijConfigAction, zellijConfigFor } from "./dotfiles.ts";
@@ -73,8 +73,91 @@ describe("where zellij puts a copied selection", () => {
     expect(readFileSync(capture).toString("utf16le")).toBe(input);
   });
 
-  test("uses the Wayland tool on a Linux desktop", () => {
-    expect(zellijConfigFor(platform({ env: "desktop" }))).toContain('copy_command "wl-copy"');
+  test("uses the session-aware bridge on a Linux desktop, not wl-copy by name", () => {
+    // Whether the session is Wayland or X11 is decided at login, and a
+    // copy_command written at converge has to be right at every login
+    // after it.
+    const config = zellijConfigFor(platform({ env: "desktop" }));
+    expect(config).toContain("linux-clipboard.sh");
+    expect(config).not.toContain('copy_command "wl-copy"');
+  });
+
+  describe("the Linux bridge", () => {
+    /**
+     * A PATH holding fake clipboard tools that record what reached them —
+     * and nothing else, so the real xsel on a developer's machine cannot
+     * answer for a case that says no tool is installed. `cat` is the one
+     * external the bridge needs, so it is linked in.
+     */
+    function tools(names: string[]): { dir: string; captures: Record<string, string> } {
+      const dir = mkdtempSync(`${tmpdir()}/red-linux-clipboard-`);
+      symlinkSync("/bin/cat", `${dir}/cat`);
+      const captures: Record<string, string> = {};
+      for (const name of names) {
+        captures[name] = `${dir}/${name}.captured`;
+        writeFileSync(`${dir}/${name}`, `#!/bin/sh\nexec /bin/cat >"${captures[name]}"\n`);
+        chmodSync(`${dir}/${name}`, 0o755);
+      }
+      return { dir, captures };
+    }
+
+    async function bridge(
+      dir: string,
+      env: Record<string, string>,
+      input: string,
+    ): Promise<{ code: number; err: string }> {
+      const proc = Bun.spawn(["/bin/bash", "config/bash/linux-clipboard.sh"], {
+        env: {
+          PATH: dir,
+          HOME: process.env["HOME"] ?? "",
+          WAYLAND_DISPLAY: "",
+          DISPLAY: "",
+          ...env,
+        },
+        stdin: "pipe",
+        stdout: "ignore",
+        stderr: "pipe",
+      });
+      proc.stdin.write(input);
+      proc.stdin.end();
+      const err = await new Response(proc.stderr).text();
+      return { code: await proc.exited, err };
+    }
+
+    test("takes wl-copy under Wayland, even when XWayland also offers a DISPLAY", async () => {
+      const { dir, captures } = tools(["wl-copy", "xclip"]);
+      const input = "ação — 🧪\ncom newline no fim\n";
+      const out = await bridge(dir, { WAYLAND_DISPLAY: "wayland-0", DISPLAY: ":0" }, input);
+      expect(out.code).toBe(0);
+      expect(readFileSync(captures["wl-copy"]!, "utf8")).toBe(input);
+      expect(existsSync(captures["xclip"]!)).toBe(false);
+    });
+
+    test("takes xclip under X11, where wl-copy has no compositor to reach", async () => {
+      const { dir, captures } = tools(["wl-copy", "xclip"]);
+      const out = await bridge(dir, { DISPLAY: ":0" }, "x11");
+      expect(out.code).toBe(0);
+      expect(readFileSync(captures["xclip"]!, "utf8")).toBe("x11");
+      expect(existsSync(captures["wl-copy"]!)).toBe(false);
+    });
+
+    test("falls through to xsel when xclip is not installed", async () => {
+      const { dir, captures } = tools(["xsel"]);
+      const out = await bridge(dir, { DISPLAY: ":0" }, "xsel");
+      expect(out.code).toBe(0);
+      expect(readFileSync(captures["xsel"]!, "utf8")).toBe("xsel");
+    });
+
+    test("says so when nothing can take the text, rather than failing silently", async () => {
+      const { dir } = tools([]);
+      const none = await bridge(dir, {}, "nowhere");
+      expect(none.code).toBe(1);
+      expect(none.err).toContain("no display");
+
+      const missing = await bridge(dir, { DISPLAY: ":0" }, "nowhere");
+      expect(missing.code).toBe(1);
+      expect(missing.err).toContain("no clipboard tool");
+    });
   });
 
   test("names no command on a server, where there is no clipboard", () => {

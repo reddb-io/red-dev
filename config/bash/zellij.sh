@@ -95,7 +95,6 @@ fi
 # the prune skip this whole tree.
 _red_zellij_log="${XDG_STATE_HOME:-$HOME/.local/state}/red-dev/zellij/crash-$$.log"
 _red_zellij_dir="${_red_zellij_log%/*}"
-_red_zellij_last="$_red_zellij_dir/last-session"
 mkdir -p "$_red_zellij_dir" 2>/dev/null
 if declare -F _red_dev_run_control >/dev/null 2>&1; then
   _red_zellij_launch() { _red_dev_run_control zellij "$@"; }
@@ -107,63 +106,36 @@ else
   _red_zellij_status=125
 fi
 
-# Resume before creating. `list-sessions --reverse` is newest-first but mixes
-# live servers with serialized sessions. A live control plane wins even when an
-# exited scratch session was created later; only when every live candidate is
-# gone do we resurrect serialized state. Attach is also the validity probe: a
-# session that disappeared in the listing race or whose serialization cannot be
-# read returns non-zero, and the next candidate gets a chance.
+# One default session, named after the machine, every time.
+#
+# This used to resume "the last valid session": the one this shell had
+# attached before, else the newest live one, else the newest serialized
+# one, and only then a fixed name. That is a good rule for one session
+# and a bad one for two: the moment somebody opened a second session on
+# purpose it became the newest, every new terminal window landed in it,
+# and the session they thought of as "the default" was never opened by
+# a terminal again. What people actually want is simpler — a new window
+# is the default session, and a second session is something you ask for
+# by name.
+#
+# `attach --create` is the whole mechanism. On a live session it
+# attaches; on a serialized one it resurrects; on none it creates. The
+# name is the hostname because that is what the frame shows and what a
+# person reads over ssh, and RED_ZELLIJ_SESSION in ~/.config/red-dev/env.sh
+# overrides it. Other sessions are `zellij -s name` or the session
+# manager, and nothing here ever attaches to them unasked.
 if declare -F _red_zellij_launch >/dev/null 2>&1; then
-  _red_zellij_sessions="$(
-    RED_IN_ZELLIJ=1 _red_zellij_launch list-sessions --no-formatting --reverse \
-      2>>"$_red_zellij_log"
-  )"
-  _red_zellij_preferred="$(sed -n '1p' "$_red_zellij_last" 2>/dev/null)"
-  _red_zellij_candidates="$(
-    printf '%s\n' "$_red_zellij_preferred"
-    printf '%s\n' "$_red_zellij_sessions" |
-      awk '/ \[Created / && $0 !~ /\(EXITED/ { sub(/ \[Created .*/, ""); print }'
-    printf '%s\n' "$_red_zellij_sessions" |
-      awk '/ \[Created / && $0 ~ /\(EXITED/ { sub(/ \[Created .*/, ""); print }'
-  )"
-  _red_zellij_candidates="$(
-    printf '%s\n' "$_red_zellij_candidates" | awk 'NF && !seen[$0]++'
-  )"
-
-  _red_zellij_status=1
-  # Read candidates on fd 9 so an interactive attach keeps the terminal on
-  # stdin. Feeding this loop with a plain here-document replaces fd 0 with a
-  # pipe for every command in the body. Zellij's stdin threads then spin on
-  # EOF while its output still targets the tty, freezing the terminal client.
-  while IFS= read -r _red_zellij_session <&9; do
-    [ -n "$_red_zellij_session" ] || continue
-    printf '%s\n' "$_red_zellij_session" >"$_red_zellij_last.tmp-$$" 2>/dev/null &&
-      mv -f "$_red_zellij_last.tmp-$$" "$_red_zellij_last" 2>/dev/null
-    RED_IN_ZELLIJ=1 _red_zellij_launch attach "$_red_zellij_session" \
-      2>>"$_red_zellij_log"
-    _red_zellij_status=$?
-    [ "$_red_zellij_status" -eq 0 ] && break
-  done 9<<EOF
-$_red_zellij_candidates
-EOF
-
-  # Empty inventory, or every candidate failed its attach/resurrection probe.
-  if [ "$_red_zellij_status" -ne 0 ]; then
-    _red_zellij_session="${RED_ZELLIJ_SESSION:-red-dev-main}"
-    printf '%s\n' "$_red_zellij_session" >"$_red_zellij_last.tmp-$$" 2>/dev/null &&
-      mv -f "$_red_zellij_last.tmp-$$" "$_red_zellij_last" 2>/dev/null
-    RED_IN_ZELLIJ=1 _red_zellij_launch attach --create "$_red_zellij_session" \
-      2>>"$_red_zellij_log"
-    _red_zellij_status=$?
-  fi
+  _red_zellij_session="${RED_ZELLIJ_SESSION:-${HOSTNAME:-$(uname -n 2>/dev/null)}}"
+  _red_zellij_session="${_red_zellij_session:-red-dev}"
+  RED_IN_ZELLIJ=1 _red_zellij_launch attach --create "$_red_zellij_session" \
+    2>>"$_red_zellij_log"
+  _red_zellij_status=$?
 fi
 
 if [ "$_red_zellij_status" -eq 0 ]; then
   rm -f "$_red_zellij_log"
   unset -f _red_zellij_launch 2>/dev/null
-  unset _red_zellij_status _red_zellij_log _red_zellij_dir _red_zellij_last \
-    _red_zellij_sessions _red_zellij_preferred _red_zellij_candidates \
-    _red_zellij_session
+  unset _red_zellij_status _red_zellij_log _red_zellij_dir _red_zellij_session
   # ExitReason::Disconnect currently reaches the shell as status 0, the
   # same status as an intentional detach. Closing this parent shell on 0
   # therefore turns a recoverable client disconnect into a closed terminal.
@@ -197,7 +169,6 @@ else
   rm -f "$_red_zellij_log"
 fi
 printf 'red-dev: set RED_ZELLIJ=0 in ~/.config/red-dev/env.sh to stop trying\n' >&2
+printf 'red-dev: a session that will not resurrect can be dropped with: zellij delete-session %s\n' "$_red_zellij_session" >&2
 unset -f _red_zellij_launch 2>/dev/null
-unset _red_zellij_status _red_zellij_log _red_zellij_dir _red_zellij_last \
-  _red_zellij_sessions _red_zellij_preferred _red_zellij_candidates \
-  _red_zellij_session
+unset _red_zellij_status _red_zellij_log _red_zellij_dir _red_zellij_session

@@ -191,8 +191,10 @@ unlocks, every binding returns to locked, and `Alt` plus arrows or `hjkl` moves
 between panes without leaving it.
 
 The clipboard is one behaviour reached three ways. On a real Linux desktop
-zellij's copy command targets `wl-copy`, so `wl-clipboard` is a declared
-`desktop` dependency rather than a tool you are assumed to already have. WSL and
+zellij's copy command is a small bridge that picks `wl-copy` under Wayland and
+`xclip` under X11 at the moment of the copy, because the session type is decided
+at login rather than at install; `wl-clipboard` and `xclip` are declared
+`desktop` dependencies rather than tools you are assumed to already have. WSL and
 native Windows cross to the Windows clipboard instead, and there text stays
 Unicode: zellij sends UTF-8, and red-dev's low-latency bridge converts it to
 BOM-less UTF-16LE before `clip.exe` reads it. That avoids both `clip.exe`'s

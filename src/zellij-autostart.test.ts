@@ -163,85 +163,49 @@ describe("zellij autostart", () => {
     expect(run({}, true).out).toContain("STUB RED_IN_ZELLIJ=1");
   });
 
-  describe("resumes the last valid session", () => {
-    test("keeps the terminal on stdin while reading session candidates", () => {
-      const r = run({
-        STUB_SESSIONS: "live [Created 2h ago]",
-      }, true);
-
-      expect(r.out).toContain("ATTACH=live CREATE=0 STDIN_TTY=1");
+  describe("always opens the default session", () => {
+    test("named after the machine, created if it does not exist", () => {
+      const r = run({ HOSTNAME: "workstation-7" }, true);
+      expect(r.out).toContain("STUB RED_IN_ZELLIJ=1 ATTACH=workstation-7 CREATE=1 STDIN_TTY=1");
+      expect(r.fellThrough).toBe(true);
     });
 
-    test("prefers the newest live session over serialized exited sessions", () => {
-      const r = run({
-        STUB_SESSIONS:
-          "newer-exited [Created 1m ago] (EXITED - attach to resurrect)\n" +
-          "live session [Created 2h ago]",
-      }, true);
+    test("RED_ZELLIJ_SESSION from env.sh renames it", () => {
+      const r = run({ HOSTNAME: "workstation-7", RED_ZELLIJ_SESSION: "main" }, true);
+      expect(r.out).toContain("ATTACH=main CREATE=1");
+      expect(r.out).not.toContain("ATTACH=workstation-7");
+    });
 
-      expect(r.out).toContain("STUB RED_IN_ZELLIJ=1 ATTACH=live session");
+    test("ignores other sessions, live or serialized, however new they are", () => {
+      // The rule this replaced attached to the newest live session, so
+      // opening a second session on purpose captured every terminal
+      // window after it. A second session is asked for by name; a new
+      // window is the default.
+      const r = run({
+        HOSTNAME: "workstation-7",
+        STUB_SESSIONS:
+          "scratch [Created 1m ago]\n" +
+          "newer-exited [Created 5m ago] (EXITED - attach to resurrect)",
+      }, true);
+      expect(r.out).toContain("ATTACH=workstation-7 CREATE=1");
+      expect(r.out).not.toContain("ATTACH=scratch");
       expect(r.out).not.toContain("ATTACH=newer-exited");
+    });
+
+    test("keeps the terminal on stdin for the attach", () => {
+      expect(run({ HOSTNAME: "h" }, true).out).toContain("STDIN_TTY=1");
+    });
+
+    test("leaves no session bookkeeping behind", () => {
+      const r = run({ HOSTNAME: "h" }, true);
+      expect(existsSync(`${r.stateHome}/red-dev/zellij/last-session`)).toBe(false);
+    });
+
+    test("names the way out when the default session will not come back", () => {
+      const r = run({ HOSTNAME: "h", STUB_BAD_SESSION: "h" }, true);
       expect(r.fellThrough).toBe(true);
+      expect(r.out).toContain("zellij delete-session h");
     });
-
-    test("resurrects the newest serialized session when none is live", () => {
-      const r = run({
-        STUB_SESSIONS:
-          "latest [Created 1h ago] (EXITED - attach to resurrect)\n" +
-          "older [Created 2h ago] (EXITED - attach to resurrect)",
-      }, true);
-
-      expect(r.out).toContain("STUB RED_IN_ZELLIJ=1 ATTACH=latest");
-      expect(r.out).not.toContain("ATTACH=older");
-    });
-
-    test("skips an invalid saved session and tries the next candidate", () => {
-      const r = run({
-        STUB_SESSIONS:
-          "broken [Created 1h ago] (EXITED - attach to resurrect)\n" +
-          "healthy [Created 2h ago] (EXITED - attach to resurrect)",
-        STUB_BAD_SESSION: "broken",
-      }, true);
-
-      expect(r.out).toContain("STUB RED_IN_ZELLIJ=1 ATTACH=broken");
-      expect(r.out).toContain("STUB RED_IN_ZELLIJ=1 ATTACH=healthy");
-      expect(r.fellThrough).toBe(true);
-    });
-
-    test("starts a stable main session when no saved session is available", () => {
-      const r = run({}, true);
-
-      expect(r.out).toContain("STUB RED_IN_ZELLIJ=1 ATTACH=red-dev-main CREATE=1");
-      expect(readFileSync(`${r.stateHome}/red-dev/zellij/last-session`, "utf8").trim()).toBe(
-        "red-dev-main",
-      );
-    });
-
-    test(
-      "persists the chosen session and prefers it on the next terminal",
-      () => {
-        const stateHome = mkdtempSync(`${tmpdir()}/red-zellij-state-`);
-        const first = run(
-          { STUB_SESSIONS: "judicious-accordion [Created 2h ago]" },
-          true,
-          stateHome,
-        );
-        expect(first.out).toContain("ATTACH=judicious-accordion");
-
-        const second = run(
-          {
-            STUB_SESSIONS:
-              "newer-session [Created 1m ago]\n" +
-              "judicious-accordion [Created 2h ago]",
-          },
-          true,
-          stateHome,
-        );
-        expect(second.out).toContain("ATTACH=judicious-accordion");
-        expect(second.out).not.toContain("ATTACH=newer-session");
-      },
-      15_000,
-    );
   });
 
   test("falls back to a plain shell when zellij cannot start", () => {

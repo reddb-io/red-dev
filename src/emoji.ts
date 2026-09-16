@@ -47,7 +47,7 @@ export { EMOJI, EMOJI_GROUPS } from "./emoji-table.ts";
  * succeeded" is a sentence; `["wl-copy"]` is an implementation detail
  * that happens to be one word long today.
  */
-export type ClipboardTarget = "wayland" | "wsl" | "windows";
+export type ClipboardTarget = "linux" | "wsl" | "windows";
 
 export interface ClipboardRoute {
   target: ClipboardTarget;
@@ -71,7 +71,7 @@ export interface ClipboardRoute {
  * one that has been wrong before.
  */
 const NOTES: Record<ClipboardTarget, string> = {
-  wayland: "wl-copy",
+  linux: "wl-copy under Wayland, xclip under X11 — chosen at the copy",
   wsl: "the Windows clipboard, through iconv to BOM-less UTF-16LE",
   windows: "the Windows clipboard, through PowerShell",
 };
@@ -88,7 +88,7 @@ export function clipboardRoute(p: Platform): ClipboardRoute | null {
   const argv = clipboardArgvFor(p);
   if (!argv) return null;
   const target: ClipboardTarget =
-    p.env === "wsl" ? "wsl" : p.os === "windows" ? "windows" : "wayland";
+    p.env === "wsl" ? "wsl" : p.os === "windows" ? "windows" : "linux";
   return { target, argv, note: NOTES[target] };
 }
 

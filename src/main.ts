@@ -829,7 +829,9 @@ async function cmdInstall(
     // by the time anyone scrolls back — the terminal has to hold the
     // verdict too, or the evidence exists only for as long as the
     // fullscreen did.
-    return await endInstall(outcome.results, outcome.elapsedMs);
+    return await endInstall(outcome.results, outcome.elapsedMs, {
+      ...(entry === "install" ? { pruneFor: p } : {}),
+    });
   }
 
   log.step(summary(p).split("\n")[0] ?? "");
@@ -863,7 +865,10 @@ async function cmdInstall(
 
   report.finish();
 
-  return await endInstall(summaryOf.results, Date.now() - startedAt, { dryRun: inv.dryRun });
+  return await endInstall(summaryOf.results, Date.now() - startedAt, {
+    dryRun: inv.dryRun,
+    ...(entry === "install" ? { pruneFor: p } : {}),
+  });
 }
 
 /**
@@ -887,7 +892,7 @@ async function cmdInstall(
 async function endInstall(
   items: readonly VerdictItem[],
   elapsedMs: number,
-  options: { dryRun?: boolean } = {},
+  options: { dryRun?: boolean; pruneFor?: Platform } = {},
 ): Promise<number> {
   const { completionBanner, convergeVerdict, shortenHome } = await import("./completion.ts");
   const { transcriptPath } = await import("./transcript.ts");
@@ -897,6 +902,28 @@ async function endInstall(
     logPath: shortenHome(transcriptPath(), process.env["HOME"] ?? process.env["USERPROFILE"]),
     ...(options.dryRun === true ? { dryRun: true } : {}),
   });
+
+  // The versions nobody points at any more, before the banner so the
+  // banner stays the last thing on the terminal.
+  //
+  // `install` did not prune, and `update` did only at the end of its own
+  // walk — so a machine that was only ever re-installed, or whose
+  // agents moved through `red-dev agents` and the mise `use -g` behind
+  // it, kept every version it had ever been given: fifteen RedCodes and
+  // 2.9 GB were measured on one. Every install now collects, and under
+  // the same rule as the update's stage: after the converge, never
+  // before it, because mise prunes what no config names and the config
+  // is not final until the converge has had its say. Which is also why
+  // a run with a failed item does not prune — a pin the converge failed
+  // to write would read to mise as a tool nothing requires.
+  //
+  // `update` still prunes through its own stage, so the converge it
+  // runs inside does not ask for this.
+  if (options.pruneFor && options.dryRun !== true && verdict.counts.failed === 0) {
+    const { misePruneSuite } = await import("./providers.ts");
+    await misePruneSuite(options.pruneFor);
+  }
+
   for (const line of completionBanner(verdict, process.stdout.columns ?? 72)) log.plain(line);
 
   // A failed run copies itself. The console this most often ends in

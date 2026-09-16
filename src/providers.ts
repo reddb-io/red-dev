@@ -827,7 +827,7 @@ export function misePruneCommand(mise: string, names: string[]): string[] {
 }
 
 /**
- * Retire the versions the upgrade left behind.
+ * Retire the versions an upgrade or a reinstall left behind.
  *
  * The policy is mise's, deliberately: it already knows which versions
  * no config still names, and a keep-N of our own would be
@@ -835,16 +835,20 @@ export function misePruneCommand(mise: string, names: string[]): string[] {
  * this machine pruned anything before this existed — measured at about
  * a gigabyte of RedSkills alone, one install at a time.
  *
- * A failure is a warning. This is the last thing an update does and the
- * least important of them: a machine that could not collect its old
- * versions is still a machine that updated.
+ * Both `install` and `update` end here, after their converge. A failure
+ * is a warning: this is the last thing either does and the least
+ * important of them, and a machine that could not collect its old
+ * versions is still a machine that converged.
  */
 export async function misePruneSuite(platform: Platform): Promise<void> {
   const mise = Bun.which("mise");
   if (!mise) return;
 
-  const { miseToolNames } = await import("./mise-config.ts");
-  const names = miseToolNames(platform);
+  // Specs rather than aliases: an alias resolves only through the
+  // conf.d fragment, and a prune that names an alias mise cannot resolve
+  // matches nothing and still exits 0. See miseToolSpecs.
+  const { miseToolSpecs } = await import("./mise-config.ts");
+  const names = miseToolSpecs(platform);
   if (names.length === 0) return;
 
   log.step(`mise: pruning unused versions of ${names.length} tools`);

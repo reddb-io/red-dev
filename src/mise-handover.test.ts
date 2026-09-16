@@ -23,7 +23,7 @@ import { join } from "node:path";
 
 import { providerFor, TOOLS } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
-import { miseEntries, miseToolNames } from "./mise-config.ts";
+import { miseEntries, miseToolNames, miseToolSpecs } from "./mise-config.ts";
 import { staleReleaseBinaries } from "./migrations.ts";
 import { runtimeBinDir } from "./red-skills-companions.ts";
 import { locateTool } from "./verify-install.ts";
@@ -174,6 +174,18 @@ describe("upgrading the suite", () => {
   test("uses the name a person types wherever the two disagree", () => {
     expect(miseToolNames(ubuntu)).toContain("tq");
     expect(miseToolNames(ubuntu)).not.toContain("github:reddb-io/toon");
+  });
+
+  test("prunes by spec, which resolves without the conf.d alias", () => {
+    // `mise prune --tools redcode` on a machine whose fragment was never
+    // written matches nothing and exits 0 — fifteen RedCode versions and
+    // 2.9 GB were measured behind a prune that reported success.
+    const specs = miseToolSpecs(ubuntu);
+    expect(specs).toContain("github:reddb-io/redcode");
+    expect(specs).toContain("github:reddb-io/toon");
+    expect(specs).not.toContain("tq");
+    expect(specs).not.toContain("redcode");
+    expect(specs).not.toContain("node");
   });
 
   test("cannot move a pinned tool, because the selector is exact", () => {

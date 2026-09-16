@@ -197,8 +197,8 @@ describe("searching, pinned against a fixture query", () => {
 
 describe("which clipboard each target copies through", () => {
   test("the route per target, all five pinned at once", () => {
-    expect(clipboardRoute(noble)?.target).toBe("wayland");
-    expect(clipboardRoute(resolute)?.target).toBe("wayland");
+    expect(clipboardRoute(noble)?.target).toBe("linux");
+    expect(clipboardRoute(resolute)?.target).toBe("linux");
     expect(clipboardRoute(wsl)?.target).toBe("wsl");
     expect(clipboardRoute(windows)?.target).toBe("windows");
     // Not a fourth route. A server has no display, so it has no
@@ -238,8 +238,10 @@ describe("which clipboard each target copies through", () => {
     expect(decoded).toContain("Text.Encoding]::UTF8.GetString");
   });
 
-  test("a Linux desktop takes wl-copy, which needs no encoding step at all", () => {
-    expect(clipboardRoute(noble)?.argv).toEqual(["wl-copy"]);
+  test("a Linux desktop takes the bridge that picks wl-copy or xclip by session", () => {
+    const argv = clipboardRoute(noble)?.argv;
+    expect(argv?.[0]).toBe("bash");
+    expect(argv?.[1]).toContain("linux-clipboard.sh");
   });
 });
 
@@ -328,7 +330,7 @@ describe("what Enter copies", () => {
         return 0;
       });
     }
-    expect(reached).toEqual(["wl-copy", "bash", "powershell.exe"]);
+    expect(reached).toEqual(["bash", "bash", "powershell.exe"]);
   });
 
   test("a machine with no clipboard says so, and hands over the character anyway", async () => {
