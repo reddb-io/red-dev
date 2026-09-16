@@ -320,6 +320,7 @@ export async function useRuntimes(ids: string[], observer: RuntimeObserver = {})
   for (const id of ids) {
     observer.stepStart?.(id);
     log.step(`mise: ${id}`);
+    log.info(`downloads from ${runtimeSource(id)}`);
     const request = runtimeInstallRequest(id);
     const result = await run(
       [mise, "use", "-g", "--yes", request.id],
@@ -367,6 +368,52 @@ async function miseBin(): Promise<string | null> {
   return Bun.which("mise");
 }
 
+/**
+ * How long mise may say nothing before it is treated as stuck.
+ *
+ * mise draws no progress bar into a pipe, so a 70 MB Go tarball on a
+ * slow link is minutes of silence that are perfectly healthy — and a
+ * download a proxy has black-holed is the same silence forever. Fifteen
+ * minutes tells the two apart at the cost of one wasted quarter-hour on
+ * the worst day; a bookkeeping call (`mise ls`, `mise which`) gets two,
+ * because it has nothing to download. RED_DEV_RUNTIME_SILENCE_MS
+ * overrides both, which is also how the tests reach this.
+ */
+const INSTALL_SILENCE_MS = 15 * 60_000;
+const QUERY_SILENCE_MS = 2 * 60_000;
+
+function silenceLimit(live: boolean): number {
+  const override = Number(process.env["RED_DEV_RUNTIME_SILENCE_MS"] ?? "");
+  if (Number.isFinite(override) && override > 0) return override;
+  return live ? INSTALL_SILENCE_MS : QUERY_SILENCE_MS;
+}
+
+/**
+ * Where a runtime's bytes come from, for the person watching a proxy.
+ *
+ * Named before the download starts rather than after it fails, because
+ * the failure mode this addresses is the one that never fails: a
+ * corporate proxy that accepts the connection and sends nothing back.
+ * The host is the thing to allowlist, and nobody at the terminal can
+ * see it otherwise — mise prints nothing into a pipe until it is done.
+ */
+export function runtimeSource(id: string): string {
+  const name = id.split("@")[0] ?? id;
+  switch (name) {
+    case "node": return "nodejs.org/dist";
+    case "python": return "github.com (astral-sh/python-build-standalone)";
+    case "go": return "go.dev/dl";
+    case "rust": return "static.rust-lang.org (rustup)";
+    case "bun": return "github.com (oven-sh/bun)";
+    case "deno": return "github.com (denoland/deno)";
+    case "java": return "api.adoptium.net";
+    case "ruby": return "cache.ruby-lang.org (ruby-build)";
+    default: return "mise's backend for it — usually github.com";
+  }
+}
+
+const STALLED = "printed nothing for";
+
 async function run(
   cmd: string[],
   extraEnv: Record<string, string> = {},
@@ -378,16 +425,50 @@ async function run(
     stdin: "ignore",
     env: unattendedEnvironment(process.env, extraEnv),
   });
-  const heartbeat = live ? startProcessHeartbeat(cmd) : null;
+  // Every call beats, not only the live installs: `mise ls` on a fresh
+  // machine has been seen taking long enough that a bare row looked
+  // hung, and the heartbeat is the only thing that says otherwise.
+  const heartbeat = startProcessHeartbeat(cmd);
+  const limit = silenceLimit(live);
+  let lastActivity = Date.now();
+  let stalled = false;
+  const activity = (): void => {
+    lastActivity = Date.now();
+    heartbeat.activity();
+  };
+  const watchdog = setInterval(() => {
+    if (Date.now() - lastActivity < limit) return;
+    stalled = true;
+    clearInterval(watchdog);
+    proc.kill("SIGTERM");
+    setTimeout(() => {
+      try {
+        proc.kill("SIGKILL");
+      } catch {
+        // Already gone, which is the point.
+      }
+    }, 5_000).unref?.();
+  }, 1_000);
+  watchdog.unref?.();
   try {
     const [out, err, code] = await Promise.all([
-      readRuntimeOutput(proc.stdout, live, heartbeat?.activity),
-      readRuntimeOutput(proc.stderr, live, heartbeat?.activity),
+      readRuntimeOutput(proc.stdout, live, activity),
+      readRuntimeOutput(proc.stderr, live, activity),
       proc.exited,
     ]);
+    if (stalled) {
+      const minutes = Math.round(limit / 60_000);
+      const stall =
+        `${cmd.slice(0, 2).map((c) => c.split("/").pop()).join(" ")} ${STALLED} ` +
+        `${minutes} min and was stopped — a proxy that accepts the connection and answers ` +
+        `nothing looks exactly like this; export https_proxy and re-run, or check what ` +
+        `the transcript under ~/.local/state/red-dev shows`;
+      return { code: code === 0 ? 124 : code, out, err: `${err}\n${stall}` };
+    }
     return { code, out, err };
   } finally {
-    heartbeat?.stop();
+    clearInterval(watchdog);
+    heartbeat.stop();
   }
 }
 
@@ -454,6 +535,7 @@ export async function installRuntimes(p: Platform): Promise<void> {
       continue;
     }
     log.step(`mise: ${runtime}`);
+    log.info(`downloads from ${runtimeSource(runtime)}`);
     const result = await run(
       [mise, "use", "-g", "--yes", runtime],
       {},

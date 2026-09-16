@@ -83,6 +83,62 @@ await Bun.write(${JSON.stringify(observed)}, "OBSERVED: " + detail);
     );
   });
 
+  test("a mise that says nothing for too long is stopped and named, not waited on forever", async () => {
+    // The shape of a corporate proxy that accepts the connection to
+    // nodejs.org and never answers: mise sits in a download with no
+    // progress bar (none is drawn into a pipe) and no error, and the
+    // converge row behind it read as a hang for as long as anyone
+    // waited. The watchdog turns that into a failure that names the
+    // host.
+    const dir = mkdtempSync(join(tmpdir(), "red-dev-runtime-"));
+    created.push(dir);
+    const fakeMise = join(dir, "mise");
+    writeFileSync(
+      fakeMise,
+      `#!/usr/bin/env bun
+if (Bun.argv[2] === "use") {
+  console.log("mise node@24 downloading");
+  await Bun.sleep(60_000);
+}
+process.exit(0);
+`,
+    );
+    chmodSync(fakeMise, 0o755);
+
+    const harness = join(dir, "harness.ts");
+    const runtimes = join(import.meta.dir, "runtimes.ts");
+    const observed = join(dir, "observed.txt");
+    writeFileSync(
+      harness,
+      `import { useRuntimes } from ${JSON.stringify(runtimes)};
+let detail = "";
+await useRuntimes(["node@24"], {
+  stepEnd: (_id, error) => { detail = error ?? ""; },
+});
+await Bun.write(${JSON.stringify(observed)}, "OBSERVED: " + detail);
+`,
+    );
+
+    const started = Date.now();
+    const result = await runBounded([process.execPath, harness], {
+      timeoutMs: 20_000,
+      env: {
+        ...process.env,
+        PATH: `${dir}:${process.env.PATH ?? ""}`,
+        RED_DEV_RUNTIME_SILENCE_MS: "1500",
+      },
+    });
+
+    expect(result.timedOut).toBe(false);
+    expect(Date.now() - started).toBeLessThan(15_000);
+    // The person was told where the bytes come from before the wait,
+    // and why the wait ended.
+    expect(result.stdout + result.stderr).toContain("nodejs.org");
+    const detail = readFileSync(observed, "utf8");
+    expect(detail).toContain("printed nothing for");
+    expect(detail).toContain("https_proxy");
+  });
+
   test("one runtime failure does not prevent the next selection from running", async () => {
     const dir = mkdtempSync(join(tmpdir(), "red-dev-runtime-"));
     created.push(dir);
