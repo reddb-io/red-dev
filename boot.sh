@@ -30,6 +30,26 @@ esac
 
 command -v curl >/dev/null 2>&1 || fail "curl is required"
 
+# Every network call carries a deadline. Without one, a proxy that
+# black-holes objects.githubusercontent.com — where the release redirect
+# lands — leaves curl waiting on a connect for minutes, and `-s` on top
+# of that meant the only thing on the terminal was "downloading
+# red-dev-linux-x64" and then nothing, for as long as the person cared
+# to wait. Connect within 20s, and give up when the transfer sits under
+# 1 KiB/s for a minute; a corporate link that slow is a link to explain,
+# not to wait on.
+CURL_NET="--connect-timeout 20 --speed-limit 1024 --speed-time 60"
+
+# What a failed download should say. The redirect chain is the part a
+# proxy administrator needs and nobody at the terminal can see.
+download_failed() {
+  printf 'red-dev: download failed: %s\n' "$1" >&2
+  printf 'red-dev: the release redirects github.com -> objects.githubusercontent.com; both must be reachable\n' >&2
+  printf 'red-dev: behind a proxy, export https_proxy before re-running; to see what curl sees:\n' >&2
+  printf '         curl -fSL --connect-timeout 20 -o /dev/null -w "%%{http_code} %%{url_effective}\\n" %s\n' "$1" >&2
+  exit 1
+}
+
 # Channel, the way toon's installer does it. Stable needs no API lookup:
 # GitHub's public /releases/latest/download/<asset> redirect resolves the
 # newest non-prerelease by contract. That matters on a fresh machine,
@@ -55,10 +75,10 @@ if [ "$CHANNEL" = "next" ]; then
   # for an API request and may therefore need GITHUB_TOKEN.
   BODY=$(mktemp)
   if [ -n "${GITHUB_TOKEN:-}" ]; then
-    STATUS=$(curl -sSL -o "$BODY" -w '%{http_code}' \
+    STATUS=$(curl -sSL $CURL_NET -o "$BODY" -w '%{http_code}' \
       -H "Authorization: Bearer $GITHUB_TOKEN" "$API" || echo 000)
   else
-    STATUS=$(curl -sSL -o "$BODY" -w '%{http_code}' "$API" || echo 000)
+    STATUS=$(curl -sSL $CURL_NET -o "$BODY" -w '%{http_code}' "$API" || echo 000)
   fi
 
   case "$STATUS" in
@@ -109,22 +129,26 @@ fi
 # what is this machine, what would change, what has drifted — and none
 # of those are worth installing something to ask.
 if [ "$#" -gt 0 ]; then
-  say "downloading $ASSET (temporary)"
+  say "downloading $ASSET (temporary) from $URL"
   TMP=$(mktemp -d)
   # Clean up on any exit path, including the interrupt that a long
   # command invites.
   trap 'rm -rf "$TMP"' EXIT INT TERM
-  curl -fsSL "$URL" -o "$TMP/red-dev" || fail "download failed"
+  curl -fSL --progress-bar $CURL_NET "$URL" -o "$TMP/red-dev" || download_failed "$URL"
   chmod +x "$TMP/red-dev"
   say "running: red-dev $*"
   "$TMP/red-dev" "$@"
   exit $?
 fi
 
-say "downloading $ASSET"
+# A progress bar rather than silence: the binary is 80-odd MB, and on a
+# slow or filtered link the difference between "downloading" and "hung"
+# is exactly what the bar shows. It goes to stderr, which `curl | sh`
+# leaves on the terminal.
+say "downloading $ASSET from $URL"
 mkdir -p "$BIN_DIR"
 TMP=$(mktemp)
-curl -fsSL "$URL" -o "$TMP" || fail "download failed"
+curl -fSL --progress-bar $CURL_NET "$URL" -o "$TMP" || download_failed "$URL"
 chmod +x "$TMP"
 mv "$TMP" "$BIN"
 say "installed $BIN"
@@ -135,7 +159,7 @@ say "installed $BIN"
 # renderer is the documented fallback.
 if [ "$CHANNEL" = "stable" ]; then
   REDWALL_TMP=$(mktemp)
-  if curl -fsSL "$REDWALL_URL" -o "$REDWALL_TMP" 2>/dev/null && [ -s "$REDWALL_TMP" ]; then
+  if curl -fsSL $CURL_NET "$REDWALL_URL" -o "$REDWALL_TMP" 2>/dev/null && [ -s "$REDWALL_TMP" ]; then
     chmod +x "$REDWALL_TMP"
     mv "$REDWALL_TMP" "$BIN_DIR/redwall"
     say "installed $BIN_DIR/redwall (1.8 MB renderer)"
