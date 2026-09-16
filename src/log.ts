@@ -81,6 +81,27 @@ export function transcribeTo(sink: (line: string) => void): () => void {
   };
 }
 
+let progressSink: ((message: string) => void) | null = null;
+
+/**
+ * Where progress goes while a presentation is drawing a step.
+ *
+ * Progress is the one kind of line that is worthless after the fact: a
+ * "12 MB of 84 MB" printed at the end of the step, beside the outcome,
+ * tells nobody anything, and that is exactly where the line report used
+ * to put it — it held every line of a step until the step closed. A
+ * presentation that can show a line while the step is open installs a
+ * sink here; without one, progress is narration like any other and
+ * follows the same routing.
+ */
+export function progressTo(sink: (message: string) => void): () => void {
+  const previous = progressSink;
+  progressSink = sink;
+  return () => {
+    progressSink = previous;
+  };
+}
+
 const emit = (line: string, sink: (s: string) => void): void => {
   // First, and outside the routing: a line that fails to reach the
   // console must still reach the log, and the reverse.
@@ -112,6 +133,28 @@ export const log = {
    * column the eye can scan.
    */
   info: (msg: string) => emit(`${paint("1;36", "info")} ${msg}`, console.log),
+  /**
+   * Liveness: bytes received, seconds elapsed, a child still running.
+   *
+   * Reaches the transcript like everything else, then the progress
+   * sink when a presentation has one — the line report overwrites the
+   * open row with it — and otherwise the ordinary route, which is what
+   * the fullscreen view and the tests capture.
+   */
+  progress: (msg: string) => {
+    if (!progressSink) {
+      emit(`${paint("1;36", "info")} ${msg}`, console.log);
+      return;
+    }
+    if (transcript) {
+      try {
+        transcript(`info ${msg}`);
+      } catch {
+        // As above: the log must never break the thing being logged.
+      }
+    }
+    progressSink(msg);
+  },
   plain: (msg: string) => emit(msg, console.log),
 };
 

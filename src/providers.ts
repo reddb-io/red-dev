@@ -460,11 +460,20 @@ async function fetchObservedBytes(
   url: string,
   opts: ObservedFetchOptions,
 ): Promise<{ response: Response; body: Uint8Array }> {
+  // Read by the heartbeat, written by the loop below: what has arrived
+  // and what the server said would. An 84 MB binary over a filtered
+  // corporate link used to be "fetch still running — 40s elapsed" every
+  // five seconds, which is true and says nothing; the numbers are what
+  // tell a stalled transfer from a slow one.
+  const started = Date.now();
+  let size = 0;
+  let total: number | null = null;
   const heartbeat = startProcessHeartbeat(
     ["fetch"],
     opts.heartbeatMs,
     true,
     "no response data for",
+    () => (size > 0 ? transferProgress(size, total, Date.now() - started) : null),
   );
   try {
     const response = await (opts.fetcher ?? fetch)(url, {
@@ -473,10 +482,11 @@ async function fetchObservedBytes(
     });
     heartbeat.activity();
     if (!response.body) return { response, body: new Uint8Array() };
+    const length = Number(response.headers.get("content-length") ?? "");
+    if (Number.isFinite(length) && length > 0) total = length;
 
     const reader = response.body.getReader();
     const chunks: Uint8Array[] = [];
-    let size = 0;
     for (;;) {
       const next = await reader.read();
       if (next.done) break;
@@ -494,6 +504,23 @@ async function fetchObservedBytes(
   } finally {
     heartbeat.stop();
   }
+}
+
+/**
+ * One transfer, as a person reads it: received, of how much, how fast. PURE.
+ *
+ * "12.3 MB of 84.4 MB (15%) at 2.1 MB/s", or without a Content-Length
+ * "12.3 MB received at 2.1 MB/s". The rate is the average since the
+ * request started, which is the honest number for the question being
+ * asked — how long is this going to take — rather than the last chunk's.
+ */
+export function transferProgress(received: number, total: number | null, elapsedMs: number): string {
+  const rate = elapsedMs > 0 ? ` at ${formatBytes(Math.round((received * 1000) / elapsedMs))}/s` : "";
+  if (total && total >= received) {
+    const pct = Math.floor((received / total) * 100);
+    return `${formatBytes(received)} of ${formatBytes(total)} (${pct}%)${rate}`;
+  }
+  return `${formatBytes(received)} received${rate}`;
 }
 
 function requestTimedOut(err: unknown): boolean {

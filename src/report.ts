@@ -19,7 +19,7 @@
  * up with exactly the same complete lines.
  */
 
-import { captureStart, captureStop, formatDuration } from "./log.ts";
+import { captureStart, captureStop, formatDuration, progressTo } from "./log.ts";
 
 const useColor = process.stdout.isTTY === true && !process.env["NO_COLOR"];
 const paint = (code: string, s: string): string =>
@@ -105,16 +105,43 @@ export class Reporter {
     // Provider labels run long — a gh: glob can be sixty characters —
     // and letting one wrap destroys the column the eye is scanning.
     const short = provider.length > 30 ? provider.slice(0, 29) + "…" : provider;
-    process.stdout.write(`  ${counter} ${name.padEnd(15)} ${paint("1;90", short.padEnd(30))} `);
+    const header = `  ${counter} ${name.padEnd(15)} ${paint("1;90", short.padEnd(30))} `;
+    process.stdout.write(header);
     this.openLine = true;
     captureStart();
 
+    // Progress is shown while the row is open, not held with the rest.
+    //
+    // Everything else a step says is buffered above and printed under
+    // the outcome, which is the right place for a hash or a version
+    // and the wrong place for "12 MB of 84 MB": by the time that line
+    // is printed the transfer is over. On a terminal the open row is
+    // rewritten in place with the latest beat; in a pipe or CI log,
+    // where a carriage return is noise, each beat gets its own line and
+    // the row is written again with its outcome when it closes.
+    const tty = process.stdout.isTTY === true;
+    let progressed = false;
+    const releaseProgress = progressTo((message) => {
+      progressed = true;
+      if (tty) {
+        process.stdout.write(`\r\x1b[2K${header}${paint("1;90", message)}`);
+      } else {
+        process.stdout.write(`\n          ${message}`);
+      }
+    });
+
     return (outcome: Outcome, detail?: string, remedy?: string) => {
+      releaseProgress();
       const held = captureStop();
       const ms = Date.now() - started;
       // Timing only where it is information: a sub-second skip is
       // noise, a 40-second download answers "why is this slow".
       const time = ms >= 1000 ? paint("1;90", ` ${human(ms)}`) : "";
+      if (progressed) {
+        // The row again, in place of the last beat on a terminal and on
+        // a fresh line after the beats everywhere else.
+        process.stdout.write(tty ? `\r\x1b[2K${header}` : `\n${header}`);
+      }
       process.stdout.write(`${MARK[outcome]}${time}\n`);
       this.openLine = false;
 

@@ -28,16 +28,26 @@ export function startProcessHeartbeat(
   intervalMs = PROCESS_HEARTBEAT_MS,
   tracksOutput = true,
   inactivityLabel = "no output for",
+  /**
+   * What has arrived so far, when the caller can say — a download's
+   * bytes against its Content-Length. Null means nothing yet, and the
+   * beat then says how long it has been silent instead, which is the
+   * question a person asks of a transfer that shows no numbers.
+   */
+  progress: () => string | null = () => null,
 ): ProcessHeartbeat {
   const started = Date.now();
   let lastActivity = started;
   const name = executableName(command);
   const timer = setInterval(() => {
     const now = Date.now();
-    const silence = tracksOutput
-      ? ` · ${inactivityLabel} ${formatDuration(now - lastActivity)}`
-      : "";
-    log.info(`${name} still running — ${formatDuration(now - started)} elapsed${silence}`);
+    const sofar = progress();
+    const detail = sofar
+      ? ` · ${sofar}`
+      : tracksOutput
+        ? ` · ${inactivityLabel} ${formatDuration(now - lastActivity)}`
+        : "";
+    log.progress(`${name} still running — ${formatDuration(now - started)} elapsed${detail}`);
   }, intervalMs);
   timer.unref?.();
 
