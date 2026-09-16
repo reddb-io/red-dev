@@ -18,7 +18,9 @@
     "e2e:rollback-ubuntu24": "bun run scripts/rollback-e2e.ts"
   },
   "devDependencies": {
+    "@bgotink/kdl": "^0.4.0",
     "@types/bun": "latest",
+    "smol-toml": "^1.8.0",
     "typescript": "^5.6.0"
   },
   "dependencies": {

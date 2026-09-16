@@ -1,0 +1,59 @@
+# red-dev — Alacritty.
+#
+# This file is created once and never rewritten, so it is yours to edit.
+# Theme and font live in the imported files, which red-dev regenerates.
+
+[general]
+# general.import, not a bare top-level import: Alacritty deprecated the
+# latter, and every launch prints
+#
+#   [WARN] Config warning: import has been deprecated; use general.import
+#
+# over the terminal before the shell has drawn anything. It still works,
+# which is why it went unnoticed — the file red-dev writes is created
+# once and never rewritten, so an install from before the rename keeps
+# warning until this file is replaced by hand.
+[general]
+import = [
+  'cursor.toml',
+  'font.toml',
+  'keys.toml',
+  'shell.toml',
+]
+
+[window]
+opacity = 0.90
+padding = { x = 8, y = 8 }
+decorations = 'full'
+dynamic_padding = true
+
+[scrolling]
+history = 50000
+
+[selection]
+save_to_clipboard = true
+
+[cursor]
+style = { shape = 'Block', blinking = 'Off' }
+
+# Keybindings shared across every target, so the muscle memory is the
+# same whichever machine you are on.
+[[keyboard.bindings]]
+key = 'N'
+mods = 'Control|Shift'
+action = 'SpawnNewInstance'
+
+[[keyboard.bindings]]
+key = 'Equals'
+mods = 'Control'
+action = 'IncreaseFontSize'
+
+[[keyboard.bindings]]
+key = 'Minus'
+mods = 'Control'
+action = 'DecreaseFontSize'
+
+[[keyboard.bindings]]
+key = 'Key0'
+mods = 'Control'
+action = 'ResetFontSize'
