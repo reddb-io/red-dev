@@ -107,9 +107,9 @@ describe("the zellij pin", () => {
   const zellij = TOOLS.find((t) => t.name === "zellij");
 
   test("is declared at the reddb-io fork build that fixes the OSC leak", () => {
-    // Four segments: 0.44.3 upstream plus the fork's red.N — see
+    // Four segments: 0.46.0 upstream plus the fork's red.N — see
     // parseVersion, which folds the marker into the last segment.
-    expect(zellij?.pinVersion).toBe("0.44.3.2");
+    expect(zellij?.pinVersion).toBe("0.46.0.1");
   });
 
   test("carries the reason and the release condition beside it", () => {
@@ -135,7 +135,7 @@ describe("the zellij pin", () => {
       // `mise upgrade zellij` both miss the fork, and the registry's
       // upstream zellij is what the name would resolve to.
       alias: "zellij",
-      version: "0.44.3-red.2",
+      version: "0.46.0-red.1",
     });
   });
 
@@ -151,7 +151,7 @@ describe("the zellij pin", () => {
   });
 
   test("plan names the version it will resolve", () => {
-    expect(describeProvider(zellij!.u24)).toContain("0.44.3-red.2");
+    expect(describeProvider(zellij!.u24)).toContain("0.46.0-red.1");
   });
 });
 
@@ -179,7 +179,7 @@ describe("every other release provider", () => {
 
     expect([...new Set(pinned)].sort()).toEqual([
       // The fork build, for the OSC-reply leak.
-      "zellij@0.44.3-red.2",
+      "zellij@0.46.0-red.1",
       // The suite crosses a major together, and only when a person says
       // so: a major moves the package-set manifest schema.
       `red-skills-brain@${REDSKILLS_MAJOR}`,

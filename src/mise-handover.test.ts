@@ -190,7 +190,7 @@ describe("upgrading the suite", () => {
 
   test("cannot move a pinned tool, because the selector is exact", () => {
     const zellij = miseEntries(ubuntu).find((e) => e.spec.includes("zellij"));
-    expect(zellij?.version).toBe("0.44.3-red.2");
+    expect(zellij?.version).toBe("0.46.0-red.1");
     expect(zellij?.version).not.toBe("latest");
   });
 });

@@ -743,13 +743,14 @@ export const TOOLS: Tool[] = [
     // answering the terminal's OSC queries without consuming the
     // replies, so they land in the pane as literal text — `11;rgb:...`
     // sprayed across whatever is running. That is zellij-org/zellij#5174;
-    // upstream main carries the fix but has never released it. The fork
-    // is v0.44.3 plus that fix backported (branch red/0.44), which keeps
-    // the 0.44.2+ features an earlier 0.44.1 pin gave up. Its releases
-    // publish binaries only — nothing goes to crates.io.
+    // the fork began as v0.44.3 plus that fix backported, and now tracks
+    // upstream release by release — 0.46.0+red.1 is upstream 0.46.0 with
+    // the fork's own changes on top (OSC 7 working-directory forwarding
+    // among them). Its releases publish binaries only — nothing goes to
+    // crates.io.
     //
     // The pin has four segments because the fork versions as
-    // 0.44.3+red.1 — see parseVersion, which folds the `red.N` marker
+    // 0.46.0+red.1 — see parseVersion, which folds the `red.N` marker
     // into a fourth segment for both the binary and the tag spellings.
     //
     // Lift the fork when an upstream release ships the fix for #5174:
@@ -757,17 +758,17 @@ export const TOOLS: Tool[] = [
     // segment together.
     name: "zellij",
     scope: "core",
-    pinVersion: "0.44.3.2",
+    pinVersion: "0.46.0.1",
     // Pinned through mise rather than by hand. The fork is ours and the
     // registry carries only upstream, so this is the github: backend —
-    // and the version here is the tag, `0.44.3-red.2`, while pinVersion
-    // above is what the binary answers to --version, `0.44.3.2`. They
+    // and the version here is the tag, `0.46.0-red.1`, while pinVersion
+    // above is what the binary answers to --version, `0.46.0.1`. They
     // name the same release in the two vocabularies that ask.
     //
     // A pinned tool is the one case where `mise upgrade` must move
     // nothing, and it moves nothing: the selector is exact, so upgrade
     // resolves it to itself.
-    u24: mise("github:reddb-io/zellij", { alias: "zellij", version: "0.44.3-red.2" }),
+    u24: mise("github:reddb-io/zellij", { alias: "zellij", version: "0.46.0-red.1" }),
     // winget installs upstream's newest — so on Windows the pin is a
     // report rather than a repair: the doctor names the machine as off
     // the pinned version and the swap is manual. The fork's release
