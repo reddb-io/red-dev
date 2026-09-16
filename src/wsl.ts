@@ -905,9 +905,15 @@ const SHIFT_ENTER_ACTION = sendInputAction(NEWLINE_INPUT);
  */
 const ALT_V_ACTION = sendInputAction(IMAGE_PASTE_INPUT);
 
+/** Windows Terminal matches chords case-insensitively and ignores spaces. */
+function chord(keys: unknown): string {
+  return typeof keys === "string" ? keys.toLowerCase().replace(/\s+/g, "") : "";
+}
+
 function hasKey(a: Record<string, unknown>, wanted: string): boolean {
   const keys = a["keys"];
-  return keys === wanted || (Array.isArray(keys) && keys.includes(wanted));
+  const want = chord(wanted);
+  return chord(keys) === want || (Array.isArray(keys) && keys.some((k) => chord(k) === want));
 }
 
 export interface WindowsTerminalAgentActions {
@@ -916,15 +922,35 @@ export interface WindowsTerminalAgentActions {
   readonly conflicts: string[];
 }
 
-/** Merge the two cross-agent gestures while treating any occupied key as user-owned. */
+/**
+ * Merge the two cross-agent gestures while treating any occupied key as user-owned.
+ *
+ * Windows Terminal 1.21 split the file: `actions` carries each command with
+ * an `id`, and a separate `keybindings` array maps `keys` to that `id`. It
+ * rewrites an older settings.json into that shape on its own. Looking only
+ * for `keys` on an action therefore stopped seeing the binding red-dev had
+ * already added — and a key the person had bound — so every converge
+ * appended another copy, one that could take the key from the person's own
+ * binding. Both spellings are asked now.
+ */
 export function mergeWindowsTerminalAgentActions(
   current: Record<string, unknown>[] = [],
+  keybindings: Record<string, unknown>[] = [],
 ): WindowsTerminalAgentActions {
   const actions = [...current];
   const added: string[] = [];
   const conflicts: string[] = [];
   for (const wanted of [SHIFT_ENTER_ACTION, ALT_V_ACTION] as const) {
     const existing = actions.find((action) => hasKey(action, wanted.keys));
+    const bound = existing ? undefined : keybindings.find((b) => hasKey(b, wanted.keys));
+    if (bound) {
+      const id = bound["id"];
+      const target = typeof id === "string" ? actions.find((a) => a["id"] === id) : undefined;
+      if (!target || JSON.stringify(target["command"]) !== JSON.stringify(wanted.command)) {
+        conflicts.push(wanted.keys);
+      }
+      continue;
+    }
     if (!existing) {
       actions.push(wanted);
       added.push(wanted.keys);
@@ -1027,7 +1053,10 @@ export async function configureWindowsTerminal(opts: TerminalOptions): Promise<v
   }
 
   // Agent input gestures, each added only when its key is free.
-  const input = mergeWindowsTerminalAgentActions(settings.actions);
+  const input = mergeWindowsTerminalAgentActions(
+    settings.actions,
+    Array.isArray(settings["keybindings"]) ? (settings["keybindings"] as Record<string, unknown>[]) : [],
+  );
   settings.actions = input.actions;
   const newlineKey = NEWLINE_INPUT.layers.windowsTerminal;
   const pasteKey = IMAGE_PASTE_INPUT.layers.windowsTerminal;

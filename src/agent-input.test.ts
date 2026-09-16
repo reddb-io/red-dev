@@ -79,6 +79,36 @@ describe("Windows Terminal input convergence", () => {
     expect(result.added).toEqual(["shift+enter", "alt+v"]);
   });
 
+  test("sees a binding Windows Terminal 1.21 moved into keybindings", () => {
+    // WT rewrites `{ command, keys }` into an action with an id plus a
+    // separate keybindings entry. The binding red-dev added is still there,
+    // so nothing may be appended again.
+    const actions = [
+      { command: { action: "sendInput", input: "[13;2u" }, id: "User.sendInput.A" },
+      { command: { action: "sendInput", input: "" }, id: "User.sendInput.B" },
+    ];
+    const keybindings = [
+      { id: "User.sendInput.A", keys: "shift+enter" },
+      { id: "User.sendInput.B", keys: "Alt+V" },
+    ];
+    const result = mergeWindowsTerminalAgentActions(actions, keybindings);
+    expect(result.actions).toEqual(actions);
+    expect(result.added).toEqual([]);
+    expect(result.conflicts).toEqual([]);
+  });
+
+  test("leaves a key the person bound in keybindings to them", () => {
+    const actions = [{ command: "newTab", id: "User.newTab" }];
+    const keybindings = [
+      { id: "User.newTab", keys: "shift+enter" },
+      { id: null, keys: "alt+v" },
+    ];
+    const result = mergeWindowsTerminalAgentActions(actions, keybindings);
+    expect(result.actions).toEqual(actions);
+    expect(result.added).toEqual([]);
+    expect(result.conflicts).toEqual(["shift+enter", "alt+v"]);
+  });
+
   test("respects user-owned conflicts for either key", () => {
     const actions = [
       { command: "newTab", keys: "shift+enter" },

@@ -23,6 +23,8 @@ import type { InputBinding } from "./actions/index.ts";
 import { log, RedError } from "./log.ts";
 import type { Platform } from "./platform.ts";
 import { cursorToml } from "./terminal-cursor.ts";
+import { joinLines, splitLines, statements, stringsIn, tomlString } from "./toml-lines.ts";
+import type { TomlLine, TomlStatement } from "./toml-lines.ts";
 import { readWindowsOutput } from "./windows-output.ts";
 
 async function capture(cmd: string[]): Promise<string> {
@@ -248,11 +250,7 @@ async function shellSectionFor(p: Platform): Promise<string> {
     }
     // Start in the distro's home rather than the Windows working
     // directory, which is the slow /mnt/c path.
-    return `
-[terminal.shell]
-program = 'wsl.exe'
-args = ['-d', '${distro}', '--cd', '~']
-`;
+    return wslShellSection(distro);
   }
 
   return gitBashSection();
@@ -268,9 +266,23 @@ function gitBashSection(): string {
     log.warn("Git Bash not found; leaving Alacritty on its default shell");
     return "";
   }
+  return gitBashShellSection(found);
+}
+
+/** Launch a WSL distro, starting in its home rather than the slow /mnt/c. */
+export function wslShellSection(distro: string): string {
   return `
 [terminal.shell]
-program = '${found.replace(/\\/g, "\\\\")}'
+program = 'wsl.exe'
+args = ['-d', ${tomlString(distro)}, '--cd', '~']
+`;
+}
+
+/** Launch Git Bash as a login shell. A literal string keeps the backslashes as written. */
+export function gitBashShellSection(path: string): string {
+  return `
+[terminal.shell]
+program = ${tomlString(path)}
 args = ['--login', '-i']
 `;
 }
@@ -442,26 +454,107 @@ function sameEntries(a: string[], b: string[]): boolean {
   return x.every((v, i) => v === y[i]);
 }
 
-function mainToml(opacity: number, required: string[]): string {
+/** major, minor, patch — as `alacritty --version` reports them. */
+export type AlacrittyVersion = readonly [number, number, number];
+
+/** `alacritty 0.13.2` or `alacritty 0.15.1 (1f7e1bb)`; null for anything else. */
+export function parseAlacrittyVersion(output: string): AlacrittyVersion | null {
+  const m = /alacritty\s+v?(\d+)\.(\d+)(?:\.(\d+))?/i.exec(output);
+  if (!m) return null;
+  return [Number(m[1]), Number(m[2]), Number(m[3] ?? 0)];
+}
+
+/**
+ * Where the import list goes: a top-level `import`, or `import` under `[general]`.
+ *
+ * The two are not interchangeable, and each is wrong on half the machines:
+ *
+ * - Alacritty 0.13 reads only the top-level key. `general` is not a table
+ *   it knows, so `[general] import` is ignored and nothing red-dev
+ *   generates — keys, font, cursor, shell — is loaded. Ubuntu 24.04's apt
+ *   package is 0.13.2.
+ * - Alacritty 0.14 moved the key under `[general]`. It still honours the
+ *   top-level spelling, and prints a deprecation warning over the terminal
+ *   on every launch for it.
+ *
+ * So the installed version decides, and an unknown version gets the
+ * top-level key: a warning on a new Alacritty is a nuisance, an ignored
+ * import on an old one is a terminal with none of its bindings.
+ */
+export type ImportStyle = "top-level" | "general";
+
+export function importStyleFor(version: AlacrittyVersion | null | undefined): ImportStyle {
+  if (!version) return "top-level";
+  const [major, minor] = version;
+  return major > 0 || minor >= 14 ? "general" : "top-level";
+}
+
+async function versionOf(cmd: string): Promise<AlacrittyVersion | null> {
+  try {
+    const proc = Bun.spawn([cmd, "--version"], {
+      stdout: "pipe",
+      stderr: "ignore",
+      stdin: "ignore",
+      timeout: 5_000,
+    });
+    const out = await new Response(proc.stdout).text();
+    if ((await proc.exited) !== 0) return null;
+    return parseAlacrittyVersion(out);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The Alacritty that will read this config, or null when it cannot be asked.
+ *
+ * Under WSL that is the Windows build, reached through interop — the one
+ * in the distro, if any, draws nothing. Only ever `--version`, which
+ * prints and exits without opening a window.
+ */
+export async function installedAlacrittyVersion(p: Platform): Promise<AlacrittyVersion | null> {
+  const candidates: string[] = [];
+  if (p.os === "windows") {
+    candidates.push("alacritty");
+    const programFiles = process.env["ProgramFiles"];
+    if (programFiles) candidates.push(`${programFiles}\\Alacritty\\alacritty.exe`);
+  } else if (p.env === "wsl") {
+    candidates.push("alacritty.exe", "/mnt/c/Program Files/Alacritty/alacritty.exe");
+  } else {
+    candidates.push("alacritty");
+  }
+  for (const c of candidates) {
+    const exists = c.includes("/") || c.includes("\\") ? existsSync(c) : Bun.which(c) !== null;
+    if (!exists) continue;
+    const v = await versionOf(c);
+    if (v) return v;
+  }
+  return null;
+}
+
+function importBlock(required: readonly string[], eol = "\n"): string[] {
+  return ["import = [", ...required.map((i) => `  ${tomlString(i)},`), "]"].map((l) => l + eol);
+}
+
+export function mainToml(opacity: number, required: string[], style: ImportStyle = "top-level"): string {
+  const imports = importBlock(required).join("");
+  const importSection =
+    style === "general"
+      ? `# The files red-dev regenerates. Under [general] because this machine's
+# Alacritty is 0.14 or newer, which warns about a top-level import on every
+# launch; 0.13 would ignore this spelling entirely.
+[general]
+${imports}`
+      : `# The files red-dev regenerates. A top-level import, because the Alacritty
+# red-dev found is older than 0.14 (or could not be asked), and those read
+# only this spelling. 0.14 and newer still honour it, with a warning.
+${imports}`;
   return `# red-dev — Alacritty.
 #
 # This file is created once and never rewritten, so it is yours to edit.
 # Theme and font live in the imported files, which red-dev regenerates.
 
-[general]
-# general.import, not a bare top-level import: Alacritty deprecated the
-# latter, and every launch prints
-#
-#   [WARN] Config warning: import has been deprecated; use general.import
-#
-# over the terminal before the shell has drawn anything. It still works,
-# which is why it went unnoticed — the file red-dev writes is created
-# once and never rewritten, so an install from before the rename keeps
-# warning until this file is replaced by hand.
-import = [
-${required.map((i) => `  '${i}',`).join("\n")}
-]
-
+${importSection}
 [window]
 opacity = ${(opacity / 100).toFixed(2)}
 padding = { x = 8, y = 8 }
@@ -622,9 +715,10 @@ export async function configureAlacritty(opts: AlacrittyOptions): Promise<void> 
   // distro this file can look absent while Windows has one, or the
   // reverse.
   const mainExists = winDir ? await hostFileExists(`${winDir}\\alacritty.toml`) : existsSync(main);
+  const version = await installedAlacrittyVersion(opts.platform);
 
   if (!mainExists) {
-    await put("alacritty.toml", mainToml(opts.opacity, required));
+    await put("alacritty.toml", mainToml(opts.opacity, required, importStyleFor(version)));
     log.ok(`alacritty: config written to ${winDir ?? dir}`);
     if (shared) log.plain(`       cursor, font and keys shared from ${shared.win}`);
     return;
@@ -636,34 +730,46 @@ export async function configureAlacritty(opts: AlacrittyOptions): Promise<void> 
   const current = winDir
     ? await readThroughHost(`${winDir}\\alacritty.toml`)
     : await Bun.file(main).text();
-  const repaired = current === null ? null : repairedImports(current, required);
+  const outcome = current === null ? UNCHANGED : repairAlacrittyToml(current, required, version);
 
-  if (repaired !== null) {
-    await put("alacritty.toml", repaired);
-    log.ok(`alacritty.toml: import block repaired — ${required.length} entries`);
-    if (shared) log.plain(`       cursor, font and keys now read from ${shared.win}`);
-  } else {
-    log.skip(`alacritty.toml exists — cursor, font and keys updated, yours left alone`);
+  switch (outcome.kind) {
+    case "repaired": {
+      const backup = `alacritty.toml.red-dev-backup-${backupStamp()}`;
+      await put(backup, current ?? "");
+      await put("alacritty.toml", outcome.text);
+      log.ok(`alacritty.toml repaired (the previous file is ${backup})`);
+      for (const change of outcome.changes) log.plain(`       ${change}`);
+      if (shared) log.plain(`       cursor, font and keys now read from ${shared.win}`);
+      break;
+    }
+    case "refused":
+      log.warn(`alacritty.toml left as it is: ${outcome.reason}`);
+      break;
+    case "unchanged":
+      log.skip(`alacritty.toml exists — cursor, font and keys updated, yours left alone`);
+      break;
   }
 }
 
+/** 2026-09-16T15-04-05, which sorts and is a legal file name on Windows. */
+function backupStamp(): string {
+  return new Date().toISOString().slice(0, 19).replace(/:/g, "-");
+}
+
 /**
- * Move a top-level `import` under `[general]`.
- *
- * "Written once and never rewritten" is the right policy for a file the
- * user is invited to edit, and it has one cost: a key that upstream
- * renames stays wrong forever. Alacritty deprecated the bare `import`,
- * so every launch printed a warning over the terminal before the shell
- * had drawn anything — on a config red-dev itself had written.
- *
- * The narrowest possible edit: only the import block, only when there is
- * no [general] section already, and only when the block is the shape
- * this file writes. Anything else is the user's and is left alone.
+ * Repair an alacritty.toml on disk: the local-filesystem form of the
+ * converge step, with the same backup beside it.
  */
-export async function migrateImportKey(path: string, required: string[]): Promise<boolean> {
-  const repaired = repairedImports(await Bun.file(path).text(), required);
-  if (repaired === null) return false;
-  await Bun.write(path, repaired);
+export async function migrateImportKey(
+  path: string,
+  required: string[],
+  version?: AlacrittyVersion | null,
+): Promise<boolean> {
+  const current = await Bun.file(path).text();
+  const outcome = repairAlacrittyToml(current, required, version);
+  if (outcome.kind !== "repaired") return false;
+  await Bun.write(`${path}.red-dev-backup-${backupStamp()}`, current);
+  await Bun.write(path, outcome.text);
   return true;
 }
 
@@ -677,37 +783,256 @@ export async function migrateImportKey(path: string, required: string[]): Promis
  * repair never ran on the one target whose config lives on the other
  * side of a boundary, which is the target that needs it most.
  */
-export function repairedImports(text: string, required: string[]): string | null {
-  const block = /(^\s*\[general\]\r?\n(?:[^[]*?))?^(\s*)import = \[\r?\n([^\]]*?)\r?\n\s*\]/m;
-  const m = block.exec(text);
-  if (!m) return null;
+export function repairedImports(
+  text: string,
+  required: string[],
+  version?: AlacrittyVersion | null,
+): string | null {
+  const outcome = repairAlacrittyToml(text, required, version);
+  return outcome.kind === "repaired" ? outcome.text : null;
+}
 
-  const hasGeneral = m[1] !== undefined;
-  const listed = (m[3] ?? "")
-    .split(/\r?\n/)
-    .map((l) => l.trim().replace(/^['"]|['"],?$/g, ""))
-    .filter(Boolean);
+export type AlacrittyRepair =
+  | { readonly kind: "unchanged" }
+  | { readonly kind: "repaired"; readonly text: string; readonly changes: readonly string[] }
+  | { readonly kind: "refused"; readonly reason: string };
 
+const UNCHANGED: AlacrittyRepair = { kind: "unchanged" };
+
+/**
+ * The comment red-dev wrote under `[general]` from 1.0.x until this repair
+ * existed. It explained a key that 0.13 does not read, and its `[WARN]` is
+ * what the old regex took for a table header — so it is removed, by its
+ * exact first and last lines, whenever the file is being repaired anyway.
+ */
+const STALE_COMMENT_FIRST = "# general.import, not a bare top-level import: Alacritty deprecated the";
+const STALE_COMMENT_LAST = "# warning until this file is replaced by hand.";
+
+/**
+ * Bring an existing alacritty.toml's import list up to date, and make it
+ * valid again if red-dev broke it.
+ *
+ * "Written once and never rewritten" is the right policy for a file the
+ * user is invited to edit, and it has a cost: whatever red-dev got wrong in
+ * it stays wrong. It got two things wrong.
+ *
+ * 1. The previous repair looked for a `[general]` above the import with
+ *    `[^[]*?`, and the comment red-dev itself wrote under `[general]`
+ *    contains `[WARN]`. So it concluded there was no table and inserted a
+ *    second `[general]`. Two tables of one name is invalid TOML; Alacritty
+ *    logs `duplicate key 'general' in document root` and falls back to its
+ *    built-in defaults, silently dropping every generated file — which is
+ *    how Shift+Enter came to submit in every agent.
+ * 2. It moved every import under `[general]`, which Alacritty 0.13 does not
+ *    read at all.
+ *
+ * What this touches, and nothing else:
+ *
+ * - every `import` statement (top-level, `general.import`, or under
+ *   `[general]`) collapses into one, in the form the installed version
+ *   reads — or, with the version unknown, the form the file already uses,
+ *   unless the file is broken, in which case the top-level form both read;
+ * - duplicate `[general]` tables merge into the first;
+ * - red-dev's own entries are replaced and the person's are kept.
+ *
+ * A file whose only problem is something else is not rewritten, and a
+ * repair whose result does not parse is refused rather than written.
+ */
+export function repairAlacrittyToml(
+  text: string,
+  required: readonly string[],
+  version?: AlacrittyVersion | null,
+): AlacrittyRepair {
+  const lines = splitLines(text);
+  const stmts = statements(lines);
+  const imports = stmts.filter(isImport);
+  const generals = stmts.filter(
+    (s): s is Extract<TomlStatement, { kind: "header" }> =>
+      s.kind === "header" && !s.array && s.table === "general",
+  );
+  const duplicateGeneral = generals.length > 1;
+  if (imports.length === 0 && !duplicateGeneral) return UNCHANGED;
+
+  const formOf = (s: Extract<TomlStatement, { kind: "assignment" }>): ImportStyle =>
+    s.table === "" && s.key === "import" ? "top-level" : "general";
+  const forms = new Set(imports.map(formOf));
+  const broken = duplicateGeneral || imports.length > 1;
+  const style: ImportStyle = version
+    ? importStyleFor(version)
+    : broken || forms.size !== 1
+      ? "top-level"
+      : [...forms][0]!;
+
+  const listed = [...new Set(imports.flatMap((s) => stringsIn(s.value)))];
   // Ours are replaced; theirs are kept.
   //
-  // Replaced rather than appended, which the previous version did. Once
-  // theme.toml moved into the share, appending the absolute path left
-  // the bare `theme.toml` beside it — two imports of the same file, the
-  // stale local copy still on disk, and the answer depending on which
-  // Alacritty merges last. Ownership is decided by the file name, so a
-  // path that moved is still recognised as the entry it replaces.
-  //
-  // Anything the user added is not ours and survives untouched, which is
-  // the property that makes rewriting safe at all here.
-  const theirs = listed.filter((e) => !isOurs(e));
-  const merged = [...required, ...theirs];
+  // Replaced rather than appended: once theme.toml moved into the share,
+  // appending the absolute path left the bare `theme.toml` beside it — two
+  // imports of the same file and the answer depending on merge order.
+  // Ownership is decided by the file name, so a path that moved is still
+  // recognised as the entry it replaces. Anything the user added is not
+  // ours and survives, which is what makes rewriting safe at all here.
+  const merged = imports.length > 0 ? [...required, ...listed.filter((e) => !isOurs(e))] : [];
 
-  // Compared as a set, not as a sequence. Our four files touch disjoint
-  // keys — colours, font, bindings, shell — so their order decides
-  // nothing, and comparing positionally would rewrite the block on every
+  // Compared as a set, not as a sequence: the four files touch disjoint
+  // keys, so comparing positionally would rewrite the block on every
   // converge just to reorder it.
-  if (hasGeneral && sameEntries(merged, listed)) return null;
+  const settled =
+    !broken &&
+    (imports.length === 0 || (formOf(imports[0]!) === style && sameEntries(merged, listed)));
+  if (settled) return UNCHANGED;
 
-  const rebuilt = `[general]\nimport = [\n${merged.map((i) => `  '${i}',`).join("\n")}\n]`;
-  return text.replace(block, rebuilt);
+  const changes: string[] = [];
+  if (duplicateGeneral) {
+    changes.push(`merged ${generals.length} [general] tables into one — Alacritty rejects the file with a duplicate`);
+  }
+  if (imports.length > 1) changes.push(`collapsed ${imports.length} import lists into one`);
+  if (imports.length > 0 && [...forms].some((f) => f !== style)) {
+    changes.push(
+      style === "top-level"
+        ? `import moved to the top level${version ? ` — Alacritty ${version.join(".")} does not read general.import` : " — the spelling every Alacritty reads"}`
+        : `import moved under [general] — Alacritty ${version?.join(".") ?? ""} warns about the top-level spelling`,
+    );
+  }
+  const added = merged.filter((e) => !listed.includes(e));
+  const dropped = listed.filter((e) => !merged.includes(e));
+  if (added.length) changes.push(`import added: ${added.join(", ")}`);
+  if (dropped.length) changes.push(`import dropped: ${dropped.join(", ")}`);
+
+  const eol = lines.find((l) => l.eol)?.eol ?? "\n";
+  const out = rebuild(lines, stmts, imports, merged, style, eol);
+  if (out.removedStaleComment) changes.push("removed red-dev's outdated general.import comment");
+  if (out.droppedEmptyGeneral) changes.push("removed the [general] table that only held the import");
+
+  let result = joinLines(out.lines);
+  if (!/(\r?\n){3,}/.test(text)) result = result.replace(/(\r?\n){3,}/g, eol + eol);
+  if (!/^\s*\r?\n/.test(text)) result = result.replace(/^(\r?\n)+/, "");
+  if (result === text) return UNCHANGED;
+
+  try {
+    Bun.TOML.parse(result);
+  } catch (err) {
+    return {
+      kind: "refused",
+      reason: `the repaired file would not parse (${(err as Error).message}); fix it by hand`,
+    };
+  }
+  return { kind: "repaired", text: result, changes };
+}
+
+function isImport(s: TomlStatement): s is Extract<TomlStatement, { kind: "assignment" }> {
+  return (
+    s.kind === "assignment" &&
+    ((s.table === "" && (s.key === "import" || s.key === "general.import")) ||
+      (s.table === "general" && s.key === "import"))
+  );
+}
+
+/**
+ * The file reassembled section by section: root first, then each table in
+ * order, with every `[general]` body folded into the first and the import
+ * written once where `style` says.
+ */
+function rebuild(
+  lines: readonly TomlLine[],
+  stmts: readonly TomlStatement[],
+  imports: readonly Extract<TomlStatement, { kind: "assignment" }>[],
+  merged: readonly string[],
+  style: ImportStyle,
+  eol: string,
+): { lines: TomlLine[]; removedStaleComment: boolean; droppedEmptyGeneral: boolean } {
+  const drop = new Set<number>();
+  for (const s of imports) for (let i = s.line; i <= s.end; i += 1) drop.add(i);
+
+  let removedStaleComment = false;
+  for (let i = 0; i < lines.length; i += 1) {
+    if (lines[i]!.text.trim() !== STALE_COMMENT_FIRST) continue;
+    const last = lines.findIndex((l, j) => j > i && j <= i + 15 && l.text.trim() === STALE_COMMENT_LAST);
+    if (last === -1 || !lines.slice(i, last + 1).every((l) => l.text.trim().startsWith("#"))) continue;
+    for (let j = i; j <= last; j += 1) drop.add(j);
+    removedStaleComment = true;
+  }
+
+  // Sections: [start, end) line ranges, the root first.
+  const headers = stmts.filter((s) => s.kind === "header");
+  const sections = [
+    { table: null as string | null, array: false, start: 0, end: headers[0]?.line ?? lines.length },
+    ...headers.map((h, n) => ({
+      table: h.table,
+      array: h.array,
+      start: h.line,
+      end: headers[n + 1]?.line ?? lines.length,
+    })),
+  ];
+  const isGeneral = (s: (typeof sections)[number]): boolean => s.table === "general" && !s.array;
+  const keep = (from: number, to: number): TomlLine[] => {
+    const out: TomlLine[] = [];
+    for (let i = from; i < to; i += 1) if (!drop.has(i)) out.push(lines[i]!);
+    return out;
+  };
+  const withEol = (l: TomlLine): TomlLine => (l.eol ? l : { text: l.text, eol });
+  const block = importBlock(merged, eol).map((l) => ({ text: l.slice(0, -eol.length), eol }));
+  const blank = { text: "", eol };
+  const assigns = (from: number, to: number): boolean =>
+    stmts.some((s) => s.kind === "assignment" && s.line >= from && s.line < to && !drop.has(s.line));
+
+  const generalBodies: TomlLine[] = [];
+  let generalHasKeys = false;
+  for (const s of sections.filter(isGeneral)) {
+    generalBodies.push(...keep(s.start + 1, s.end));
+    generalHasKeys ||= assigns(s.start + 1, s.end);
+  }
+  const firstGeneral = sections.find(isGeneral);
+  const droppedEmptyGeneral = style === "top-level" && firstGeneral !== undefined && !generalHasKeys;
+
+  const out: TomlLine[] = [];
+
+  // The root. A top-level import goes after the root's own keys, or — when
+  // the root is only the file's opening comment — after that comment, but
+  // never between a table and the comment directly above it.
+  const root = keep(sections[0]!.start, sections[0]!.end);
+  if (style === "top-level" && merged.length > 0) {
+    let at = root.length;
+    while (at > 0 && root[at - 1]!.text.trim().startsWith("#")) at -= 1;
+    const before = root.slice(0, at).map(withEol);
+    if (before.length && before[before.length - 1]!.text.trim() !== "") before.push(blank);
+    out.push(...before, ...block, blank, ...root.slice(at));
+  } else {
+    out.push(...root);
+  }
+
+  let generalWritten = false;
+  for (const s of sections.slice(1)) {
+    if (!isGeneral(s)) {
+      if (style === "general" && !firstGeneral && !generalWritten && merged.length > 0) {
+        out.push({ text: "[general]", eol }, ...block, blank);
+        generalWritten = true;
+      }
+      out.push(...keep(s.start, s.end));
+      continue;
+    }
+    if (generalWritten) continue;
+    generalWritten = true;
+    if (droppedEmptyGeneral) {
+      // Its comments stay where they were; only the header goes.
+      out.push(...generalBodies.filter((l) => l.text.trim() !== ""), ...(generalBodies.length ? [blank] : []));
+      continue;
+    }
+    out.push(withEol(lines[s.start]!));
+    if (style === "general" && merged.length > 0) out.push(...block);
+    out.push(...generalBodies);
+  }
+  if (style === "general" && !generalWritten && merged.length > 0) {
+    if (out.length && out[out.length - 1]!.text.trim() !== "") out.push(blank);
+    out.push({ text: "[general]", eol }, ...block);
+  }
+
+  // Whatever now ends the file keeps the original's final terminator, or lack of one.
+  if (out.length) {
+    const last = out[out.length - 1]!;
+    const hadFinal = lines.length === 0 || lines[lines.length - 1]!.eol !== "";
+    out[out.length - 1] = { text: last.text, eol: hadFinal ? last.eol || eol : "" };
+    for (let i = 0; i < out.length - 1; i += 1) out[i] = withEol(out[i]!);
+  }
+  return { lines: out, removedStaleComment, droppedEmptyGeneral };
 }

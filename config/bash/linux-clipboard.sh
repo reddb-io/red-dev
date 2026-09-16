@@ -46,6 +46,6 @@ fi
 if [ -z "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]; then
   printf 'red-dev clipboard: no display in this session (WAYLAND_DISPLAY and DISPLAY are both unset)\n' >&2
 else
-  printf 'red-dev clipboard: no clipboard tool answered (tried wl-copy, xclip, xsel); run `red-dev install core`\n' >&2
+  printf 'red-dev clipboard: no clipboard tool answered (tried wl-copy, xclip, xsel); run "red-dev install core"\n' >&2
 fi
 exit 1
