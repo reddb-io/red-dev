@@ -199,8 +199,8 @@ export const REDSKILLS_SET_RETENTION = 2;
  * published what.
  */
 export const REDSKILLS_RELEASE_IDENTITY =
-  "^https://github\\.com/reddb-io/red-skills/\\.github/workflows/red-publish\\.yml@refs/heads/main$" +
-  "|^https://github\\.com/reddb-io/red-skills/\\.github/workflows/red-publish\\.yml@refs/tags/v[0-9]+\\.[0-9]+\\.[0-9]+$";
+  "^https://github\\.com/reddb-io/(red-skills|redskilled)/\\.github/workflows/red-publish\\.yml@refs/heads/main$" +
+  "|^https://github\\.com/reddb-io/(red-skills|redskilled)/\\.github/workflows/red-publish\\.yml@refs/tags/v[0-9]+\\.[0-9]+\\.[0-9]+$";
 
 /** The OIDC issuer a GitHub Actions identity is minted by. */
 export const GITHUB_OIDC_ISSUER = "https://token.actions.githubusercontent.com";

@@ -38,7 +38,9 @@ command -v curl >/dev/null 2>&1 || fail "curl is required"
 # to wait. Connect within 20s, and give up when the transfer sits under
 # 1 KiB/s for a minute; a corporate link that slow is a link to explain,
 # not to wait on.
-CURL_NET="--connect-timeout 20 --speed-limit 1024 --speed-time 60"
+curl_net() {
+  curl --connect-timeout 20 --speed-limit 1024 --speed-time 60 "$@"
+}
 
 # What a failed download should say. The redirect chain is the part a
 # proxy administrator needs and nobody at the terminal can see.
@@ -75,10 +77,10 @@ if [ "$CHANNEL" = "next" ]; then
   # for an API request and may therefore need GITHUB_TOKEN.
   BODY=$(mktemp)
   if [ -n "${GITHUB_TOKEN:-}" ]; then
-    STATUS=$(curl -sSL $CURL_NET -o "$BODY" -w '%{http_code}' \
+    STATUS=$(curl_net -sSL -o "$BODY" -w '%{http_code}' \
       -H "Authorization: Bearer $GITHUB_TOKEN" "$API" || echo 000)
   else
-    STATUS=$(curl -sSL $CURL_NET -o "$BODY" -w '%{http_code}' "$API" || echo 000)
+    STATUS=$(curl_net -sSL -o "$BODY" -w '%{http_code}' "$API" || echo 000)
   fi
 
   case "$STATUS" in
@@ -134,7 +136,7 @@ if [ "$#" -gt 0 ]; then
   # Clean up on any exit path, including the interrupt that a long
   # command invites.
   trap 'rm -rf "$TMP"' EXIT INT TERM
-  curl -fSL --progress-bar $CURL_NET "$URL" -o "$TMP/red-dev" || download_failed "$URL"
+  curl_net -fSL --progress-bar "$URL" -o "$TMP/red-dev" || download_failed "$URL"
   chmod +x "$TMP/red-dev"
   say "running: red-dev $*"
   "$TMP/red-dev" "$@"
@@ -148,7 +150,7 @@ fi
 say "downloading $ASSET from $URL"
 mkdir -p "$BIN_DIR"
 TMP=$(mktemp)
-curl -fSL --progress-bar $CURL_NET "$URL" -o "$TMP" || download_failed "$URL"
+curl_net -fSL --progress-bar "$URL" -o "$TMP" || download_failed "$URL"
 chmod +x "$TMP"
 mv "$TMP" "$BIN"
 say "installed $BIN"
@@ -159,7 +161,7 @@ say "installed $BIN"
 # renderer is the documented fallback.
 if [ "$CHANNEL" = "stable" ]; then
   REDWALL_TMP=$(mktemp)
-  if curl -fsSL $CURL_NET "$REDWALL_URL" -o "$REDWALL_TMP" 2>/dev/null && [ -s "$REDWALL_TMP" ]; then
+  if curl_net -fsSL "$REDWALL_URL" -o "$REDWALL_TMP" 2>/dev/null && [ -s "$REDWALL_TMP" ]; then
     chmod +x "$REDWALL_TMP"
     mv "$REDWALL_TMP" "$BIN_DIR/redwall"
     say "installed $BIN_DIR/redwall (1.8 MB renderer)"
