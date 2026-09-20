@@ -23,33 +23,31 @@
  *
  * ## Two ways a candidate arrives
  *
- * A **composed** set is what real machines have today: red-dev takes the
- * core and every manifest-declared plugin from mise's installs tree, at
- * the highest version present in *all* of them, and copies them into
- * one self-contained tree with the shape the standalone installer has
- * always produced. Versions that do not agree — a core published minutes
- * before its plugins, a plugin pruned under the core — are a candidate
- * that is refused, and refusing it is the whole point: the four packages
- * were never four things, and a machine that resolves a core at one
- * version and a plugin at another has an identity nothing can vouch for.
- * A composed set is `unsigned`; nothing published signs it yet.
+ * A **composed** set is the compatibility path for historical installs:
+ * red-dev takes the core and every manifest-declared plugin from mise's
+ * installs tree, at the highest version present in *all* of them, and
+ * copies them into one self-contained tree with the shape the standalone
+ * installer has always produced. Versions that do not agree — a core
+ * published minutes before its plugins, a plugin pruned under the core —
+ * are a candidate that is refused, and refusing it is the whole point:
+ * the four packages were never four things, and a machine that resolves
+ * a core at one version and a plugin at another has an identity nothing
+ * can vouch for. A composed set is `unsigned`.
  *
  * A **manifest** set is a directory carrying the `red.package-set.v1`
- * manifest RedSkills publishes with every release, its cosign bundle,
- * the artifacts the manifest declares, and the workstation tree to
- * activate. Today that directory is a fixture or a depot; once
- * reddb-io/red-skills#3977 publishes the complete set and #203 acquires
- * it, it is what every machine resolves. It verifies to `trusted`, and a
- * machine that has resolved a trusted set never accepts an unsigned one
- * again — stripping the manifest must not be a downgrade anybody can
- * perform.
+ * manifest Redskilled publishes with every runtime release, its cosign
+ * bundle, the artifacts the manifest declares, and the workstation tree
+ * to activate. It has been the primary path since v4.5.0. It verifies
+ * to `trusted`, and a machine that has resolved a trusted set never
+ * accepts an unsigned one again — stripping the manifest must not be a
+ * downgrade anybody can perform.
  *
  * ## The contract is theirs, mirrored here exactly
  *
  * The manifest rules below — key order, sorted unique basenames, one
  * source commit for every artifact, the digest over the identity bytes,
  * the canonical encoding — are `scripts/verify-package-set.mjs` in the
- * red-skills repository, transcribed rather than reinterpreted. There is
+ * redskilled repository, transcribed rather than reinterpreted. There is
  * deliberately no field the publisher does not emit: a `targets` list
  * would be rejected by their verifier and sit outside their signature,
  * so a schema this module does not know is refused as incompatible
@@ -144,7 +142,7 @@ export const REDSKILLS_CORE_ALIAS = "red-skills";
 /** How npm nests the core inside the install prefix mise hands it. */
 const CORE_PACKAGE = "@reddb-io/red-skills";
 
-/** The manifest RedSkills publishes beside every release's assets. */
+/** The manifest Redskilled publishes beside every runtime release's assets. */
 export const SET_MANIFEST_NAME = "package-set.manifest.json";
 
 /** Its cosign bundle: signature, certificate and log entry in one file. */
@@ -192,8 +190,9 @@ export const PACKAGE_SET_TARGETS = ["linux-x64", "windows-x64"] as const;
 export const REDSKILLS_SET_RETENTION = 2;
 
 /**
- * Who may sign a package set: the red-skills release workflow, on main
- * or on a version tag. Copied verbatim from the verifier the release
+ * Who may sign a package set: the historical red-skills or current
+ * redskilled release workflow, on main or on a version tag. Copied
+ * verbatim from the verifier the release
  * ships (`scripts/verify-package-set.mjs`), because two spellings of
  * the same identity are two things that can disagree about who
  * published what.
@@ -514,7 +513,7 @@ export type SignatureVerifier = (
 export interface CosignOptions {
   /** The binary. Defaults to `cosign` on PATH — the mise entry puts it there. */
   cosignBin?: string;
-  /** Who may have signed. Defaults to the red-skills release workflow. */
+  /** Who may have signed. Defaults to the two recognized release workflows. */
   identityRegexp?: string;
   issuer?: string;
   /**
@@ -611,7 +610,7 @@ export function cosignVerifier(opts: CosignOptions = {}): SignatureVerifier {
       const detail = `${result.stderr ?? ""}${result.stdout ?? ""}`.trim().split("\n").pop() ?? "";
       return { ok: false, reason: `manifest signature is invalid${detail ? `: ${detail}` : ""}` };
     }
-    return { ok: true, by: "red-skills release workflow (sigstore)" };
+    return { ok: true, by: "RedSkills/Redskilled release workflow (sigstore)" };
   };
 }
 

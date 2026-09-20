@@ -326,6 +326,19 @@ describe("the listing, and the order it puts releases in", () => {
     const out = [`${COMMIT_B}\trefs/tags/3.19.5`, `${COMMIT_B}\trefs/tags/v3.19.5`].join("\n");
     expect(parseRemoteRevisions(out)).toHaveLength(1);
   });
+
+  test("an annotated release resolves to its peeled commit, in either line order", () => {
+    const tagObject = "d".repeat(40);
+    const lines = [
+      `${tagObject}\trefs/tags/v4.5.0`,
+      `${COMMIT_B}\trefs/tags/v4.5.0^{}`,
+    ];
+    for (const out of [lines.join("\n"), lines.reverse().join("\n")]) {
+      expect(parseRemoteRevisions(out)).toEqual([
+        { tag: "v4.5.0", version: "4.5.0", commit: COMMIT_B, prerelease: false },
+      ]);
+    }
+  });
 });
 
 describe("resolution is deterministic, per channel and per pin", () => {
@@ -390,8 +403,8 @@ describe("resolution is deterministic, per channel and per pin", () => {
 // --------------------------------------------------------- mirror and snapshot
 
 describe("one mirror, and one snapshot per commit", () => {
-  test("the argv is the mirror's: --tags --refs to list, --mirror to clone", () => {
-    expect(lsRemoteArgv("u")).toEqual(["git", "ls-remote", "--tags", "--refs", "u"]);
+  test("the argv lists peeled tags and uses a mirror clone", () => {
+    expect(lsRemoteArgv("u")).toEqual(["git", "ls-remote", "--tags", "u"]);
     expect(mirrorCloneArgv("u", "d")).toContain("--mirror");
   });
 

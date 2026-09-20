@@ -371,8 +371,11 @@ searching it returns third-party chat clients that merely speak to Gemini — so
 that one is npm, while T3 Code went the other way, because npm's `t3code-cli` is
 a third-party wrapper and winget's `T3Tools.T3Code` is the publisher's own.
 Picking any CLI agent then offers
-[red-skills](https://github.com/reddb-io/red-skills), which registers its
-marketplace in Claude Code and Codex and generates plugin modules for RedCode.
+[RedSkills](https://github.com/reddb-io/red-skills), the canonical skill and
+marketplace content, which registers its marketplace in Claude Code and Codex
+and generates plugin modules for RedCode. Its runtime, package-set releases and
+unchanged `@reddb-io/red-skills*` npm packages are published by
+[Redskilled](https://github.com/reddb-io/redskilled).
 **The Default agent** is the one installed host red-dev hands work to — a crash
 to diagnose, a launch shortcut, a profile's required host. It is asked
 immediately after the hosts and only when the answer is a real choice: tick one
@@ -396,14 +399,16 @@ one stage of updating the machine: system packages, RedSkills, mise's tools,
 the agents, then the converge.
 
 The RedSkills half of that stage is one staged reconciliation across four
-surfaces — the package set is acquired, the seven coder hosts are wired against
-it, the companions are built out of it, and the exact workstation lock pins
-everything none of them publishes. `mise upgrade red-skills` reaches the same
-walk through its own postinstall, so the two entry points end on one digest
-rather than two implementations that agree until they do not. It is truthful
-rather than falsely transactional: a surface that fails is named and the ones
-that already verified keep what they got, so the retry only re-attempts the
-failure. Two things it will not do. **A running coder session is never
+surfaces — the signed package set is acquired from Redskilled, the seven coder
+hosts are wired against it, the companions are built out of it, and the exact
+workstation lock pins everything none of them publishes. Exact versions before
+4.5.0 remain available from the original RedSkills releases; 4.5.0 and later
+come from Redskilled. `mise upgrade red-skills` keeps its established command
+and reaches the same walk through its own postinstall, so the two entry points
+end on one digest rather than two implementations that agree until they do not.
+It is truthful rather than falsely transactional: a surface that fails is named
+and the ones that already verified keep what they got, so the retry only
+re-attempts the failure. Two things it will not do. **A running coder session is never
 terminated** — the host is reconciled on disk and reported `restart needed`
 until a fresh session opens. And **an active Worker holds the activation**: the
 complete new revision is verified and staged under its own immutable name,
