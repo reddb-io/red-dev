@@ -417,6 +417,15 @@ that Worker is using, and the next update that finds the queue drained activates
 what is already on disk without acquiring it again. `doctor` names every one of
 those states — active, staged, pending, failed, partial, restart needed.
 
+The Redskilled companion is provisioned after its launchers land. On a Linux
+or Windows desktop its signed tray runtime is expanded under
+`~/.red/redskilled/runtime/tray`; no daemon startup reaches npm. Provisioning
+then starts the daemon. On a systemd host it also installs the daemon user
+service and, when the set carries the web bundle, the separate HTTPS dashboard
+service. Those files are recorded as owned companion state, so `red-dev doctor`
+reports deletion, an inactive service, or partial setup as drift instead of
+trusting an old successful receipt.
+
 Every verified activation is recorded as one **complete workstation revision**:
 the package set and the exact lock, named together, with the local depot copy
 the applications were installed from. That record is what makes a rollback one
