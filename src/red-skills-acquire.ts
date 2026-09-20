@@ -107,7 +107,14 @@ import {
 // -------------------------------------------------------------- the source
 
 /** Where RedSkills is published, as `owner/repo`. */
-export const REDSKILLS_REPO = "reddb-io/red-skills";
+export const REDSKILLS_REPO = "reddb-io/redskilled";
+/** Historical exact versions remain in the original release repository. */
+export function redSkillsReleaseRepo(version: string): string {
+  const match = /^v?(\d+)\.(\d+)\.(\d+)(?:-[\w.-]+)?$/.exec(version);
+  if (match && (Number(match[1]) < 4 || (Number(match[1]) === 4 && Number(match[2]) < 5))) return "reddb-io/red-skills";
+  return REDSKILLS_REPO;
+}
+
 
 /** The Git URL the mirror is cloned from. HTTPS, so no key is needed to read it. */
 export const REDSKILLS_GIT_URL = `https://github.com/${REDSKILLS_REPO}.git`;
@@ -769,11 +776,12 @@ export function githubAssetProvider(
   } = {},
 ): AssetProvider {
   const fetcher = opts.fetcher ?? fetch;
-  const repo = opts.repo ?? REDSKILLS_REPO;
+
   const env = opts.env ?? process.env;
   const probe = opts.probe ?? spawnSync;
 
   return async (req) => {
+    const repo = opts.repo ?? redSkillsReleaseRepo(req.tag ?? "");
     if (!req.tag) {
       return {
         kind: "unavailable",
@@ -1073,8 +1081,8 @@ export async function acquireRedSkills(opts: AcquireOptions = {}): Promise<Acqui
   const env = opts.env ?? process.env;
   const home = opts.home ?? homeOf(env);
   const run = opts.run ?? systemRunner;
-  const url = opts.url ?? REDSKILLS_GIT_URL;
   const raw = opts.selector ?? env[CHANNEL_ENV] ?? DEFAULT_CHANNEL;
+  const url = opts.url ?? `https://github.com/${redSkillsReleaseRepo(raw)}.git`;
   // Whether a revision was *asked* for, as against defaulted to. The
   // difference decides what happens on a machine resolving a
   // development checkout: `red-dev red-skills install 3.19.5` is a

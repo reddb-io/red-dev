@@ -31,7 +31,7 @@
 
 import { parsePackageSetManifest, PACKAGE_SET_SCHEMA_V1, PACKAGE_SET_SCHEMA_V2 } from "../src/red-skills-set.ts";
 
-const REPO = "reddb-io/red-skills";
+const REPO = "reddb-io/redskilled";
 const ASSET = "package-set.manifest.json";
 
 function arg(name: string): string | undefined {

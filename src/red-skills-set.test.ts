@@ -1285,8 +1285,8 @@ describe("cosign, the verifier every real machine uses", () => {
     // against the sibling checkout where there is one (a maintainer's
     // machine), and pinned here for everywhere else.
     expect(REDSKILLS_RELEASE_IDENTITY).toBe(
-      "^https://github\\.com/reddb-io/red-skills/\\.github/workflows/red-publish\\.yml@refs/heads/main$" +
-        "|^https://github\\.com/reddb-io/red-skills/\\.github/workflows/red-publish\\.yml@refs/tags/v[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "^https://github\\.com/reddb-io/(red-skills|redskilled)/\\.github/workflows/red-publish\\.yml@refs/heads/main$" +
+        "|^https://github\\.com/reddb-io/(red-skills|redskilled)/\\.github/workflows/red-publish\\.yml@refs/tags/v[0-9]+\\.[0-9]+\\.[0-9]+$",
     );
     const sibling = `${import.meta.dir}/../../red-skills/scripts/verify-package-set.mjs`;
     if (existsSync(sibling)) {
