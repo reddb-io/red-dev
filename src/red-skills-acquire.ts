@@ -55,12 +55,11 @@
  *
  * ## What "unavailable" means, and why it is not a refusal
  *
- * red-skills publishes `red.package-set.v1` over its release assets but
- * does not yet publish the complete workstation tree beside it
- * (reddb-io/red-skills#3977). A release with no package-set manifest is
- * therefore the ordinary state of every machine today, not a fault: it
- * is reported as `unavailable`, the machine keeps the composed set the
- * four npm entries produce, and nothing is logged as refused. Refusals
+ * Historical red-skills releases may not carry a complete package set.
+ * That remains a supported state for exact versions before 4.5.0: it is
+ * reported as `unavailable`, the machine keeps the composed set the four
+ * npm entries produce, and nothing is logged as refused. Redskilled
+ * releases from 4.5.0 onward publish the complete signed set. Refusals
  * are for a set that exists and is wrong.
  */
 
@@ -106,7 +105,7 @@ import {
 
 // -------------------------------------------------------------- the source
 
-/** Where RedSkills is published, as `owner/repo`. */
+/** Where current RedSkills runtime releases are published, as `owner/repo`. */
 export const REDSKILLS_REPO = "reddb-io/redskilled";
 /** Historical exact versions remain in the original release repository. */
 export function redSkillsReleaseRepo(version: string): string {
@@ -199,13 +198,13 @@ export interface RemoteRevision {
 }
 
 /**
- * Parse `git ls-remote --tags --refs`. PURE.
+ * Parse `git ls-remote --tags`. PURE.
  *
- * `--refs` drops the `^{}` peel lines, so every line here is
- * `<sha>\trefs/tags/<tag>` and the sha is the tagged commit for a
- * lightweight tag. An annotated tag without `--refs` would give the tag
- * object's own sha, which is not a commit and would fail to archive —
- * so the flag is part of the contract rather than a tidiness.
+ * A lightweight tag has one line whose sha is its commit. An annotated
+ * tag has that line plus `refs/tags/<tag>^{}`, whose sha is the commit
+ * the tag object peels to. The peeled sha must win regardless of line
+ * order; the unpeeled object cannot be archived and does not match the
+ * source commit signed into the release manifest.
  *
  * Anything that is not a release tag is dropped rather than guessed at:
  * a repository accumulates `nightly`, `latest` and hand-made tags, and
@@ -213,17 +212,29 @@ export interface RemoteRevision {
  * whatever somebody last pushed.
  */
 export function parseRemoteRevisions(out: string): RemoteRevision[] {
-  const seen = new Map<string, RemoteRevision>();
+  const refs = new Map<string, { object?: string; peeled?: string }>();
   for (const line of out.split("\n")) {
     const m = /^([0-9a-f]{40})\s+refs\/tags\/(.+?)\s*$/.exec(line);
     if (!m?.[1] || !m[2]) continue;
-    const tag = m[2];
+    const peeled = m[2].endsWith("^{}");
+    const tag = peeled ? m[2].slice(0, -3) : m[2];
+    const ref = refs.get(tag) ?? {};
+    if (peeled) ref.peeled = m[1];
+    else ref.object = m[1];
+    refs.set(tag, ref);
+  }
+
+  const seen = new Map<string, RemoteRevision>();
+  for (const tag of [...refs.keys()].sort()) {
     const version = EXACT_VERSION.exec(tag)?.[1];
     if (!version) continue;
-    // First writer wins, so a repository carrying both `3.19.5` and
-    // `v3.19.5` resolves deterministically rather than by line order.
+    const ref = refs.get(tag);
+    const commit = ref?.peeled ?? ref?.object;
+    if (!commit) continue;
+    // Sorted tag names make a repository carrying both `3.19.5` and
+    // `v3.19.5` resolve deterministically rather than by wire order.
     if (!seen.has(version)) {
-      seen.set(version, { tag, version, commit: m[1], prerelease: version.includes("-") });
+      seen.set(version, { tag, version, commit, prerelease: version.includes("-") });
     }
   }
   return [...seen.values()].sort((a, b) => compareVersions(a.version, b.version));
@@ -396,7 +407,7 @@ export function redSkillsCandidateDir(home: string, commit: string): string {
 
 /** Exported so the argv can be asserted without a network. PURE. */
 export function lsRemoteArgv(url: string): string[] {
-  return ["git", "ls-remote", "--tags", "--refs", url];
+  return ["git", "ls-remote", "--tags", url];
 }
 
 /** PURE. `--mirror` because nothing works in this clone; it is only fetched from. */
@@ -620,7 +631,7 @@ export function publishSnapshot(
  * npm payloads, which carry no symlinks. Measured on the machine that
  * found it: one symlink in the entire 4.0.1 tree
  * (`packages/worker/AGENTS.md` -> `CLAUDE.md`), and it cost that side
- * every signed set red-skills has ever published.
+ * every signed set the original red-skills repository published.
  *
  * Where a symlink cannot be created, it is written as a regular file
  * holding the path it pointed at — which is exactly what `git clone`
@@ -817,7 +828,7 @@ export function githubAssetProvider(
     if (!manifestUrl) {
       return {
         kind: "unavailable",
-        reason: `release ${req.tag} publishes no ${SET_MANIFEST_NAME} (reddb-io/red-skills#3977)`,
+        reason: `release ${req.tag} publishes no ${SET_MANIFEST_NAME}`,
       };
     }
     const bundleUrl = byName.get(SET_BUNDLE_NAME);

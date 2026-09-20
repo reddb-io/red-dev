@@ -1316,7 +1316,7 @@ describe("cosign, the verifier every real machine uses", () => {
     cpSync(`${FIXTURES}/v3.19.5.manifest.sigstore.json`, join(set, SET_BUNDLE_NAME));
     const verifier = cosignVerifier({ cosignBin: cosign, home });
     const verdict = verifier(join(set, SET_MANIFEST_NAME), join(set, SET_BUNDLE_NAME));
-    expect(verdict).toEqual({ ok: true, by: "red-skills release workflow (sigstore)" });
+    expect(verdict).toEqual({ ok: true, by: "RedSkills/Redskilled release workflow (sigstore)" });
     // Whereas one byte more and it is not that manifest any more.
     writeFileSync(join(set, SET_MANIFEST_NAME), `${readFileSync(join(set, SET_MANIFEST_NAME), "utf8")}\n`);
     const tampered = verifier(join(set, SET_MANIFEST_NAME), join(set, SET_BUNDLE_NAME));

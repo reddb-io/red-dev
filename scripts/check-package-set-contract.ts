@@ -1,5 +1,5 @@
 /**
- * Does this red-dev accept the package set red-skills actually publishes?
+ * Does this red-dev accept the package set Redskilled actually publishes?
  *
  * red-dev does not import the publisher's verifier; it transcribes it
  * (see the note at the top of src/red-skills-set.ts). Two independent
@@ -69,7 +69,7 @@ async function main(): Promise<number> {
 
   const parsed = parsePackageSetManifest(bytes);
   if (!parsed.ok) {
-    console.error(`red-skills ${tag} publishes a package set this red-dev cannot read:`);
+    console.error(`redskilled ${tag} publishes a package set this red-dev cannot read:`);
     console.error(`  ${parsed.reason}`);
     console.error("");
     console.error(`This red-dev reads ${PACKAGE_SET_SCHEMA_V1} and ${PACKAGE_SET_SCHEMA_V2}.`);
@@ -80,7 +80,7 @@ async function main(): Promise<number> {
   }
 
   const m = parsed.manifest;
-  console.log(`ok  red-skills ${tag}: ${m.schema}, ${m.artifacts.length} artifact(s)`);
+  console.log(`ok  redskilled ${tag}: ${m.schema}, ${m.artifacts.length} artifact(s)`);
   if (m.version) console.log(`    version ${m.version}, channel ${m.channel}, targets ${m.targets?.join(", ")}`);
   return 0;
 }

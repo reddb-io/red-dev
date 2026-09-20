@@ -21,20 +21,16 @@
  * *contract* — the names mise calls, the environment it sets, the exit
  * codes it reads — and red-dev owns the work.
  *
- * ## Why the plugin is not yet named `red-skills`
+ * ## Why the plugin is named `red-skills-set`
  *
  * A mise plugin's directory name is the tool name, and `red-skills` is
  * already the alias the generated fragment maps to
- * `npm:@reddb-io/red-skills`. Installing a plugin under that name would
- * put two acquisitions behind one word on every machine that upgrades
- * before red-skills publishes the complete set
- * (reddb-io/red-skills#3977) — and the acquisition here reports
- * `unavailable` until it does, which would leave those machines with no
- * source at all. So the plugin is installed as `red-skills-set`, the
- * four npm entries stay the acquisition ADR 0011 describes, and the
- * `[tools]` entry moves onto the plugin in one line when the complete
- * set is published. Both paths already converge through the same
- * functions, so that line is the whole migration.
+ * `npm:@reddb-io/red-skills`. Those package and command names stayed
+ * stable when publication moved to Redskilled in 4.5.0. Installing a
+ * plugin under the same name would put two acquisitions behind one word,
+ * so the dispatcher remains `red-skills-set`; the four npm entries remain
+ * the compatibility path ADR 0011 describes. Both paths converge through
+ * the same functions and therefore end on one package-set identity.
  */
 
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
