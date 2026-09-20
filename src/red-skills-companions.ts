@@ -175,7 +175,7 @@ export interface CompanionAdapter {
    * written, so the fragment landing on disk is only half of installing
    * it. Answers a reason it could not, or null.
    */
-  settle?: (ctx: CompanionContext) => Promise<string | null>;
+  settle?: (ctx: CompanionContext, run: (cmd: string[]) => Promise<number>) => Promise<string | null>;
   /** The commands that take this companion's own state back out. */
   remove: (ctx: CompanionContext, record: CompanionRecord) => Step[];
 }
@@ -363,6 +363,8 @@ const PUBLISHED_RUNTIME_BUNDLES: Record<string, string> = {
 
 /** The bundle a daemon launcher is worth nothing without. */
 const DAEMON_BUNDLE = "redskilled.bundle.min.mjs";
+const WEB_BUNDLE = "redskilled-web.bundle.min.mjs";
+const TRAY_RUNTIME = "redskilled-tray-runtime.tgz";
 
 /** Where the set's zellij fragment lands, which zellij-layer.ts composes. */
 export { ZELLIJ_COMPANION_FILE } from "./zellij-layer.ts";
@@ -453,11 +455,42 @@ const redskilled: CompanionAdapter = {
     if (version === null || mine.length === 0 || bundle === null) {
       return plan({ version: ctx.setVersion, unavailable: `the package set carries no ${DAEMON_BUNDLE}` });
     }
+    const web = firstPath(...COMPANION_ROOTS.map((root) => join(ctx.source, root, WEB_BUNDLE)));
+    const tray = firstPath(
+      join(ctx.source, "artifacts", TRAY_RUNTIME),
+      ...COMPANION_ROOTS.map((root) => join(ctx.source, root, TRAY_RUNTIME)),
+    );
+    const trayRoot = join(ctx.home, ".red", "redskilled", "runtime", "tray");
+    const systemd = join(ctx.config, "systemd", "user");
+    const installsTray = ctx.platform.caps.gui && ["linux", "windows"].includes(ctx.platform.os) && tray !== null;
+    const trayBinary = ctx.platform.os === "windows" ? "tray_windows_release.exe" : "tray_linux_release";
     return plan({
       version,
+      steps: installsTray
+        ? [must("mkdir", "-p", trayRoot), must("tar", "-xzf", tray, "-C", trayRoot)]
+        : [],
       writes: mine.map(([bin, name]) => launcherFor(ctx.platform, ctx, name, bins[bin] as string)),
-      expect: [{ kind: "path", path: bundle }],
+      expect: [
+        { kind: "path", path: bundle },
+        ...(web === null ? [] : [{ kind: "path" as const, path: web }]),
+        ...(installsTray
+          ? [
+              { kind: "path" as const, path: join(trayRoot, "node_modules", "systray2", "package.json") },
+              { kind: "path" as const, path: join(trayRoot, "node_modules", "systray2", "traybin", trayBinary) },
+            ]
+          : []),
+        ...(web !== null && ctx.platform.caps.systemd
+          ? [
+              { kind: "path" as const, path: join(systemd, "redskilled.service") },
+              { kind: "path" as const, path: join(systemd, "redskilled-web.service") },
+            ]
+          : []),
+      ],
     });
+  },
+  settle: async (ctx, run) => {
+    const launcher = join(ctx.bin, ctx.platform.os === "windows" ? "redskilled.cmd" : "redskilled");
+    return (await run([launcher, "provision"])) === 0 ? null : "redskilled provision failed";
   },
   remove: () => [],
 };
@@ -1042,7 +1075,7 @@ export async function reconcileCompanions(
       continue;
     }
 
-    const settled = adapter.settle ? await adapter.settle(ctx) : null;
+    const settled = adapter.settle ? await adapter.settle(ctx, run) : null;
     if (settled !== null) {
       log.warn(`${adapter.name}: ${settled}`);
       out.push({ companion: adapter.name, status: "failed", reason: settled });
@@ -1263,6 +1296,7 @@ export interface CompanionDoctorRow {
   reload: ReloadState;
   targets?: string[];
   verifiedAt: string;
+  drift?: string;
 }
 
 export interface CompanionDoctorReport {
@@ -1292,6 +1326,8 @@ export function redSkillsCompanionReport(
       unrecorded.push(adapter.name);
       continue;
     }
+    const missing = missingOwned(record.owned);
+    const inactive = inactiveOwnedService(record.owned);
     companions.push({
       companion: adapter.name,
       setDigest: record.setDigest,
@@ -1301,9 +1337,34 @@ export function redSkillsCompanionReport(
       reload: record.reload,
       ...(record.targets ? { targets: record.targets } : {}),
       verifiedAt: record.verifiedAt,
+      ...(missing !== null ? { drift: missing } : inactive !== null ? { drift: inactive } : {}),
     });
   }
   return { companions, unrecorded };
+}
+
+function inactiveOwnedService(owned: readonly OwnedEntry[]): string | null {
+  if (process.platform !== "linux") return null;
+  for (const entry of owned) {
+    if (entry.kind !== "path") continue;
+    const unit = entry.path.endsWith("/redskilled.service")
+      ? "redskilled.service"
+      : entry.path.endsWith("/redskilled-web.service")
+        ? "redskilled-web.service"
+        : null;
+    if (unit === null) continue;
+    const enabled = Bun.spawnSync(["systemctl", "--user", "is-enabled", "--quiet", unit], {
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    if (enabled.exitCode !== 0) return `${unit} is installed but not enabled`;
+    const active = Bun.spawnSync(["systemctl", "--user", "is-active", "--quiet", unit], {
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    if (active.exitCode !== 0) return `${unit} is installed but inactive`;
+  }
+  return null;
 }
 
 export interface CompanionDoctorLine {
@@ -1314,12 +1375,13 @@ export interface CompanionDoctorLine {
 /** The report as the lines doctor prints. */
 export function redSkillsCompanionRows(report: CompanionDoctorReport): CompanionDoctorLine[] {
   const rows: CompanionDoctorLine[] = report.companions.map((row) => ({
-    status: row.reload === "restart-needed" ? "warn" : "ok",
+    status: row.reload === "restart-needed" || row.drift ? "warn" : "ok",
     detail:
       `${row.companion} ${row.version} — from ${row.setVersion} ${row.setDigest.slice(0, 12)}, ` +
       `state ${row.stateDigest.slice(0, 12)}` +
       (row.targets && row.targets.length > 0 ? `, in ${row.targets.join(", ")}` : "") +
-      (row.reload === "restart-needed" ? " — restart needed to load it" : ""),
+      (row.reload === "restart-needed" ? " — restart needed to load it" : "") +
+      (row.drift ? ` — ${row.drift}` : ""),
   }));
   if (report.unrecorded.length > 0) {
     rows.push({ status: "n/a", detail: `no observed record yet: ${report.unrecorded.join(", ")}` });
