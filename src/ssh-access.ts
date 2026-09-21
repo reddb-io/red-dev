@@ -45,13 +45,14 @@
  *
  * The fullscreen menu hosts the interview too, and its answers are
  * applied inside a live frame where a blocking prompt would draw over
- * the interface. So the question is not asked there; `red-dev ssh` is,
- * and the converge names it.
+ * the interface. It therefore selects an account on its own SSH page;
+ * that selection is the confirmation passed to the same writer below.
  */
 
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { log, RedError } from "./log.ts";
 import type { Platform } from "./platform.ts";
+import { readPreferences, writePreferences } from "./preferences.ts";
 import { linuxUnit, windowsSshRevertScript } from "./ssh-server.ts";
 import { unattendedEnvironment } from "./unattended.ts";
 import type { Removal } from "./uninstall.ts";
@@ -97,6 +98,42 @@ export const BLOCK_END = "# end red-dev";
 export function githubKeysUrl(user: string): string {
   if (!USERNAME.test(user)) throw new RedError(`'${user}' is not a GitHub username`);
   return `https://github.com/${user}.keys`;
+}
+
+/**
+ * GitHub identity available before the setup converge begins.
+ *
+ * A recorded choice wins. Otherwise the authenticated gh account is a
+ * trustworthy default; the local OS username is deliberately ignored.
+ */
+export async function detectGithubUser(
+  p: Platform,
+  deps: {
+    run?: (cmd: string[]) => Promise<{ ok: boolean; out: string }>;
+    recorded?: () => Promise<string | undefined>;
+  } = {},
+): Promise<string | null> {
+  const loadRecorded = deps.recorded ?? (async () => (await readPreferences(p)).sshGithubUser);
+  const recorded = (await loadRecorded())?.trim();
+  if (recorded) {
+    try {
+      githubKeysUrl(recorded);
+      return recorded;
+    } catch {
+      // Ignore a hand-edited invalid preference and try gh below.
+    }
+  }
+
+  const execute = deps.run ?? spawn;
+  const result = await execute(["gh", "api", "user", "--jq", ".login"]);
+  const user = result.out.trim().split(/\r?\n/, 1)[0] ?? "";
+  if (!result.ok || !user) return null;
+  try {
+    githubKeysUrl(user);
+    return user;
+  } catch {
+    return null;
+  }
 }
 
 /** Every key line in a blob of authorized_keys text. PURE. */
@@ -378,6 +415,13 @@ export async function offerGithubKeys(
     // typed with a missing letter is not a reason to stop it.
     log.warn(`ssh keys: ${(err as Error).message}`);
     return null;
+  }
+}
+
+/** Record a successful explicit authorization for the next setup. */
+export async function rememberGithubUser(p: Platform, result: Authorized): Promise<void> {
+  if (result.status === "written" || result.status === "unchanged") {
+    await writePreferences(p, { sshGithubUser: result.user });
   }
 }
 

@@ -32,6 +32,7 @@ export interface FirstRunChoices {
   runtimes: string[];
   /** Agent keys chosen, when the fullscreen setup ran. */
   agents?: string[];
+  sshGithubUser?: string;
   blesh: boolean;
 }
 
@@ -73,6 +74,7 @@ export function preferencesFromAnswers(answers: SetupAnswers): Preferences {
     blesh: answers.blesh,
     redwall: answers.redwall,
     agents: answers.agents,
+    ...(answers.sshGithubUser ? { sshGithubUser: answers.sshGithubUser } : {}),
     runtimes: answers.runtimes,
     // Conditional like the Default agent below: an interview that never
     // asked — no host that takes skills was picked — must leave a
@@ -206,10 +208,34 @@ export async function buildSetupSteps(p: Platform, wslTuningFacts?: WslTuningFac
  */
 export async function setupFacts(p: Platform): Promise<SetupFacts> {
   const { currentWallpaperLabel } = await import("./wallpaper.ts");
+  const { detectGithubUser } = await import("./ssh-access.ts");
+  const [wallpaper, githubUser] = await Promise.all([
+    currentWallpaperLabel(p).catch(() => null),
+    detectGithubUser(p).catch(() => null),
+  ]);
+  return { currentWallpaper: wallpaper, githubUser };
+}
+
+/** Apply the explicit SSH choice made in either setup interface. */
+export async function applySetupSshAccess(
+  p: Platform,
+  answers: Pick<SetupAnswers, "sshGithubUser">,
+): Promise<void> {
+  if (!answers.sshGithubUser) return;
+  const { authorizeGithubKeys, reportAuthorization } = await import("./ssh-access.ts");
   try {
-    return { currentWallpaper: await currentWallpaperLabel(p) };
-  } catch {
-    return { currentWallpaper: null };
+    const result = await authorizeGithubKeys(answers.sshGithubUser, {
+      // Selecting the account on the SSH page is the confirmation. A
+      // second prompt would be invisible behind the fullscreen renderer.
+      confirm: async () => true,
+    });
+    reportAuthorization(p, result);
+  } catch (err) {
+    // SSH access must not strand the rest of a first installation when
+    // GitHub is temporarily unavailable. The selected account remains
+    // recorded and the explicit command can retry it.
+    log.warn(`ssh keys: ${(err as Error).message}`);
+    log.plain(`       retry with: red-dev ssh ${answers.sshGithubUser} --yes`);
   }
 }
 
@@ -275,6 +301,7 @@ export async function applySetupAnswers(
   }
 
   await writePreferences(p, preferencesFromAnswers(answers));
+  await applySetupSshAccess(p, answers);
   await writeShellEnv(p, answers.blesh);
   await carryOutChoices(p, {
     agents: answers.agents,
@@ -473,6 +500,7 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
     }
 
     await writePreferences(p, preferencesFromAnswers(answers));
+    await applySetupSshAccess(p, answers);
 
     return {
       theme: answers.theme,
@@ -481,6 +509,7 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
       apps: answers.apps,
       runtimes: answers.runtimes,
       agents: answers.agents,
+      sshGithubUser: answers.sshGithubUser,
       blesh: answers.blesh,
     };
   }
@@ -692,6 +721,12 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
       ? { distro: process.env["WSL_DISTRO_NAME"] }
       : {}),
   });
+
+  // The compact linear fallback cannot render the SSH selection page,
+  // so it asks here. This remains outside every converge path.
+  const { offerGithubKeys, rememberGithubUser } = await import("./ssh-access.ts");
+  const authorized = await offerGithubKeys(p);
+  if (authorized) await rememberGithubUser(p, authorized);
 
   log.plain("");
   return choices;

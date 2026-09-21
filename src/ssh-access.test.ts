@@ -25,6 +25,7 @@ import {
   BLOCK_END,
   authorizeGithubKeys,
   authorizedKeysPath,
+  detectGithubUser,
   fetchGithubKeys,
   fingerprint,
   githubKeysUrl,
@@ -95,6 +96,27 @@ function platform(over: Partial<Platform> = {}): Platform {
 }
 
 describe("the keys are fetched for a username and shown", () => {
+  test("setup prefers a recorded account, then the authenticated gh account", async () => {
+    const ran: string[][] = [];
+    expect(await detectGithubUser(platform(), {
+      recorded: async () => "remembered-user",
+      run: async (cmd) => {
+        ran.push(cmd);
+        return { ok: true, out: "other-user\n" };
+      },
+    })).toBe("remembered-user");
+    expect(ran).toEqual([]);
+
+    expect(await detectGithubUser(platform(), {
+      recorded: async () => undefined,
+      run: async (cmd) => {
+        ran.push(cmd);
+        return { ok: true, out: "authenticated-user\n" };
+      },
+    })).toBe("authenticated-user");
+    expect(ran.at(-1)).toEqual(["gh", "api", "user", "--jq", ".login"]);
+  });
+
   test("from the address GitHub publishes them at, and nowhere else", () => {
     expect(githubKeysUrl("octocat")).toBe("https://github.com/octocat.keys");
     // The username lands in a URL, so it is checked against GitHub's own
@@ -309,17 +331,19 @@ describe("the question never appears in the non-interactive install path", () =>
     }
   });
 
-  test("and install asks only inside its first-run branch", () => {
-    const main = readFileSync("src/main.ts", "utf8");
-    const guard = main.indexOf("if (!inv.dryRun && !inv.yes && !inv.scope) {");
-    const ask = main.indexOf("offerGithubKeys(p)");
-    const converging = main.indexOf("// Repairs before converging");
-    expect(guard).toBeGreaterThan(-1);
-    // Between the gate and the converge: `--yes`, `--dry-run`, a scope
-    // argument and a machine already set up all skip it, and the
-    // converge below it never sees a prompt.
-    expect(ask).toBeGreaterThan(guard);
-    expect(ask).toBeLessThan(converging);
+  test("and both setup interfaces apply the selected account before convergence", () => {
+    const firstRun = readFileSync("src/firstrun.ts", "utf8");
+    const apply = firstRun.indexOf("export async function applySetupAnswers(");
+    const authorize = firstRun.indexOf("await applySetupSshAccess(p, answers);", apply);
+    const choices = firstRun.indexOf("await carryOutChoices(", apply);
+    expect(apply).toBeGreaterThan(-1);
+    expect(authorize).toBeGreaterThan(apply);
+    expect(authorize).toBeLessThan(choices);
+
+    // The narrow-terminal fallback asks explicitly in askFirstRun; no
+    // authorization prompt lives in the converge or provider layers.
+    const linear = firstRun.indexOf("offerGithubKeys, rememberGithubUser");
+    expect(linear).toBeGreaterThan(firstRun.indexOf("export async function askFirstRun"));
   });
 
   test("the explicit command is the other way in", () => {

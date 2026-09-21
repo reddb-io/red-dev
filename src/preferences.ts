@@ -23,6 +23,8 @@ import { isThemeSlug, resolveThemeSlug, type ThemeSlug } from "./themes.ts";
 export type TerminalShell = "wsl" | "gitbash";
 
 export interface Preferences {
+  /** GitHub account whose published public keys may enter this machine over SSH. */
+  sshGithubUser?: string;
   /** Which shell Alacritty launches on a Windows host. */
   terminalShell?: TerminalShell;
   /** WSL distro to open, when terminalShell is "wsl". */

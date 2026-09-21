@@ -59,6 +59,8 @@ export interface SetupAnswers {
   apps: string[];
   runtimes: string[];
   agents: string[];
+  /** GitHub account explicitly selected for SSH access during setup. */
+  sshGithubUser?: string;
   /**
    * The RedSkills plugins the agent hosts switch on — see
    * src/red-skills-plugins.ts. Absent when the interview never asked.
@@ -110,6 +112,8 @@ export interface Question {
   description: string;
   multi: boolean;
   choices: Choice[];
+  /** A free-form answer kept in the same one-value slot as a single choice. */
+  textInput?: { placeholder: string };
   /**
    * Choices that depend on an earlier answer, used instead of `choices`
    * when present — the Default agent is one of the hosts the Agents
@@ -183,6 +187,8 @@ export interface SetupFacts {
    * could not read, or one already showing red-dev's own art.
    */
   currentWallpaper?: string | null;
+  /** Authenticated or previously selected GitHub account, when one can be identified. */
+  githubUser?: string | null;
 }
 
 /** The wallpaper answer that keeps the desktop's own image. */
@@ -334,6 +340,20 @@ export function questions(
       // Hidden when no agent host was picked, so there is nowhere to
       // install a plugin and nothing for this page to decide.
       available: (picked) => redSkillsHostKeys(picked("agents")).length > 0,
+    },
+    {
+      id: "ssh",
+      title: "SSH access",
+      description: facts.githubUser
+        ? "Authorize this GitHub account's published SSH keys for this machine. Edit the " +
+          "username if another account should enter; leave it blank to configure later."
+        : "Enter the GitHub account whose published SSH keys may enter this machine. " +
+          "Leave it blank to configure later with `red-dev ssh <github-user> --yes`.",
+      multi: false,
+      choices: [],
+      textInput: { placeholder: "github-user" },
+      preset: facts.githubUser ? [facts.githubUser] : [],
+      applies: () => true,
     },
     {
       id: "runtimes",
@@ -531,6 +551,8 @@ interface SetupKey {
   rightArrow?: boolean;
   escape?: boolean;
   return?: boolean;
+  backspace?: boolean;
+  delete?: boolean;
 }
 
 export function useSetupModel(steps: Question[], wizard: ReturnType<typeof createWizard>): SetupModel {
@@ -583,6 +605,7 @@ export function useSetupModel(steps: Question[], wizard: ReturnType<typeof creat
         apps: selectedSetupApps(steps, get),
         runtimes: get("runtimes"),
         agents: get("agents"),
+        ...(get("ssh")[0] ? { sshGithubUser: get("ssh")[0] } : {}),
         redSkillsPlugins: get("redskills"),
         ...(defaultAgent ? { defaultAgent } : {}),
         blesh: get("plugins").includes("blesh"),
@@ -596,6 +619,18 @@ export function useSetupModel(steps: Question[], wizard: ReturnType<typeof creat
       const q = step();
       const options = choices();
       const max = options.length - 1;
+
+      if (q.textInput && !key.return && !key.escape) {
+        const current = selection()[0] ?? "";
+        if (key.backspace || key.delete || input === "\x7f") {
+          const shortened = current.slice(0, -1);
+          setPicked({ ...picked(), [q.id]: shortened ? [shortened] : [] });
+          return "handled";
+        }
+        const typed = input.replace(/[^A-Za-z0-9-]/g, "").slice(0, 39 - current.length);
+        if (typed) setPicked({ ...picked(), [q.id]: [`${current}${typed}`] });
+        return "handled";
+      }
 
       if (key.upArrow || input === "k") {
         setCursor(Math.max(0, cursor() - 1));
@@ -650,7 +685,7 @@ export function useSetupModel(steps: Question[], wizard: ReturnType<typeof creat
         for (let i = from; i < next; i++) wizard.next();
         return "handled";
       }
-      if ((key.leftArrow && q.id !== "runtimes") || key.escape) {
+      if ((key.leftArrow && q.id !== "runtimes" && !q.textInput) || key.escape) {
         const from = stepIndex();
         const back = adjacent(from, -1, picked());
         if (back !== null) {
@@ -660,7 +695,7 @@ export function useSetupModel(steps: Question[], wizard: ReturnType<typeof creat
         }
         return "handled";
       }
-      if (input === "q") return "quit";
+      if (input === "q" && !q.textInput) return "quit";
       return "handled";
     },
   };
@@ -701,6 +736,7 @@ export function SetupLayout(m: SetupModel, p: Platform, width: number, height: n
   const isTheme = q.id === "theme";
   const isRuntimes = q.id === "runtimes";
   const isWslTuning = q.id === "wsl-tuning";
+  const isTextInput = q.textInput !== undefined;
   const options = stepChoices(q, m.pickedFor);
   const activeKey = options[m.cursor()]?.key ?? "";
   // A step the answers have ruled out is not a step someone is going to
@@ -766,7 +802,20 @@ export function SetupLayout(m: SetupModel, p: Platform, width: number, height: n
           Text({}, ""),
           Text({ color: muted }, q.description),
           Text({}, ""),
-          ...(isWslTuning
+          ...(isTextInput
+            ? [
+                Text(
+                  { color: ui.accent, bold: true },
+                  `GitHub username  ${m.selection()[0] ?? ""}`,
+                ),
+                Text(
+                  { color: muted },
+                  m.selection()[0]
+                    ? "Every public key published by this account will be authorized."
+                    : `Blank — configure later; example: ${q.textInput!.placeholder}`,
+                ),
+              ]
+            : isWslTuning
             ? options.map((c, i) =>
                 Text(
                   { ...(i === m.cursor() ? { color: ui.accent } : {}) },
@@ -808,16 +857,22 @@ export function SetupLayout(m: SetupModel, p: Platform, width: number, height: n
       { marginTop: 1 },
       HintBar({
         hints: [
-          { shortcut: "up/down", action: "move" },
+          ...(isTextInput
+            ? [{ shortcut: "type", action: "GitHub username" }]
+            : [{ shortcut: "up/down", action: "move" }]),
           ...(stepHasChoices(q) ? [{ shortcut: "space", action: "toggle" }] : []),
           ...(isRuntimes ? [{ shortcut: "left/right", action: "version" }] : []),
           {
             shortcut: "enter",
             action: position === timeline.length - 1 ? "install" : "next",
           },
-          ...(m.stepIndex() > 0 && !isRuntimes ? [{ shortcut: "left", action: "back" }] : []),
-          ...(m.stepIndex() > 0 && isRuntimes ? [{ shortcut: "esc", action: "back" }] : []),
-          { shortcut: "q", action: "skip" },
+          ...(m.stepIndex() > 0 && !isRuntimes && !isTextInput
+            ? [{ shortcut: "left", action: "back" }]
+            : []),
+          ...(m.stepIndex() > 0 && (isRuntimes || isTextInput)
+            ? [{ shortcut: "esc", action: "back" }]
+            : []),
+          ...(!isTextInput ? [{ shortcut: "q", action: "skip" }] : []),
         ],
       }),
     ),
