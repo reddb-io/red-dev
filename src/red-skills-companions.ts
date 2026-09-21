@@ -50,7 +50,7 @@
  * red-dev never writes twice.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
 import { log } from "./log.ts";
@@ -466,9 +466,7 @@ const redskilled: CompanionAdapter = {
     const trayBinary = ctx.platform.os === "windows" ? "tray_windows_release.exe" : "tray_linux_release";
     return plan({
       version,
-      steps: installsTray
-        ? [must("mkdir", "-p", trayRoot), must("tar", "-xzf", tray, "-C", trayRoot)]
-        : [],
+      steps: [],
       writes: mine.map(([bin, name]) => launcherFor(ctx.platform, ctx, name, bins[bin] as string)),
       expect: [
         { kind: "path", path: bundle },
@@ -489,6 +487,32 @@ const redskilled: CompanionAdapter = {
     });
   },
   settle: async (ctx, run) => {
+    const tray = firstPath(
+      join(ctx.source, "artifacts", TRAY_RUNTIME),
+      ...COMPANION_ROOTS.map((root) => join(ctx.source, root, TRAY_RUNTIME)),
+    );
+    const installsTray = ctx.platform.caps.gui && ["linux", "windows"].includes(ctx.platform.os) && tray !== null;
+    if (installsTray && tray !== null) {
+      const trayRoot = join(ctx.home, ".red", "redskilled", "runtime", "tray");
+      const staging = `${trayRoot}.staging-${process.pid}`;
+      const previous = `${trayRoot}.previous-${process.pid}`;
+      rmSync(staging, { recursive: true, force: true });
+      rmSync(previous, { recursive: true, force: true });
+      mkdirSync(staging, { recursive: true });
+      if ((await run(["tar", "-xzf", tray, "-C", staging])) !== 0) {
+        rmSync(staging, { recursive: true, force: true });
+        return `could not expand ${TRAY_RUNTIME}`;
+      }
+      try {
+        if (existsSync(trayRoot)) renameSync(trayRoot, previous);
+        renameSync(staging, trayRoot);
+        rmSync(previous, { recursive: true, force: true });
+      } catch (error) {
+        if (!existsSync(trayRoot) && existsSync(previous)) renameSync(previous, trayRoot);
+        rmSync(staging, { recursive: true, force: true });
+        return `could not replace the tray runtime: ${error instanceof Error ? error.message : String(error)}`;
+      }
+    }
     const launcher = join(ctx.bin, ctx.platform.os === "windows" ? "redskilled.cmd" : "redskilled");
     return (await run([launcher, "provision"])) === 0 ? null : "redskilled provision failed";
   },

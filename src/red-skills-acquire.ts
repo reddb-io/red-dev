@@ -973,6 +973,24 @@ export function overlaysIntoTree(name: string): boolean {
   return name.endsWith(".bundle.min.mjs") || name.endsWith(".asset.cjs");
 }
 
+/**
+ * Archives that materialise the installable workstation tree.
+ *
+ * Redskilled releases these beside the runtime bundles so the release remains
+ * self-contained after the repository split. The git snapshot supplies the
+ * compatibility shell and documentation; these archives supply the generated
+ * marketplace manifests and the pinned RedSkills content.
+ */
+export function archiveOverlaysIntoTree(name: string): boolean {
+  return (
+    name === "runtime-entrypoints.tgz" ||
+    name === "marketplace-manifests.tgz" ||
+    name === "opencode-host.generated.tgz" ||
+    name === "gemini-extension.tgz" ||
+    /^plugin-[a-z0-9-]+\.payload\.tgz$/.test(name)
+  );
+}
+
 export interface StageRequest {
   /** The extracted commit — source, with no built bundles in it. */
   snapshot: string;
@@ -984,6 +1002,8 @@ export interface StageRequest {
   plugins: readonly string[];
   /** The plugins the machine chose to switch on. Defaults to `dev` alone. */
   activated?: readonly string[];
+  /** Process seam used to expand signed archive payloads. */
+  run?: CommandRunner;
 }
 
 /**
@@ -1012,7 +1032,21 @@ export function stageCandidate(
 
   const dist = join(tree, "dist");
   mkdirSync(dist, { recursive: true });
+  const run = req.run ?? systemRunner;
   for (const artifact of parsed.manifest.artifacts) {
+    if (archiveOverlaysIntoTree(artifact.name)) {
+      const from = join(setArtifactsDir(req.assets), artifact.name);
+      if (!existsSync(from)) {
+        return { ok: false, reason: `declared artifact is missing: ${artifact.name}` };
+      }
+      const extracted = run(["tar", "-xzf", from, "-C", tree]);
+      if (extracted.code !== 0) {
+        return {
+          ok: false,
+          reason: `expanding ${artifact.name} exited ${extracted.code}: ${firstLine(extracted.stderr)}`,
+        };
+      }
+    }
     if (!overlaysIntoTree(artifact.name)) continue;
     const from = join(setArtifactsDir(req.assets), artifact.name);
     if (!existsSync(from)) {
@@ -1244,6 +1278,7 @@ export async function acquireRedSkills(opts: AcquireOptions = {}): Promise<Acqui
     assets: candidate,
     dest: candidate,
     plugins,
+    run,
     ...(opts.activated ? { activated: opts.activated } : {}),
   });
   if (!staged.ok) {
