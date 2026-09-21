@@ -101,10 +101,16 @@ async function retireLegacyLinux(run: Awaited<ReturnType<typeof runner>>, home: 
   const path = legacyUnitPath(home);
   const declared = existsSync(path);
   const enabled = (await run(["systemctl", "--user", "is-enabled", LEGACY_ROUTER_SERVICE])).exitCode === 0;
-  if (!declared && !enabled) return false;
+  if (!declared && !enabled) {
+    await run(["systemctl", "--user", "reset-failed", LEGACY_ROUTER_SERVICE]);
+    return false;
+  }
   await run(["systemctl", "--user", "disable", "--now", LEGACY_ROUTER_SERVICE]);
   rmSync(path, { force: true });
   await run(["systemctl", "--user", "daemon-reload"]);
+  // systemd remembers a failed unit after its file is gone. Clear that
+  // tombstone so `list-units --all` does not keep showing 9router.
+  await run(["systemctl", "--user", "reset-failed", LEGACY_ROUTER_SERVICE]);
   return true;
 }
 
@@ -146,7 +152,15 @@ export function routerWrapper(mise: string, port: number, host: string): string 
 
 async function retireLegacyPackage(run: Awaited<ReturnType<typeof runner>>, seams: RouterSeams): Promise<void> {
   const mise = seams.miseBinary === undefined ? Bun.which("mise") : seams.miseBinary;
-  if (mise) await run([mise, "uninstall", "--all", "9router"], { timeoutMs: 180_000 });
+  if (!mise) return;
+  const result = await run([mise, "uninstall", "--all", "9router"], { timeoutMs: 180_000 });
+  if (result.exitCode !== 0) return;
+
+  // mise removes the version but leaves the old `latest`, `0` and `0.5`
+  // links behind. This directory belongs to the managed package and is
+  // safe to retire only after mise confirms the uninstall.
+  const { miseInstallRoot } = await import("./mise-config.ts");
+  rmSync(`${miseInstallRoot(seams.env ?? process.env)}/9router`, { recursive: true, force: true });
 }
 
 async function convergeLinux(p: Platform, seams: RouterSeams, env: NodeJS.ProcessEnv): Promise<RouterOutcome> {
