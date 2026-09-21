@@ -1529,6 +1529,55 @@ export async function reconcileSkillHosts(
   const out: HostOutcome[] = [];
 
   for (const adapter of adapters) {
+    // An empty activation is a complete, valid choice: this workstation
+    // carries RedSkills but installs none of its plugins into agent hosts.
+    // Asking the ordinary plans to describe that state is wrong for both
+    // kinds of adapter. Projectors see zero skills and block, while
+    // generators read the package set's own config and can install plugins
+    // the workstation explicitly switched off. Reconcile the empty set by
+    // replaying the ownership record instead.
+    if (plugins.length === 0) {
+      const recorded = registry.hosts[adapter.name];
+      if (!recorded) {
+        const installed = present(adapter.cmd);
+        out.push({
+          host: adapter.name,
+          status: installed ? "current" : "absent",
+          reason: installed ? "no plugin activated" : `${adapter.cmd} is not installed`,
+        });
+        continue;
+      }
+
+      log.step(`${adapter.name}: removing red-skills — no plugin activated`);
+      if (present(adapter.cmd)) {
+        const ctx: AdapterContext = {
+          ...shared,
+          plugins: recorded.plugins,
+          added: [],
+          retired: recorded.plugins,
+        };
+        const failure = await runSteps(adapter.remove(ctx), run);
+        if (failure !== null) {
+          log.warn(`${adapter.name}: ${failure}`);
+          out.push({ host: adapter.name, status: "failed", mode: recorded.mode, reason: failure });
+          continue;
+        }
+      }
+
+      removeOwned(recorded.owned);
+      delete registry.hosts[adapter.name];
+      await writeHostRegistry(home, registry);
+      log.ok(`${adapter.name}: red-skills removed — no plugin activated`);
+      out.push({
+        host: adapter.name,
+        status: "reconciled",
+        mode: recorded.mode,
+        reason: "no plugin activated",
+        reload: running(adapter.cmd) ? "restart-needed" : "current",
+      });
+      continue;
+    }
+
     if (!present(adapter.cmd)) {
       // Deliberately not recorded: a host that arrives next week has to be
       // reconciled then, and recording it now would say it already was.
