@@ -1030,9 +1030,20 @@ targets that have no Windows host to reach — bare-metal Ubuntu and native
 Windows — and it verifies the family resolves before configuring the terminals
 that depend on it, rather than trusting the copy to have taken.
 
-> [!WARNING]
-> This target is **implemented and unproven** — no bare-metal Ubuntu has run it.
-> Start with `red-dev install --dry-run`.
+#### The RedDB menu bar
+
+The desktop scope installs a GNOME Shell extension that turns Ubuntu's top
+panel into the persistent RedDB surface. The official RedDB mark opens the
+red-dev menu, workspace dots switch desktops, and the Agents item starts the
+Default agent or herdr. GNOME keeps owning the clock, network, audio, power and
+AppIndicator tray, so applications such as dit, 9router and redskilled remain
+visible in the same bar instead of growing a second status area.
+
+The extension lives at
+`~/.local/share/gnome-shell/extensions/reddb-bar@reddb.io`. It is generated and
+enabled by `red-dev install desktop`; edits there are replaced at the next
+converge. The mark is copied from the RedDB brand repository rather than drawn
+again inside red-dev.
 
 #### The chords, as GNOME custom keybindings
 

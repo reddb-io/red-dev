@@ -185,6 +185,7 @@ type ProviderSpec =
         | "runtimes"
         | "shared-root"
         | "hotkeys"
+        | "gnome-bar"
         | "red-skills"
         | "red-skills-vscode"
         | "red-skills-herdr"
@@ -418,6 +419,7 @@ const builtin = (
     | "runtimes"
     | "shared-root"
     | "hotkeys"
+    | "gnome-bar"
     | "red-skills"
     | "red-skills-vscode"
     | "red-skills-herdr"
@@ -931,6 +933,14 @@ export const TOOLS: Tool[] = [
     name: "gnome-tweaks",
     scope: "desktop",
     u24: apt("gnome-tweaks"),
+    win: skip(NO_GUI),
+  },
+  {
+    name: "gnome-menu-bar",
+    about: "a RedDB menu, workspace switcher and agent controls in GNOME's top bar",
+    scope: "desktop",
+    managed: true,
+    u24: builtin("gnome-bar"),
     win: skip(NO_GUI),
   },
   {

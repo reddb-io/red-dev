@@ -18,6 +18,11 @@ declare module "*.kdl" {
   export default content;
 }
 
+declare module "*.gnome" {
+  const content: string;
+  export default content;
+}
+
 /**
  * `with { type: "file" }`, which is a different thing to the three above.
  *
