@@ -3,5 +3,5 @@
   "name": "RedDB Menu Bar",
   "description": "RedDB's menu, workspaces and agent controls in the GNOME top bar.",
   "shell-version": ["46"],
-  "version": 1
+  "version": 2
 }

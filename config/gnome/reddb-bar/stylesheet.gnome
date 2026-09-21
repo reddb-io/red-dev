@@ -1,18 +1,35 @@
+/*
+ * Resolved from @reddb-io/tokens and the application/dark theme.
+ * GNOME Shell's StTheme CSS does not support the design system's custom
+ * properties, so the semantic tokens are recorded beside their values.
+ */
 .reddb-panel {
-  background-color: rgba(7, 8, 10, 0.94);
-  box-shadow: inset 0 -1px rgba(255, 255, 255, 0.08);
+  /* application surface.dark → neutral.900 */
+  background-color: rgba(18, 20, 27, 0.96);
+  /* elevation.base.foreground.dark → neutral.50 */
+  color: #f4f5f7;
+  /* elevation.base.border.dark → neutral.700 */
+  box-shadow: inset 0 -1px #333949;
 }
 
 .reddb-panel-button {
-  border-radius: 9px;
+  /* radius.lg */
+  border-radius: 8px;
   margin: 3px 2px;
   padding: 0 7px;
+  color: #f4f5f7;
 }
 
 .reddb-panel-button:hover,
-.reddb-panel-button:active,
+.reddb-panel-button:active {
+  /* elevation.raised.surface.dark → neutral.800 */
+  background-color: #1e222d;
+}
+
 .reddb-panel-button:checked {
-  background-color: rgba(255, 255, 255, 0.12);
+  /* primary → red.500; on-primary → neutral.950 */
+  background-color: #ff2056;
+  color: #07080a;
 }
 
 .reddb-brand,
@@ -24,7 +41,44 @@
   icon-size: 18px;
 }
 
-.reddb-workspaces-label {
+.reddb-workspaces {
+  spacing: 5px;
+}
+
+.reddb-workspace-active {
+  /* primary → red.500 */
+  color: #ff2056;
   font-weight: 700;
-  letter-spacing: 1px;
+}
+
+.reddb-workspace-inactive {
+  /* neutral.400: readable secondary mark on neutral.900 */
+  color: #8b91a1;
+}
+
+.reddb-agents-icon {
+  color: #ff2056;
+}
+
+.reddb-panel-button:checked .reddb-workspace-active,
+.reddb-panel-button:checked .reddb-workspace-inactive,
+.reddb-panel-button:checked .reddb-agents-icon {
+  color: #07080a;
+}
+
+.reddb-popup-menu {
+  /* elevation.raised.surface/border/foreground.dark */
+  background-color: #1e222d;
+  border: 1px solid #666d7e;
+  color: #f4f5f7;
+}
+
+.reddb-popup-menu .popup-menu-item:focus,
+.reddb-popup-menu .popup-menu-item:hover {
+  background-color: #333949;
+  color: #f4f5f7;
+}
+
+.reddb-popup-menu .popup-separator-menu-item .popup-separator-menu-item-separator {
+  background-color: #333949;
 }

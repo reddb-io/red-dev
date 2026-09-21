@@ -66,10 +66,16 @@ function item(menu, label, icon, action) {
   return row;
 }
 
+function themeMenu(menu) {
+  menu.box.add_style_class_name('reddb-popup-menu');
+}
+
 const RedDbMenu = GObject.registerClass(class RedDbMenu extends PanelMenu.Button {
   _init(extension) {
     super._init(0.0, 'RedDB');
     this.add_style_class_name('reddb-panel-button');
+    this.add_style_class_name('reddb-brand-button');
+    themeMenu(this.menu);
 
     const box = new St.BoxLayout({style_class: 'reddb-brand'});
     box.add_child(new St.Icon({
@@ -95,8 +101,9 @@ const WorkspaceMenu = GObject.registerClass(class WorkspaceMenu extends PanelMen
   _init() {
     super._init(0.0, 'Workspaces');
     this.add_style_class_name('reddb-panel-button');
-    this._label = new St.Label({style_class: 'reddb-workspaces-label', y_align: 2});
-    this.add_child(this._label);
+    themeMenu(this.menu);
+    this._dots = new St.BoxLayout({style_class: 'reddb-workspaces'});
+    this.add_child(this._dots);
     this._signals = [
       global.workspace_manager.connect('active-workspace-changed', () => this._refresh()),
       global.workspace_manager.connect('notify::n-workspaces', () => this._refresh()),
@@ -107,7 +114,15 @@ const WorkspaceMenu = GObject.registerClass(class WorkspaceMenu extends PanelMen
   _refresh() {
     const manager = global.workspace_manager;
     const active = manager.get_active_workspace_index();
-    this._label.text = Array.from({length: manager.n_workspaces}, (_, i) => i === active ? '●' : '○').join(' ');
+    for (const child of this._dots.get_children())
+      child.destroy();
+    for (let i = 0; i < manager.n_workspaces; i++) {
+      this._dots.add_child(new St.Label({
+        text: i === active ? '●' : '○',
+        style_class: i === active ? 'reddb-workspace-active' : 'reddb-workspace-inactive',
+        y_align: 2,
+      }));
+    }
     this.menu.removeAll();
     for (let i = 0; i < manager.n_workspaces; i++) {
       const row = new PopupMenu.PopupMenuItem(`Workspace ${i + 1}`);
@@ -128,8 +143,9 @@ const AgentsMenu = GObject.registerClass(class AgentsMenu extends PanelMenu.Butt
   _init() {
     super._init(0.0, 'Agents');
     this.add_style_class_name('reddb-panel-button');
+    themeMenu(this.menu);
     const box = new St.BoxLayout({style_class: 'reddb-agents'});
-    box.add_child(new St.Icon({icon_name: 'system-run-symbolic'}));
+    box.add_child(new St.Icon({icon_name: 'system-run-symbolic', style_class: 'reddb-agents-icon'}));
     box.add_child(new St.Label({text: 'Agents', y_align: 2}));
     this.add_child(box);
 
