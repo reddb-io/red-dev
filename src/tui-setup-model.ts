@@ -285,20 +285,6 @@ export function questions(
       applies: () => true,
     },
     {
-      id: "ssh",
-      title: "SSH access",
-      description: facts.githubUser
-        ? "Authorize this GitHub account's published SSH keys for this machine. Edit the " +
-          "username if another account should enter; leave it blank to configure later."
-        : "Enter the GitHub account whose published SSH keys may enter this machine. " +
-          "Leave it blank to configure later with `red-dev ssh <github-user> --yes`.",
-      multi: false,
-      choices: [],
-      textInput: { placeholder: "github-user" },
-      preset: facts.githubUser ? [facts.githubUser] : [],
-      applies: () => true,
-    },
-    {
       // Immediately after the hosts, because it is a question about the
       // answer just given and about nothing else.
       //
@@ -354,6 +340,20 @@ export function questions(
       // Hidden when no agent host was picked, so there is nowhere to
       // install a plugin and nothing for this page to decide.
       available: (picked) => redSkillsHostKeys(picked("agents")).length > 0,
+    },
+    {
+      id: "ssh",
+      title: "SSH access",
+      description: facts.githubUser
+        ? "Authorize this GitHub account's published SSH keys for this machine. Edit the " +
+          "username if another account should enter; leave it blank to configure later."
+        : "Enter the GitHub account whose published SSH keys may enter this machine. " +
+          "Leave it blank to configure later with `red-dev ssh <github-user> --yes`.",
+      multi: false,
+      choices: [],
+      textInput: { placeholder: "github-user" },
+      preset: facts.githubUser ? [facts.githubUser] : [],
+      applies: () => true,
     },
     {
       id: "runtimes",
