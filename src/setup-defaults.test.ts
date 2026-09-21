@@ -62,6 +62,29 @@ describe("the optional tools", () => {
 });
 
 describe("multi-choice defaults", () => {
+  test("SSH preselects the authenticated GitHub account and records that consent", () => {
+    const q = questions(WSL, choices(2), choices(3), choices(2), [], [], {
+      githubUser: "octocat",
+    }).find((candidate) => candidate.id === "ssh")!;
+    expect(q.preset).toEqual(["octocat"]);
+    expect(q.textInput).toEqual({ placeholder: "github-user" });
+    expect(q.choices).toEqual([]);
+
+    const base: SetupAnswers = {
+      theme: "cobalt",
+      font: "firacode",
+      apps: [],
+      runtimes: [],
+      agents: [],
+      sshGithubUser: "octocat",
+      blesh: true,
+      redwall: true,
+      share: false,
+      completed: true,
+    };
+    expect(preferencesFromAnswers(base).sshGithubUser).toBe("octocat");
+  });
+
   test("language runtimes leave Java, Ruby and Go unmarked", () => {
     const runtimes = [
       { key: "node@24", label: "Node", note: "" },

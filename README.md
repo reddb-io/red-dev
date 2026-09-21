@@ -622,6 +622,8 @@ red-dev lang                 # choose runtimes for mise to manage
 red-dev lang node@24,bun@1.3 # unattended, independently selected versions
 red-dev lang --latest node,python # newest release of each
 red-dev shell                # Windows + WSL: where a terminal lands
+red-dev ssh <github-user>    # authorize that account's published SSH keys
+red-dev ssh <github-user> --yes # the same operation without a confirmation prompt
 red-dev agents               # choose coding agents, wire in red-skills
 red-dev agents claude-code,codex # unattended agent selection
 red-dev agents default       # which host red-dev hands work to

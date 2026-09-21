@@ -752,16 +752,6 @@ async function cmdInstall(
         // and installed none of them.
         await carryOutChoices(p, choices);
 
-        // Whose keys, asked here and nowhere the converge can reach. The
-        // converge below installs the SSH server and opens the port on
-        // every machine; until this question existed it authorized
-        // nobody, so the port was open and the machine unreachable. The
-        // file is written before sshd exists, which is the right order —
-        // it reads it when it starts, and `red-dev ssh <github-user>` is
-        // the way in for every run that is not a first one. See
-        // src/ssh-access.ts.
-        const { offerGithubKeys } = await import("./ssh-access.ts");
-        await offerGithubKeys(p);
       }
     }
   }
@@ -1736,9 +1726,8 @@ async function cmdEmoji(p: Platform): Promise<number> {
  * the failure this whole file exists to stop.
  */
 async function cmdSsh(p: Platform, inv: Invocation): Promise<number> {
-  const { askGithubUser, authorizeGithubKeys, reportAuthorization } = await import(
-    "./ssh-access.ts"
-  );
+  const { askGithubUser, authorizeGithubKeys, rememberGithubUser, reportAuthorization } =
+    await import("./ssh-access.ts");
 
   if (!inv.yes && !interactive()) {
     log.err("no terminal to confirm on — `red-dev ssh <github-user> --yes` authorizes unattended");
@@ -1760,6 +1749,7 @@ async function cmdSsh(p: Platform, inv: Invocation): Promise<number> {
     // still leaves a record of what it authorized.
     const result = await authorizeGithubKeys(user, inv.yes ? { confirm: async () => true } : {});
     reportAuthorization(p, result);
+    await rememberGithubUser(p, result);
     return 0;
   } catch (err) {
     log.err(`ssh keys: ${(err as Error).message}`);
