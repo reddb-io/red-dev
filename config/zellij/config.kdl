@@ -197,6 +197,8 @@ keybinds clear-defaults=true {
         }
     }
     shared_among "normal" "locked" {
+        bind "Ctrl Tab" { GoToNextTab; }
+        bind "Ctrl Shift Tab" { GoToPreviousTab; }
         bind "Alt Left" { MoveFocusOrTab "left"; }
         bind "Alt Down" { MoveFocus "down"; }
         bind "Alt Up" { MoveFocus "up"; }
