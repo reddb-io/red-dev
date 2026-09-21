@@ -338,6 +338,8 @@ const SHIPPED_ZELLIJ_CONFIGS = new Set([
   "77cebc27b626c988458567d7a2947084915644c3572618629061f2c91c0fb8b8",
   "a34b6850436b42e61b5cfa6b1c477cfbcde3e2b1f88d43b9fffbf28c401eed9c",
   "f2861f1902b9b14cc444991b243de765a2db69dffe1bc45f72de08cd2ff61c63",
+  // 1.0.145: browser-style Ctrl+Tab and Ctrl+Shift+Tab tab navigation.
+  "f8611722c0b6cbcd30981736bb29ee29b483e80913cf7d3c0462865a2ad704cb",
 ]);
 
 /**
