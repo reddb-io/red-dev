@@ -158,29 +158,6 @@ describe("the update argv of each per-host mechanism", () => {
     });
   });
 
-  test("the Microsoft Store path names its source, as the install path does", () => {
-    // Without --source msstore the id resolves against the community
-    // repository, where the ChatGPT entries belong to third parties.
-    const p = plan("codex-desktop", WINDOWS);
-    expect(p.state).toBe("ready");
-    if (p.state !== "ready" || p.step.kind !== "command") return;
-    expect(p.mechanism).toBe("msstore");
-    expect(p.step.argv).toEqual([
-      "cmd.exe",
-      "/c",
-      "winget",
-      "upgrade",
-      "--id",
-      "9PLM9XGG6VKS",
-      "--source",
-      "msstore",
-      "--exact",
-      "--accept-package-agreements",
-      "--accept-source-agreements",
-      "--disable-interactivity",
-    ]);
-  });
-
   test("a host that updates itself is asked to, not reinstalled", () => {
     // Claude Code's installer leaves a self-updating binary behind, so
     // `claude update` is the publisher's own door. Re-running install.sh

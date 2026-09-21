@@ -35,7 +35,7 @@ import { AGENTS, currentAgentKeys, type AgentSpec } from "./agents.ts";
  * in agents.ts, which says so in its own words.
  */
 export function isDefaultAgentCandidate(a: AgentSpec): boolean {
-  return !a.desktopOnly && !a.multiplexer && a.cmd.length > 0;
+  return !a.multiplexer && a.cmd.length > 0;
 }
 
 /** The hosts in a selection that could be the Default agent. */

@@ -46,7 +46,7 @@ const hasNode = async () => true;
 describe("the setup work plan", () => {
   test("an npm agent brings node and every unit appears once", async () => {
     const plan = await setupPlan(windows, {
-      agents: ["gemini", "t3code"],
+      agents: ["gemini"],
       runtimes: [],
       apps: [],
     }, noNode);
@@ -54,7 +54,6 @@ describe("the setup work plan", () => {
     expect(plan.map((step) => step.tool)).toEqual([
       "node@24",
       "Gemini CLI",
-      "T3 Code",
       "red-skills",
     ]);
   });
@@ -122,7 +121,7 @@ describe("the setup work plan", () => {
     ]);
   });
 
-  test("desktop-only choices do not pretend red-skills has work", async () => {
+  test("retired desktop-app preference values do not pretend red-skills has work", async () => {
     const plan = await setupPlan(windows, {
       agents: ["t3code", "claude-desktop", "codex-desktop"],
       runtimes: [],

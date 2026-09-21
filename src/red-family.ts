@@ -17,6 +17,7 @@ import {
 } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
 import type { Choice } from "./tui-setup-model.ts";
+import { DESKTOP_APP_NAMES } from "./desktop-apps.ts";
 
 export const RED_FAMILY_OPTIONAL = new Set([
   "red-skills-vscode",
@@ -105,6 +106,7 @@ export function redFamilyChoices(p: Platform, agents: readonly Choice[]): Choice
 export function otherOptionalChoices(p: Platform): Choice[] {
   return toolsInScope("optional")
     .filter((tool) => !RED_FAMILY_OPTIONAL.has(tool.name))
+    .filter((tool) => !DESKTOP_APP_NAMES.has(tool.name))
     .filter((tool) => providerFor(tool, p).kind !== "skip")
     .map((tool) => ({ key: tool.name, label: tool.name, note: tool.about ?? "" }));
 }

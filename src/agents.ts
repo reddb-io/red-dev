@@ -129,8 +129,6 @@ export interface AgentSpec {
    * that has never been configured costs nothing.
    */
   configFiles?: string[];
-  /** Desktop applications have no CLI and only exist on some targets. */
-  desktopOnly?: boolean;
   /**
    * Runs agents rather than being one, so it is never the Default agent
    * — see src/default-agent.ts. It belongs in this list because it is
@@ -143,13 +141,11 @@ export interface AgentSpec {
 /**
  * Whether a host takes RedSkills at all.
  *
- * The desktop applications host no skills — there is no marketplace,
- * generator or skills directory to project into — so picking only those
- * is not a reason to install the package set, and not a reason to ask
- * which plugins to switch on in it.
+ * Every entry in this catalog is a host. Graphical applications live in
+ * desktop-apps.ts instead and never reach this decision.
  */
 export function hostsRedSkills(a: AgentSpec): boolean {
-  return a.desktopOnly !== true;
+  return AGENTS.some((candidate) => candidate.key === a.key);
 }
 
 /** The hosts in a selection that RedSkills is wired into. */
@@ -220,20 +216,6 @@ export const AGENTS: AgentSpec[] = [
     configFiles: [".gemini/settings.json"],
     recommended: false,
     npm: "@google/gemini-cli",
-  },
-  {
-    // The winget id is the publisher's: "T3 Tools Inc", support at
-    // pingdotgg/t3code. Checked, because npm's `t3code-cli` is a
-    // third-party wrapper by an unrelated author whose binary is not
-    // even called t3code — installing that under this name would be
-    // worse than installing nothing.
-    key: "t3code",
-    label: "T3 Code",
-    about: "T3 Tools' editor",
-    cmd: "",
-    recommended: false,
-    winget: "T3Tools.T3Code",
-    desktopOnly: true,
   },
   {
     // Not an agent — the thing agents run inside. It multiplexes them
@@ -334,29 +316,6 @@ export const AGENTS: AgentSpec[] = [
     // true. Under WSL the installer runs and the binary lands in the
     // distro, which is where a CLI belongs anyway.
   },
-  {
-    key: "claude-desktop",
-    label: "Claude Desktop",
-    about: "the desktop app, not the CLI",
-    cmd: "",
-    recommended: false,
-    winget: "Anthropic.Claude",
-    desktopOnly: true,
-  },
-  {
-    // Codex Desktop is a mode inside OpenAI's ChatGPT app rather than a
-    // separate download, and OpenAI ships it through the Microsoft
-    // Store. There is no official Linux build — the CLI above is the
-    // Linux answer, which is why this is Windows-only rather than
-    // desktop-capable-anywhere.
-    key: "codex-desktop",
-    label: "Codex Desktop",
-    about: "Codex inside OpenAI's ChatGPT app",
-    cmd: "",
-    recommended: false,
-    msstore: "9PLM9XGG6VKS",
-    desktopOnly: true,
-  },
 ];
 
 /** Translate the retired OpenCode selection without uninstalling OpenCode itself. */
@@ -367,12 +326,6 @@ export function currentAgentKeys(keys: readonly string[]): string[] {
 /** Which agents can be installed here. */
 export function availableAgents(p: Platform): AgentSpec[] {
   return AGENTS.filter((a) => {
-    if (a.desktopOnly) {
-      // A desktop application needs somewhere to draw, and neither of
-      // these has an official Linux build. Under WSL they would also be
-      // installing onto a host this scope does not own.
-      return p.os === "windows";
-    }
     // mise's GitHub backend resolves the asset for whatever platform it
     // runs on, so a host that declares mise and nothing narrower is
     // available everywhere mise is — which, on a machine red-dev set up,

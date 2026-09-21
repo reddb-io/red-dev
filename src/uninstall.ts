@@ -65,6 +65,13 @@ export function removalFor(tool: Tool, p: Platform): Removal | null {
         run: () => sh(["sudo", "apt-get", "remove", "-y", pr.pkg]),
       };
 
+    case "deb":
+      return {
+        tool: tool.name,
+        how: `apt remove ${pr.package}`,
+        run: () => sh(["sudo", "apt-get", "remove", "-y", pr.package]),
+      };
+
     case "aptrepo":
       return {
         tool: tool.name,
@@ -90,6 +97,18 @@ export function removalFor(tool: Tool, p: Platform): Removal | null {
             process.platform === "win32"
               ? ["cmd.exe", "/c", "winget", "uninstall", "--id", pr.id, "--exact", "--silent"]
               : ["winget.exe", "uninstall", "--id", pr.id, "--exact", "--silent"],
+          ),
+      };
+
+    case "msstore":
+      return {
+        tool: tool.name,
+        how: `winget uninstall ${pr.id} (Microsoft Store)`,
+        run: () =>
+          sh(
+            process.platform === "win32"
+              ? ["cmd.exe", "/c", "winget", "uninstall", "--id", pr.id, "--source", "msstore", "--exact"]
+              : ["winget.exe", "uninstall", "--id", pr.id, "--source", "msstore", "--exact"],
           ),
       };
 

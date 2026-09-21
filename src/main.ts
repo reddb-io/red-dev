@@ -2225,7 +2225,7 @@ async function cmdAgents(p: Platform, inv: Invocation): Promise<number> {
   // red-skills configures whichever agents exist, so it only means
   // anything once at least one does — and it is worth asking about
   // rather than assuming, since it writes into each agent's own config.
-  const anyCli = keys.some((key) => !available.find((agent) => agent.key === key)?.desktopOnly);
+  const anyCli = keys.some((key) => available.some((agent) => agent.key === key));
   if (anyCli) {
     log.plain("");
     if (await confirm("Install red-skills for these agents?", true)) {

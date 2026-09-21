@@ -364,7 +364,7 @@ export function wingetArgv(args: string[], platform: string = process.platform):
   return [Bun.which("winget.exe") ?? "winget.exe", ...args];
 }
 
-export async function wingetInstall(id: string): Promise<void> {
+export async function wingetInstall(id: string, source?: "msstore"): Promise<void> {
   log.step(`winget: ${id}`);
   // winget downloads, hashes and verifies the installer against the
   // manifest itself, and refuses to install when they disagree — so
@@ -382,6 +382,7 @@ export async function wingetInstall(id: string): Promise<void> {
       "install",
       "--id",
       id,
+      ...(source ? ["--source", source] : []),
       "--exact",
       "--silent",
       "--accept-package-agreements",
@@ -1040,6 +1041,30 @@ export async function ghInstall(
   removeTemp(tmp);
 }
 
+/** Install an official architecture-specific .deb and let its maintainer scripts register updates. */
+export async function debInstall(
+  packageName: string,
+  urls: { x64: string; arm64: string },
+  arch: "x64" | "arm64",
+  note: string,
+): Promise<void> {
+  await requireSudo();
+  const url = urls[arch];
+  const tmp = tempDir(`deb-${Date.now()}`);
+  const file = `${tmp}/${packageName}.deb`;
+  log.step(`deb: ${packageName}`);
+  log.info(note);
+  try {
+    // The ChatGPT desktop package is roughly 400 MB. A real progress
+    // heartbeat remains visible, and slower links get enough time to
+    // finish instead of turning a healthy transfer into a false hang.
+    await downloadVerified(url, file, { timeoutMs: 15 * 60_000 });
+    await run(["sudo", "-E", "apt-get", "install", "-y", file]);
+  } finally {
+    removeTemp(tmp);
+  }
+}
+
 /**
  * Put a binary in place even when the copy it replaces is running.
  *
@@ -1572,6 +1597,7 @@ export function declaredAptPackages(p: Platform, tools: readonly Tool[] = TOOLS)
   for (const tool of tools) {
     const pr = providerFor(tool, p);
     if (pr.kind === "apt") names.add(pr.pkg);
+    else if (pr.kind === "deb") names.add(pr.package);
     else if (pr.kind === "aptrepo" || pr.kind === "ppa") for (const pkg of pr.pkgs) names.add(pkg);
   }
   return [...names].sort();
@@ -1801,6 +1827,15 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
       return;
     case "winget":
       await wingetInstall(pr.id);
+      return;
+    case "msstore":
+      await wingetInstall(pr.id, "msstore");
+      return;
+    case "deb":
+      if (ctx.platform.arch === "unsupported") {
+        throw new RedError(`${pr.package} has no package for this processor architecture`);
+      }
+      await debInstall(pr.package, pr.urls, ctx.platform.arch, pr.note);
       return;
     case "installer":
       await installerInstall(pr.url, pr.note, pr.args);

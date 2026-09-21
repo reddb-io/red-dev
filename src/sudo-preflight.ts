@@ -25,6 +25,7 @@ export function providerUsesSudo(provider: Provider): boolean {
   if (provider.kind === "apt" || provider.kind === "ppa" || provider.kind === "aptrepo") {
     return true;
   }
+  if (provider.kind === "deb") return true;
   return provider.kind === "gh" && /\.deb$/i.test(provider.asset);
 }
 

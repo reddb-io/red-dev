@@ -155,13 +155,14 @@ export function stepInitialCursor(q: Question): number {
   return first < 0 ? 0 : first;
 }
 
-/** Optional tools selected across the generic Tools and RedDB pages. */
+/** Optional tools selected across the Desktop apps, generic Tools and RedDB pages. */
 export function selectedSetupApps(steps: readonly Question[], picked: Picked): string[] {
   const redOptionalApps = steps
     .find((candidate) => candidate.id === "reddb")
     ?.choices.filter((choice) => choice.answer === "apps")
     .map((choice) => choice.key) ?? [];
   return [
+    ...picked("desktop-apps"),
     ...picked("apps"),
     ...picked("reddb").filter((key) => redOptionalApps.includes(key)),
   ];
@@ -195,6 +196,7 @@ export function questions(
   redApps: Choice[] = [],
   wslTuning: Choice[] = [],
   facts: SetupFacts = {},
+  desktopApps: Choice[] = [],
 ): Question[] {
   // Annotated rather than inferred: the return type does not reach
   // through `.filter` to type a step's callbacks, so `choicesFrom` and
@@ -329,8 +331,8 @@ export function questions(
       })),
       preset: [...DEFAULT_ACTIVATED_PLUGINS],
       applies: () => true,
-      // Hidden when nothing picked on the Agents page hosts skills: the
-      // desktop applications take no plugin, so there is nothing to ask.
+      // Hidden when no agent host was picked, so there is nowhere to
+      // install a plugin and nothing for this page to decide.
       available: (picked) => redSkillsHostKeys(picked("agents")).length > 0,
     },
     {
@@ -345,6 +347,18 @@ export function questions(
       choices: runtimes,
       preset: runtimes.filter((runtime) => runtimeSelectedByDefault(runtime.key)).map((runtime) => runtime.key),
       applies: () => true,
+    },
+    {
+      id: "desktop-apps",
+      title: "Desktop apps",
+      description:
+        "Optional graphical applications from their official publishers. " +
+        "They stay on the desktop host and never become agents or get copied into WSL. " +
+        "Space selects an app; leave both off to install neither.",
+      multi: true,
+      choices: desktopApps,
+      preset: [],
+      applies: (pl) => pl.caps.gui && desktopApps.length > 0,
     },
     {
       id: "reddb",
@@ -661,8 +675,9 @@ export function setupSteps(
   redApps: Choice[] = [],
   wslTuning: Choice[] = [],
   facts: SetupFacts = {},
+  desktopApps: Choice[] = [],
 ): { steps: Question[]; wizard: ReturnType<typeof createWizard> } {
-  const steps = questions(p, agents, apps, runtimes, redApps, wslTuning, facts);
+  const steps = questions(p, agents, apps, runtimes, redApps, wslTuning, facts, desktopApps);
   // createWizard creates signals; calling it during render rebuilds them
   // thirty times a second and puts a warning across the interface.
   const wizard = createWizard(
