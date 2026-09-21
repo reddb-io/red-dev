@@ -1043,7 +1043,10 @@ The extension lives at
 `~/.local/share/gnome-shell/extensions/reddb-bar@reddb.io`. It is generated and
 enabled by `red-dev install desktop`; edits there are replaced at the next
 converge. The mark is copied from the RedDB brand repository rather than drawn
-again inside red-dev.
+again inside red-dev. Its application-dark surfaces, borders, foreground,
+interaction states and accent resolve the semantic palette published by
+`@reddb-io/tokens` (`neutral.900`, `neutral.800`, `neutral.700`, `neutral.50`
+and `red.500`).
 
 #### The chords, as GNOME custom keybindings
 
