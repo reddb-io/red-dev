@@ -176,37 +176,43 @@ describe("the manifest itself", () => {
     expect(providerFor(tool!, WSL24)).toEqual({ kind: "apt", pkg: "bash-completion" });
   });
 
-  test("9router is core on every target, and mise owns it through npm", () => {
+  test("red-router is core on every target, and mise owns it through npm", () => {
     // The router is what the agents are configured against, so a target
     // without it is a different environment rather than a smaller one.
     // npm, not github: the package ships a node tree with a bin shim,
     // not a release binary, and mise's npm backend is what red-skills
     // already uses for exactly that shape.
-    const tool = TOOLS.find((t) => t.name === "9router");
-    expect(tool).toMatchObject({ scope: "core", cmd: ["9router"] });
+    const tool = TOOLS.find((t) => t.name === "red-router");
+    expect(tool).toMatchObject({ scope: "core", cmd: ["red-router"] });
     expect(tool?.managed).toBeUndefined();
     for (const p of [WSL24, DESKTOP, WINDOWS]) {
-      expect(providerFor(tool!, p)).toEqual({ kind: "mise", spec: "npm:9router", alias: "9router" });
+      expect(providerFor(tool!, p)).toEqual({
+        kind: "mise",
+        spec: "npm:@reddb-io/red-router",
+        alias: "red-router",
+        version: "0.9.1",
+        allowLowDownloads: true,
+      });
     }
   });
 
-  test("what keeps 9router running is its own managed core row, right after the package", () => {
+  test("what keeps red-router running is its own managed core row, right after the package", () => {
     // Installed and stopped is the failure the agents see. Apart from
     // the package row because the two fail differently: mise answers for
     // the package, systemd or Explorer for the service.
-    const tool = TOOLS.find((t) => t.name === "9router-autostart");
+    const tool = TOOLS.find((t) => t.name === "red-router-autostart");
     expect(tool).toMatchObject({ scope: "core", managed: true });
     for (const p of [WSL24, DESKTOP, WINDOWS]) {
-      expect(providerFor(tool!, p)).toEqual({ kind: "builtin", name: "9router-autostart" });
+      expect(providerFor(tool!, p)).toEqual({ kind: "builtin", name: "red-router-autostart" });
     }
     const names = TOOLS.map((t) => t.name);
-    expect(names.indexOf("9router-autostart")).toBe(names.indexOf("9router") + 1);
+    expect(names.indexOf("red-router-autostart")).toBe(names.indexOf("red-router") + 1);
   });
 
-  test("9router comes after the runtimes, because its backend needs node", () => {
+  test("red-router comes after the runtimes, because its backend needs node", () => {
     const names = TOOLS.map((t) => t.name);
     expect(names.indexOf("runtimes")).toBeGreaterThanOrEqual(0);
-    expect(names.indexOf("9router")).toBeGreaterThan(names.indexOf("runtimes"));
+    expect(names.indexOf("red-router")).toBeGreaterThan(names.indexOf("runtimes"));
   });
 
   test("webm2mp4's ffmpeg dependency is declared", () => {

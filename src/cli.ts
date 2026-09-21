@@ -225,20 +225,12 @@ export function buildCli(): CLI {
       learn: {
         description: "the README by anchor, RedSkills, and the keys viewer",
       },
-      "9router": {
-        // `serve` is what the systemd unit and the Windows Startup
-        // shortcut run: the standalone server in the foreground, by
-        // absolute path into mise's install, with the environment the
-        // package's own launcher would have given it. Typed with no verb
-        // it reports instead — is the service declared, is it running,
-        // does the port answer — which is the same three facts doctor
-        // carries, on their own so a person does not read all of doctor
-        // to learn why an agent's first request failed.
-        description: "the AI router every coding agent points at: `serve` runs it in the foreground; no verb reports its state",
+      "red-router": {
+        description: "report or manage the RedRouter service every coding agent points at",
         positional: [
           {
             name: "router_verb",
-            description: "serve",
+            description: "status, install, or uninstall",
             required: false,
           },
         ],
@@ -413,7 +405,7 @@ export interface Invocation {
    */
   redSkillsPhase: string | undefined;
   redSkillsSelector: string | undefined;
-  /** `9router [serve]` — its own positional, named apart from `phase`. */
+  /** `red-router [status|install|uninstall]` — named apart from `phase`. */
   routerVerb: string | undefined;
   /** Explicit selections make agents/lang safe to invoke across WSL unattended. */
   agentKeys: string[] | undefined;

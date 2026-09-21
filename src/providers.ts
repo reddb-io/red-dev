@@ -1790,7 +1790,7 @@ const BUILTIN_INTENT: Partial<Record<BuiltinName, string>> = {
   "redwall-hook": "declaring the RedSkills host hook that repaints the Redwall",
   puppeteer: "installing Puppeteer, its matching Chrome for Testing and browser dependencies",
   "ssh-server": "installing and enabling the SSH server",
-  "9router-autostart": "keeping 9router running: a systemd user service, or a Startup shortcut on Windows",
+  "red-router-autostart": "keeping red-router running: a systemd user service, or a Startup shortcut on Windows",
 };
 
 export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<void> {
@@ -1975,11 +1975,11 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
         await installSshServer(ctx.platform);
         return;
       }
-      if (pr.name === "9router-autostart") {
+      if (pr.name === "red-router-autostart") {
         // The outcome is dropped for the reason the redwall hook's is:
         // every branch is a converged machine, and the ones worth a line
         // have printed one.
-        const { convergeRouterAutostart } = await import("./nine-router.ts");
+        const { convergeRouterAutostart } = await import("./red-router.ts");
         await convergeRouterAutostart(ctx.platform);
         return;
       }

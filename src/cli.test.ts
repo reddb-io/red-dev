@@ -62,12 +62,12 @@ describe("command parsing", () => {
     expect(help).toContain("learn");
   });
 
-  test("the router is a command: `serve` for the unit, nothing for a report", () => {
-    expect(parse(["9router"])).toMatchObject({ command: "9router", routerVerb: undefined, errors: [] });
-    expect(parse(["9router", "serve"])).toMatchObject({ command: "9router", routerVerb: "serve", errors: [] });
+  test("the router is a command with its own service verb", () => {
+    expect(parse(["red-router"])).toMatchObject({ command: "red-router", routerVerb: undefined, errors: [] });
+    expect(parse(["red-router", "status"])).toMatchObject({ command: "red-router", routerVerb: "status", errors: [] });
     // Its positional is its own: it must not land in the RedSkills phase.
-    expect(parse(["9router", "serve"]).redSkillsPhase).toBeUndefined();
-    expect(buildCli().help()).toContain("9router");
+    expect(parse(["red-router", "status"]).redSkillsPhase).toBeUndefined();
+    expect(buildCli().help()).toContain("red-router");
   });
 
   test("the keys viewer takes no arguments, and says so rather than ignoring them", () => {
