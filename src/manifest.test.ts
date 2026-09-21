@@ -132,6 +132,7 @@ describe("the manifest itself", () => {
   test("Linux desktop declares wl-clipboard for Zellij copy", () => {
     const tool = TOOLS.find((t) => t.name === "wl-clipboard");
     expect(tool?.scope).toBe("desktop");
+    expect(tool?.cmd).toEqual(["wl-copy", "wl-paste"]);
     expect(providerFor(tool!, DESKTOP)).toEqual({ kind: "apt", pkg: "wl-clipboard" });
   });
 

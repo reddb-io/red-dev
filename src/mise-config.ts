@@ -86,6 +86,8 @@ export interface MiseEntry {
    * PATH has nothing for this machine to reconcile afterwards.
    */
   postinstall?: string;
+  /** The package was reviewed and is expected to trip aube's popularity gate. */
+  allowLowDownloads?: true;
 }
 
 /**
@@ -357,11 +359,12 @@ export function renderMiseConfig(entries: MiseEntry[]): string {
       // An inline table only where there is something to say beyond the
       // version: every other row stays the one-line form a person can
       // read, and a diff of this file keeps showing only what moved.
-      out.push(
-        e.postinstall
-          ? `${key} = { version = ${str(e.version)}, postinstall = ${str(e.postinstall)} }`
-          : `${key} = ${str(e.version)}`,
-      );
+      const options = [
+        `version = ${str(e.version)}`,
+        ...(e.postinstall ? [`postinstall = ${str(e.postinstall)}`] : []),
+        ...(e.allowLowDownloads ? ["allow_low_downloads = true"] : []),
+      ];
+      out.push(options.length > 1 ? `${key} = { ${options.join(", ")} }` : `${key} = ${str(e.version)}`);
     }
   }
 
@@ -394,6 +397,7 @@ export function miseEntries(
       spec: pr.spec,
       ...(pr.alias ? { alias: pr.alias } : {}),
       version: pr.version ?? "latest",
+      ...(pr.allowLowDownloads ? { allowLowDownloads: true as const } : {}),
       // The RedSkills entry, and only it: whichever way mise advances
       // the package set — a suite upgrade, a bare `mise upgrade
       // red-skills`, a first install — the hosts are reconciled from

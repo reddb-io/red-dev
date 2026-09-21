@@ -327,6 +327,7 @@ describe("the manifest entries mise resolves", () => {
         alias: REDSKILLS_CORE_ALIAS,
         // Pinned to a major: see REDSKILLS_MAJOR in src/manifest.ts.
         version: REDSKILLS_MAJOR,
+        allowLowDownloads: true,
       });
     }
   });
@@ -346,6 +347,7 @@ describe("the manifest entries mise resolves", () => {
         spec: REDSKILLS_CORE_SPEC,
         alias: REDSKILLS_CORE_ALIAS,
         version: REDSKILLS_MAJOR,
+        allowLowDownloads: true,
         // The seam ADR 0010 asks for: mise tells red-dev that the set
         // moved. Asserted as a whole entry rather than a field, so a
         // postinstall appearing on some *other* tool would fail here.
@@ -358,7 +360,7 @@ describe("the manifest entries mise resolves", () => {
     const out = renderMiseConfig(miseEntries(UBUNTU));
     expect(out).toContain('red-skills = "npm:@reddb-io/red-skills"');
     expect(out).toContain(
-      `red-skills = { version = "${REDSKILLS_MAJOR}", postinstall = "${REDSKILLS_RECONCILE_POSTINSTALL}" }`,
+      `red-skills = { version = "${REDSKILLS_MAJOR}", postinstall = "${REDSKILLS_RECONCILE_POSTINSTALL}", allow_low_downloads = true }`,
     );
   });
 
