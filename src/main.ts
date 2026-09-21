@@ -1776,19 +1776,17 @@ async function cmdSsh(p: Platform, inv: Invocation): Promise<number> {
  * there would be worse than the address it could have copied.
  */
 /**
- * `red-dev 9router [serve]`.
+ * `red-dev red-router [status|install|uninstall]`.
  *
- * `serve` is the unit's ExecStart and the shortcut's target, so it runs
- * in the foreground and its exit code is the server's. Anything else is
- * a report, and an unknown verb says so rather than starting a server
- * the person did not ask for.
+ * The package owns its server and service contract. red-dev only
+ * converges that contract and reports the endpoint agents use.
  */
 async function cmdRouter(p: Platform, inv: Invocation): Promise<number> {
-  const { inspectRouter, serveRouter, routerHost, routerPort } = await import("./nine-router.ts");
+  const { inspectRouter, manageRouterService, routerHost, routerPort } = await import("./red-router.ts");
   const verb = inv.routerVerb;
-  if (verb === "serve") return await serveRouter(p);
-  if (verb !== undefined) {
-    log.err(`unknown verb '${verb}' (expected: serve, or nothing for a report)`);
+  if (verb === "install" || verb === "uninstall") return await manageRouterService(p, verb);
+  if (verb !== undefined && verb !== "status") {
+    log.err(`unknown verb '${verb}' (expected: status, install, uninstall, or nothing for a report)`);
     return 1;
   }
   const checks = await inspectRouter(p);
@@ -2795,7 +2793,7 @@ async function main(): Promise<number> {
       return await cmdLearn(p);
     case "red-skills":
       return await cmdRedSkills(p, inv);
-    case "9router":
+    case "red-router":
       return await cmdRouter(p, inv);
     case "agents":
       return await cmdAgents(p, inv);

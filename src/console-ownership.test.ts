@@ -53,8 +53,8 @@ const ALLOWED = new Map<string, string>([
     "`red-dev agents run` hands the terminal to the Default agent, which draws its own full-screen interface and reads the keyboard — neither survives a pipe. Nothing reaches it but that command typed at a shell: the menu has no agents entry, and the flag that selects it exists only when `agents run` is parsed from argv.",
   ],
   [
-    "nine-router.ts",
-    "`red-dev 9router serve` is the foreground server a systemd unit or a Startup shortcut runs, and its output is the server's log — the journal on Linux, nothing on Windows. It is reached only from that verb typed at a shell or written into a unit; the converge's builtin writes the unit and never calls serve, and the menu has no router entry.",
+    "red-router.ts",
+    "RedRouter owns its foreground and service processes. red-dev invokes its service contract during converge and only reports service state at the terminal; the menu has no router entry.",
   ],
   [
     "wsl-provision.ts",

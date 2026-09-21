@@ -633,7 +633,7 @@ export async function collectDrift(p: Platform): Promise<DriftCheck[]> {
   checks.push(await checkBlesh());
   const { inspectBuildResources } = await import("./build-resources.ts");
   checks.push(...(await inspectBuildResources(p)));
-  const { inspectRouter } = await import("./nine-router.ts");
+  const { inspectRouter } = await import("./red-router.ts");
   checks.push(...(await inspectRouter(p)));
   checks.push(await checkSharedRoot(p));
   checks.push(await checkHotkeys(p));

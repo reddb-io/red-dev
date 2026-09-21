@@ -250,56 +250,35 @@ and says so rather than composing over it. See
 `neovim` · `docker` · `delta` · `yazi` · `tldr` · `starship` · `atuin` ·
 `carapace` · `direnv`
 
-**[9router](https://github.com/decolua/9router)** is core too, on every
-target. It is one local endpoint — `http://localhost:20128/v1`, speaking both
-the OpenAI and the Claude wire formats — that every coding agent on the machine
-can point at, and it routes each request across the providers you connect:
-subscription first, then cheap, then free, so a rate limit on one is not the end
-of the session. It is core rather than a choice on the Agents page because it is
-the thing the agents are configured *against*; a machine where some hosts route
-through it and some do not is two environments wearing one name. mise installs
-it from npm and `red-dev update` moves it forward with the rest of the suite.
+**[RedRouter](https://github.com/reddb-io/red-router)** is core on every
+target. It exposes the OpenAI-compatible API at `http://localhost:25050/v1`
+and its dashboard at `http://localhost:25050/dashboard`. mise installs the
+published `@reddb-io/red-router` package, and `red-dev update` advances it with
+the rest of the suite.
 
-It is also **kept running**, because installed and stopped is what the agents
-see as broken: a host configured against that endpoint fails its first request
-after every boot until somebody opens a terminal and leaves `9router` in it. So
-the router is a systemd user service on Linux and WSL and a Startup-folder
-shortcut on Windows, and the converge brings it up now rather than at the next
-logon. What runs is `red-dev 9router serve` — the package's standalone server,
-by absolute path into mise's install, with the environment the package's own
-launcher would have given it. Not the launcher itself: read against the real
-tarball, it kills every process whose command line mentions `next-server` on
-the way up, offers `npm i -g` to move itself out from under mise, and with no
-TTY drops into a tray mode that has no tray to drop into. The service binds
-`127.0.0.1` — a router holding provider credentials has no business on the LAN
-by default — and each side of a WSL boundary runs its own, because under NAT
-networking a Windows loopback port is not reachable from the distro.
-
-The service is bounded. When mise has not put the package down, `serve` exits
-with a status the unit refuses to restart on, and the converge and `doctor`
-both say so and name `red-dev install 9router`; anything else that fails five
-times in five minutes stops being retried until the next `red-dev install`
-clears it. A server that is restarted every five seconds into the same missing
-file is not a service, it is a journal filling up.
+RedRouter stays available after boot through its own service contract. Linux
+and WSL use `red-router.service` under `systemd --user`; Windows starts
+`red-router -t` from the Startup folder. The service binds to `127.0.0.1` by
+default. During migration red-dev disables and removes the old
+`red-dev-9router.service` or Startup shortcut, but preserves `~/.9router` so
+RedRouter can migrate existing credentials and settings into `~/.red-router`.
 
 ```bash
-red-dev 9router                 # declared? running? answering? — and the two URLs
-red-dev 9router serve           # the server in the foreground, what the unit runs
-systemctl --user status red-dev-9router.service   # Linux and WSL
+red-dev red-router                    # service state and endpoints
+red-dev red-router install            # converge the background service
+red-dev red-router uninstall          # remove the background service
+red-router service status             # official Linux/WSL service command
+systemctl --user status red-router.service
 ```
 
 | Variable | Effect |
 | --- | --- |
-| `RED_9ROUTER=0` | no service; the package stays, `9router` still works by hand |
-| `RED_9ROUTER_PORT` | another port (1024–65535); the default is 20128 |
-| `RED_9ROUTER_HOST` | another interface; the default is loopback |
+| `RED_ROUTER=0` | no service; the package stays installed |
+| `RED_ROUTER_PORT` | another port (1024–65535); the default is 25050 |
+| `RED_ROUTER_HOST` | another interface; the default is loopback |
 
-Its data lives in `~/.9router` (`%APPDATA%\9router` on Windows), and
-`red-dev uninstall` removes the service and leaves that directory alone — it
-holds the credentials you entered. Connecting a provider and pointing an agent
-at `http://localhost:20128/v1` is done in the dashboard at
-`http://localhost:20128/dashboard`; a credential is yours to enter, not
-red-dev's to assume.
+Provider credentials belong to RedRouter. Configure them in the dashboard;
+red-dev neither reads nor writes them.
 
 **The RedDB tools** come with it, because this is the environment a RedDB
 developer works in:
@@ -657,8 +636,8 @@ red-dev red-skills install [selector] # acquire the package set: stable | next |
 red-dev red-skills sync <path> # run a development checkout, built into staging, never a release
 red-dev red-skills reconcile # wire the hosts against the active package set, once
 red-dev red-skills adopt     # take a standalone-installed machine into the package set
-red-dev 9router              # the AI router: declared? running? answering? — and its two URLs
-red-dev 9router serve        # the router in the foreground; what the user service runs
+red-dev red-router              # the AI router: declared? running? answering? — and its two URLs
+red-dev red-router install      # install or repair the background service
 red-dev share [path]         # one directory both WSL and Windows read
 red-dev share adopt <tool>   # move that tool's configuration into it
 red-dev uninstall            # remove tools, or red-dev's own config
@@ -1036,7 +1015,7 @@ The desktop scope installs a GNOME Shell extension that turns Ubuntu's top
 panel into the persistent RedDB surface. The official RedDB mark opens the
 red-dev menu, workspace dots switch desktops, and the Agents item starts the
 Default agent or herdr. GNOME keeps owning the clock, network, audio, power and
-AppIndicator tray, so applications such as dit, 9router and redskilled remain
+AppIndicator tray, so applications such as dit, red-router and redskilled remain
 visible in the same bar instead of growing a second status area.
 
 The extension lives at

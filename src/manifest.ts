@@ -196,7 +196,7 @@ type ProviderSpec =
         | "redwall-hook"
         | "puppeteer"
         | "ssh-server"
-        | "9router-autostart";
+        | "red-router-autostart";
     }
   /** Not installed here, deliberately. The reason is required. */
   | { kind: "skip"; reason: string };
@@ -429,7 +429,7 @@ const builtin = (
     | "redwall-hook"
     | "puppeteer"
     | "ssh-server"
-    | "9router-autostart",
+    | "red-router-autostart",
 ): Provider => ({ kind: "builtin", name });
 const skip = (reason: string): Provider => ({ kind: "skip", reason });
 /** A Linux provider whose implementation performs system work through sudo. */
@@ -860,7 +860,7 @@ export const TOOLS: Tool[] = [
   },
   {
     // The one endpoint every coding agent on this machine can point at.
-    // 9router sits at http://localhost:20128/v1, speaks both the OpenAI
+    // red-router sits at http://localhost:25050/v1, speaks both the OpenAI
     // and the Claude wire formats, and routes each request across the
     // providers a person has connected — subscription first, then cheap,
     // then free — so a rate limit on one host is not the end of the
@@ -872,42 +872,44 @@ export const TOOLS: Tool[] = [
     // Straight after `runtimes`, and the order is load-bearing: the
     // package is npm, so mise's `npm:` backend needs the node the row
     // above just installed. The publisher's postinstall pulls sql.js and
-    // better-sqlite3 into ~/.9router/runtime rather than into the
+    // better-sqlite3 into ~/.red-router/runtime rather than into the
     // package tree, and cli.js re-checks them on every start, so a
     // gated postinstall (npm 11) installs cleanly and still works.
     //
-    // Aliased to the command people type, so `mise upgrade 9router`
-    // means what it says. No version selector: the project ships several
-    // releases a week and none of them has needed holding back.
+    // Aliased to the command people type, so `mise upgrade red-router`
+    // means what it says. The current release is explicit because aube's
+    // cached npm `latest` still resolves this package to 0.8.1 even
+    // though npm's dist-tag is 0.9.1; the older build must not silently
+    // replace the service contract declared here.
     //
     // The package only. What keeps it running is the row below.
-    name: "9router",
+    name: "red-router",
     about: "one local endpoint for every coding agent, routed across many AI providers",
-    cmd: ["9router"],
+    cmd: ["red-router"],
     scope: "core",
-    u24: mise("npm:9router", { alias: "9router" }),
-    win: mise("npm:9router", { alias: "9router" }),
+    u24: mise("npm:@reddb-io/red-router", { alias: "red-router", version: "0.9.1", allowLowDownloads: true }),
+    win: mise("npm:@reddb-io/red-router", { alias: "red-router", version: "0.9.1", allowLowDownloads: true }),
   },
   {
     // Installed and stopped is the failure the agents see: a host
-    // configured against localhost:20128 on a machine where nothing
+    // configured against localhost:25050 on a machine where nothing
     // listens there fails its first request after every boot. So the
     // router is a standing service — a systemd user unit on Linux and
     // WSL, a Startup-folder shortcut on Windows — and a converge brings
     // it up now rather than at the next logon. Loopback only, one router
-    // per side of a WSL boundary; RED_9ROUTER=0 turns the service off
-    // and leaves the package. src/nine-router.ts says why the service
-    // runs the standalone server and not the package's own launcher.
+    // per side of a WSL boundary; RED_ROUTER=0 turns the service off
+    // and leaves the package. src/red-router.ts invokes the service
+    // contract shipped by the package and retires the old 9router unit.
     //
     // Its own row rather than a flag on the one above, because the two
     // fail differently and doctor reports them apart: mise answers for
     // the package, systemd or Explorer for the service.
-    name: "9router-autostart",
-    about: "keeps 9router running — a user service on Linux, a Startup shortcut on Windows",
+    name: "red-router-autostart",
+    about: "keeps red-router running — a user service on Linux, a Startup shortcut on Windows",
     scope: "core",
     managed: true,
-    u24: builtin("9router-autostart"),
-    win: builtin("9router-autostart"),
+    u24: builtin("red-router-autostart"),
+    win: builtin("red-router-autostart"),
   },
   {
     name: "build-resources",
