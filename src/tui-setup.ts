@@ -67,8 +67,9 @@ export async function runSetupTui(
   redApps: Choice[] = [],
   wslTuning: Choice[] = [],
   facts: SetupFacts = {},
+  desktopApps: Choice[] = [],
 ): Promise<SetupAnswers | null> {
-  const steps = questions(p, agents, apps, runtimes, redApps, wslTuning, facts);
+  const steps = questions(p, agents, apps, runtimes, redApps, wslTuning, facts, desktopApps);
   let result: SetupAnswers | null = null;
 
   // Built here, outside the component, and deliberately so.

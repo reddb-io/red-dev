@@ -167,6 +167,7 @@ export async function isFirstRun(p: Platform): Promise<boolean> {
 export async function buildSetupSteps(p: Platform, wslTuningFacts?: WslTuningFacts) {
   const { setupSteps } = await import("./tui-setup-model.ts");
   const { availableAgents, isAgentInstalled } = await import("./agents.ts");
+  const { desktopAppChoices } = await import("./desktop-apps.ts");
   const { otherOptionalChoices, redFamilyChoices } = await import("./red-family.ts");
   const { OFFERED_RUNTIMES } = await import("./runtimes.ts");
   const { observeWslTuningFacts, wslTuningChoices } = await import("./wsl-tuning.ts");
@@ -189,6 +190,7 @@ export async function buildSetupSteps(p: Platform, wslTuningFacts?: WslTuningFac
     redFamilyChoices(p, agents),
     tuningFacts ? wslTuningChoices(tuningFacts) : [],
     await setupFacts(p),
+    desktopAppChoices(p),
   );
 }
 
@@ -392,8 +394,8 @@ export async function carryOutChoices(
         observer.stepEnd?.({ tool: step.tool, outcome: "failed", detail });
       }
     }
-    // The desktop apps host no skills, so picking only those is not a
-    // reason to run the installer.
+    // Desktop apps never enter this plan, so they cannot trigger a
+    // RedSkills install merely by being selected on their own page.
     const skills = plan.find((step) => step.kind === "red-skills");
     if (skills) {
       observer.stepStart?.(skills);
@@ -422,6 +424,7 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
   if (columns >= 60) {
     const { runSetupTui } = await import("./tui-setup.ts");
     const { availableAgents, isAgentInstalled } = await import("./agents.ts");
+    const { desktopAppChoices } = await import("./desktop-apps.ts");
     const { otherOptionalChoices, redFamilyChoices } = await import("./red-family.ts");
     const { OFFERED_RUNTIMES } = await import("./runtimes.ts");
     const { observeWslTuningFacts, wslTuningChoices } = await import("./wsl-tuning.ts");
@@ -444,6 +447,7 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
         ? wslTuningChoices(await observeWslTuningFacts(p))
         : [],
       await setupFacts(p),
+      desktopAppChoices(p),
     );
 
     if (!given) {
@@ -558,6 +562,7 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
 
   // 4. The RedDB family: inventory beside the optional integrations.
   const { availableAgents } = await import("./agents.ts");
+  const { desktopAppChoices } = await import("./desktop-apps.ts");
   const { otherOptionalChoices, redFamilyChoices } = await import("./red-family.ts");
   const redFamily = redFamilyChoices(
     p,
@@ -599,6 +604,17 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
           appLabels,
         )
       : [];
+
+  // Graphical assistants are applications, not agent hosts. They are
+  // opt-in and stay on the desktop side of a Windows+WSL workstation.
+  const desktopLabels = desktopAppChoices(p).map((choice) => `${choice.key} — ${choice.note}`);
+  const pickedDesktopApps = desktopLabels.length > 0
+    ? await checkbox(
+        "Optional desktop apps? (space to select)",
+        desktopLabels as [string, ...string[]],
+        [],
+      )
+    : [];
 
   // 6. Plugins — things that attach to bash rather than sit beside it.
   //    The caveat stays visible, but the answer follows the same opt-out
@@ -657,7 +673,7 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
     theme,
     wallpaper,
     font,
-    apps: [...pickedApps, ...pickedRedApps].map((l) => l.split(" ")[0]!),
+    apps: [...pickedDesktopApps, ...pickedApps, ...pickedRedApps].map((l) => l.split(" ")[0]!),
     runtimes: selectedRuntimes,
     blesh,
   };

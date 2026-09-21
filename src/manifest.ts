@@ -103,6 +103,13 @@ type ProviderSpec =
    * it.
    */
   | { kind: "installer"; url: string; note: string; args?: string[] }
+  /** An official Debian package served outside GitHub, selected by architecture. */
+  | {
+      kind: "deb";
+      package: string;
+      urls: { x64: string; arm64: string };
+      note: string;
+    }
   /**
    * Resolve a release asset by *matching a glob against the names the
    * release actually has*, never by building a filename from a pinned
@@ -153,6 +160,8 @@ type ProviderSpec =
        */
       silentArgs?: string[];
     }
+  /** A first-party Microsoft Store listing, addressed by its product id. */
+  | { kind: "msstore"; id: string }
   /** A Launchpad PPA, then apt. */
   | { kind: "ppa"; ppa: string; pkgs: string[] }
   /**
@@ -330,6 +339,12 @@ export interface Tool {
 
 const apt = (pkg: string): Provider => ({ kind: "apt", pkg });
 const winget = (id: string): Provider => ({ kind: "winget", id });
+const msstore = (id: string): Provider => ({ kind: "msstore", id });
+const deb = (
+  packageName: string,
+  urls: { x64: string; arm64: string },
+  note: string,
+): Provider => ({ kind: "deb", package: packageName, urls, note });
 const gh = (repo: string, asset: string, bin?: string): Provider => ({
   kind: "gh",
   repo,
@@ -1086,6 +1101,42 @@ export const TOOLS: Tool[] = [
   // Chosen, never assumed. `red-dev apps` offers these; a plain
   // converge ignores them entirely.
   {
+    name: "codex-desktop",
+    about: "ChatGPT desktop app with Codex — official Linux preview",
+    cmd: ["chatgpt"],
+    scope: "optional",
+    u24: deb(
+      "chatgpt",
+      {
+        x64: "https://persistent.oaistatic.com/codex-app-prod/linux/deb/latest/chatgpt_amd64.deb",
+        arm64: "https://persistent.oaistatic.com/codex-app-prod/linux/deb/latest/chatgpt_arm64.deb",
+      },
+      "OpenAI's official ChatGPT/Codex desktop package",
+    ),
+    win: msstore("9PLM9XGG6VKS"),
+  },
+  {
+    name: "claude-desktop",
+    about: "Claude Desktop — Chat, Cowork and Claude Code",
+    cmd: ["claude-desktop"],
+    scope: "optional",
+    u24: aptrepo({
+      pkgs: ["claude-desktop"],
+      keyUrl: "https://downloads.claude.ai/claude-desktop/key.asc",
+      keyring: "/usr/share/keyrings/claude-desktop-archive-keyring.asc",
+      entry:
+        "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/claude-desktop-archive-keyring.asc] https://downloads.claude.ai/claude-desktop/apt/stable stable main",
+    }),
+    win: winget("Anthropic.Claude"),
+  },
+  {
+    name: "t3code",
+    about: "T3 Tools' desktop editor",
+    scope: "optional",
+    u24: skip("T3 Code does not publish a Linux desktop build"),
+    win: winget("T3Tools.T3Code"),
+  },
+  {
     name: "puppeteer",
     about: "browser automation CLI + Chrome for Testing + Ubuntu libraries — about 280 MB",
     cmd: ["puppeteer"],
@@ -1689,6 +1740,10 @@ export function describeProvider(pr: Provider): string {
       return `apt:${pr.pkg}`;
     case "winget":
       return `winget:${pr.id}`;
+    case "msstore":
+      return `msstore:${pr.id}`;
+    case "deb":
+      return `deb:${pr.package}`;
     case "installer":
       return `installer:${pr.url}`;
     case "gh":

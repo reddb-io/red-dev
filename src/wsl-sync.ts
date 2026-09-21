@@ -51,7 +51,7 @@ export function distroSetupCommands(
   const runtimes = runtimeIds.filter(isKnownRuntimeId);
   const cliAgents = agentKeys.filter((key) => {
     const agent = AGENTS.find((candidate) => candidate.key === key);
-    return agent !== undefined && !agent.desktopOnly;
+    return agent !== undefined;
   });
 
   return [

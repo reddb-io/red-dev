@@ -157,8 +157,8 @@ describe("the wallpaper", () => {
 });
 
 describe("the RedSkills plugins", () => {
-  const skillHost = AGENTS.find((agent) => !agent.desktopOnly && !agent.multiplexer)!.key;
-  const desktopHost = AGENTS.find((agent) => agent.desktopOnly)!.key;
+  const skillHost = AGENTS.find((agent) => !agent.multiplexer)!.key;
+  const desktopApp = "claude-desktop";
   const withAgents = (selected: string[]) => (id: string): string[] =>
     id === "agents" ? selected : [];
 
@@ -180,8 +180,8 @@ describe("the RedSkills plugins", () => {
   test("are asked only when a picked host takes skills", () => {
     const q = step("redskills");
     expect(stepAvailable(q, withAgents([skillHost]))).toBe(true);
-    expect(stepAvailable(q, withAgents([skillHost, desktopHost]))).toBe(true);
-    expect(stepAvailable(q, withAgents([desktopHost]))).toBe(false);
+    expect(stepAvailable(q, withAgents([skillHost, desktopApp]))).toBe(true);
+    expect(stepAvailable(q, withAgents([desktopApp]))).toBe(false);
     expect(stepAvailable(q, withAgents([]))).toBe(false);
   });
 

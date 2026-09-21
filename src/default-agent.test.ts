@@ -250,7 +250,7 @@ describe("the recorded choice", () => {
 });
 
 describe("the hosts a Default agent may be", () => {
-  test("exclude desktop applications and the multiplexer", () => {
+  test("exclude applications that are no longer agents and the multiplexer", () => {
     const keys = defaultAgentCandidates(AGENTS.map((agent) => agent.key)).map((a) => a.key);
     expect(keys).toContain("claude-code");
     expect(keys).not.toContain("claude-desktop");
