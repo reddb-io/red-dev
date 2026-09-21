@@ -420,6 +420,11 @@ export function mirrorFetchArgv(dir: string): string[] {
   return ["git", "--git-dir", dir, "fetch", "--prune", "--tags", "--quiet", "origin"];
 }
 
+/** PURE. A package-set repository move must also move an existing mirror. */
+export function mirrorSetOriginArgv(dir: string, url: string): string[] {
+  return ["git", "--git-dir", dir, "remote", "set-url", "origin", url];
+}
+
 /** PURE. */
 export function snapshotArchiveArgv(mirror: string, commit: string, tar: string): string[] {
   return ["git", "--git-dir", mirror, "archive", "--format=tar", `--output=${tar}`, commit];
@@ -499,6 +504,15 @@ export function ensureMirror(
 ): { ok: true; cloned: boolean } | { ok: false; reason: string } {
   const { url, dir } = opts;
   if (existsSync(join(dir, "HEAD"))) {
+    // The runtime publisher moved from red-skills to redskilled. A bare
+    // mirror remembers the old origin forever, so fetching tags alone can
+    // resolve the new repository through ls-remote and then try to archive
+    // that commit from the old repository. Keep the reusable mirror, but
+    // make its origin follow the source this acquisition resolved.
+    const moved = run(mirrorSetOriginArgv(dir, url));
+    if (moved.code !== 0) {
+      return { ok: false, reason: `git remote set-url exited ${moved.code}: ${firstLine(moved.stderr)}` };
+    }
     const fetched = run(mirrorFetchArgv(dir));
     if (fetched.code !== 0) {
       return { ok: false, reason: `git fetch exited ${fetched.code}: ${firstLine(fetched.stderr)}` };

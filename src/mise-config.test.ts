@@ -85,6 +85,20 @@ describe("renderMiseConfig", () => {
     expect(out).toContain('"npm:@reddb-io/red-skills" = "3.18.12"');
   });
 
+  test("known low-download npm packages carry their aube approval", () => {
+    const out = renderMiseConfig([
+      {
+        spec: "npm:@reddb-io/red-skills",
+        alias: "red-skills",
+        version: "4",
+        allowLowDownloads: true,
+      },
+    ]);
+    expect(out).toContain(
+      'red-skills = { version = "4", allow_low_downloads = true }',
+    );
+  });
+
   test("no entries still yields a parseable file rather than an empty one", () => {
     const out = renderMiseConfig([]);
     expect(out.startsWith("#")).toBe(true);

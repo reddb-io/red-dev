@@ -150,6 +150,7 @@ function fakeGit(revisions: readonly FakeRevision[]): {
       writeFileSync(join(dir, "HEAD"), "ref: refs/heads/main\n");
       return ok();
     }
+    if (args[3] === "remote" && args[4] === "set-url") return ok();
     if (args[3] === "fetch") {
       state.fetches++;
       return ok();
@@ -629,6 +630,45 @@ describe("against the real git", () => {
       );
     }
     expect(readdirSync(join(home, ".red", "skills", "snapshots"))).toHaveLength(2);
+  });
+
+  test.skipIf(!git)("moves an existing mirror to the repository now publishing the set", () => {
+    const first = mkdtempSync(join(tmpdir(), "red-acquire-old-origin-"));
+    const second = mkdtempSync(join(tmpdir(), "red-acquire-new-origin-"));
+    const init = (dir: string, version: string) => {
+      const run = (...args: string[]) =>
+        Bun.spawnSync(args, {
+          cwd: dir,
+          env: {
+            ...process.env,
+            GIT_AUTHOR_NAME: "red-dev",
+            GIT_AUTHOR_EMAIL: "red-dev@example.invalid",
+            GIT_COMMITTER_NAME: "red-dev",
+            GIT_COMMITTER_EMAIL: "red-dev@example.invalid",
+          },
+        });
+      run("git", "init", "--quiet", "--initial-branch=main", ".");
+      writeFileSync(join(dir, "package.json"), `${JSON.stringify({ version })}\n`);
+      run("git", "add", "package.json");
+      run("git", "commit", "--quiet", "-m", version);
+      run("git", "tag", `v${version}`);
+      return run("git", "rev-parse", "HEAD").stdout.toString().trim();
+    };
+    init(first, "4.5.0");
+    const wanted = init(second, "4.6.0");
+
+    const home = fakeHome();
+    const { systemRunner } = require("./red-skills-acquire.ts") as typeof import("./red-skills-acquire.ts");
+    const mirror = redSkillsMirrorDir(home);
+    expect(ensureMirror(systemRunner, { url: first, dir: mirror })).toMatchObject({ ok: true });
+    expect(ensureMirror(systemRunner, { url: second, dir: mirror })).toEqual({ ok: true, cloned: false });
+    expect(ensureSnapshot(systemRunner, { mirror, home, commit: wanted })).toMatchObject({
+      ok: true,
+      created: true,
+    });
+    expect(
+      Bun.spawnSync(["git", "--git-dir", mirror, "remote", "get-url", "origin"]).stdout.toString().trim(),
+    ).toBe(second);
   });
 });
 

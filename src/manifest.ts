@@ -86,6 +86,8 @@ type ProviderSpec =
       alias?: string;
       /** A mise selector. Absent means "latest". */
       version?: string;
+      /** Approve this known package when aube's popularity gate prompts. */
+      allowLowDownloads?: true;
     }
   /**
    * The vendor's own install script, fetched and run.
@@ -369,12 +371,13 @@ export const REDSKILLS_MAJOR = "4";
 
 const mise = (
   spec: string,
-  opts: { alias?: string; version?: string } = {},
+  opts: { alias?: string; version?: string; allowLowDownloads?: true } = {},
 ): Provider => ({
   kind: "mise",
   spec,
   ...(opts.alias ? { alias: opts.alias } : {}),
   ...(opts.version ? { version: opts.version } : {}),
+  ...(opts.allowLowDownloads ? { allowLowDownloads: true } : {}),
 });
 /** A release asset that is an installer rather than a binary. */
 const ghInstaller = (repo: string, asset: string, ...silentArgs: string[]): Provider => ({
@@ -948,6 +951,7 @@ export const TOOLS: Tool[] = [
     // anything, and a "Copied!" that copied nothing. WSL and native
     // Windows use their own clipboard bridges.
     name: "wl-clipboard",
+    cmd: ["wl-copy", "wl-paste"],
     scope: "desktop",
     u24: apt("wl-clipboard"),
     win: skip(NO_GUI),
@@ -1246,8 +1250,8 @@ export const TOOLS: Tool[] = [
     about: "the RedSkills runtime bundles, resolved and kept current by mise",
     scope: "core",
     managed: true,
-    u24: mise("npm:@reddb-io/red-skills", { alias: "red-skills", version: REDSKILLS_MAJOR }),
-    win: mise("npm:@reddb-io/red-skills", { alias: "red-skills", version: REDSKILLS_MAJOR }),
+    u24: mise("npm:@reddb-io/red-skills", { alias: "red-skills", version: REDSKILLS_MAJOR, allowLowDownloads: true }),
+    win: mise("npm:@reddb-io/red-skills", { alias: "red-skills", version: REDSKILLS_MAJOR, allowLowDownloads: true }),
   },
   // The plugins, one row each, and that is the point of them being here.
   //
@@ -1271,24 +1275,24 @@ export const TOOLS: Tool[] = [
     about: "RedSkills dev plugin — engineering skills for coding agents",
     scope: "core",
     managed: true,
-    u24: mise("npm:@reddb-io/red-skills-dev", { alias: "red-skills-dev", version: REDSKILLS_MAJOR }),
-    win: mise("npm:@reddb-io/red-skills-dev", { alias: "red-skills-dev", version: REDSKILLS_MAJOR }),
+    u24: mise("npm:@reddb-io/red-skills-dev", { alias: "red-skills-dev", version: REDSKILLS_MAJOR, allowLowDownloads: true }),
+    win: mise("npm:@reddb-io/red-skills-dev", { alias: "red-skills-dev", version: REDSKILLS_MAJOR, allowLowDownloads: true }),
   },
   {
     name: "red-skills-memory",
     about: "RedSkills memory plugin — governed operational memory, on top of dev",
     scope: "core",
     managed: true,
-    u24: mise("npm:@reddb-io/red-skills-memory", { alias: "red-skills-memory", version: REDSKILLS_MAJOR }),
-    win: mise("npm:@reddb-io/red-skills-memory", { alias: "red-skills-memory", version: REDSKILLS_MAJOR }),
+    u24: mise("npm:@reddb-io/red-skills-memory", { alias: "red-skills-memory", version: REDSKILLS_MAJOR, allowLowDownloads: true }),
+    win: mise("npm:@reddb-io/red-skills-memory", { alias: "red-skills-memory", version: REDSKILLS_MAJOR, allowLowDownloads: true }),
   },
   {
     name: "red-skills-brain",
     about: "RedSkills brain plugin — a project-local knowledge repository",
     scope: "core",
     managed: true,
-    u24: mise("npm:@reddb-io/red-skills-brain", { alias: "red-skills-brain", version: REDSKILLS_MAJOR }),
-    win: mise("npm:@reddb-io/red-skills-brain", { alias: "red-skills-brain", version: REDSKILLS_MAJOR }),
+    u24: mise("npm:@reddb-io/red-skills-brain", { alias: "red-skills-brain", version: REDSKILLS_MAJOR, allowLowDownloads: true }),
+    win: mise("npm:@reddb-io/red-skills-brain", { alias: "red-skills-brain", version: REDSKILLS_MAJOR, allowLowDownloads: true }),
   },
   {
     // After the agents, never before: the installer detects which CLIs
