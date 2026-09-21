@@ -1,0 +1,168 @@
+import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
+import GObject from 'gi://GObject';
+import St from 'gi://St';
+
+import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
+import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
+
+const MENU_WINDOW = [
+  '--class', 'red-dev-menu,red-dev-menu',
+  '--title', 'red-dev',
+  '--option', 'window.dimensions.columns=68',
+  '--option', 'window.dimensions.lines=25',
+  '--option', 'window.decorations="None"',
+  '--option', 'window.dynamic_title=false',
+  '--option', 'window.opacity=0.97',
+  '--option', 'window.padding.x=12',
+  '--option', 'window.padding.y=10',
+  '--option', 'scrolling.history=0',
+];
+
+function firstExecutable(paths) {
+  return paths.find(path => GLib.file_test(path, GLib.FileTest.IS_EXECUTABLE)) ?? paths.at(-1);
+}
+
+function command(...args) {
+  const home = GLib.get_home_dir();
+  const redDev = firstExecutable([
+    `${home}/.local/share/mise/shims/red-dev`,
+    `${home}/.local/bin/red-dev`,
+    'red-dev',
+  ]);
+  const terminal = firstExecutable(['/usr/bin/alacritty', 'alacritty']);
+
+  try {
+    Gio.Subprocess.new(
+      [terminal, ...(args[0] === 'menu' ? MENU_WINDOW : []), '-e', redDev, ...args],
+      Gio.SubprocessFlags.NONE,
+    );
+  } catch (error) {
+    console.error(`RedDB Menu Bar could not start red-dev ${args.join(' ')}: ${error.message}`);
+  }
+}
+
+function herdr() {
+  const home = GLib.get_home_dir();
+  const executable = firstExecutable([
+    `${home}/.local/share/mise/shims/herdr`,
+    `${home}/.local/bin/herdr`,
+    'herdr',
+  ]);
+  const terminal = firstExecutable(['/usr/bin/alacritty', 'alacritty']);
+  try {
+    Gio.Subprocess.new([terminal, '-e', executable], Gio.SubprocessFlags.NONE);
+  } catch (error) {
+    console.error(`RedDB Menu Bar could not start herdr: ${error.message}`);
+  }
+}
+
+function item(menu, label, icon, action) {
+  const row = new PopupMenu.PopupImageMenuItem(label, icon);
+  row.connect('activate', action);
+  menu.addMenuItem(row);
+  return row;
+}
+
+const RedDbMenu = GObject.registerClass(class RedDbMenu extends PanelMenu.Button {
+  _init(extension) {
+    super._init(0.0, 'RedDB');
+    this.add_style_class_name('reddb-panel-button');
+
+    const box = new St.BoxLayout({style_class: 'reddb-brand'});
+    box.add_child(new St.Icon({
+      gicon: Gio.icon_new_for_string(`${extension.path}/reddb-icon.svg`),
+      style_class: 'reddb-brand-icon',
+    }));
+    box.add_child(new St.Label({text: 'RedDB', y_align: 2}));
+    this.add_child(box);
+
+    item(this.menu, 'Applications', 'view-app-grid-symbolic', () => Main.overview.showApps());
+    item(this.menu, 'red-dev menu', 'open-menu-symbolic', () => command('menu'));
+    this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+    item(this.menu, 'Default agent', 'system-run-symbolic', () => command('agents', 'run'));
+    item(this.menu, 'Agent multiplexer', 'view-grid-symbolic', () => herdr());
+    this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+    item(this.menu, 'Doctor', 'emblem-system-symbolic', () => command('doctor'));
+    item(this.menu, 'Apps', 'application-x-executable-symbolic', () => command('apps'));
+    item(this.menu, 'Update workstation', 'software-update-available-symbolic', () => command('update'));
+  }
+});
+
+const WorkspaceMenu = GObject.registerClass(class WorkspaceMenu extends PanelMenu.Button {
+  _init() {
+    super._init(0.0, 'Workspaces');
+    this.add_style_class_name('reddb-panel-button');
+    this._label = new St.Label({style_class: 'reddb-workspaces-label', y_align: 2});
+    this.add_child(this._label);
+    this._signals = [
+      global.workspace_manager.connect('active-workspace-changed', () => this._refresh()),
+      global.workspace_manager.connect('notify::n-workspaces', () => this._refresh()),
+    ];
+    this._refresh();
+  }
+
+  _refresh() {
+    const manager = global.workspace_manager;
+    const active = manager.get_active_workspace_index();
+    this._label.text = Array.from({length: manager.n_workspaces}, (_, i) => i === active ? '●' : '○').join(' ');
+    this.menu.removeAll();
+    for (let i = 0; i < manager.n_workspaces; i++) {
+      const row = new PopupMenu.PopupMenuItem(`Workspace ${i + 1}`);
+      row.setOrnament(i === active ? PopupMenu.Ornament.DOT : PopupMenu.Ornament.NONE);
+      row.connect('activate', () => manager.get_workspace_by_index(i).activate(global.get_current_time()));
+      this.menu.addMenuItem(row);
+    }
+  }
+
+  destroy() {
+    for (const id of this._signals)
+      global.workspace_manager.disconnect(id);
+    super.destroy();
+  }
+});
+
+const AgentsMenu = GObject.registerClass(class AgentsMenu extends PanelMenu.Button {
+  _init() {
+    super._init(0.0, 'Agents');
+    this.add_style_class_name('reddb-panel-button');
+    const box = new St.BoxLayout({style_class: 'reddb-agents'});
+    box.add_child(new St.Icon({icon_name: 'system-run-symbolic'}));
+    box.add_child(new St.Label({text: 'Agents', y_align: 2}));
+    this.add_child(box);
+
+    item(this.menu, 'Launch default agent', 'media-playback-start-symbolic', () => command('agents', 'run'));
+    item(this.menu, 'Open multiplexer', 'view-grid-symbolic', () => herdr());
+    item(this.menu, 'Choose agents', 'preferences-system-symbolic', () => command('agents'));
+  }
+});
+
+export default class RedDbBarExtension extends Extension {
+  enable() {
+    this._brand = new RedDbMenu(this);
+    this._workspaces = new WorkspaceMenu();
+    this._agents = new AgentsMenu();
+
+    Main.panel.add_style_class_name('reddb-panel');
+    Main.panel.addToStatusArea('reddb-menu', this._brand, 0, 'left');
+    Main.panel.addToStatusArea('reddb-workspaces', this._workspaces, 1, 'left');
+    Main.panel.addToStatusArea('reddb-agents', this._agents, 0, 'right');
+
+    this._activities = Main.panel.statusArea.activities?.container ?? null;
+    this._activities?.hide();
+  }
+
+  disable() {
+    this._activities?.show();
+    this._activities = null;
+    this._agents?.destroy();
+    this._agents = null;
+    this._workspaces?.destroy();
+    this._workspaces = null;
+    this._brand?.destroy();
+    this._brand = null;
+    Main.panel.remove_style_class_name('reddb-panel');
+  }
+}

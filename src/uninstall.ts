@@ -340,6 +340,13 @@ export async function removeConfiguration(p: Platform): Promise<string[]> {
     log.warn(`9router: ${(err as Error).message}`);
   }
 
+  try {
+    const { removeGnomeBar } = await import("./gnome-bar.ts");
+    removed.push(...(await removeGnomeBar(p)));
+  } catch (err) {
+    log.warn(`GNOME menu bar: ${(err as Error).message}`);
+  }
+
   const targets = [
     `${home}/.local/share/red-dev`,
     `${home}/.config/red-dev`,

@@ -1779,6 +1779,7 @@ const BUILTIN_INTENT: Partial<Record<BuiltinName, string>> = {
   runtimes: "installing language runtimes through mise",
   "shared-root": "creating the shared workspace root and its permissions",
   hotkeys: "registering the Windows hotkeys",
+  "gnome-bar": "installing and enabling the RedDB menu bar in GNOME Shell",
   "red-skills": "cloning or updating red-skills and wiring the agent plugins",
   "red-skills-vscode": "installing the red-skills VS Code extension out of the package set",
   "red-skills-herdr": "installing the herdr plugin out of the package set",
@@ -1994,6 +1995,11 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
         }
         const { installGnomeKeys } = await import("./gnome-keys.ts");
         await installGnomeKeys(ctx.platform);
+        return;
+      }
+      if (pr.name === "gnome-bar") {
+        const { convergeGnomeBar } = await import("./gnome-bar.ts");
+        await convergeGnomeBar(ctx.platform);
         return;
       }
       if (pr.name === "wsl-sync") {
