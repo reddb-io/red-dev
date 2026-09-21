@@ -1344,6 +1344,20 @@ describe("the Hermes projection of the local dev set", () => {
 // -------------------------------------------------------------- the removal
 
 describe("removal is the ownership manifest, replayed", () => {
+  test("an empty activation removes every recorded host and converges", async () => {
+    const m = machine();
+    await reconcile(m, { run: runner(m).run });
+
+    const { calls, run } = runner(m);
+    const out = await reconcile(m, { plugins: [], run });
+
+    expect(out.every((o) => o.status === "reconciled")).toBe(true);
+    expect(readHostRegistry(m.home).hosts).toEqual({});
+    expect(lines(calls)).toContain(`${m.tree}/scripts/install-pi.sh --uninstall --user`);
+    expect(existsSync(join(m.home, ".gemini", "extensions", "red-skills"))).toBe(false);
+    expect(existsSync(join(m.home, ".hermes", "skills", "red-skills"))).toBe(false);
+  });
+
   test("takes back what was recorded and nothing beside it", async () => {
     const m = machine({ skills: ["shipped", "also-shipped"] });
     await reconcile(m, { run: runner(m).run });
