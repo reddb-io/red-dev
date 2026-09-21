@@ -178,6 +178,9 @@ describe("every other release provider", () => {
     );
 
     expect([...new Set(pinned)].sort()).toEqual([
+      // aube's cached npm `latest` still resolves 0.8.1; keep the
+      // official service contract on the version npm currently marks latest.
+      "red-router@0.9.1",
       // The fork build, for the OSC-reply leak.
       "zellij@0.46.0-red.1",
       // The suite crosses a major together, and only when a person says
