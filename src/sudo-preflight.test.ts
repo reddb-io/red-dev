@@ -84,9 +84,15 @@ describe("the human install entry points", () => {
     // `curl | sh` leaves stdin pointing at the exhausted script pipe. The
     // downloaded binary must inherit the controlling terminal or neither
     // its sudo prompt nor its fullscreen interface can read a key.
-    expect(boot).toContain('exec "$BIN" < /dev/tty');
+    expect(boot).toContain('"$BIN" < /dev/tty');
+    // The bootstrap must regain control after the child closes so it can
+    // retire its copy once mise owns red-dev. `exec` would preserve the TTY
+    // but make the duplicate permanent again.
+    expect(boot).not.toContain('exec "$BIN" < /dev/tty');
+    expect(boot).toContain("mise where red-dev");
+    expect(boot).toContain('rm -f "$BIN"');
     expect(boot.indexOf("export RED_DEV_BOOTSTRAP=1")).toBeLessThan(
-      boot.indexOf('exec "$BIN" < /dev/tty'),
+      boot.indexOf('"$BIN" < /dev/tty'),
     );
 
     // The bootstrap enters the menu rather than `cmdInstall`, so it needs

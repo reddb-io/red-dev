@@ -660,6 +660,38 @@ return {}
       log.plain(`       original config backed up at ${backup}`);
     },
   },
+  {
+    id: "2026-09-22-suite-binary-handover",
+    describe: "finish handing bootstrap binaries to their single mise owner",
+    applies: (p) => staleReleaseBinaries(p).length > 0,
+    run: async (p) => {
+      const stale = staleReleaseBinaries(p);
+      const mise = Bun.which("mise");
+      if (!mise) throw new Error("mise is not installed yet — bootstrap binaries left intact");
+
+      // Prove every replacement before removing any old copy. `mise where`
+      // asks for the alias's install tree directly; `which` can answer with
+      // the very ~/.local/bin file this migration is trying to retire.
+      for (const { name } of stale) {
+        const where = Bun.spawnSync([mise, "where", name], { stdout: "pipe", stderr: "ignore" });
+        if (where.exitCode !== 0 || where.stdout.toString().trim() === "") {
+          throw new Error(`${name} has no mise replacement yet — bootstrap binaries left intact`);
+        }
+      }
+
+      for (const { name, path } of stale) {
+        // Linux permits unlinking the image this process is executing; the
+        // inode stays alive until exit and the next command resolves through
+        // mise. Windows locks a running .exe, so boot.ps1 removes its bootstrap
+        // copy after this process returns and the migration retries once.
+        if (p.os === "windows" && samePath(path, process.execPath)) {
+          throw new Error(`${path} is still running — boot.ps1 will retire it after exit`);
+        }
+        rmSync(path, { force: true });
+        log.plain(`       ${name}: removed ${path}; mise is the only owner`);
+      }
+    },
+  },
 ];
 
 /**

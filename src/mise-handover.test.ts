@@ -103,6 +103,18 @@ describe("the stale binary an older release left behind", () => {
       expect(staleReleaseBinaries(ubuntu).map((s) => s.name)).toEqual(["red"]);
     });
   });
+
+  test("includes red-dev's bootstrap copy so a later run can finish the handover", () => {
+    const home = temp();
+    mkdirSync(join(home, ".local", "bin"), { recursive: true });
+    writeFileSync(join(home, ".local", "bin", "red-dev"), "#!/bin/sh\nexit 0\n");
+    withEnv({ HOME: home }, () => {
+      expect(staleReleaseBinaries(ubuntu)).toContainEqual({
+        name: "red-dev",
+        path: join(home, ".local", "bin", "red-dev"),
+      });
+    });
+  });
 });
 
 describe("mise's shims", () => {
