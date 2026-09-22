@@ -25,8 +25,8 @@ describe("the sudo preflight plan", () => {
   test("a fresh Ubuntu install names archive and deb-installer work", () => {
     const names = sudoItemsFor(ubuntu, ["core", "desktop"], () => "absent");
 
-    expect(names).toContain("btop");
     expect(names).toContain("red-request");
+    expect(names).not.toContain("btop");
     // dit's binary moved off its all-in-one installer. The managed input
     // repair decides from the group/rule state inside its own provider;
     // it is not another archive item in this static package plan.

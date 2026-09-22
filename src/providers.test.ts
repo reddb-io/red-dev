@@ -90,19 +90,20 @@ describe("what `red-dev update` moves", () => {
     expect(winget).toEqual([...winget].sort());
   });
 
-  test("the apt list covers repository and PPA packages too, not only plain apt", () => {
+  test("the apt list covers repository packages too, not only plain apt", () => {
     const apt = declaredAptPackages(UBUNTU);
-    // aptrepo (docker) and ppa (neovim) declare `pkgs`, not `pkg`; an
-    // enumeration that only knew about `apt` would upgrade neither.
+    // aptrepo (docker) declares `pkgs`, not `pkg`; an enumeration that
+    // only knew about `apt` would not upgrade it.
     expect(apt).toContain("docker-ce");
-    expect(apt).toContain("neovim");
+    expect(apt).not.toContain("neovim");
   });
 
   test("each side names only its own package manager's packages", () => {
     // Windows has no apt list at all; the winget list is what the
     // Windows converge would install, so it is what an update may move.
     expect(declaredAptPackages(WINDOWS)).toEqual([]);
-    expect(declaredWingetIds(WINDOWS)).toContain("BurntSushi.ripgrep.MSVC");
+    expect(declaredWingetIds(WINDOWS)).toContain("Git.Git");
+    expect(declaredWingetIds(WINDOWS)).not.toContain("BurntSushi.ripgrep.MSVC");
   });
 });
 
