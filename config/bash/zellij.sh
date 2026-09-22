@@ -42,7 +42,9 @@ if [ -n "${RED_IN_ZELLIJ:-}" ] || [ -n "${ZELLIJ:-}" ] || [ -n "${ZELLIJ_SESSION
   # deliberately left alone.
   if [ "${ZELLIJ_SESSION_NAME:-}" = "red-dev-main" ] && command -v zellij >/dev/null 2>&1; then
     _red_zellij_host="${RED_ZELLIJ_SESSION:-$(hostname 2>/dev/null || uname -n 2>/dev/null)}"
-    [ -n "$_red_zellij_host" ] && zellij action rename-session "$_red_zellij_host" >/dev/null 2>&1 || true
+    if [ -n "$_red_zellij_host" ]; then
+      zellij action rename-session "$_red_zellij_host" >/dev/null 2>&1 || true
+    fi
     unset _red_zellij_host
   fi
   return 0
