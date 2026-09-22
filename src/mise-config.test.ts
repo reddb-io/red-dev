@@ -114,6 +114,12 @@ describe("renderMiseConfig", () => {
       '[settings.github]\ncredential_command = "gh auth token"',
     );
   });
+
+  test("latest asks remote sources on every direct mise upgrade", () => {
+    expect(renderMiseConfig([])).toContain(
+      '[settings]\nfetch_remote_versions_cache = "0s"',
+    );
+  });
 });
 
 describe("miseEntries", () => {

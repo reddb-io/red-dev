@@ -947,6 +947,10 @@ async function runMise(cmd: string[], platform: Platform): Promise<number> {
     // nothing else the person owns is inside this exemption.
     env: {
       MISE_YES: "1",
+      // A moving selector with an hour-old version list is a pin for an
+      // hour. The generated fragment covers direct `mise upgrade`; the
+      // environment also wins over a conflicting personal setting here.
+      MISE_FETCH_REMOTE_VERSIONS_CACHE: "0s",
       ...miseReleaseAgeEnv(platform),
     },
   });
