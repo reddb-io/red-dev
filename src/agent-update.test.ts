@@ -214,6 +214,7 @@ describe("the update argv of each per-host mechanism", () => {
         "use",
         "-g",
         "--yes",
+        "--fuzzy",
         "github:reddb-io/redcode@latest",
       ],
       env: {},
@@ -226,7 +227,7 @@ describe("the update argv of each per-host mechanism", () => {
     if (p.state !== "ready") return;
     expect(p.step).toEqual({
       kind: "command",
-      argv: ["/usr/bin/mise", "use", "-g", "--yes", "herdr@latest"],
+      argv: ["/usr/bin/mise", "use", "-g", "--yes", "--fuzzy", "herdr@latest"],
       env: {},
     });
   });

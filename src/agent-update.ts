@@ -230,7 +230,9 @@ export function planAgentUpdate(
       }
       return ready({
         kind: "command",
-        argv: [mise, "use", "-g", "--yes", `${a.mise as string}@latest`],
+        // --fuzzy keeps `latest` in config even on a machine whose
+        // MISE_PIN=1 would otherwise turn this into today's number.
+        argv: [mise, "use", "-g", "--yes", "--fuzzy", `${a.mise as string}@latest`],
         env: {},
       });
     }
