@@ -571,6 +571,12 @@ The bootstrap download is temporary ownership: after a successful first run
 proves mise has installed `red-dev`, the bootstrap removes its own copy. A
 cancelled setup keeps that copy so the command never disappears.
 
+A shell without mise activation keeps the shim fallback; an activated shell uses
+only mise's real tool directories, so the same command is not listed twice on
+`PATH`. RedSkills runtime commands are the corresponding exception: their one
+visible path is the stable launcher for the signed active package set, not the
+npm acquisition tree behind it.
+
 On the Ubuntu desktop, red-dev itself also has a tool-level postinstall: it
 runs the newly installed binary's `desktop reconcile`. That updates only the
 managed mise declaration, GNOME menu bar and shortcuts; it does not install

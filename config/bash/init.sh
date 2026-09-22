@@ -66,9 +66,36 @@ _red_fix_path() {
   unset _red_posix_path
 }
 
+# path.sh gives every shell mise's shims so commands also work without
+# activation. Once activation succeeds, mise has inserted the real tool
+# directories; keeping the shims as well makes every command appear
+# twice in PATH. RedSkills is the other deliberate exception: its stable
+# launchers follow the signed active set (including rollback), so the npm
+# acquisition tree must not expose a second runtime beside them.
+_red_drop_mise_fallbacks() {
+  local data="${MISE_DATA_DIR:-$HOME/.local/share/mise}" out="" entry
+  if [ "${RED_ENV:-}" = "windows" ] && [ -n "${_RED_CYGPATH:-}" ]; then
+    _red_data_posix=$("$_RED_CYGPATH" -u "$data" 2>/dev/null)
+    [ -n "$_red_data_posix" ] && data="$_red_data_posix"
+    unset _red_data_posix
+  fi
+  local IFS=':'
+  for entry in $PATH; do
+    [ -n "$entry" ] || continue
+    case "$entry" in
+      "$data/shims"|"$data/installs/red-skills/"*/node_modules/.bin) continue ;;
+    esac
+    out="${out:+$out:}$entry"
+  done
+  PATH="$out"
+}
+
 if command -v mise >/dev/null 2>&1; then
-  eval "$(mise activate bash)"
-  _red_fix_path
+  if eval "$(mise activate bash)"; then
+    _red_fix_path
+    _red_drop_mise_fallbacks
+    export PATH
+  fi
 fi
 
 if command -v zoxide >/dev/null 2>&1; then
@@ -126,6 +153,7 @@ fi
 # directories glued into one that is neither.
 _red_fix_path
 unset -f _red_fix_path
+unset -f _red_drop_mise_fallbacks
 unset _RED_CYGPATH
 
 export EDITOR="nvim"
