@@ -210,10 +210,8 @@ export function planAgentUpdate(
     }
 
     case "mise": {
-      // The one mechanism that is not a vendor's: for a host this
-      // organisation publishes, mise is what moves every other tool in
-      // the suite, and `upgrade` is the same verb `red-dev` itself
-      // takes. The cache is not cleared here — `mise upgrade` on a
+      // The same mechanism that moves the portable workstation suite.
+      // The cache is not cleared here — `mise upgrade` on a
       // named tool re-resolves it, and the version list this depends on
       // is refreshed by the self-update that runs beside this.
       const mise = res.locate("mise");

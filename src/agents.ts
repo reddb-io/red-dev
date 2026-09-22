@@ -56,7 +56,7 @@ export interface AgentSpec {
   /** npm package, when neither of the above fits the platform. */
   npm?: string;
   /**
-   * A mise spec, for a host this organisation publishes itself.
+   * A mise spec for a host whose public releases mise can manage.
    *
    * The rule in `src/agent-update.ts` — every host by its own
    * publisher's mechanism — is written against third parties, and it is
@@ -82,6 +82,8 @@ export interface AgentSpec {
    * `release` entry stays as the answer for a machine that does not.
    */
   mise?: string;
+  /** Also belongs to the always-present workstation suite fragment. */
+  miseSuite?: true;
   /** GitHub release archives whose stable filenames are part of our contract. */
   release?: {
     repo: string;
@@ -162,6 +164,7 @@ export const AGENTS: AgentSpec[] = [
     cmd: "claude",
     configFiles: [".claude/settings.json", ".claude.json"],
     recommended: true,
+    mise: "claude",
     installer: "https://claude.ai/install.sh",
     winget: "Anthropic.ClaudeCode",
     selfUpdate: ["update"],
@@ -173,6 +176,7 @@ export const AGENTS: AgentSpec[] = [
     cmd: "codex",
     configFiles: [".codex/config.toml"],
     recommended: true,
+    mise: "codex",
     winget: "OpenAI.Codex",
     npm: "@openai/codex",
     // OpenAI ships a standalone build with its own updater, and machines
@@ -189,6 +193,7 @@ export const AGENTS: AgentSpec[] = [
     configFiles: [".config/redcode/opencode.json", ".config/redcode/opencode.jsonc"],
     recommended: true,
     mise: "github:reddb-io/redcode",
+    miseSuite: true,
     release: {
       repo: "reddb-io/redcode",
       linux: {
@@ -215,6 +220,7 @@ export const AGENTS: AgentSpec[] = [
     cmd: "gemini",
     configFiles: [".gemini/settings.json"],
     recommended: false,
+    mise: "gemini",
     npm: "@google/gemini-cli",
   },
   {
@@ -231,14 +237,15 @@ export const AGENTS: AgentSpec[] = [
     // in the preview channel, as a dated .zip, and pulling a preview
     // into a converge is a decision rather than a default.
     //
-    // The installer is POSIX sh and lands in ~/.local/bin, which needs
-    // no sudo and is already on the PATH red-dev builds.
+    // Herdr is in mise's registry, backed by its public GitHub releases.
+    // Keeping it here means `mise upgrade` advances the same copy red-dev
+    // installed instead of leaving an installer-owned binary behind.
     key: "herdr",
     label: "Herdr",
     about: "run several coding agents in one terminal, alive over SSH",
     cmd: "herdr",
     recommended: false,
-    installer: "https://herdr.dev/install.sh",
+    mise: "herdr",
     multiplexer: true,
   },
   {
@@ -247,6 +254,7 @@ export const AGENTS: AgentSpec[] = [
     about: "personal assistant, any platform",
     cmd: "openclaw",
     recommended: false,
+    mise: "npm:openclaw",
     installer: "https://openclaw.ai/install.sh",
     npm: "openclaw",
   },
@@ -270,6 +278,7 @@ export const AGENTS: AgentSpec[] = [
     about: "badlogic's minimal coding agent",
     cmd: "pi",
     recommended: false,
+    mise: "pi",
     // The scoped package: bare `pi` on npm is something else entirely.
     npm: "@earendil-works/pi-coding-agent",
     probeArgs: ["--version"],
@@ -633,10 +642,9 @@ export type AgentInstallMethod =
 
 /** Choose a method that can run unattended on this target. */
 export function agentInstallMethod(a: AgentSpec, p: Platform): AgentInstallMethod | null {
-  // First, and only for a host we publish: mise owns version resolution,
-  // download, checksum and the shim for the rest of this organisation's
-  // suite, and a host of ours is not different in kind from `red` or
-  // `tq`.
+  // First whenever a public release or official package has a mise
+  // backend. One owner for install and upgrade avoids a working binary
+  // in ~/.local/bin while mise updates a different copy.
   //
   // Not conditioned on mise being present, though the first draft was.
   // This function is asked what mechanism a host *has*, and the answer

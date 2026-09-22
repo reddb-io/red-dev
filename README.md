@@ -328,15 +328,15 @@ same machine.
 
 `dit` is a CLI and still `desktop`, for the same reason wearing different
 clothes — it types into the *focused application*, and under WSL there is
-neither one of those nor a `/dev/input` to read its hotkey from. On Linux it
-comes from the publisher's installer rather than the release binary, and not for
-the usual checksum reason: dit reads its hotkey from `/dev/input` and types
-through `/dev/uinput`, so it needs you in the `input` group and a udev rule.
-Dropping the binary in gives you a program that runs and cannot see a keypress.
-red-dev passes `--yes` to keep the converge non-interactive and `--no-service`
-to leave the autostart unit alone — a standing background service is a decision
-to make deliberately, and dit works without it. It also wants an
-`ELEVENLABS_API_KEY`, or `--engine local` for offline Whisper.
+neither one of those nor a `/dev/input` to read its hotkey from. mise owns its
+binary so `red-dev update` advances the copy people actually run. On Linux,
+red-dev separately converges the `input` group, `/dev/uinput` rule and GNOME
+focus bridge that make the binary usable. It also installs dit's user-session
+autostart contract, so the hotkey and tray return at login: one
+`dit.service`/XDG entry on Linux or one `dit` logon task on Windows. Re-running
+the installer rewrites those same fixed names rather than creating another
+service. dit reads `ELEVENLABS_API_KEY` from `~/.red/dit/.env`, or can use
+`--engine local` for offline Whisper.
 
 **Coding agents** are chosen rather than assumed — `red-dev agents` offers
 every agent applicable to the current platform pre-ticked, including the
@@ -541,31 +541,35 @@ WSL, on the desktop, and in Git Bash. `red-dev lang` chooses which. A version
 manager that manages nothing is how `pnpm` ends up working in one shell and not
 another on the same machine.
 
-**And so is almost everything else that is not a distro package.** On Linux the
-tools red-dev used to download release-by-release — `starship`, `atuin`,
-`carapace`, `yazi`, `lazygit`, `lazydocker`, `dust`, `glow`, `gitui`, the
-RedDB CLIs `red` and `tq`, the pinned `zellij` fork, **and red-dev itself** —
-are mise's too. The reason is not tidiness: a converge that finds a binary on
-PATH never asks how old it is, so a hand-downloaded release was installed once
-and then frozen for good. `red-dev update` now names each of them to `mise
-upgrade`, which is also what finally makes red-dev self-updating.
+**And so is every portable CLI for which mise has an official backend.** This
+applies on Linux and Windows: shell tools, terminal utilities, RedDB CLIs,
+RedRouter, dit, the RedSkills packages, the RedDB Zellij fork, red-dev itself
+and supported agent hosts all use `latest`. A converge that finds a binary on
+PATH otherwise never asks how old it is, so a hand-downloaded release can stay
+frozen forever. Both bare `mise upgrade` and `red-dev update` now advance the
+copies red-dev installed.
 
 mise picks the asset for the platform, verifies the publisher's checksum, and
 verifies GitHub build attestations where the release carries them — ours do.
 It also holds a release back for a short while after publication, which red-dev
 leaves alone: the tag cut minutes ago is the one nobody has run yet.
 
-Three deliberately stay behind. `tldr` ships a binary called `tealdeer` and
-mise will not rename it. `red-ui` ships a .deb whose desktop integration a bare
-binary would shadow, and `red-request` ships a Windows installer rather than a
-binary. On Windows nothing moved: winget is already an updater, and replacing a
-working one buys nothing — though what red-dev asks it to upgrade is now the
-list red-dev declares rather than every app on the machine (below).
+Native package managers remain for system services and libraries, plus desktop
+apps whose `.deb` or installer carries integration a bare binary cannot replace.
+`gh` remains a bootstrap package because mise uses the active `gh` account for
+authenticated GitHub downloads. Muse and Hermes keep their official installers;
+their setup includes work that a generic package backend does not reproduce.
 
 Anything mise owns lands on PATH through its shims, which — unlike `mise
 activate` — also work in a script, a systemd unit and over SSH. A machine
 upgrading from an older release hands its `~/.local/bin` copies over on the
 next converge, and never before mise can answer for them.
+
+GitHub lookups made by mise use the account selected by `gh auth login`.
+red-dev writes `github.credential_command = "gh auth token"` into its managed
+mise fragment, so `mise upgrade` receives the authenticated API allowance
+without storing a second token. `gh auth switch` changes the account used by
+the next upgrade.
 
 ### The shell
 
@@ -1014,9 +1018,10 @@ that depend on it, rather than trusting the copy to have taken.
 #### The RedDB menu bar
 
 The desktop scope installs a GNOME Shell extension that turns Ubuntu's top
-panel into the persistent RedDB surface. The official RedDB mark opens the
-red-dev menu, workspace dots switch desktops, and the Agents item starts the
-Default agent or herdr. GNOME keeps owning the clock, network, audio, power and
+panel into the persistent RedDB surface. The official RedDB mark and **Menu**
+label open the red-dev menu, workspace dots switch desktops, and the item named
+after the Default agent (for example, **RedCode**) starts that app or herdr.
+GNOME keeps owning the clock, network, audio, power and
 AppIndicator tray, so applications such as dit, red-router and redskilled remain
 visible in the same bar instead of growing a second status area.
 

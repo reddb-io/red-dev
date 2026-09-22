@@ -60,8 +60,8 @@ type ProviderSpec =
    * provider to them lasted exactly as long as it took to read the rest
    * of the manifest: every `gh` tool had the same frozen-forever
    * problem, because a converge that finds a binary on PATH never asks
-   * how old it is. So mise owns the Linux half of the third-party
-   * releases too, through its registry wherever the registry has them.
+   * how old it is. So mise owns portable third-party releases on every
+   * target wherever the registry has them.
    *
    * `gh` stays where mise would be wrong rather than merely
    * unnecessary: an asset that is an installer rather than a binary
@@ -69,9 +69,9 @@ type ProviderSpec =
    * a .deb carrying desktop integration that a bare relocatable binary
    * would shadow (red-ui).
    *
-   * winget stays on Windows. `winget upgrade --all` already refreshes
-   * what it owns, so mise there would be replacing a working updater
-   * rather than supplying the missing one.
+   * Native package managers stay for operating-system services,
+   * libraries and desktop integration. `gh` is also bootstrap: it must
+   * exist before mise can ask the selected GitHub account for a token.
    */
   | {
       kind: "mise";
@@ -84,8 +84,8 @@ type ProviderSpec =
        * inside it are different facts: reddb-io/toon ships `tq`.
        */
       alias?: string;
-      /** A mise selector. Absent means "latest". */
-      version?: string;
+      /** Always follows the publisher's latest release. */
+      version?: "latest";
       /** Approve this known package when aube's popularity gate prompts. */
       allowLowDownloads?: true;
     }
@@ -189,6 +189,8 @@ type ProviderSpec =
         | "alacritty"
         | "wsl-interop"
         | "wsl-runtime-dir"
+        | "dit-input"
+        | "dit-autostart"
         | "blesh"
         | "build-resources"
         | "runtimes"
@@ -362,32 +364,13 @@ const gh = (repo: string, asset: string, bin?: string): Provider => ({
  * registry does not know — our repositories, and our forks.
  *
  * The options ride in an object rather than as positional arguments
- * because `alias` and `version` are independent and mostly absent, and
+ * because `alias` and the low-download approval are independent and mostly absent, and
  * a call site reading mise("github:reddb-io/toon", "tq") gives no clue
  * which of the two that string is.
  */
-/**
- * The RedSkills major this red-dev knows how to read.
- *
- * `latest` was the pin, which means npm's dist-tag decided when every
- * machine crossed a major boundary — including at 03:00, including for
- * a major whose manifest schema this binary has never seen. red-skills
- * 4.0 did exactly that: the package set moved to `red.package-set.v2`,
- * every red-dev in the field refused every 4.x set, and no human had
- * decided anything.
- *
- * A major is a decision, so it is spelled here and moves in a commit,
- * beside the parser that has to be able to read it (`red-skills-set.ts`)
- * and the contract check that proves it can (`scripts/check-package-set-contract.ts`).
- * Minors and patches still arrive on their own — mise resolves the
- * newest release inside the major, which is the part that should not
- * need a person.
- */
-export const REDSKILLS_MAJOR = "4";
-
 const mise = (
   spec: string,
-  opts: { alias?: string; version?: string; allowLowDownloads?: true } = {},
+  opts: { alias?: string; version?: "latest"; allowLowDownloads?: true } = {},
 ): Provider => ({
   kind: "mise",
   spec,
@@ -408,11 +391,6 @@ const installer = (url: string, note: string, ...args: string[]): Provider => ({
   note,
   ...(args.length > 0 ? { args } : {}),
 });
-const ppa =(name: string, ...pkgs: string[]): Provider => ({
-  kind: "ppa",
-  ppa: name,
-  pkgs,
-});
 const aptrepo = (spec: {
   pkgs: string[];
   keyUrl: string;
@@ -428,6 +406,8 @@ const builtin = (
     | "alacritty"
     | "wsl-interop"
     | "wsl-runtime-dir"
+    | "dit-input"
+    | "dit-autostart"
     | "wsl-sync"
     | "blesh"
     | "build-resources"
@@ -529,31 +509,31 @@ export const TOOLS: Tool[] = [
     name: "just",
     about: "command runner; a Makefile without the Make",
     scope: "core",
-    u24: apt("just"),
-    win: winget("Casey.Just"),
+    u24: mise("just"),
+    win: mise("just"),
   },
   {
     name: "ripgrep",
     cmd: ["rg"],
     scope: "core",
-    u24: apt("ripgrep"),
-    win: winget("BurntSushi.ripgrep.MSVC"),
+    u24: mise("ripgrep"),
+    win: mise("ripgrep"),
   },
   {
     name: "fd",
     cmd: ["fdfind", "fd"],
     scope: "core",
-    u24: apt("fd-find"),
-    win: winget("sharkdp.fd"),
+    u24: mise("fd"),
+    win: mise("fd"),
   },
   {
     name: "bat",
     cmd: ["batcat", "bat"],
     scope: "core",
-    u24: apt("bat"),
-    win: winget("sharkdp.bat"),
+    u24: mise("bat"),
+    win: mise("bat"),
   },
-  { name: "eza", scope: "core", u24: apt("eza"), win: winget("eza-community.eza") },
+  { name: "eza", scope: "core", u24: mise("eza"), win: mise("eza") },
   {
     // A service, not a binary, which is why it is a builtin on both
     // columns rather than apt on one and winget on the other: `apt
@@ -600,10 +580,10 @@ export const TOOLS: Tool[] = [
     u24: apt("bash-completion"),
     win: skip("Git Bash ships its own bash-completion"),
   },
-  { name: "zoxide", scope: "core", u24: apt("zoxide"), win: winget("ajeetdsouza.zoxide") },
-  { name: "fzf", scope: "core", u24: apt("fzf"), win: winget("junegunn.fzf") },
-  { name: "btop", scope: "core", u24: apt("btop"), win: winget("aristocratos.btop4win") },
-  { name: "jq", scope: "core", u24: apt("jq"), win: winget("jqlang.jq") },
+  { name: "zoxide", scope: "core", u24: mise("zoxide"), win: mise("zoxide") },
+  { name: "fzf", scope: "core", u24: mise("fzf"), win: mise("fzf") },
+  { name: "btop", scope: "core", u24: mise("btop"), win: winget("aristocratos.btop4win") },
+  { name: "jq", scope: "core", u24: mise("jq"), win: mise("jq") },
   {
     // config/bash/functions.sh ships webm2mp4, and that helper is only
     // honest if the binary it shells out to is part of the base toolset.
@@ -659,13 +639,13 @@ export const TOOLS: Tool[] = [
     // checksum file — the asset glob this carried before verified
     // nothing beyond "a file with that name existed".
     u24: mise("starship"),
-    win: winget("Starship.Starship"),
+    win: mise("starship"),
   },
   {
     name: "atuin",
     scope: "core",
     u24: mise("atuin"),
-    win: winget("Atuinsh.Atuin"),
+    win: mise("atuin"),
   },
   {
     name: "carapace",
@@ -674,24 +654,24 @@ export const TOOLS: Tool[] = [
     // unpack; the registry hands over a binary instead, so carapace
     // stops being a reason for a converge to ask for sudo.
     u24: mise("carapace"),
-    win: winget("rsteube.Carapace"),
+    win: mise("carapace"),
   },
-  { name: "direnv", scope: "core", u24: apt("direnv"), win: winget("direnv.direnv") },
+  { name: "direnv", scope: "core", u24: mise("direnv"), win: mise("direnv") },
   {
     // Every git diff, show and log -p goes through this, and lazygit
     // picks it up too. The single largest quality change per byte
     // installed.
     name: "delta",
     scope: "core",
-    u24: apt("git-delta"),
-    win: winget("dandavison.delta"),
+    u24: mise("delta"),
+    win: mise("delta"),
   },
   {
-    // Not in the 24.04 archive; the release tarball is the only route.
+    // mise's registry follows the publisher and verifies its release.
     name: "yazi",
     scope: "core",
     u24: mise("yazi"),
-    win: winget("sxyazi.yazi"),
+    win: mise("yazi"),
   },
   {
     // Not apt. The archive ships tealdeer 1.6.1 from 2023, which points
@@ -703,23 +683,18 @@ export const TOOLS: Tool[] = [
     name: "tldr",
     cmd: ["tldr"],
     scope: "core",
-    // The one tool here that stays on gh, and the reason is the third
-    // argument: the release ships a binary called `tealdeer` and the
-    // command people type is `tldr`. gh renames it on the way in. mise
-    // cannot — neither the github: backend nor ubi's `exe=` option
-    // renames the extracted file, both verified against the real 1.8.1
-    // release, and a shim called `tealdeer` is a `tldr` that does not
-    // exist. Revisit if the registry ever adopts it.
-    u24: gh("dbrgn/tealdeer", "tealdeer-linux-x86_64-musl", "tldr"),
-    win: winget("dbrgn.tealdeer"),
+    // The registry names the project tealdeer; the alias keeps the
+    // workstation contract and `mise upgrade tldr` under the command
+    // people actually type.
+    u24: mise("tealdeer", { alias: "tldr" }),
+    win: mise("tealdeer", { alias: "tldr" }),
   },
   {
     name: "fastfetch",
     scope: "core",
-    // Not in the 24.04 archive. The PPA publishes per-suite, so this is
-    // unverified on 26.04 — no 26.04 target has run yet.
-    u24: ppa("zhangsongcui3371/fastfetch", "fastfetch"),
-    win: winget("Fastfetch-cli.Fastfetch"),
+    // The registry removes the Ubuntu-release dependency the old PPA had.
+    u24: mise("fastfetch"),
+    win: mise("fastfetch"),
   },
   {
     name: "gh",
@@ -731,22 +706,22 @@ export const TOOLS: Tool[] = [
       entry:
         "deb [arch=amd64 signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main",
     }),
+    // gh authenticates mise's GitHub downloads. Keep it on the native
+    // package manager so a clean machine can obtain it before mise asks
+    // `gh auth token` for credentials.
     win: winget("GitHub.cli"),
   },
   {
     name: "lazygit",
     scope: "core",
     u24: mise("lazygit"),
-    win: winget("JesseDuffield.lazygit"),
+    win: mise("lazygit"),
   },
   {
     name: "lazydocker",
     scope: "core",
     u24: mise("lazydocker"),
-    // Capital L. winget's --exact is case-sensitive, and the lowercase
-    // form exits 20 ("no package found") -- which this reported as a
-    // successful install for as long as non-zero was only a warning.
-    win: winget("JesseDuffield.Lazydocker"),
+    win: mise("lazydocker"),
   },
   {
     // zellij is how tiling stays identical across all five targets.
@@ -769,33 +744,13 @@ export const TOOLS: Tool[] = [
     // among them). Its releases publish binaries only — nothing goes to
     // crates.io.
     //
-    // The pin has four segments because the fork versions as
-    // 0.46.0+red.1 — see parseVersion, which folds the `red.N` marker
-    // into a fourth segment for both the binary and the tag spellings.
-    //
-    // Lift the fork when an upstream release ships the fix for #5174:
-    // point repo, tag and pin back at zellij-org and drop the fourth
-    // segment together.
+    // Keep following the fork's newest release. The fork is the channel;
+    // an exact version here would freeze every workstation until red-dev
+    // itself shipped again.
     name: "zellij",
     scope: "core",
-    pinVersion: "0.46.0.1",
-    // Pinned through mise rather than by hand. The fork is ours and the
-    // registry carries only upstream, so this is the github: backend —
-    // and the version here is the tag, `0.46.0-red.1`, while pinVersion
-    // above is what the binary answers to --version, `0.46.0.1`. They
-    // name the same release in the two vocabularies that ask.
-    //
-    // A pinned tool is the one case where `mise upgrade` must move
-    // nothing, and it moves nothing: the selector is exact, so upgrade
-    // resolves it to itself.
-    u24: mise("github:reddb-io/zellij", { alias: "zellij", version: "0.46.0-red.1" }),
-    // winget installs upstream's newest — so on Windows the pin is a
-    // report rather than a repair: the doctor names the machine as off
-    // the pinned version and the swap is manual. The fork's release
-    // does ship a windows-msvc .zip and .msi for exactly that swap.
-    // Silence would be the alternative, and silence is how 0.44.3 got
-    // onto a machine in the first place.
-    win: winget("Zellij.Zellij"),
+    u24: mise("github:reddb-io/zellij", { alias: "zellij" }),
+    win: mise("github:reddb-io/zellij", { alias: "zellij" }),
   },
   {
     name: "neovim",
@@ -804,16 +759,11 @@ export const TOOLS: Tool[] = [
     // requires Neovim >= 0.11.2" and exits.
     minVersion: "0.11.2",
     scope: "core",
-    // The archive ships 0.9.5 on noble, and LazyVim refuses to start on
-    // it — it requires 0.11.2 or newer and exits with a message. Since
-    // red-dev also sets EDITOR=nvim, an archive nvim does not degrade
-    // the editor, it breaks every caller of $EDITOR: git commit, zellij's
-    // EditScrollback, Claude Code's external editor. The upstream tarball
-    // is not a drop-in either: nvim needs its runtime tree, so installing
-    // just the binary produces a broken editor. The PPA packages both
-    // properly.
-    u24: ppa("neovim-ppa/unstable", "neovim"),
-    win: winget("Neovim.Neovim"),
+    // The archive ships 0.9.5 on noble, which LazyVim refuses. mise's
+    // registry installs the complete upstream distribution, runtime tree
+    // included, and keeps it current across Ubuntu and Windows.
+    u24: mise("neovim"),
+    win: mise("neovim"),
   },
   {
     name: "docker",
@@ -892,18 +842,17 @@ export const TOOLS: Tool[] = [
     // gated postinstall (npm 11) installs cleanly and still works.
     //
     // Aliased to the command people type, so `mise upgrade red-router`
-    // means what it says. The current release is explicit because aube's
-    // cached npm `latest` still resolves this package to 0.8.1 even
-    // though npm's dist-tag is 0.9.1; the older build must not silently
-    // replace the service contract declared here.
+    // means what it says. Do not pin this row: mise's npm backend follows
+    // the package's public `latest` dist-tag, so a RedRouter release must
+    // not wait for a red-dev release before workstations can receive it.
     //
     // The package only. What keeps it running is the row below.
     name: "red-router",
     about: "one local endpoint for every coding agent, routed across many AI providers",
     cmd: ["red-router"],
     scope: "core",
-    u24: mise("npm:@reddb-io/red-router", { alias: "red-router", version: "0.9.1", allowLowDownloads: true }),
-    win: mise("npm:@reddb-io/red-router", { alias: "red-router", version: "0.9.1", allowLowDownloads: true }),
+    u24: mise("npm:@reddb-io/red-router", { alias: "red-router", allowLowDownloads: true }),
+    win: mise("npm:@reddb-io/red-router", { alias: "red-router", allowLowDownloads: true }),
   },
   {
     // Installed and stopped is the failure the agents see: a host
@@ -1053,48 +1002,44 @@ export const TOOLS: Tool[] = [
     win: ghInstaller("reddb-io/red-ui", "red-ui-windows-x86_64-setup.exe", "/S"),
   },
   {
+    name: "libasound2",
+    about: "the ALSA library dit links against",
+    scope: "desktop",
+    u24: apt("libasound2t64"),
+    win: skip(NO_GUI),
+  },
+  {
     // A CLI, and still `desktop` rather than `core`, because what it
     // does is type into the focused application. Under WSL there is no
     // focused application to type into and no /dev/input to read the
     // hotkey from — the binary would install cleanly and do nothing,
     // which is the outcome this project exists to avoid.
     //
-    // The publisher's installer on Linux, not the bare binary, and for
-    // once that is not about checksums. dit reads its hotkey from
-    // /dev/input and types through /dev/uinput, so it needs you in the
-    // `input` group and a udev rule; dropping the binary in gives you a
-    // program that runs and cannot see a keypress. install.sh sets both
-    // up. --yes keeps a converge non-interactive, and --no-service
-    // leaves the autostart unit alone: a standing background service is
-    // a decision to make deliberately, and dit works without it.
-    //
-    // Windows needs no equivalent — SendInput requires no permissions —
-    // so the release binary is enough there.
+    // mise owns the binary on every target so update and prune operate
+    // on the copy people actually run. Linux input access and startup
+    // are separate managed rows because they fail independently from
+    // downloading the binary.
     name: "dit",
     about: "push-to-toggle voice dictation, typed into the focused app",
     scope: "desktop",
-    // Split on purpose, and the split is the whole point of keeping two
-    // providers around.
-    //
-    // Linux stays on the vendor installer because the binary is the
-    // smaller half of what it does: dit reads the hotkey from
-    // /dev/input and types through /dev/uinput, so it also adds the
-    // user to the `input` group and writes the uinput udev rule
-    // (dit/install.sh:339-361). mise would deliver a binary that runs
-    // and never types — working software by every check we could make,
-    // and useless.
-    u24: sudoProvider(
-      installer(
-        "https://raw.githubusercontent.com/reddb-io/dit/main/install.sh",
-        "reddb-io/dit — installs the binary and the /dev/uinput permissions it needs",
-        "--yes",
-        "--no-service",
-      ),
-    ),
-    // Windows has no such requirement — it was a plain release asset
-    // already, so here mise is a straight gain: the same download, plus
-    // an updater.
+    u24: mise("github:reddb-io/dit", { alias: "dit" }),
     win: mise("github:reddb-io/dit", { alias: "dit" }),
+  },
+  {
+    name: "dit-input",
+    about: "the input group, uinput rule and GNOME focus bridge dit needs to see a keypress and type",
+    scope: "desktop",
+    managed: true,
+    u24: sudoProvider(builtin("dit-input")),
+    win: skip("SendInput needs no permissions"),
+  },
+  {
+    name: "dit-autostart",
+    about: "keeps dit running so its hotkey and tray are available after login",
+    scope: "desktop",
+    managed: true,
+    u24: builtin("dit-autostart"),
+    win: builtin("dit-autostart"),
   },
 
   // ------------------------------------------------------ optional
@@ -1203,36 +1148,36 @@ export const TOOLS: Tool[] = [
     name: "duf",
     about: "df you can read at a glance",
     scope: "optional",
-    u24: apt("duf"),
-    win: winget("muesli.duf"),
+    u24: mise("duf"),
+    win: mise("duf"),
   },
   {
     name: "dust",
     about: "du sorted by what is actually large",
     scope: "optional",
     u24: mise("dust"),
-    win: winget("bootandy.dust"),
+    win: mise("dust"),
   },
   {
     name: "hyperfine",
     about: "benchmark a command properly, with warmup and statistics",
     scope: "optional",
-    u24: apt("hyperfine"),
-    win: winget("sharkdp.hyperfine"),
+    u24: mise("hyperfine"),
+    win: mise("hyperfine"),
   },
   {
     name: "glow",
     about: "render markdown in the terminal",
     scope: "optional",
     u24: mise("glow"),
-    win: winget("charmbracelet.glow"),
+    win: mise("glow"),
   },
   {
     name: "gitui",
     about: "a lighter, keyboard-first alternative to lazygit",
     scope: "optional",
     u24: mise("gitui"),
-    win: winget("StephanDilly.gitui"),
+    win: mise("gitui"),
   },
 
   // ----------------------------------------------------------- wsl
@@ -1313,8 +1258,8 @@ export const TOOLS: Tool[] = [
     about: "the RedSkills runtime bundles, resolved and kept current by mise",
     scope: "core",
     managed: true,
-    u24: mise("npm:@reddb-io/red-skills", { alias: "red-skills", version: REDSKILLS_MAJOR, allowLowDownloads: true }),
-    win: mise("npm:@reddb-io/red-skills", { alias: "red-skills", version: REDSKILLS_MAJOR, allowLowDownloads: true }),
+    u24: mise("npm:@reddb-io/red-skills", { alias: "red-skills", allowLowDownloads: true }),
+    win: mise("npm:@reddb-io/red-skills", { alias: "red-skills", allowLowDownloads: true }),
   },
   // The plugins, one row each, and that is the point of them being here.
   //
@@ -1338,24 +1283,24 @@ export const TOOLS: Tool[] = [
     about: "RedSkills dev plugin — engineering skills for coding agents",
     scope: "core",
     managed: true,
-    u24: mise("npm:@reddb-io/red-skills-dev", { alias: "red-skills-dev", version: REDSKILLS_MAJOR, allowLowDownloads: true }),
-    win: mise("npm:@reddb-io/red-skills-dev", { alias: "red-skills-dev", version: REDSKILLS_MAJOR, allowLowDownloads: true }),
+    u24: mise("npm:@reddb-io/red-skills-dev", { alias: "red-skills-dev", allowLowDownloads: true }),
+    win: mise("npm:@reddb-io/red-skills-dev", { alias: "red-skills-dev", allowLowDownloads: true }),
   },
   {
     name: "red-skills-memory",
     about: "RedSkills memory plugin — governed operational memory, on top of dev",
     scope: "core",
     managed: true,
-    u24: mise("npm:@reddb-io/red-skills-memory", { alias: "red-skills-memory", version: REDSKILLS_MAJOR, allowLowDownloads: true }),
-    win: mise("npm:@reddb-io/red-skills-memory", { alias: "red-skills-memory", version: REDSKILLS_MAJOR, allowLowDownloads: true }),
+    u24: mise("npm:@reddb-io/red-skills-memory", { alias: "red-skills-memory", allowLowDownloads: true }),
+    win: mise("npm:@reddb-io/red-skills-memory", { alias: "red-skills-memory", allowLowDownloads: true }),
   },
   {
     name: "red-skills-brain",
     about: "RedSkills brain plugin — a project-local knowledge repository",
     scope: "core",
     managed: true,
-    u24: mise("npm:@reddb-io/red-skills-brain", { alias: "red-skills-brain", version: REDSKILLS_MAJOR, allowLowDownloads: true }),
-    win: mise("npm:@reddb-io/red-skills-brain", { alias: "red-skills-brain", version: REDSKILLS_MAJOR, allowLowDownloads: true }),
+    u24: mise("npm:@reddb-io/red-skills-brain", { alias: "red-skills-brain", allowLowDownloads: true }),
+    win: mise("npm:@reddb-io/red-skills-brain", { alias: "red-skills-brain", allowLowDownloads: true }),
   },
   {
     // After the agents, never before: the installer detects which CLIs

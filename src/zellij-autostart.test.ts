@@ -34,6 +34,9 @@ const SOURCE = `${import.meta.dir}/../config/bash/zellij.sh`;
  */
 function stubDir(): string {
   const dir = mkdtempSync(`${tmpdir()}/red-zellij-stub-`);
+  const hostname = `${dir}/hostname`;
+  writeFileSync(hostname, `#!/bin/sh\nprintf '%s\\n' "\${STUB_HOSTNAME:-test-host}"\n`);
+  chmodSync(hostname, 0o755);
   const stub = `${dir}/zellij`;
   writeFileSync(
     stub,
@@ -119,6 +122,9 @@ function run(
       RED_IN_ZELLIJ: "",
       RED_ZELLIJ: "",
       TERM: "xterm-256color",
+      // util-linux `script` runs its command through $SHELL. A user's
+      // interactive shell may rebuild PATH and start the real Zellij.
+      SHELL: "/bin/sh",
       XDG_STATE_HOME: stateHome,
       ...env,
     },
@@ -165,15 +171,26 @@ describe("zellij autostart", () => {
 
   describe("always opens the default session", () => {
     test("named after the machine, created if it does not exist", () => {
-      const r = run({ HOSTNAME: "workstation-7" }, true);
+      const r = run({ STUB_HOSTNAME: "workstation-7" }, true);
       expect(r.out).toContain("STUB RED_IN_ZELLIJ=1 ATTACH=workstation-7 CREATE=1 STDIN_TTY=1");
       expect(r.fellThrough).toBe(true);
     });
 
     test("RED_ZELLIJ_SESSION from env.sh renames it", () => {
-      const r = run({ HOSTNAME: "workstation-7", RED_ZELLIJ_SESSION: "main" }, true);
+      const r = run({ STUB_HOSTNAME: "workstation-7", RED_ZELLIJ_SESSION: "main" }, true);
       expect(r.out).toContain("ATTACH=main CREATE=1");
       expect(r.out).not.toContain("ATTACH=workstation-7");
+    });
+
+    test("each Herdr pane gets its own session instead of the machine session", () => {
+      const first = run({ HERDR_ENV: "1", STUB_HOSTNAME: "workstation-7" }, true);
+      const second = run({ HERDR_ENV: "1", STUB_HOSTNAME: "workstation-7" }, true);
+      const session = (out: string) => out.match(/ATTACH=(herdr-[a-z0-9]+) CREATE=1/)?.[1];
+
+      expect(session(first.out)).toStartWith("herdr-");
+      expect(session(second.out)).toStartWith("herdr-");
+      expect(session(first.out)).not.toBe(session(second.out));
+      expect(first.out).not.toContain("ATTACH=workstation-7");
     });
 
     test("ignores other sessions, live or serialized, however new they are", () => {
@@ -182,7 +199,7 @@ describe("zellij autostart", () => {
       // window after it. A second session is asked for by name; a new
       // window is the default.
       const r = run({
-        HOSTNAME: "workstation-7",
+        STUB_HOSTNAME: "workstation-7",
         STUB_SESSIONS:
           "scratch [Created 1m ago]\n" +
           "newer-exited [Created 5m ago] (EXITED - attach to resurrect)",
@@ -202,7 +219,7 @@ describe("zellij autostart", () => {
     });
 
     test("names the way out when the default session will not come back", () => {
-      const r = run({ HOSTNAME: "h", STUB_BAD_SESSION: "h" }, true);
+      const r = run({ STUB_HOSTNAME: "h", STUB_BAD_SESSION: "h" }, true);
       expect(r.fellThrough).toBe(true);
       expect(r.out).toContain("zellij delete-session h");
     });

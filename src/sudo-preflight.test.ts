@@ -25,9 +25,12 @@ describe("the sudo preflight plan", () => {
   test("a fresh Ubuntu install names archive and deb-installer work", () => {
     const names = sudoItemsFor(ubuntu, ["core", "desktop"], () => "absent");
 
-    expect(names).toContain("btop");
     expect(names).toContain("red-request");
-    expect(names).toContain("dit");
+    expect(names).not.toContain("btop");
+    // dit's binary moved off its all-in-one installer. The managed input
+    // repair decides from the group/rule state inside its own provider;
+    // it is not another archive item in this static package plan.
+    expect(names).not.toContain("dit");
     // carapace used to be here. Its Linux column was a .deb, which is
     // the reason it asked; mise hands over a plain binary instead, so
     // the preflight has one fewer item to justify. Asserted rather than

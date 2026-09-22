@@ -80,6 +80,14 @@ const RELEASE_HOST: AgentSpec = {
 /** Resolve one host's plan, with everything it could ask the machine answered. */
 function plan(key: string, p: Platform, overrides: Partial<{ npm: string | null }> = {}) {
   const spec = host(key);
+  return planSpec(spec, p, overrides);
+}
+
+function planSpec(
+  spec: AgentSpec,
+  p: Platform,
+  overrides: Partial<{ npm: string | null }> = {},
+) {
   return planAgentUpdate(spec, p, {
     // mise too: a host this organisation publishes is upgraded through
     // it, so the resolver has to be able to find it.
@@ -88,6 +96,12 @@ function plan(key: string, p: Platform, overrides: Partial<{ npm: string | null 
     platform: p.os === "windows" ? "win32" : "linux",
   });
 }
+
+const withoutMise = (key: string): AgentSpec => ({
+  ...host(key),
+  mise: undefined,
+  miseSuite: undefined,
+});
 
 /**
  * The machine questions, answered without asking a machine.
@@ -104,7 +118,7 @@ const offMachine = {
 
 describe("the update argv of each per-host mechanism", () => {
   test("npm reinstalls the package globally, pinned to latest", () => {
-    const p = plan("gemini", LINUX);
+    const p = planSpec(withoutMise("gemini"), LINUX);
     expect(p.state).toBe("ready");
     if (p.state !== "ready") return;
     expect(p.mechanism).toBe("npm");
@@ -126,7 +140,7 @@ describe("the update argv of each per-host mechanism", () => {
     // an update path that spawned the same npm without this would have
     // reintroduced exactly the hang that suppression was added for.
     for (const key of ["codex", "gemini", "openclaw"]) {
-      const p = plan(key, WSL);
+      const p = planSpec(withoutMise(key), WSL);
       expect(p.state).toBe("ready");
       if (p.state !== "ready" || p.step.kind !== "command") continue;
       expect(p.mechanism).toBe("npm");
@@ -135,7 +149,7 @@ describe("the update argv of each per-host mechanism", () => {
   });
 
   test("winget upgrades the package, silently and without interaction", () => {
-    const p = plan("codex", WINDOWS);
+    const p = planSpec(withoutMise("codex"), WINDOWS);
     expect(p.state).toBe("ready");
     if (p.state !== "ready") return;
     expect(p.mechanism).toBe("winget");
@@ -162,7 +176,7 @@ describe("the update argv of each per-host mechanism", () => {
     // Claude Code's installer leaves a self-updating binary behind, so
     // `claude update` is the publisher's own door. Re-running install.sh
     // would be red-dev going around it.
-    const p = plan("claude-code", LINUX);
+    const p = planSpec(withoutMise("claude-code"), LINUX);
     expect(p.state).toBe("ready");
     if (p.state !== "ready") return;
     expect(p.mechanism).toBe("self-update");
@@ -208,13 +222,10 @@ describe("the update argv of each per-host mechanism", () => {
     expect(p.step).toEqual({ kind: "script", url: "https://dev.meta.ai/install.sh" });
   });
 
-  test("the mechanism follows how the host was installed, not the catalog order", () => {
-    // Codex carries a winget id and an npm package. Under WSL the
-    // install path takes npm, so the update path must not reach for
-    // winget just because the id is sitting in the same entry.
-    expect(agentUpdateMechanism(host("codex"), WSL)).toBe("npm");
-    expect(agentUpdateMechanism(host("codex"), WINDOWS)).toBe("winget");
-    expect(agentUpdateMechanism(host("claude-code"), WINDOWS)).toBe("winget");
+  test("mise wins over fallback installer and package-manager metadata", () => {
+    expect(agentUpdateMechanism(host("codex"), WSL)).toBe("mise");
+    expect(agentUpdateMechanism(host("codex"), WINDOWS)).toBe("mise");
+    expect(agentUpdateMechanism(host("claude-code"), WINDOWS)).toBe("mise");
   });
 
   test("every host red-dev can install on a target also has a way to be updated", () => {
@@ -342,7 +353,7 @@ describe("one host failing", () => {
     // front of it.
     const order: string[] = [];
     const outcomes = await updateAgents(
-      [host("claude-code"), RELEASE_HOST, host("gemini")],
+      [withoutMise("claude-code"), RELEASE_HOST, withoutMise("gemini")],
       LINUX,
       {
         ...offMachine,
@@ -418,7 +429,7 @@ describe("reading a release", () => {
 });
 
 describe("when the catalog and the machine disagree about npm", () => {
-  const codex = host("codex");
+  const codex = withoutMise("codex");
   const res = (npmOwns?: (pkg: string) => boolean) => ({
     locate: (_c: string) => "/home/cyber/.local/bin/codex",
     npm: "/usr/bin/npm",
@@ -452,13 +463,13 @@ describe("when the catalog and the machine disagree about npm", () => {
   test("a host with no self-updater is left on npm, wrong or not", () => {
     // Gemini declares npm and no `update` subcommand. Reclassifying it
     // would be inventing a mechanism its publisher never shipped.
-    const gemini = host("gemini");
+    const gemini = withoutMise("gemini");
     expect(gemini.selfUpdate).toBeUndefined();
     expect(agentUpdateMechanism(gemini, WSL, res(() => false))).toBe("npm");
   });
 
   test("Claude Code is unaffected: its installer already elected self-update", () => {
-    const claude = host("claude-code");
+    const claude = withoutMise("claude-code");
     expect(agentUpdateMechanism(claude, WSL, res(() => true))).toBe("self-update");
     expect(agentUpdateMechanism(claude, WSL, res(() => false))).toBe("self-update");
   });

@@ -67,9 +67,7 @@ acquisition, and nothing about what the acquisition is willing to accept.
 - A release that is bad is taken quickly too. The mitigations are the ones
   already in place and are the reason this is defensible: the signature is
   verified before `current` moves, the previous revision is retained and
-  `red-dev red-skills rollback` restores it, and the version pin is a major
-  (`REDSKILLS_MAJOR` in `src/manifest.ts`) so a major boundary is still a
-  decision a person makes in a commit.
+  `red-dev red-skills rollback` restores it.
 - Background work costs something on a machine that is being used, and nothing
   on one that is not — which is the opposite of the timer this replaces.
 - The check needs the network. An offline machine answers "could not ask" and
@@ -139,3 +137,13 @@ accept.
 - Doctor reports consecutive unattended failures. The count is what makes
   the difference between "this machine was offline" and "this machine has
   been failing since yesterday and nobody was told".
+
+## Amendment 2 — workstations follow `latest`
+
+- Date: 2026-09-21
+
+The package-set entries no longer pin a major. Every repository installed by
+red-dev through mise follows the publisher's `latest` channel, so `mise
+upgrade` can advance it without waiting for a red-dev release. Compatibility
+remains a release contract enforced by the package-set parser and signature
+verification; rollback remains the recovery path.

@@ -1816,6 +1816,8 @@ const BUILTIN_INTENT: Partial<Record<BuiltinName, string>> = {
   "redwall-hook": "declaring the RedSkills host hook that repaints the Redwall",
   puppeteer: "installing Puppeteer, its matching Chrome for Testing and browser dependencies",
   "ssh-server": "installing and enabling the SSH server",
+  "dit-input": "giving dit the input group, the uinput rule and the GNOME focus bridge",
+  "dit-autostart": "keeping dit's hotkey and tray running after login",
   "red-router-autostart": "keeping red-router running: a systemd user service, or a Startup shortcut on Windows",
 };
 
@@ -2008,6 +2010,16 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
       if (pr.name === "ssh-server") {
         const { installSshServer } = await import("./ssh-server.ts");
         await installSshServer(ctx.platform);
+        return;
+      }
+      if (pr.name === "dit-input") {
+        const { installDitInput } = await import("./dit.ts");
+        await installDitInput(ctx.platform);
+        return;
+      }
+      if (pr.name === "dit-autostart") {
+        const { installDitAutostart } = await import("./dit.ts");
+        await installDitAutostart(ctx.platform);
         return;
       }
       if (pr.name === "red-router-autostart") {

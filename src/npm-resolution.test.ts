@@ -148,11 +148,9 @@ describe("agent install method", () => {
     caps: { apt: true, gui: false, systemd: true, winget: true, flatpak: false },
   };
 
-  test("WSL uses the non-interactive npm packages for OpenClaw and Hermes", () => {
-    for (const key of ["openclaw", "hermes"]) {
-      const agent = AGENTS.find((candidate) => candidate.key === key)!;
-      expect(agentInstallMethod(agent, wsl), key).toBe("npm");
-    }
+  test("WSL prefers mise where an official package exists", () => {
+    expect(agentInstallMethod(AGENTS.find((a) => a.key === "openclaw")!, wsl)).toBe("mise");
+    expect(agentInstallMethod(AGENTS.find((a) => a.key === "hermes")!, wsl)).toBe("npm");
   });
 
   test("Hermes is present only when its Python-backed command starts", () => {

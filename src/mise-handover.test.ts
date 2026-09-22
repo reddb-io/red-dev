@@ -188,10 +188,9 @@ describe("upgrading the suite", () => {
     expect(specs).not.toContain("node");
   });
 
-  test("cannot move a pinned tool, because the selector is exact", () => {
+  test("every managed tool follows latest", () => {
     const zellij = miseEntries(ubuntu).find((e) => e.spec.includes("zellij"));
-    expect(zellij?.version).toBe("0.46.0-red.1");
-    expect(zellij?.version).not.toBe("latest");
+    expect(zellij?.version).toBe("latest");
   });
 });
 
@@ -215,23 +214,21 @@ describe("what moved to mise, and what deliberately did not", () => {
     for (const name of ["tq", "red", "red-dev"]) expect(kindOf(name)).toBe("mise");
   });
 
-  test("tldr stays a release download, because mise cannot rename a binary", () => {
-    // The release ships `tealdeer` and the command is `tldr`. Verified
-    // against the real 1.8.1 release: neither the github: backend nor
-    // ubi's exe= option renames the extracted file, and a shim called
-    // `tealdeer` is a `tldr` that does not exist.
-    expect(kindOf("tldr")).toBe("gh");
+  test("portable terminal tools use mise", () => {
+    for (const name of ["tldr", "ripgrep", "fd", "bat", "neovim", "fastfetch"]) {
+      expect(kindOf(name)).toBe("mise");
+    }
   });
 
   test("red-ui stays a .deb, because a bare binary would shadow it", () => {
     expect(kindOf("red-ui")).toBe("gh");
   });
 
-  test("nothing on Windows moved off winget, which already has an updater", () => {
+  test("portable tools use mise on Windows too", () => {
     const windows: Platform = { ...ubuntu, os: "windows", env: "windows" };
     for (const name of ["starship", "atuin", "lazygit", "yazi"]) {
       const tool = TOOLS.find((t) => t.name === name)!;
-      expect(providerFor(tool, windows).kind).toBe("winget");
+      expect(providerFor(tool, windows).kind).toBe("mise");
     }
   });
 });

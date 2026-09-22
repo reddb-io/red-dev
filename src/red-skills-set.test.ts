@@ -36,7 +36,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { sha256Hex } from "./checksum.ts";
-import { providerFor, REDSKILLS_MAJOR, TOOLS } from "./manifest.ts";
+import { providerFor, TOOLS } from "./manifest.ts";
 import {
   miseEntries,
   miseToolNames,
@@ -325,8 +325,6 @@ describe("the manifest entries mise resolves", () => {
         kind: "mise",
         spec: REDSKILLS_CORE_SPEC,
         alias: REDSKILLS_CORE_ALIAS,
-        // Pinned to a major: see REDSKILLS_MAJOR in src/manifest.ts.
-        version: REDSKILLS_MAJOR,
         allowLowDownloads: true,
       });
     }
@@ -336,17 +334,13 @@ describe("the manifest entries mise resolves", () => {
     expect(REDSKILLS_CORE_SPEC.startsWith("npm:")).toBe(true);
   });
 
-  test("the fragment pins the major, under the name people type", () => {
-    // Not `latest`: a major moves the manifest schema, and npm's
-    // dist-tag deciding when every machine crosses that boundary is how
-    // red-skills 4.0 made every red-dev in the field refuse every set
-    // it published. Minors and patches still arrive on their own.
+  test("the fragment tracks latest, under the name people type", () => {
     for (const p of [UBUNTU, WINDOWS]) {
       const entry = miseEntries(p).find((e) => e.spec === REDSKILLS_CORE_SPEC);
       expect(entry, `${p.os}`).toEqual({
         spec: REDSKILLS_CORE_SPEC,
         alias: REDSKILLS_CORE_ALIAS,
-        version: REDSKILLS_MAJOR,
+        version: "latest",
         allowLowDownloads: true,
         // The seam ADR 0010 asks for: mise tells red-dev that the set
         // moved. Asserted as a whole entry rather than a field, so a
@@ -360,7 +354,7 @@ describe("the manifest entries mise resolves", () => {
     const out = renderMiseConfig(miseEntries(UBUNTU));
     expect(out).toContain('red-skills = "npm:@reddb-io/red-skills"');
     expect(out).toContain(
-      `red-skills = { version = "${REDSKILLS_MAJOR}", postinstall = "${REDSKILLS_RECONCILE_POSTINSTALL}", allow_low_downloads = true }`,
+      `red-skills = { version = "latest", postinstall = "${REDSKILLS_RECONCILE_POSTINSTALL}", allow_low_downloads = true }`,
     );
   });
 
