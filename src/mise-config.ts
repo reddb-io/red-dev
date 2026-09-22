@@ -330,6 +330,11 @@ export function renderMiseConfig(entries: MiseEntry[]): string {
     "# read for each mise process and never copied into this file.",
     "[settings.github]",
     'credential_command = "gh auth token"',
+    "",
+    "# `latest` must ask the publisher on every upgrade. Mise otherwise",
+    "# caches remote versions for an hour and can call a new release current.",
+    "[settings]",
+    'fetch_remote_versions_cache = "0s"',
   ];
 
   const excludes = releaseAgeExcludes(sorted);
@@ -338,7 +343,6 @@ export function renderMiseConfig(entries: MiseEntry[]): string {
       "",
       "# A release-age gate must not reach the tools that carry the fix.",
       "# See releaseAgeExcludes in src/mise-config.ts.",
-      "[settings]",
       `minimum_release_age_excludes = [${excludes.map((s) => str(s)).join(", ")}]`,
     );
   }
