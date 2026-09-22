@@ -16,8 +16,9 @@
  *
  *  - Idempotent anyway. The ledger is a promise, not a guarantee; a
  *    preferences file can be deleted.
- *  - Never destructive. A migration runs unattended during install, so
- *    it may repair and must not remove.
+ *  - Never remove user data. A machine-owned declaration may be retired
+ *    only after its replacement is present, with the original file backed
+ *    up first.
  *  - Skip loudly when it does not apply, so `install` on a fresh
  *    machine does not look like it silently did something.
  */
@@ -65,6 +66,49 @@ export function globalMiseConfigPath(
 export interface MiseLatestMigrationResult {
   text: string;
   changed: string[];
+}
+
+export interface MiseIdentityMigrationResult {
+  text: string;
+  removed: string[];
+}
+
+/**
+ * Remove backend-qualified suite declarations superseded by managed aliases.
+ *
+ * `github:reddb-io/redcode` and `redcode` resolve the same publisher release,
+ * but mise stores them under different identities and downloads both. Only
+ * first-party entries are eligible: third-party declarations in the person's
+ * config remain theirs even when red-dev happens to offer the same tool.
+ */
+export function migrateMiseSuiteToSingleIdentity(
+  source: string,
+  entries: readonly { spec: string; alias?: string }[],
+): MiseIdentityMigrationResult {
+  const aliases = new Map(
+    entries
+      .filter((entry): entry is { spec: string; alias: string } =>
+        !!entry.alias && entry.alias !== entry.spec && /^(github|npm):@?reddb-io[/-]/.test(entry.spec))
+      .map((entry) => [entry.spec, entry.alias]),
+  );
+  const lines = splitLines(source);
+  const removed: string[] = [];
+
+  for (const statement of statements(lines)) {
+    if (statement.kind !== "assignment" || statement.table !== "tools") continue;
+    const alias = aliases.get(statement.key);
+    if (!alias) continue;
+
+    for (let i = statement.line; i <= statement.end; i++) {
+      const line = lines[i]!;
+      lines[i] = { text: "", eol: line.eol };
+    }
+    removed.push(`${statement.key} -> ${alias}`);
+  }
+
+  const text = joinLines(lines);
+  if (removed.length > 0) Bun.TOML.parse(text);
+  return { text, removed };
 }
 
 /**
@@ -569,6 +613,51 @@ return {}
       writeFileSync(temporary, result.text);
       renameSync(temporary, path);
       log.plain(`       ${result.changed.join(", ")} -> latest`);
+    },
+  },
+  {
+    id: "2026-09-22-single-mise-identity",
+    describe: "retire duplicate qualified identities for the managed RedDB suite",
+    applies: async (p) => {
+      const path = globalMiseConfigPath(process.env, p.os === "windows" ? "win32" : "linux");
+      if (!path || !existsSync(path)) return false;
+      const { miseEntries } = await import("./mise-config.ts");
+      return migrateMiseSuiteToSingleIdentity(readFileSync(path, "utf8"), miseEntries(p)).removed.length > 0;
+    },
+    run: async (p) => {
+      const path = globalMiseConfigPath(process.env, p.os === "windows" ? "win32" : "linux");
+      if (!path || !existsSync(path)) return;
+
+      const { convergeMiseConfig, miseEntries } = await import("./mise-config.ts");
+      const entries = miseEntries(p);
+      const source = readFileSync(path, "utf8");
+      const result = migrateMiseSuiteToSingleIdentity(source, entries);
+      if (result.removed.length === 0) return;
+
+      // Declare the aliases first, then prove every replacement has an
+      // installed tree. A machine with no replacement keeps its old row and
+      // retries after the ordinary converge has installed the suite.
+      convergeMiseConfig(p);
+      const mise = Bun.which("mise");
+      if (!mise) throw new Error("mise is not installed yet — duplicate declarations left intact");
+      const bySpec = new Map(entries.filter((entry) => entry.alias).map((entry) => [entry.spec, entry.alias!]));
+      for (const item of result.removed) {
+        const spec = item.slice(0, item.indexOf(" -> "));
+        const alias = bySpec.get(spec);
+        if (!alias) continue;
+        const where = Bun.spawnSync([mise, "where", alias], { stdout: "ignore", stderr: "ignore" });
+        if (where.exitCode !== 0) {
+          throw new Error(`${alias} has no managed replacement yet — ${spec} left intact`);
+        }
+      }
+
+      const backup = `${path}.bak-red-dev-single-identity`;
+      if (!existsSync(backup)) writeFileSync(backup, source);
+      const temporary = `${path}.red-dev-single-identity.tmp`;
+      writeFileSync(temporary, result.text);
+      renameSync(temporary, path);
+      log.plain(`       ${result.removed.join(", ")}`);
+      log.plain(`       original config backed up at ${backup}`);
     },
   },
 ];

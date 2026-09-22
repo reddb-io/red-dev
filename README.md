@@ -560,6 +560,14 @@ its package set, reconciles every host and companion, and restarts its daemon
 only after the Worker gate is clear. There is no second command owed after
 `mise upgrade` on that path.
 
+Each RedDB product has exactly one mise identity. Native binaries (`red-dev`,
+`red`, `tq`, `redcode`, `dit` and the Zellij fork) come from attested GitHub
+release assets. Node runtimes and package sets (`red-router` and RedSkills)
+come from npm. The generated short alias is the installed identity; red-dev
+never also writes the backend-qualified spec into the global config. Existing
+machines are migrated only after the aliased replacement is present, with the
+original config backed up before the redundant declaration is retired.
+
 On the Ubuntu desktop, red-dev itself also has a tool-level postinstall: it
 runs the newly installed binary's `desktop reconcile`. That updates only the
 managed mise declaration, GNOME menu bar and shortcuts; it does not install

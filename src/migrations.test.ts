@@ -17,6 +17,7 @@ import { join } from "node:path";
 import {
   MIGRATIONS,
   globalMiseConfigPath,
+  migrateMiseSuiteToSingleIdentity,
   migrateMiseToolsToLatest,
   migrationLedgerPath,
   readMigrationLedger,
@@ -39,6 +40,32 @@ describe("legacy mise selectors", () => {
     expect(globalMiseConfigPath({ MISE_CONFIG_DIR: "/mise-config" }, "linux")).toBe("/mise-config/config.toml");
     expect(globalMiseConfigPath({ XDG_CONFIG_HOME: "/xdg" }, "linux")).toBe("/xdg/mise/config.toml");
     expect(globalMiseConfigPath({ APPDATA: "C:/Users/me/AppData/Roaming" }, "win32")).toBe("C:/Users/me/AppData/Roaming/mise/config.toml");
+  });
+});
+
+describe("one mise identity per RedDB product", () => {
+  const entries = [
+    { spec: "github:reddb-io/redcode", alias: "redcode" },
+    { spec: "npm:@reddb-io/red-router", alias: "red-router" },
+    { spec: "github:someone/else", alias: "else" },
+  ];
+
+  test("retires only first-party qualified rows superseded by aliases", () => {
+    const source = `[tools]\n# written by an older red-dev\n"github:reddb-io/redcode" = "latest"\n"npm:@reddb-io/red-router" = {\n  version = "latest"\n}\n"github:someone/else" = "latest"\nnode = "latest"\n`;
+    const first = migrateMiseSuiteToSingleIdentity(source, entries);
+
+    expect(first.removed).toEqual([
+      "github:reddb-io/redcode -> redcode",
+      "npm:@reddb-io/red-router -> red-router",
+    ]);
+    expect(first.text).toBe(`[tools]\n# written by an older red-dev\n\n\n\n\n"github:someone/else" = "latest"\nnode = "latest"\n`);
+    expect(Bun.TOML.parse(first.text)).toEqual({
+      tools: { "github:someone/else": "latest", node: "latest" },
+    });
+    expect(migrateMiseSuiteToSingleIdentity(first.text, entries)).toEqual({
+      text: first.text,
+      removed: [],
+    });
   });
 });
 

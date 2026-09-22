@@ -210,14 +210,11 @@ export function planAgentUpdate(
     }
 
     case "mise": {
-      // The same mechanism that moves the portable workstation suite.
-      // `use -g ...@latest` is intentional rather than `upgrade`. An
-      // agent may predate red-dev's mise ownership and still live in
-      // ~/.local/bin; in that case `mise upgrade herdr` exits zero while
-      // updating nothing because herdr is not declared yet. `use` adopts
-      // that installed host into mise as well as advancing one mise
-      // already owns, and leaves the unpinned selector behind for every
-      // later bare `mise upgrade`.
+      // A suite host is already declared under its short alias in red-dev's
+      // fragment. Installing that alias advances the one managed identity;
+      // `use -g <qualified spec>` would create a second global declaration
+      // and a second physical install of the same release. Third-party hosts
+      // still need `use -g`: it both adopts and declares them.
       const mise = res.locate("mise");
       if (!mise) {
         return {
@@ -230,9 +227,11 @@ export function planAgentUpdate(
       }
       return ready({
         kind: "command",
-        // --fuzzy keeps `latest` in config even on a machine whose
-        // MISE_PIN=1 would otherwise turn this into today's number.
-        argv: [mise, "use", "-g", "--yes", "--fuzzy", `${a.mise as string}@latest`],
+        argv: a.miseSuite
+          ? [mise, "install", `${a.cmd}@latest`]
+          // --fuzzy keeps `latest` in config even on a machine whose
+          // MISE_PIN=1 would otherwise turn this into today's number.
+          : [mise, "use", "-g", "--yes", "--fuzzy", `${a.mise as string}@latest`],
         env: {},
       });
     }
