@@ -47,6 +47,8 @@ containing **Open RedCode log** (RedCode has no separate native tray in this
 integration). RedRouter and Redskilled provide **Open log** in their own native
 tray context menus. Installing updated GNOME extension files can
 require signing out and in before the running shell loads the new actions.
+Every menu action resolves the same current file reported by its corresponding
+`--path` command; the tray never keeps a second diagnostic copy.
 
 ## Retention and privacy
 
