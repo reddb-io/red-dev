@@ -1133,6 +1133,14 @@ async function cmdRedSkillsSync(p: Platform, inv: Invocation): Promise<number> {
  * in and which of them may fail without ending the run.
  */
 async function cmdUpdate(p: Platform, inv: Invocation): Promise<number> {
+  // Repair old global selectors before any update stage asks mise what is
+  // current. Otherwise a numbered selector truthfully reports that its old
+  // line is current and the machine never reaches the moving channel.
+  if (!inv.dryRun) {
+    const { runPendingMigrations } = await import("./migrations.ts");
+    await runPendingMigrations(p);
+  }
+
   const { runUpdate } = await import("./update-order.ts");
 
   const stages: Record<UpdateStage, () => Promise<number | void>> = {
@@ -2485,22 +2493,21 @@ async function cmdAgentsUpdate(p: Platform): Promise<number> {
 
 /** Choose which language runtimes mise manages. */
 async function cmdLang(p: Platform, inv: Invocation): Promise<number> {
-  const { checkbox, select } = await import("./ui.ts");
+  const { checkbox } = await import("./ui.ts");
   const {
     OFFERED_RUNTIMES,
-    offeredRuntime,
     useRuntimes,
     currentRuntimes,
     resolveRuntimeIds,
+    runtimeIdsForPolicy,
     runtimeSelectedByDefault,
   } =
     await import("./runtimes.ts");
 
   let ids = inv.runtimeIds;
   if (ids !== undefined) {
-    // `--latest` makes the channel explicit, so the terse and natural
-    // `red-dev lang --latest node,python` is enough. Selectors supplied
-    // alongside it are intentionally replaced by the same policy.
+    // Every runtime red-dev owns is a moving channel. A selector accepted
+    // for backwards compatibility is normalised to latest as well.
     const resolved = resolveRuntimeIds(ids, inv.latest ? "latest" : "recommended");
     ids = resolved.ids;
     const { unknown } = resolved;
@@ -2509,7 +2516,7 @@ async function cmdLang(p: Platform, inv: Invocation): Promise<number> {
       log.plain(
         `     known runtime names: ${OFFERED_RUNTIMES.map((runtime) => runtime.id.split("@")[0]).join(", ")}`,
       );
-      log.plain("     use @latest, the recommended selector shown by `red-dev lang`, or an exact version");
+      log.plain("     use a runtime name such as node, or its @latest selector");
       return 1;
     }
   } else {
@@ -2533,23 +2540,7 @@ async function cmdLang(p: Platform, inv: Invocation): Promise<number> {
     );
     ids = picked.map((label) => label.split(" ")[0]!.trim());
 
-    const versioned: string[] = [];
-    for (const id of ids) {
-      const runtime = offeredRuntime(id);
-      if (!runtime) {
-        versioned.push(id);
-        continue;
-      }
-      const versions = runtime.versions.map((version) => `${version.id} — ${version.label}`);
-      const fallback = versions.find((version) => version.startsWith(`${id} `)) ?? versions[0]!;
-      const picked = await select(
-        `${runtime.label} version?`,
-        versions as [string, ...string[]],
-        fallback,
-      );
-      versioned.push(picked.split(" ")[0]!);
-    }
-    ids = versioned;
+    ids = runtimeIdsForPolicy(ids, "latest");
   }
 
   if (ids.length === 0) {

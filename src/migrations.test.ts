@@ -16,10 +16,31 @@ import { join } from "node:path";
 
 import {
   MIGRATIONS,
+  globalMiseConfigPath,
+  migrateMiseToolsToLatest,
   migrationLedgerPath,
   readMigrationLedger,
   writeMigrationLedger,
 } from "./migrations.ts";
+
+describe("legacy mise selectors", () => {
+  const managed = new Set(["go", "gemini", "github:reddb-io/redcode"]);
+
+  test("moves only red-dev-owned selectors to latest and preserves the file", () => {
+    const source = `[tools]\n# chosen long ago\ngo = "1.24.4" # old default\ngemini = { version = "0.60.0", allow_builds = ["node-pty"] }\n"github:reddb-io/redcode" = '0.38.4'\nprivate-tool = "2.3.4"\n`;
+    const first = migrateMiseToolsToLatest(source, managed);
+
+    expect(first.changed).toEqual(["go", "gemini", "github:reddb-io/redcode"]);
+    expect(first.text).toBe(`[tools]\n# chosen long ago\ngo = "latest" # old default\ngemini = { version = "latest", allow_builds = ["node-pty"] }\n"github:reddb-io/redcode" = 'latest'\nprivate-tool = "2.3.4"\n`);
+    expect(migrateMiseToolsToLatest(first.text, managed)).toEqual({ text: first.text, changed: [] });
+  });
+
+  test("finds the global config without assuming one home layout", () => {
+    expect(globalMiseConfigPath({ MISE_CONFIG_DIR: "/mise-config" }, "linux")).toBe("/mise-config/config.toml");
+    expect(globalMiseConfigPath({ XDG_CONFIG_HOME: "/xdg" }, "linux")).toBe("/xdg/mise/config.toml");
+    expect(globalMiseConfigPath({ APPDATA: "C:/Users/me/AppData/Roaming" }, "win32")).toBe("C:/Users/me/AppData/Roaming/mise/config.toml");
+  });
+});
 
 describe("the ledger", () => {
   test("ids are unique, because the ledger is keyed on them", () => {

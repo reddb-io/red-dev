@@ -22,8 +22,8 @@
  *    machine does not look like it silently did something.
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 import { log } from "./log.ts";
 import { providerFor, TOOLS } from "./manifest.ts";
@@ -31,6 +31,7 @@ import type { Platform } from "./platform.ts";
 import { readPreferences, writePreferences } from "./preferences.ts";
 import { userBinDir } from "./providers.ts";
 import { transcriptDir } from "./transcript.ts";
+import { joinLines, splitLines, statements } from "./toml-lines.ts";
 
 export interface Migration {
   /** Sortable and unique. The date this was written, not when it runs. */
@@ -40,6 +41,77 @@ export interface Migration {
   /** False when this machine never had the problem. */
   applies: (p: Platform) => boolean | Promise<boolean>;
   run: (p: Platform) => Promise<void>;
+}
+
+/** The global mise file older red-dev flows wrote with `mise use -g`. */
+export function globalMiseConfigPath(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: string = process.platform,
+): string | null {
+  if (env["MISE_CONFIG_FILE"]) return env["MISE_CONFIG_FILE"]!;
+  if (env["MISE_CONFIG_DIR"]) return join(env["MISE_CONFIG_DIR"]!, "config.toml");
+
+  if (platform === "win32") {
+    const root =
+      env["APPDATA"] ??
+      (env["USERPROFILE"] ? join(env["USERPROFILE"]!, "AppData", "Roaming") : null);
+    return root ? join(root, "mise", "config.toml") : null;
+  }
+
+  const root = env["XDG_CONFIG_HOME"] ?? (env["HOME"] ? join(env["HOME"]!, ".config") : null);
+  return root ? join(root, "mise", "config.toml") : null;
+}
+
+export interface MiseLatestMigrationResult {
+  text: string;
+  changed: string[];
+}
+
+/**
+ * Rewrite only known red-dev tool rows in `[tools]`, preserving the person's
+ * comments, ordering, quoting and inline-table options.
+ */
+export function migrateMiseToolsToLatest(
+  source: string,
+  managed: ReadonlySet<string>,
+): MiseLatestMigrationResult {
+  const lines = splitLines(source);
+  const changed: string[] = [];
+
+  for (const statement of statements(lines)) {
+    if (statement.kind !== "assignment" || statement.table !== "tools") continue;
+    if (!managed.has(statement.key) || statement.line !== statement.end) continue;
+
+    const line = lines[statement.line]!;
+    let next = line.text;
+    const inline = /\b(version\s*=\s*)(["'])([^"']+)\2/;
+    const scalar = /(=\s*)(["'])([^"']+)\2/;
+    const match = inline.exec(next) ?? scalar.exec(next);
+    if (!match || match[3] === "latest") continue;
+
+    next = `${next.slice(0, match.index)}${match[1]}${match[2]}latest${match[2]}${next.slice(match.index + match[0].length)}`;
+    lines[statement.line] = { text: next, eol: line.eol };
+    changed.push(statement.key);
+  }
+
+  const text = joinLines(lines);
+  if (changed.length > 0) Bun.TOML.parse(text);
+  return { text, changed };
+}
+
+async function redDevManagedMiseKeys(p: Platform): Promise<Set<string>> {
+  const [{ OFFERED_RUNTIMES }, { AGENTS }, { miseEntries }] = await Promise.all([
+    import("./runtimes.ts"),
+    import("./agents.ts"),
+    import("./mise-config.ts"),
+  ]);
+  const keys = new Set(OFFERED_RUNTIMES.map((runtime) => runtime.id.split("@")[0]!));
+  for (const agent of AGENTS) if (agent.mise) keys.add(agent.mise);
+  for (const entry of miseEntries(p)) {
+    keys.add(entry.spec);
+    if (entry.alias) keys.add(entry.alias);
+  }
+  return keys;
 }
 
 export const MIGRATIONS: Migration[] = [
@@ -470,6 +542,33 @@ return {}
           for (const file of result.cleared) log.plain(`       cleared ${file}; the hosts are re-registered at the new path below`);
           return;
       }
+    },
+  },
+  {
+    id: "2026-09-21-mise-latest-selectors",
+    describe: "move legacy red-dev mise selectors onto latest",
+    applies: async (p) => {
+      const path = globalMiseConfigPath(process.env, p.os === "windows" ? "win32" : "linux");
+      if (!path || !existsSync(path)) return false;
+      const result = migrateMiseToolsToLatest(
+        readFileSync(path, "utf8"),
+        await redDevManagedMiseKeys(p),
+      );
+      return result.changed.length > 0;
+    },
+    run: async (p) => {
+      const path = globalMiseConfigPath(process.env, p.os === "windows" ? "win32" : "linux");
+      if (!path || !existsSync(path)) return;
+      const result = migrateMiseToolsToLatest(
+        readFileSync(path, "utf8"),
+        await redDevManagedMiseKeys(p),
+      );
+      if (result.changed.length === 0) return;
+
+      const temporary = `${path}.red-dev-latest.tmp`;
+      writeFileSync(temporary, result.text);
+      renameSync(temporary, path);
+      log.plain(`       ${result.changed.join(", ")} -> latest`);
     },
   },
 ];

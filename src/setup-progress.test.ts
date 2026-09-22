@@ -52,8 +52,8 @@ describe("the setup work plan", () => {
     }, noNode);
 
     expect(plan.map((step) => step.tool)).toEqual([
-      "node@24",
-      "python@3.13",
+      "node@latest",
+      "python@latest",
       "Hermes Agent",
       "red-skills",
     ]);
@@ -68,17 +68,17 @@ describe("the setup work plan", () => {
     // `red-dev lang node@latest` then `red-dev agents …` — two separate
     // commands, which is how the Windows side reproduces a selection
     // inside WSL. The second saw no node in its own choices, took the
-    // machine for one without any, and `mise use -g node@24` set the
-    // global pin over the `latest` a person had just chosen.
+    // machine for one without any, and used to replace the moving
+    // selector with a numbered line.
     const plan = await setupPlan(windows, { agents: ["hermes"], runtimes: [], apps: [] }, hasNode);
 
-    expect(plan.map((step) => step.tool)).not.toContain("node@24");
-    expect(plan.map((step) => step.tool)).toEqual(["python@3.13", "Hermes Agent", "red-skills"]);
+    expect(plan.map((step) => step.tool)).not.toContain("node@latest");
+    expect(plan.map((step) => step.tool)).toEqual(["python@latest", "Hermes Agent", "red-skills"]);
   });
 
   test("and a machine without one still gets it, so npm has something to run", async () => {
     const plan = await setupPlan(windows, { agents: ["hermes"], runtimes: [], apps: [] }, noNode);
-    expect(plan.map((step) => step.tool)).toContain("node@24");
+    expect(plan.map((step) => step.tool)).toContain("node@latest");
   });
 
   test("an explicitly selected node is not counted twice", async () => {
@@ -88,7 +88,7 @@ describe("the setup work plan", () => {
       apps: [],
     }, noNode);
 
-    expect(plan.filter((step) => step.tool === "node@lts")).toHaveLength(1);
+    expect(plan.filter((step) => step.tool === "node@latest")).toHaveLength(1);
   });
 
   test("Hermes brings both Node and Python before its npm postinstall", async () => {
@@ -99,8 +99,8 @@ describe("the setup work plan", () => {
     }, noNode);
 
     expect(plan.map((step) => step.tool)).toEqual([
-      "node@24",
-      "python@3.13",
+      "node@latest",
+      "python@latest",
       "Hermes Agent",
       "red-skills",
     ]);
@@ -114,8 +114,8 @@ describe("the setup work plan", () => {
     }, noNode);
 
     expect(plan.map((step) => step.tool)).toEqual([
-      "node@24",
-      "python@3.13",
+      "node@latest",
+      "python@latest",
       "OpenClaw",
       "Hermes Agent",
       "red-skills",

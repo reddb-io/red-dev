@@ -31,27 +31,15 @@ import { unattendedEnvironment } from "./unattended.ts";
  * `mise use`. A prompt that installs four runtimes nobody asked for is
  * how a dev environment becomes 8 GB.
  */
-const DEFAULT_RUNTIMES = ["node@24"] as const;
+const DEFAULT_RUNTIMES = ["node@latest"] as const;
 
 /**
  * Whether this machine already has a node an npm install can use.
  *
- * Asked before red-dev adds `node@24` on an agent's behalf, and the
+ * Asked before red-dev adds `node@latest` on an agent's behalf, and the
  * whole reason that addition needs a question at all: `mise use -g`
- * does not add a tool, it *sets* one. So a run that appends `node@24`
- * to satisfy an npm agent rewrites whatever node line the global config
- * held — and on this machine it rewrote `latest`.
- *
- * Measured, from one install transcript:
- *
- *     :: mise: node@latest    tools: node@26.7.0     <- what was asked for
- *     :: mise: node@24        tools: node@24.18.0    <- what replaced it
- *
- * Those are two separate red-dev commands — `red-dev lang …` then
- * `red-dev agents …`, which is how the Windows side reproduces a
- * selection inside WSL — so the second could not see the first's
- * choice in its own `choices.runtimes`, took the machine for one with
- * no node, and pinned 24 over the answer a person had just given.
+ * does not add a tool, it *sets* one. Every selector red-dev writes is
+ * `latest`, including prerequisites it adds on an agent's behalf.
  *
  * The install tree rather than PATH, and both rather than either: a
  * node installed moments ago by the previous command is not on this
@@ -84,105 +72,58 @@ export interface OfferedRuntime {
 }
 
 /**
- * Supported lines shown directly on the language picker.
- *
- * Every list ends in a moving channel so the UI remains useful between
- * red-dev releases, while the numbered entries let a project stay on a
- * major/minor line. Mise resolves each selector to the newest patch on it.
- *
- * ## The default is the moving channel
- *
- * Each `id` is what the picker starts on, and every one of them is
- * `latest`. The numbered lines used to be the defaults, which meant a
- * red-dev that had not shipped in a month offered a picker whose
- * "default" was a version behind — and the numbers went stale in this
- * file rather than on anybody's machine, where they would have been
- * noticed. A person who wants a line still picks it; the tool no longer
- * decides on their behalf that they wanted last quarter's.
+ * Runtime channels shown by the picker. red-dev owns a moving workstation,
+ * so every selector it writes is `latest`; project-specific pins belong in
+ * the project's mise file rather than the global machine config.
  */
 export const OFFERED_RUNTIMES: OfferedRuntime[] = [
   {
     id: "node@latest",
     label: "Node.js",
     about: "also brings npm and corepack",
-    versions: [
-      { id: "node@22", label: "22 LTS" },
-      { id: "node@24", label: "24 LTS" },
-      { id: "node@26", label: "26 Current" },
-      { id: "node@latest", label: "Latest" },
-    ],
+    versions: [{ id: "node@latest", label: "Latest" }],
   },
   {
     id: "bun@latest",
     label: "Bun",
     about: "runtime, bundler and package manager",
-    versions: [
-      { id: "bun@1.2", label: "1.2" },
-      { id: "bun@1.3", label: "1.3" },
-      { id: "bun@latest", label: "Latest" },
-    ],
+    versions: [{ id: "bun@latest", label: "Latest" }],
   },
   {
     id: "deno@latest",
     label: "Deno",
     about: "secure JavaScript and TypeScript runtime",
-    versions: [
-      { id: "deno@2.8", label: "2.8" },
-      { id: "deno@2.9", label: "2.9" },
-      { id: "deno@latest", label: "Latest" },
-    ],
+    versions: [{ id: "deno@latest", label: "Latest" }],
   },
   {
     id: "python@latest",
     label: "Python",
     about: "CPython with SQLite support verified after install",
-    versions: [
-      { id: "python@3.13", label: "3.13" },
-      { id: "python@3.14", label: "3.14" },
-      { id: "python@latest", label: "Latest" },
-    ],
+    versions: [{ id: "python@latest", label: "Latest" }],
   },
   {
     id: "go@latest",
     label: "Go",
     about: "compiler and standard toolchain",
-    versions: [
-      { id: "go@1.25", label: "1.25" },
-      { id: "go@1.26", label: "1.26" },
-      { id: "go@latest", label: "Latest" },
-    ],
+    versions: [{ id: "go@latest", label: "Latest" }],
   },
   {
     id: "rust@latest",
     label: "Rust",
     about: "via rustup",
-    versions: [
-      { id: "rust@1.96", label: "1.96" },
-      { id: "rust@1.97", label: "1.97" },
-      { id: "rust@stable", label: "Stable" },
-    ],
+    versions: [{ id: "rust@latest", label: "Latest" }],
   },
   {
     id: "ruby@latest",
     label: "Ruby",
     about: "MRI Ruby",
-    versions: [
-      { id: "ruby@3.3", label: "3.3" },
-      { id: "ruby@3.4", label: "3.4" },
-      { id: "ruby@4.0", label: "4.0" },
-      { id: "ruby@latest", label: "Latest" },
-    ],
+    versions: [{ id: "ruby@latest", label: "Latest" }],
   },
   {
     id: "java@latest",
     label: "Java",
     about: "OpenJDK",
-    versions: [
-      { id: "java@21", label: "21 LTS" },
-      { id: "java@25", label: "25 LTS" },
-      { id: "java@26", label: "26 Current" },
-      { id: "java@latest", label: "Latest" },
-    ],
+    versions: [{ id: "java@latest", label: "Latest" }],
   },
 ];
 
@@ -243,17 +184,15 @@ export function runtimeIdsForPolicy(
   ids: string[],
   policy: RuntimeVersionPolicy,
 ): string[] {
-  if (policy === "recommended") return [...ids];
+  void policy;
   return ids.map((id) => `${id.split("@")[0]}@latest`);
 }
 
 /**
  * Runtime ids accepted at the CLI and safe to mirror through a WSL shell.
  *
- * The runtime name stays inside our catalog, while the mise selector may be
- * a channel (`latest`, `lts`, `stable`) or an exact version. Keeping the
- * selector deliberately boring also means a preference can be interpolated
- * into `red-dev lang ...` without becoming shell syntax.
+ * The runtime name stays inside our catalog. Old channel or exact selectors
+ * are accepted only so they can be rewritten to `latest`.
  */
 export function isKnownRuntimeId(id: string): boolean {
   const match = /^([a-z0-9-]+)@([A-Za-z0-9][A-Za-z0-9._+-]*)$/.exec(id);
@@ -290,15 +229,6 @@ export interface RuntimeInstallRequest {
 
 /** Stable installation request behind a user-facing runtime channel. */
 export function runtimeInstallRequest(id: string): RuntimeInstallRequest {
-  if (id === "python@3.13") {
-    return {
-      // 3.13.15 briefly had no python-build-standalone artifact. Mise
-      // fell back to compiling without libsqlite3-dev and produced a
-      // Python that started successfully but could not import sqlite3.
-      id: "python@3.13.14",
-      env: { MISE_PYTHON_COMPILE: "0" },
-    };
-  }
   if (id.startsWith("python@")) {
     return { id, env: { MISE_PYTHON_COMPILE: "0" } };
   }
@@ -317,13 +247,13 @@ export async function useRuntimes(ids: string[], observer: RuntimeObserver = {})
     throw new RedError(detail);
   }
 
-  for (const id of ids) {
+  for (const id of runtimeIdsForPolicy(ids, "latest")) {
     observer.stepStart?.(id);
     log.step(`mise: ${id}`);
     log.info(`downloads from ${runtimeSource(id)}`);
     const request = runtimeInstallRequest(id);
     const result = await run(
-      [mise, "use", "-g", "--yes", request.id],
+      [mise, "use", "-g", "--yes", "--fuzzy", request.id],
       request.env,
       true,
     );
@@ -537,7 +467,7 @@ export async function installRuntimes(p: Platform): Promise<void> {
     log.step(`mise: ${runtime}`);
     log.info(`downloads from ${runtimeSource(runtime)}`);
     const result = await run(
-      [mise, "use", "-g", "--yes", runtime],
+      [mise, "use", "-g", "--yes", "--fuzzy", runtime],
       {},
       true,
     );

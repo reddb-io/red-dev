@@ -269,7 +269,7 @@ export const AGENTS: AgentSpec[] = [
     // an unrelated project at 0.4.x, and installing it would put a
     // completely different binary on PATH under the expected name.
     npm: "hermes-agent",
-    runtimeNeeds: ["python@3.13"],
+    runtimeNeeds: ["python@latest"],
     probeArgs: ["--version"],
   },
   {

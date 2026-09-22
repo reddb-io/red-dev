@@ -1,12 +1,9 @@
-/** Per-runtime version selection belongs on the language row itself. */
+/** The language screen exposes only moving latest channels. */
 
 import { describe, expect, test } from "bun:test";
 import { renderToString } from "tuiuiu.js";
 import type { Platform } from "./platform.ts";
-import {
-  OFFERED_RUNTIMES,
-  shiftRuntimeVersion,
-} from "./runtimes.ts";
+import { OFFERED_RUNTIMES } from "./runtimes.ts";
 import {
   questions,
   SetupLayout,
@@ -46,30 +43,12 @@ function runtimesFrame(selection: string[]): string {
   return strip(renderToString(SetupLayout(model, UBUNTU_26, 100, 30), 100, 30));
 }
 
-describe("per-runtime version picker", () => {
-  test("Node can move from the supported LTS line to the current line", () => {
-    expect(shiftRuntimeVersion(["node@24", "python@3.13"], "node@24", 1)).toEqual([
-      "node@26",
-      "python@3.13",
-    ]);
-  });
-
-  test("each selected language keeps its own version", () => {
-    expect(shiftRuntimeVersion(["node@26", "python@3.13"], "python@3.13", 1)).toEqual([
-      "node@26",
-      "python@3.14",
-    ]);
-  });
-
-  test("version arrows do not also opt an unchecked language in", () => {
-    expect(shiftRuntimeVersion(["node@24"], "java@25", 1)).toEqual(["node@24"]);
-  });
-
-  test("the language screen shows the active version and its controls", () => {
-    const frame = runtimesFrame(["node@26"]);
+describe("runtime channel picker", () => {
+  test("the language screen shows latest without version controls", () => {
+    const frame = runtimesFrame(["node@latest"]);
     expect(frame).toContain("Node.js");
-    expect(frame).toContain("26 Current");
-    expect(frame).toContain("left/right");
+    expect(frame).toContain("latest");
+    expect(frame).not.toContain("left/right");
   });
 
   test("there is no hidden global Versions step anymore", () => {

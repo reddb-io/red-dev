@@ -147,7 +147,7 @@ await Bun.write(${JSON.stringify(observed)}, "OBSERVED: " + detail);
       fakeMise,
       `#!/usr/bin/env bun
 const request = Bun.argv.at(-1) ?? "";
-if (request === "node@lts") {
+if (request === "node@latest") {
   console.log("NODE INSTALL COMPLETED");
   process.exit(0);
 }
@@ -187,7 +187,7 @@ console.log("OUTCOMES: " + JSON.stringify(outcomes));
     expect(result.stdout).toContain("PYTHON INSTALL FAILED");
     expect(result.stdout).toContain("BUN INSTALL COMPLETED");
     expect(result.stdout).toContain(
-      'OUTCOMES: [["node@lts",null],["python@3.13","PYTHON INSTALL FAILED"],["bun@latest",null]]',
+      'OUTCOMES: [["node@latest",null],["python@latest","PYTHON INSTALL FAILED"],["bun@latest",null]]',
     );
   });
 });
