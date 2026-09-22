@@ -209,7 +209,25 @@ describe("the update argv of each per-host mechanism", () => {
     expect(p.mechanism).toBe("mise");
     expect(p.step).toEqual({
       kind: "command",
-      argv: ["/usr/bin/mise", "upgrade", "github:reddb-io/redcode"],
+      argv: [
+        "/usr/bin/mise",
+        "use",
+        "-g",
+        "--yes",
+        "--fuzzy",
+        "github:reddb-io/redcode@latest",
+      ],
+      env: {},
+    });
+  });
+
+  test("mise adopts an installed legacy host instead of falsely skipping it", () => {
+    const p = plan("herdr", LINUX);
+    expect(p.state).toBe("ready");
+    if (p.state !== "ready") return;
+    expect(p.step).toEqual({
+      kind: "command",
+      argv: ["/usr/bin/mise", "use", "-g", "--yes", "--fuzzy", "herdr@latest"],
       env: {},
     });
   });
