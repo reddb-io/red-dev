@@ -49,6 +49,13 @@ describe("bounded diagnostics", () => {
     expect(diagnosticRecord('token="first-line\nsecond-line"')).toBe('token="[REDACTED]"');
   });
 
+  test("redacts every cookie/header credential and fine-grained GitHub tokens", () => {
+    const input = "Cookie: sid=first-session; other=second-session\nSet-Cookie: id=third-session; HttpOnly\ngithub_pat_fixture_sensitive_value";
+    const output = diagnosticRecord(input);
+    for (const secret of ["first-session", "second-session", "third-session", "github_pat_fixture_sensitive_value"]) expect(output).not.toContain(secret);
+    expect(output).toContain("Cookie: [REDACTED]");
+  });
+
   test("uses private files and refuses symlinks without touching their targets", () => {
     const root = fixture();
     const path = join(root, "app.log");
