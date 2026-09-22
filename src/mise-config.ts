@@ -333,7 +333,14 @@ function isOurs(spec: string): boolean {
 export function renderMiseConfig(entries: MiseEntry[]): string {
   const sorted = [...entries].sort((a, b) => key(a).localeCompare(key(b)));
 
-  const out: string[] = [HEADER];
+  const out: string[] = [
+    HEADER,
+    "",
+    "# Use the account already selected by `gh auth login`. The token is",
+    "# read for each mise process and never copied into this file.",
+    "[settings.github]",
+    'credential_command = "gh auth token"',
+  ];
 
   const excludes = releaseAgeExcludes(sorted);
   if (excludes.length > 0) {
@@ -379,13 +386,10 @@ export function miseEntries(
 ): MiseEntry[] {
   const entries: MiseEntry[] = [];
 
-  // The agent hosts this organisation publishes itself. They live in
-  // the agent catalog because red-skills wires its marketplace into
-  // them, and they are mise's for the same reason every other tool of
-  // ours is — see the note on `AgentSpec.mise`. Without this the pin is
-  // never written, and the release-age gate below never learns to let
-  // our own releases through, which is exactly what kept RedCode's
-  // newest five versions hidden from `mise ls-remote`.
+  // Agent hosts whose release is managed by mise. They live in the agent
+  // catalog because red-skills wires its marketplace into them. Without
+  // this projection `mise upgrade` would know nothing about the copy
+  // red-dev installed.
   for (const host of hosts) {
     if (host.mise) entries.push({ spec: host.mise, alias: host.cmd, version: "latest" });
   }

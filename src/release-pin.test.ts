@@ -21,7 +21,7 @@ import {
   isPresent,
   parseVersion,
   TOOLS,
-  type Tool, REDSKILLS_MAJOR } from "./manifest.ts";
+  type Tool } from "./manifest.ts";
 import { releaseApiUrl } from "./providers.ts";
 
 describe("releaseApiUrl", () => {
@@ -103,60 +103,25 @@ describe("installState under a pin", () => {
   });
 });
 
-describe("the zellij pin", () => {
+describe("the zellij release channel", () => {
   const zellij = TOOLS.find((t) => t.name === "zellij");
 
-  test("is declared at the reddb-io fork build that fixes the OSC leak", () => {
-    // Four segments: 0.46.0 upstream plus the fork's red.N — see
-    // parseVersion, which folds the marker into the last segment.
-    expect(zellij?.pinVersion).toBe("0.46.0.1");
-  });
-
-  test("carries the reason and the release condition beside it", () => {
-    // Asserted against the source because a pin without its justification
-    // is a pin nobody dares lift: the next reader needs to know which
-    // upstream issue closing lets this go.
+  test("uses the reddb-io fork that fixes the OSC leak", () => {
     const text = readFileSync("src/manifest.ts", "utf8");
     const at = text.indexOf('name: "zellij"');
     const comment = text.slice(Math.max(0, at - 2500), at);
     expect(comment).toContain("5174");
     expect(comment.toLowerCase()).toContain("osc");
-  });
-
-  test("resolves the pinned fork tag rather than whatever is newest", () => {
-    // The mechanism moved from a release download to mise; the pin did
-    // not. An exact selector is what makes `mise upgrade` a no-op for
-    // this one tool while it moves every other tool in the fragment.
     expect(zellij?.u24).toEqual({
       kind: "mise",
       spec: "github:reddb-io/zellij",
-      // The alias is load-bearing rather than cosmetic: mise answers to
-      // the binary name, so without it `mise which zellij` and
-      // `mise upgrade zellij` both miss the fork, and the registry's
-      // upstream zellij is what the name would resolve to.
       alias: "zellij",
-      version: "0.46.0-red.1",
     });
-  });
-
-  test("the tag and the version the binary reports agree", () => {
-    // Two fields saying the same thing in three dialects — a git tag
-    // (`v0.44.3-red.1`), what `zellij --version` prints
-    // (`0.44.3+red.1`), and the pin. parseVersion is the translator
-    // between them, so agreement is asserted through it; the fields
-    // drift silently otherwise.
-    const u24 = zellij!.u24!;
-    if (u24.kind !== "mise") throw new Error("zellij u24 must stay the pinned mise provider");
-    expect(parseVersion(u24.version!)).toBe(zellij!.pinVersion ?? null);
-  });
-
-  test("plan names the version it will resolve", () => {
-    expect(describeProvider(zellij!.u24)).toContain("0.46.0-red.1");
   });
 });
 
-describe("every other release provider", () => {
-  test("is unpinned, so it still resolves latest exactly as before", () => {
+describe("every release provider", () => {
+  test("is unpinned or explicitly latest", () => {
     // Both provider kinds can hold a version now, so both are counted:
     // asking only about `gh` would have gone quietly to zero when
     // zellij moved to mise, and stopped guarding anything.
@@ -177,19 +142,7 @@ describe("every other release provider", () => {
         .map((pr) => `${t.name}@${(pr as { version?: string }).version}`),
     );
 
-    expect([...new Set(pinned)].sort()).toEqual([
-      // aube's cached npm `latest` still resolves 0.8.1; keep the
-      // official service contract on the version npm currently marks latest.
-      "red-router@0.9.1",
-      // The fork build, for the OSC-reply leak.
-      "zellij@0.46.0-red.1",
-      // The suite crosses a major together, and only when a person says
-      // so: a major moves the package-set manifest schema.
-      `red-skills-brain@${REDSKILLS_MAJOR}`,
-      `red-skills-dev@${REDSKILLS_MAJOR}`,
-      `red-skills-memory@${REDSKILLS_MAJOR}`,
-      `red-skills-core@${REDSKILLS_MAJOR}`,
-    ].sort());
+    expect([...new Set(pinned)].sort()).toEqual([]);
   });
 
   test("no tool declares a floor and a pin at once", () => {

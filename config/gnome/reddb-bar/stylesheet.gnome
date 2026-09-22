@@ -57,6 +57,9 @@
 }
 
 .reddb-agents-icon {
+  /* GNOME's system-status-icon contract: match dit, RedRouter and
+   * Redskilled AppIndicators instead of inheriting the label's height. */
+  icon-size: 16px;
   color: #ff2056;
 }
 

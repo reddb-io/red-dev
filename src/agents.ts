@@ -56,7 +56,7 @@ export interface AgentSpec {
   /** npm package, when neither of the above fits the platform. */
   npm?: string;
   /**
-   * A mise spec, for a host this organisation publishes itself.
+   * A mise spec for a host whose public releases mise can manage.
    *
    * The rule in `src/agent-update.ts` — every host by its own
    * publisher's mechanism — is written against third parties, and it is
@@ -231,14 +231,15 @@ export const AGENTS: AgentSpec[] = [
     // in the preview channel, as a dated .zip, and pulling a preview
     // into a converge is a decision rather than a default.
     //
-    // The installer is POSIX sh and lands in ~/.local/bin, which needs
-    // no sudo and is already on the PATH red-dev builds.
+    // Herdr is in mise's registry, backed by its public GitHub releases.
+    // Keeping it here means `mise upgrade` advances the same copy red-dev
+    // installed instead of leaving an installer-owned binary behind.
     key: "herdr",
     label: "Herdr",
     about: "run several coding agents in one terminal, alive over SSH",
     cmd: "herdr",
     recommended: false,
-    installer: "https://herdr.dev/install.sh",
+    mise: "herdr",
     multiplexer: true,
   },
   {

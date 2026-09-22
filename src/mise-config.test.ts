@@ -108,6 +108,12 @@ describe("renderMiseConfig", () => {
   test("it says it is generated, because it is overwritten without asking", () => {
     expect(renderMiseConfig([])).toContain("Do not edit");
   });
+
+  test("GitHub downloads use the account already selected by gh", () => {
+    expect(renderMiseConfig([])).toContain(
+      '[settings.github]\ncredential_command = "gh auth token"',
+    );
+  });
 });
 
 describe("miseEntries", () => {
@@ -134,18 +140,19 @@ describe("miseEntries", () => {
     expect(aliases).toContain("tq");
   });
 
-  test("a platform's entries are its own — dit is a mise tool only on Windows", () => {
-    // On Linux dit needs the uinput group and udev rule its installer
-    // writes, so it stays on the vendor script. A regression there is
-    // silent: the binary installs and simply never types.
+  test("a platform's entries are its own — dit is managed by mise on both desktops", () => {
+    // Linux permissions and autostart are separate managed rows; the
+    // binary itself can therefore share mise's update path with Windows.
     const linux = miseEntries(UBUNTU).map((e) => e.spec);
     const windows = miseEntries(WINDOWS).map((e) => e.spec);
-    expect(linux).not.toContain("github:reddb-io/dit");
+    expect(linux).toContain("github:reddb-io/dit");
     expect(windows).toContain("github:reddb-io/dit");
   });
 
-  test("no entry is missing a version selector", () => {
-    for (const e of miseEntries(UBUNTU)) expect(e.version.length).toBeGreaterThan(0);
+  test("every managed tool follows latest", () => {
+    for (const p of [UBUNTU, WINDOWS]) {
+      for (const e of miseEntries(p)) expect(e.version, e.spec).toBe("latest");
+    }
   });
 });
 

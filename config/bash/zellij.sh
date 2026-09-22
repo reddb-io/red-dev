@@ -35,6 +35,16 @@ fi
 # (verified: a pane gets ZELLIJ=0), and RED_IN_ZELLIJ is ours and cannot
 # be taken away.
 if [ -n "${RED_IN_ZELLIJ:-}" ] || [ -n "${ZELLIJ:-}" ] || [ -n "${ZELLIJ_SESSION_NAME:-}" ]; then
+  # `red-dev-main` was the generated default before sessions followed the
+  # machine name. Installing a newer red-dev from inside that restored
+  # session updates every file but leaves the already-running server named
+  # forever. Migrate only that name; a scratch session named by its owner is
+  # deliberately left alone.
+  if [ "${ZELLIJ_SESSION_NAME:-}" = "red-dev-main" ] && command -v zellij >/dev/null 2>&1; then
+    _red_zellij_host="${RED_ZELLIJ_SESSION:-$(hostname 2>/dev/null || uname -n 2>/dev/null)}"
+    [ -n "$_red_zellij_host" ] && zellij action rename-session "$_red_zellij_host" >/dev/null 2>&1 || true
+    unset _red_zellij_host
+  fi
   return 0
 fi
 
@@ -106,7 +116,11 @@ else
   _red_zellij_status=125
 fi
 
-# One default session, named after the machine, every time.
+# One default session, named after the machine, every time. Herdr is the
+# exception: every pane it creates is already an independent terminal, so
+# attaching all of them to the hostname session makes every tab show the same
+# Zellij client. HERDR_ENV is set by Herdr on each managed pane; give that pane
+# a fresh session instead.
 #
 # This used to resume "the last valid session": the one this shell had
 # attached before, else the newest live one, else the newest serialized
@@ -125,7 +139,20 @@ fi
 # overrides it. Other sessions are `zellij -s name` or the session
 # manager, and nothing here ever attaches to them unasked.
 if declare -F _red_zellij_launch >/dev/null 2>&1; then
-  _red_zellij_session="${RED_ZELLIJ_SESSION:-${HOSTNAME:-$(uname -n 2>/dev/null)}}"
+  if [ "${HERDR_ENV:-}" = "1" ]; then
+    if [ -r /proc/sys/kernel/random/uuid ]; then
+      IFS= read -r _red_zellij_random </proc/sys/kernel/random/uuid
+    else
+      _red_zellij_random="${RANDOM:-0}-$$-$(date +%s 2>/dev/null)"
+    fi
+    _red_zellij_session="herdr-${_red_zellij_random%%-*}"
+    unset _red_zellij_random
+  else
+    # Ask the kernel instead of trusting an inherited HOSTNAME. Long-lived
+    # terminal processes keep the old environment after `hostnamectl` changes
+    # the machine name, which otherwise creates the stale name again.
+    _red_zellij_session="${RED_ZELLIJ_SESSION:-$(hostname 2>/dev/null || uname -n 2>/dev/null)}"
+  fi
   _red_zellij_session="${_red_zellij_session:-red-dev}"
   RED_IN_ZELLIJ=1 _red_zellij_launch attach --create "$_red_zellij_session" \
     2>>"$_red_zellij_log"

@@ -328,15 +328,15 @@ same machine.
 
 `dit` is a CLI and still `desktop`, for the same reason wearing different
 clothes — it types into the *focused application*, and under WSL there is
-neither one of those nor a `/dev/input` to read its hotkey from. On Linux it
-comes from the publisher's installer rather than the release binary, and not for
-the usual checksum reason: dit reads its hotkey from `/dev/input` and types
-through `/dev/uinput`, so it needs you in the `input` group and a udev rule.
-Dropping the binary in gives you a program that runs and cannot see a keypress.
-red-dev passes `--yes` to keep the converge non-interactive and `--no-service`
-to leave the autostart unit alone — a standing background service is a decision
-to make deliberately, and dit works without it. It also wants an
-`ELEVENLABS_API_KEY`, or `--engine local` for offline Whisper.
+neither one of those nor a `/dev/input` to read its hotkey from. mise owns its
+binary so `red-dev update` advances the copy people actually run. On Linux,
+red-dev separately converges the `input` group, `/dev/uinput` rule and GNOME
+focus bridge that make the binary usable. It also installs dit's user-session
+autostart contract, so the hotkey and tray return at login: one
+`dit.service`/XDG entry on Linux or one `dit` logon task on Windows. Re-running
+the installer rewrites those same fixed names rather than creating another
+service. dit reads `ELEVENLABS_API_KEY` from `~/.red/dit/.env`, or can use
+`--engine local` for offline Whisper.
 
 **Coding agents** are chosen rather than assumed — `red-dev agents` offers
 every agent applicable to the current platform pre-ticked, including the
@@ -566,6 +566,12 @@ Anything mise owns lands on PATH through its shims, which — unlike `mise
 activate` — also work in a script, a systemd unit and over SSH. A machine
 upgrading from an older release hands its `~/.local/bin` copies over on the
 next converge, and never before mise can answer for them.
+
+GitHub lookups made by mise use the account selected by `gh auth login`.
+red-dev writes `github.credential_command = "gh auth token"` into its managed
+mise fragment, so `mise upgrade` receives the authenticated API allowance
+without storing a second token. `gh auth switch` changes the account used by
+the next upgrade.
 
 ### The shell
 
@@ -1014,9 +1020,10 @@ that depend on it, rather than trusting the copy to have taken.
 #### The RedDB menu bar
 
 The desktop scope installs a GNOME Shell extension that turns Ubuntu's top
-panel into the persistent RedDB surface. The official RedDB mark opens the
-red-dev menu, workspace dots switch desktops, and the Agents item starts the
-Default agent or herdr. GNOME keeps owning the clock, network, audio, power and
+panel into the persistent RedDB surface. The official RedDB mark and **Menu**
+label open the red-dev menu, workspace dots switch desktops, and the item named
+after the Default agent (for example, **RedCode**) starts that app or herdr.
+GNOME keeps owning the clock, network, audio, power and
 AppIndicator tray, so applications such as dit, red-router and redskilled remain
 visible in the same bar instead of growing a second status area.
 

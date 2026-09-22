@@ -84,8 +84,8 @@ type ProviderSpec =
        * inside it are different facts: reddb-io/toon ships `tq`.
        */
       alias?: string;
-      /** A mise selector. Absent means "latest". */
-      version?: string;
+      /** Always follows the publisher's latest release. */
+      version?: "latest";
       /** Approve this known package when aube's popularity gate prompts. */
       allowLowDownloads?: true;
     }
@@ -189,6 +189,8 @@ type ProviderSpec =
         | "alacritty"
         | "wsl-interop"
         | "wsl-runtime-dir"
+        | "dit-input"
+        | "dit-autostart"
         | "blesh"
         | "build-resources"
         | "runtimes"
@@ -362,32 +364,13 @@ const gh = (repo: string, asset: string, bin?: string): Provider => ({
  * registry does not know — our repositories, and our forks.
  *
  * The options ride in an object rather than as positional arguments
- * because `alias` and `version` are independent and mostly absent, and
+ * because `alias` and the low-download approval are independent and mostly absent, and
  * a call site reading mise("github:reddb-io/toon", "tq") gives no clue
  * which of the two that string is.
  */
-/**
- * The RedSkills major this red-dev knows how to read.
- *
- * `latest` was the pin, which means npm's dist-tag decided when every
- * machine crossed a major boundary — including at 03:00, including for
- * a major whose manifest schema this binary has never seen. red-skills
- * 4.0 did exactly that: the package set moved to `red.package-set.v2`,
- * every red-dev in the field refused every 4.x set, and no human had
- * decided anything.
- *
- * A major is a decision, so it is spelled here and moves in a commit,
- * beside the parser that has to be able to read it (`red-skills-set.ts`)
- * and the contract check that proves it can (`scripts/check-package-set-contract.ts`).
- * Minors and patches still arrive on their own — mise resolves the
- * newest release inside the major, which is the part that should not
- * need a person.
- */
-export const REDSKILLS_MAJOR = "4";
-
 const mise = (
   spec: string,
-  opts: { alias?: string; version?: string; allowLowDownloads?: true } = {},
+  opts: { alias?: string; version?: "latest"; allowLowDownloads?: true } = {},
 ): Provider => ({
   kind: "mise",
   spec,
@@ -428,6 +411,8 @@ const builtin = (
     | "alacritty"
     | "wsl-interop"
     | "wsl-runtime-dir"
+    | "dit-input"
+    | "dit-autostart"
     | "wsl-sync"
     | "blesh"
     | "build-resources"
@@ -769,32 +754,12 @@ export const TOOLS: Tool[] = [
     // among them). Its releases publish binaries only — nothing goes to
     // crates.io.
     //
-    // The pin has four segments because the fork versions as
-    // 0.46.0+red.1 — see parseVersion, which folds the `red.N` marker
-    // into a fourth segment for both the binary and the tag spellings.
-    //
-    // Lift the fork when an upstream release ships the fix for #5174:
-    // point repo, tag and pin back at zellij-org and drop the fourth
-    // segment together.
+    // Keep following the fork's newest release. The fork is the channel;
+    // an exact version here would freeze every workstation until red-dev
+    // itself shipped again.
     name: "zellij",
     scope: "core",
-    pinVersion: "0.46.0.1",
-    // Pinned through mise rather than by hand. The fork is ours and the
-    // registry carries only upstream, so this is the github: backend —
-    // and the version here is the tag, `0.46.0-red.1`, while pinVersion
-    // above is what the binary answers to --version, `0.46.0.1`. They
-    // name the same release in the two vocabularies that ask.
-    //
-    // A pinned tool is the one case where `mise upgrade` must move
-    // nothing, and it moves nothing: the selector is exact, so upgrade
-    // resolves it to itself.
-    u24: mise("github:reddb-io/zellij", { alias: "zellij", version: "0.46.0-red.1" }),
-    // winget installs upstream's newest — so on Windows the pin is a
-    // report rather than a repair: the doctor names the machine as off
-    // the pinned version and the swap is manual. The fork's release
-    // does ship a windows-msvc .zip and .msi for exactly that swap.
-    // Silence would be the alternative, and silence is how 0.44.3 got
-    // onto a machine in the first place.
+    u24: mise("github:reddb-io/zellij", { alias: "zellij" }),
     win: winget("Zellij.Zellij"),
   },
   {
@@ -892,18 +857,17 @@ export const TOOLS: Tool[] = [
     // gated postinstall (npm 11) installs cleanly and still works.
     //
     // Aliased to the command people type, so `mise upgrade red-router`
-    // means what it says. The current release is explicit because aube's
-    // cached npm `latest` still resolves this package to 0.8.1 even
-    // though npm's dist-tag is 0.9.1; the older build must not silently
-    // replace the service contract declared here.
+    // means what it says. Do not pin this row: mise's npm backend follows
+    // the package's public `latest` dist-tag, so a RedRouter release must
+    // not wait for a red-dev release before workstations can receive it.
     //
     // The package only. What keeps it running is the row below.
     name: "red-router",
     about: "one local endpoint for every coding agent, routed across many AI providers",
     cmd: ["red-router"],
     scope: "core",
-    u24: mise("npm:@reddb-io/red-router", { alias: "red-router", version: "0.9.1", allowLowDownloads: true }),
-    win: mise("npm:@reddb-io/red-router", { alias: "red-router", version: "0.9.1", allowLowDownloads: true }),
+    u24: mise("npm:@reddb-io/red-router", { alias: "red-router", allowLowDownloads: true }),
+    win: mise("npm:@reddb-io/red-router", { alias: "red-router", allowLowDownloads: true }),
   },
   {
     // Installed and stopped is the failure the agents see: a host
@@ -1053,48 +1017,44 @@ export const TOOLS: Tool[] = [
     win: ghInstaller("reddb-io/red-ui", "red-ui-windows-x86_64-setup.exe", "/S"),
   },
   {
+    name: "libasound2",
+    about: "the ALSA library dit links against",
+    scope: "desktop",
+    u24: apt("libasound2t64"),
+    win: skip(NO_GUI),
+  },
+  {
     // A CLI, and still `desktop` rather than `core`, because what it
     // does is type into the focused application. Under WSL there is no
     // focused application to type into and no /dev/input to read the
     // hotkey from — the binary would install cleanly and do nothing,
     // which is the outcome this project exists to avoid.
     //
-    // The publisher's installer on Linux, not the bare binary, and for
-    // once that is not about checksums. dit reads its hotkey from
-    // /dev/input and types through /dev/uinput, so it needs you in the
-    // `input` group and a udev rule; dropping the binary in gives you a
-    // program that runs and cannot see a keypress. install.sh sets both
-    // up. --yes keeps a converge non-interactive, and --no-service
-    // leaves the autostart unit alone: a standing background service is
-    // a decision to make deliberately, and dit works without it.
-    //
-    // Windows needs no equivalent — SendInput requires no permissions —
-    // so the release binary is enough there.
+    // mise owns the binary on every target so update and prune operate
+    // on the copy people actually run. Linux input access and startup
+    // are separate managed rows because they fail independently from
+    // downloading the binary.
     name: "dit",
     about: "push-to-toggle voice dictation, typed into the focused app",
     scope: "desktop",
-    // Split on purpose, and the split is the whole point of keeping two
-    // providers around.
-    //
-    // Linux stays on the vendor installer because the binary is the
-    // smaller half of what it does: dit reads the hotkey from
-    // /dev/input and types through /dev/uinput, so it also adds the
-    // user to the `input` group and writes the uinput udev rule
-    // (dit/install.sh:339-361). mise would deliver a binary that runs
-    // and never types — working software by every check we could make,
-    // and useless.
-    u24: sudoProvider(
-      installer(
-        "https://raw.githubusercontent.com/reddb-io/dit/main/install.sh",
-        "reddb-io/dit — installs the binary and the /dev/uinput permissions it needs",
-        "--yes",
-        "--no-service",
-      ),
-    ),
-    // Windows has no such requirement — it was a plain release asset
-    // already, so here mise is a straight gain: the same download, plus
-    // an updater.
+    u24: mise("github:reddb-io/dit", { alias: "dit" }),
     win: mise("github:reddb-io/dit", { alias: "dit" }),
+  },
+  {
+    name: "dit-input",
+    about: "the input group, uinput rule and GNOME focus bridge dit needs to see a keypress and type",
+    scope: "desktop",
+    managed: true,
+    u24: sudoProvider(builtin("dit-input")),
+    win: skip("SendInput needs no permissions"),
+  },
+  {
+    name: "dit-autostart",
+    about: "keeps dit running so its hotkey and tray are available after login",
+    scope: "desktop",
+    managed: true,
+    u24: builtin("dit-autostart"),
+    win: builtin("dit-autostart"),
   },
 
   // ------------------------------------------------------ optional
@@ -1313,8 +1273,8 @@ export const TOOLS: Tool[] = [
     about: "the RedSkills runtime bundles, resolved and kept current by mise",
     scope: "core",
     managed: true,
-    u24: mise("npm:@reddb-io/red-skills", { alias: "red-skills", version: REDSKILLS_MAJOR, allowLowDownloads: true }),
-    win: mise("npm:@reddb-io/red-skills", { alias: "red-skills", version: REDSKILLS_MAJOR, allowLowDownloads: true }),
+    u24: mise("npm:@reddb-io/red-skills", { alias: "red-skills", allowLowDownloads: true }),
+    win: mise("npm:@reddb-io/red-skills", { alias: "red-skills", allowLowDownloads: true }),
   },
   // The plugins, one row each, and that is the point of them being here.
   //
@@ -1338,24 +1298,24 @@ export const TOOLS: Tool[] = [
     about: "RedSkills dev plugin — engineering skills for coding agents",
     scope: "core",
     managed: true,
-    u24: mise("npm:@reddb-io/red-skills-dev", { alias: "red-skills-dev", version: REDSKILLS_MAJOR, allowLowDownloads: true }),
-    win: mise("npm:@reddb-io/red-skills-dev", { alias: "red-skills-dev", version: REDSKILLS_MAJOR, allowLowDownloads: true }),
+    u24: mise("npm:@reddb-io/red-skills-dev", { alias: "red-skills-dev", allowLowDownloads: true }),
+    win: mise("npm:@reddb-io/red-skills-dev", { alias: "red-skills-dev", allowLowDownloads: true }),
   },
   {
     name: "red-skills-memory",
     about: "RedSkills memory plugin — governed operational memory, on top of dev",
     scope: "core",
     managed: true,
-    u24: mise("npm:@reddb-io/red-skills-memory", { alias: "red-skills-memory", version: REDSKILLS_MAJOR, allowLowDownloads: true }),
-    win: mise("npm:@reddb-io/red-skills-memory", { alias: "red-skills-memory", version: REDSKILLS_MAJOR, allowLowDownloads: true }),
+    u24: mise("npm:@reddb-io/red-skills-memory", { alias: "red-skills-memory", allowLowDownloads: true }),
+    win: mise("npm:@reddb-io/red-skills-memory", { alias: "red-skills-memory", allowLowDownloads: true }),
   },
   {
     name: "red-skills-brain",
     about: "RedSkills brain plugin — a project-local knowledge repository",
     scope: "core",
     managed: true,
-    u24: mise("npm:@reddb-io/red-skills-brain", { alias: "red-skills-brain", version: REDSKILLS_MAJOR, allowLowDownloads: true }),
-    win: mise("npm:@reddb-io/red-skills-brain", { alias: "red-skills-brain", version: REDSKILLS_MAJOR, allowLowDownloads: true }),
+    u24: mise("npm:@reddb-io/red-skills-brain", { alias: "red-skills-brain", allowLowDownloads: true }),
+    win: mise("npm:@reddb-io/red-skills-brain", { alias: "red-skills-brain", allowLowDownloads: true }),
   },
   {
     // After the agents, never before: the installer detects which CLIs

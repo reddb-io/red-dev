@@ -631,6 +631,10 @@ export async function collectDrift(p: Platform): Promise<DriftCheck[]> {
   checks.push(await checkDocker(p));
   checks.push(await checkToolchainParity(p));
   checks.push(await checkBlesh());
+  {
+    const { inspectDitInput } = await import("./dit.ts");
+    checks.push(inspectDitInput(p));
+  }
   const { inspectBuildResources } = await import("./build-resources.ts");
   checks.push(...(await inspectBuildResources(p)));
   const { inspectRouter } = await import("./red-router.ts");

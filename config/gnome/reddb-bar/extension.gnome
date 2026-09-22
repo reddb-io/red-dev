@@ -25,6 +25,33 @@ function firstExecutable(paths) {
   return paths.find(path => GLib.file_test(path, GLib.FileTest.IS_EXECUTABLE)) ?? paths.at(-1);
 }
 
+function defaultAgentLabel() {
+  const labels = {
+    'claude-code': 'Claude Code',
+    codex: 'Codex CLI',
+    redcode: 'RedCode',
+    opencode: 'RedCode',
+    gemini: 'Gemini CLI',
+    pi: 'Pi',
+    'oh-my-pi': 'Oh My Pi',
+    hermes: 'Hermes Agent',
+    muse: 'Muse',
+    openclaw: 'OpenClaw',
+  };
+  try {
+    const path = `${GLib.get_home_dir()}/.config/alacritty/red-dev.json`;
+    const [ok, bytes] = GLib.file_get_contents(path);
+    if (ok) {
+      const key = JSON.parse(new TextDecoder().decode(bytes)).defaultAgent;
+      if (typeof key === 'string' && key.length > 0)
+        return labels[key] ?? key;
+    }
+  } catch (error) {
+    console.error(`RedDB Menu Bar could not read the Default agent: ${error.message}`);
+  }
+  return 'Agent';
+}
+
 function command(...args) {
   const home = GLib.get_home_dir();
   const redDev = firstExecutable([
@@ -72,7 +99,7 @@ function themeMenu(menu) {
 
 const RedDbMenu = GObject.registerClass(class RedDbMenu extends PanelMenu.Button {
   _init(extension) {
-    super._init(0.0, 'RedDB');
+    super._init(0.0, 'Menu');
     this.add_style_class_name('reddb-panel-button');
     this.add_style_class_name('reddb-brand-button');
     themeMenu(this.menu);
@@ -82,7 +109,7 @@ const RedDbMenu = GObject.registerClass(class RedDbMenu extends PanelMenu.Button
       gicon: Gio.icon_new_for_string(`${extension.path}/reddb-icon.svg`),
       style_class: 'reddb-brand-icon',
     }));
-    box.add_child(new St.Label({text: 'RedDB', y_align: 2}));
+    box.add_child(new St.Label({text: 'Menu', y_align: 2}));
     this.add_child(box);
 
     item(this.menu, 'Applications', 'view-app-grid-symbolic', () => Main.overview.showApps());
@@ -141,15 +168,16 @@ const WorkspaceMenu = GObject.registerClass(class WorkspaceMenu extends PanelMen
 
 const AgentsMenu = GObject.registerClass(class AgentsMenu extends PanelMenu.Button {
   _init() {
-    super._init(0.0, 'Agents');
+    const label = defaultAgentLabel();
+    super._init(0.0, label);
     this.add_style_class_name('reddb-panel-button');
     themeMenu(this.menu);
     const box = new St.BoxLayout({style_class: 'reddb-agents'});
     box.add_child(new St.Icon({icon_name: 'system-run-symbolic', style_class: 'reddb-agents-icon'}));
-    box.add_child(new St.Label({text: 'Agents', y_align: 2}));
+    box.add_child(new St.Label({text: label, y_align: 2}));
     this.add_child(box);
 
-    item(this.menu, 'Launch default agent', 'media-playback-start-symbolic', () => command('agents', 'run'));
+    item(this.menu, `Launch ${label}`, 'media-playback-start-symbolic', () => command('agents', 'run'));
     item(this.menu, 'Open multiplexer', 'view-grid-symbolic', () => herdr());
     item(this.menu, 'Choose agents', 'preferences-system-symbolic', () => command('agents'));
   }
