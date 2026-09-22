@@ -1,3 +1,4 @@
+import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
@@ -130,12 +131,25 @@ function themeMenu(menu) {
   menu.box.add_style_class_name('reddb-popup-menu');
 }
 
+// PanelMenu's primary-click behavior varies across Shell/AppIndicator
+// combinations. Make the desktop contract explicit: secondary-clicking a
+// RedDB panel entry always opens its menu, where the diagnostic action lives.
+function openMenuOnSecondaryClick(button) {
+  return button.connect('button-press-event', (_actor, event) => {
+    if (event.get_button() !== 3)
+      return Clutter.EVENT_PROPAGATE;
+    button.menu.open();
+    return Clutter.EVENT_STOP;
+  });
+}
+
 const RedDbMenu = GObject.registerClass(class RedDbMenu extends PanelMenu.Button {
   _init(extension) {
     super._init(0.0, 'Menu');
     this.add_style_class_name('reddb-panel-button');
     this.add_style_class_name('reddb-brand-button');
     themeMenu(this.menu);
+    this._secondaryClickId = openMenuOnSecondaryClick(this);
 
     const box = new St.BoxLayout({style_class: 'reddb-brand'});
     box.add_child(new St.Icon({
@@ -206,6 +220,7 @@ const AgentsMenu = GObject.registerClass(class AgentsMenu extends PanelMenu.Butt
     super._init(0.0, label);
     this.add_style_class_name('reddb-panel-button');
     themeMenu(this.menu);
+    this._secondaryClickId = openMenuOnSecondaryClick(this);
     const box = new St.BoxLayout({style_class: 'reddb-agents'});
     box.add_child(new St.Icon({icon_name: 'system-run-symbolic', style_class: 'reddb-agents-icon'}));
     box.add_child(new St.Label({text: label, y_align: 2}));

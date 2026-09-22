@@ -12,7 +12,7 @@ class Actor {
   style_class = "";
   parent: Actor | null = null;
   children: Actor[] = [];
-  signals = new Map<number, { name: string; handler: () => void }>();
+  signals = new Map<number, { name: string; handler: (...args: unknown[]) => unknown }>();
   nextSignal = 1;
   destroyed = false;
   _indicator?: { label: string };
@@ -29,7 +29,7 @@ class Actor {
   get_text() { return this.text; }
   hide() { this.visible = false; }
   show() { this.visible = true; }
-  connect(name: string, handler: () => void) {
+  connect(name: string, handler: (...args: unknown[]) => unknown) {
     const id = this.nextSignal++;
     this.signals.set(id, { name, handler });
     return id;
@@ -50,8 +50,10 @@ class Actor {
 class Menu {
   box = new Actor();
   items: Actor[] = [];
+  openCount = 0;
   addMenuItem(item: Actor) { this.items.push(item); }
   removeAll() { this.items = []; }
+  open() { this.openCount++; }
 }
 
 class MenuItem extends Actor {
@@ -122,9 +124,9 @@ function fixture(initial: Record<string, Actor> = {}) {
   const source = extensionSource
     .replace(/^import .*;\n/gm, "")
     .replace("export default class RedDbBarExtension", "class RedDbBarExtension");
-  const evaluate = new Function("Gio", "GLib", "GObject", "St", "Extension", "Main",
+  const evaluate = new Function("Clutter", "Gio", "GLib", "GObject", "St", "Extension", "Main",
     "PanelMenu", "PopupMenu", "global", `${source}\nreturn {NamedTrayLabels, RedDbBarExtension};`);
-  const classes = evaluate(Gio, GLib, { registerClass: (value: unknown) => value },
+  const classes = evaluate({ EVENT_PROPAGATE: false, EVENT_STOP: true }, Gio, GLib, { registerClass: (value: unknown) => value },
     { Label: Actor, Icon: Actor, BoxLayout: Actor }, class {},
     { panel: {
       statusArea,
@@ -155,6 +157,22 @@ function indicator(name: string, visible = true) {
 }
 
 describe("GNOME live named tray actors", () => {
+  test("secondary click opens the red-dev and agent menus that own log actions", () => {
+    const env = fixture();
+    const bar = new env.RedDbBarExtension();
+    bar.enable();
+    const menus = [env.statusArea["reddb-menu"], env.statusArea["reddb-agents"]] as Button[];
+    for (const button of menus) {
+      const signal = [...button.signals.values()].find(value => value.name === "button-press-event");
+      expect(signal).toBeDefined();
+      expect(signal!.handler(button, { get_button: () => 1 })).toBe(false);
+      expect(button.menu.openCount).toBe(0);
+      expect(signal!.handler(button, { get_button: () => 3 })).toBe(true);
+      expect(button.menu.openCount).toBe(1);
+    }
+    bar.disable();
+  });
+
   test("log menu actions use red-dev's read-only resolver without opening a terminal", () => {
     const env = fixture();
     const bar = new env.RedDbBarExtension();
