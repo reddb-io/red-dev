@@ -95,6 +95,30 @@ function herdr() {
   }
 }
 
+function openDiagnosticLog(app) {
+  const home = GLib.get_home_dir();
+  const executable = firstExecutable([
+    `${home}/.local/share/mise/shims/red-dev`, `${home}/.local/bin/red-dev`, 'red-dev',
+  ]);
+  try {
+    const child = Gio.Subprocess.new(
+      [executable, 'logs', '--app', app, '--open'],
+      Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE,
+    );
+    child.communicate_utf8_async(null, null, (process, result) => {
+      try {
+        const [, stdout, stderr] = process.communicate_utf8_finish(result);
+        if (!process.get_successful())
+          Main.notifyError('Could not open log', (stderr || stdout || app).trim().slice(0, 512));
+      } catch (error) {
+        Main.notifyError('Could not open log', error.message);
+      }
+    });
+  } catch (error) {
+    Main.notifyError('Could not open log', error.message);
+  }
+}
+
 function item(menu, label, icon, action) {
   const row = new PopupMenu.PopupImageMenuItem(label, icon);
   row.connect('activate', action);
@@ -128,6 +152,7 @@ const RedDbMenu = GObject.registerClass(class RedDbMenu extends PanelMenu.Button
     item(this.menu, 'Agent multiplexer', 'view-grid-symbolic', () => herdr());
     this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
     item(this.menu, 'Doctor', 'emblem-system-symbolic', () => command('doctor'));
+    item(this.menu, 'Open red-dev log', 'text-x-generic-symbolic', () => openDiagnosticLog('red-dev'));
     item(this.menu, 'Apps', 'application-x-executable-symbolic', () => command('apps'));
     item(this.menu, 'Update workstation', 'software-update-available-symbolic', () => command('update'));
   }
@@ -189,6 +214,7 @@ const AgentsMenu = GObject.registerClass(class AgentsMenu extends PanelMenu.Butt
     item(this.menu, `Launch ${label}`, 'media-playback-start-symbolic', () => command('agents', 'run'));
     item(this.menu, 'Open multiplexer', 'view-grid-symbolic', () => herdr());
     item(this.menu, 'Choose agents', 'preferences-system-symbolic', () => command('agents'));
+    item(this.menu, 'Open RedCode log', 'text-x-generic-symbolic', () => openDiagnosticLog('redcode'));
   }
 });
 

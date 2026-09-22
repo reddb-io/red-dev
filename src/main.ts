@@ -2753,7 +2753,7 @@ async function main(): Promise<number> {
     case "reclaim":
       return await cmdReclaim(p, inv);
     case "logs":
-      return await cmdLogs(inv.logsWhich);
+      return await cmdLogs(inv);
     case "install":
       return await cmdInstall(p, inv);
     case "update":
@@ -2822,41 +2822,9 @@ async function main(): Promise<number> {
  * the converge someone is trying to read would be a small joke at their
  * expense.
  */
-async function cmdLogs(which?: string): Promise<number> {
-  const { recentTranscripts, transcriptDir, transcriptPath } = await import("./transcript.ts");
-  const mine = transcriptPath();
-  const all = recentTranscripts().filter((f) => f !== mine);
-
-  if (all.length === 0) {
-    log.skip(`no transcripts yet — they are written to ${transcriptDir()}`);
-    return 0;
-  }
-
-  if (which === "list") {
-    log.ok(`${all.length} transcript(s) in ${transcriptDir()}`);
-    for (const [i, f] of all.entries()) {
-      const size = Bun.file(f).size;
-      log.plain(`  ${String(i + 1).padStart(2)}  ${f.split("/").pop()}  ${(size / 1024).toFixed(1)}k`);
-    }
-    return 0;
-  }
-
-  const n = which ? Number.parseInt(which, 10) : 1;
-  if (!Number.isFinite(n) || n < 1) {
-    log.err(`'${which}' is neither 'list' nor a run number`);
-    return 1;
-  }
-  const target = all[n - 1];
-  if (!target) {
-    log.err(`there are only ${all.length} transcript(s)`);
-    return 1;
-  }
-
-  // Written through stdout rather than log.plain: a transcript is
-  // content, not a message about the run, and routing it through the
-  // logger would tee it straight back into the transcript being written.
-  process.stdout.write(await Bun.file(target).text());
-  return 0;
+async function cmdLogs(inv: Invocation): Promise<number> {
+  const { logsCommand } = await import("./diagnostic-logs.ts");
+  return await logsCommand(inv);
 }
 
 /**
@@ -2886,6 +2854,7 @@ async function run(): Promise<number> {
   const verb = argv[0];
   if (
     verb === "doctor" ||
+    verb === "logs" ||
     (verb === "desktop" && (argv[1] === undefined || argv[1] === "status")) ||
     ((verb === "rescue" || verb === "reclaim") && !argv.includes("--apply")) ||
     argv.includes("--help") ||
