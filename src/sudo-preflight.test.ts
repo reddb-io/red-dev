@@ -92,7 +92,7 @@ describe("the human install entry points", () => {
     expect(boot).toContain("mise where red-dev");
     expect(boot).toContain('rm -f "$BIN"');
     expect(boot.indexOf("export RED_DEV_BOOTSTRAP=1")).toBeLessThan(
-      boot.indexOf('exec "$BIN" < /dev/tty'),
+      boot.indexOf('"$BIN" < /dev/tty'),
     );
 
     // The bootstrap enters the menu rather than `cmdInstall`, so it needs
