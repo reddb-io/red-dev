@@ -41,10 +41,11 @@ desktop's default application without waiting for that application to close.
 Immediate launcher failures are reported; successful submission is not proof
 that a window was displayed. Configure a default text-file application if needed.
 
-The red-dev GNOME menu has **Open red-dev log**. Its agent menu has **Open RedCode
-log** (RedCode has no separate native tray in this integration). RedRouter and
-Redskilled provide **Open log** in their own tray menus. Use the menu/right-click
-action supported by the desktop. Installing updated GNOME extension files can
+Right-clicking the red-dev GNOME panel entry opens the menu containing **Open
+red-dev log**. Right-clicking the agent/RedCode panel entry opens the menu
+containing **Open RedCode log** (RedCode has no separate native tray in this
+integration). RedRouter and Redskilled provide **Open log** in their own native
+tray context menus. Installing updated GNOME extension files can
 require signing out and in before the running shell loads the new actions.
 
 ## Retention and privacy
