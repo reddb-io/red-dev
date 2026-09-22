@@ -33,6 +33,7 @@ import {
   normalAccel,
   ownedPath,
   parseGvariantList,
+  parseGvariantString,
   type GnomeCustom,
   type GnomeState,
 } from "./gnome-keys.ts";
@@ -277,6 +278,22 @@ describe("verifying the saved GNOME keybindings", () => {
     };
   }
 
+  test("the compact menu stays converged when gsettings uses double-quoted GVariant output", async () => {
+    const state = converged(customs);
+    const menu = customs.find(custom => custom.path === ownedPath("menu.open"));
+    expect(menu).toBeDefined();
+    const printed = answer(["get", `${CUSTOM_SCHEMA}:${ownedPath("menu.open")}`, "command"], state);
+    expect(printed?.startsWith('"')).toBe(true);
+    expect(printed?.endsWith('"')).toBe(true);
+    expect(printed && parseGvariantString(printed)).toBe(menu?.command ?? "");
+
+    const calls: string[][] = [];
+    const run = async (argv: string[]) => { calls.push(argv); return answer(argv, state); };
+    expect((await inspectGnomeKeys(desktop, run, fire)).status).toBe("ok");
+    await installGnomeKeys(desktop, run, fire);
+    expect(calls.every(argv => argv[0] === "get")).toBe(true);
+  });
+
   test("reports saved configuration without claiming delivery of a physical chord", async () => {
     const calls: string[][] = [];
     const check = await inspectGnomeKeys(desktop, async argv => {
@@ -479,19 +496,46 @@ describe("an action this adapter will not bind", () => {
   });
 });
 
+describe("GVariant string readback", () => {
+  test("reads either quote delimiter and preserves embedded quotes and escaped path separators", () => {
+    expect(parseGvariantString("'alacritty -e red-dev menu'")).toBe("alacritty -e red-dev menu");
+    expect(parseGvariantString("\"a 'b' \\\"c\\\" C:\\\\Users\\\\cyber\""))
+      .toBe("a 'b' \"c\" C:\\Users\\cyber");
+  });
+
+  test("round-trips shell commands, apostrophes, both quote styles and backslashes", () => {
+    for (const value of [
+      "",
+      "alacritty -e red-dev menu",
+      "red-dev's menu",
+      "alacritty --option 'window.decorations=\"None\"' -e red-dev menu",
+      "C:\\Users\\cyber\\red-dev.exe",
+      "'C:\\Users\\cyber name\\red-dev.exe' --title \"red-dev's menu\"",
+    ]) {
+      expect(parseGvariantString(printGvariantString(value))).toBe(value);
+    }
+  });
+});
+
+/** GLib chooses double quotes when a string contains an apostrophe. */
+function printGvariantString(value: string): string {
+  if (value.includes("'")) return JSON.stringify(value);
+  return `'${value.replaceAll("\\", "\\\\")}'`;
+}
+
 /** What a machine in `state` answers to each read the converge makes. */
 function answer(argv: string[], state: GnomeState): string | null {
   const [verb, schema, key] = argv;
   if (verb !== "get") return "";
   if (schema === MEDIA_KEYS && key === "custom-keybindings") {
-    return `[${state.list.map((p) => `'${p}'`).join(", ")}]`;
+    return `[${state.list.map(printGvariantString).join(", ")}]`;
   }
   if (schema === MEDIA_KEYS && key === "terminal") {
-    return state.launchTerminal === null ? null : `[${state.launchTerminal.map((a) => `'${a}'`).join(", ")}]`;
+    return state.launchTerminal === null ? null : `[${state.launchTerminal.map(printGvariantString).join(", ")}]`;
   }
   const path = (schema ?? "").split(":")[1] ?? "";
   const custom = state.owned.find((c) => c.path === path);
   if (!custom) return null;
   const value = key === "name" ? custom.name : key === "command" ? custom.command : custom.binding;
-  return `'${value}'`;
+  return printGvariantString(value);
 }

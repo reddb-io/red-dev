@@ -506,7 +506,10 @@ export function parseGvariantList(text: string): string[] {
 /** The contents of a GVariant `s`, unescaped. */
 export function parseGvariantString(text: string): string {
   const trimmed = text.trim();
-  if (trimmed.startsWith("'") && trimmed.endsWith("'") && trimmed.length >= 2) {
+  // GVariant accepts both delimiters. gsettings chooses double quotes when
+  // a command contains shell single quotes (as the compact menu does).
+  const quote = trimmed[0];
+  if ((quote === "'" || quote === '"') && trimmed.endsWith(quote) && trimmed.length >= 2) {
     return trimmed.slice(1, -1).replace(/\\(.)/g, "$1");
   }
   return trimmed;
