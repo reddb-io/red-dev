@@ -17,9 +17,12 @@ export function redactDiagnostic(value: string): string {
     .replace(/(--[\w-]*(?:api[_-]?key|token|password|secret)\s+)(?:"[^"]*"|'[^']*'|\S+)/gi, "$1[REDACTED]")
     .replace(/\b(Bearer|Basic)\s+[^\s,'"}]+/gi, "$1 [REDACTED]")
     .replace(/(["']?\b[\w-]*(?:api[_-]?key|token|password|secret|authorization|cookie)["']?\s*[:=]\s*)(["'])([\s\S]*?)\2/gi, "$1\"[REDACTED]\"")
+    // Header values contain spaces/semicolons: masking only the first cookie
+    // would leave the remaining session credentials on the same line intact.
+    .replace(/(\b(?:authorization|proxy-authorization|cookie|set-cookie)\s*[:=]\s*)[^\r\n]*/gi, "$1[REDACTED]")
     .replace(/(\b[\w-]*(?:api[_-]?key|token|password|secret|authorization|cookie)\s*[:=]\s*)(?!\[REDACTED\])[^\s,;&}"']+/gi, "$1[REDACTED]")
     .replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/gi, "$1[REDACTED]@")
-    .replace(/\b(?:sk-[\w-]{10,}|gh[opusr]_[\w]{10,})\b/g, "[REDACTED]");
+    .replace(/\b(?:sk-[\w-]{10,}|gh[opusr]_[\w]{10,}|github_pat_[\w]{10,})\b/g, "[REDACTED]");
 }
 
 function prefix(value: string, cap: number): string {
