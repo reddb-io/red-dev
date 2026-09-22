@@ -75,7 +75,10 @@ _red_path_prepend "$HOME/.local/bin"
 # Shims have neither problem: each is a small exec into mise, so they
 # work with no shell integration at all. Prepended before ~/.local/bin
 # so that on a machine still carrying a binary an older release left
-# there, the copy mise keeps current is the one that answers.
+# there, the copy mise keeps current is the one that answers. init.sh
+# removes this entry only after `mise activate` succeeds; interactive
+# shells then expose the real tool directory once, while every other
+# context retains this fallback.
 _red_path_prepend "${MISE_DATA_DIR:-$HOME/.local/share/mise}/shims"
 
 # The RedSkills runtimes, ahead of both.

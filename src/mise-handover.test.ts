@@ -24,7 +24,7 @@ import { join } from "node:path";
 import { providerFor, TOOLS } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
 import { miseEntries, miseToolNames, miseToolSpecs } from "./mise-config.ts";
-import { staleReleaseBinaries } from "./migrations.ts";
+import { staleRedSkillsRuntimeLaunchers, staleReleaseBinaries } from "./migrations.ts";
 import { runtimeBinDir } from "./red-skills-companions.ts";
 import { locateTool } from "./verify-install.ts";
 
@@ -117,8 +117,34 @@ describe("the stale binary an older release left behind", () => {
   });
 });
 
+describe("the legacy RedSkills runtime launcher", () => {
+  test("is retired only after the package set owns a replacement", () => {
+    const home = temp();
+    const legacy = join(home, ".local", "bin", "rsp");
+    const replacement = join(runtimeBinDir(home), "rsp");
+    mkdirSync(join(home, ".local", "bin"), { recursive: true });
+    mkdirSync(runtimeBinDir(home), { recursive: true });
+    writeFileSync(legacy, "#!/bin/sh\n# RED_SKILLS_DEV_PLUGIN_ROOT\nnode rsp.bundle.min.mjs\n");
+    writeFileSync(replacement, "#!/bin/sh\nexit 0\n");
+
+    expect(staleRedSkillsRuntimeLaunchers(home)).toEqual([{ name: "rsp", path: legacy, replacement }]);
+  });
+
+  test("leaves an unrelated command with the same name alone", () => {
+    const home = temp();
+    const legacy = join(home, ".local", "bin", "rsp");
+    mkdirSync(join(home, ".local", "bin"), { recursive: true });
+    mkdirSync(runtimeBinDir(home), { recursive: true });
+    writeFileSync(legacy, "#!/bin/sh\necho mine\n");
+    writeFileSync(join(runtimeBinDir(home), "rsp"), "#!/bin/sh\nexit 0\n");
+
+    expect(staleRedSkillsRuntimeLaunchers(home)).toEqual([]);
+  });
+});
+
 describe("mise's shims", () => {
   const path = readFileSync("config/bash/path.sh", "utf8");
+  const init = readFileSync("config/bash/init.sh", "utf8");
 
   test("are on PATH, so a tool works outside an activated shell", () => {
     // `mise activate` covers interactive bash and nothing else. A
@@ -126,6 +152,13 @@ describe("mise's shims", () => {
     // or they get nothing.
     expect(path).toContain("/shims");
     expect(path).toContain("MISE_DATA_DIR");
+  });
+
+  test("leave an activated shell after mise exposes the real tool directories", () => {
+    expect(init).toContain("_red_drop_mise_fallbacks()");
+    expect(init).toContain('if eval "$(mise activate bash)"; then');
+    expect(init).toContain("_red_drop_mise_fallbacks");
+    expect(init).toContain('"$data/installs/red-skills/"*/node_modules/.bin');
   });
 
   test("win over a binary an older release left in ~/.local/bin", () => {

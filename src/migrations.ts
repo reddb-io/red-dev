@@ -31,6 +31,7 @@ import { providerFor, TOOLS } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
 import { readPreferences, writePreferences } from "./preferences.ts";
 import { userBinDir } from "./providers.ts";
+import { runtimeBinDir } from "./red-skills-companions.ts";
 import { transcriptDir } from "./transcript.ts";
 import { joinLines, splitLines, statements } from "./toml-lines.ts";
 
@@ -661,6 +662,17 @@ return {}
     },
   },
   {
+    id: "2026-09-22-single-red-skills-runtime-path",
+    describe: "retire the legacy rsp launcher after the signed package set takes ownership",
+    applies: (p) => p.os !== "windows" && staleRedSkillsRuntimeLaunchers().length > 0,
+    run: async () => {
+      for (const { name, path, replacement } of staleRedSkillsRuntimeLaunchers()) {
+        rmSync(path, { force: true });
+        log.plain(`       ${name}: removed ${path}; active package-set launcher is ${replacement}`);
+      }
+    },
+  },
+  {
     id: "2026-09-22-suite-binary-handover",
     describe: "finish handing bootstrap binaries to their single mise owner",
     applies: (p) => staleReleaseBinaries(p).length > 0,
@@ -730,6 +742,33 @@ export function staleReleaseBinaries(p: Platform): { name: string; path: string 
     }
   }
   return out;
+}
+
+/**
+ * Runtime launchers left by the pre-package-set RedSkills installer.
+ *
+ * `rsp` used to be copied into ~/.local/bin as a 2 KiB discovery script.
+ * The signed package set now writes a stable launcher under red-dev's own
+ * runtime bin. Remove the old file only when both sides prove their identity:
+ * the replacement exists, and the legacy script contains its old package-cache
+ * discovery markers. A person's unrelated `rsp` is never ours to touch.
+ */
+export function staleRedSkillsRuntimeLaunchers(
+  home = process.env["HOME"] ?? "",
+): { name: string; path: string; replacement: string }[] {
+  if (!home) return [];
+  const path = join(home, ".local", "bin", "rsp");
+  const replacement = join(runtimeBinDir(home), "rsp");
+  if (!existsSync(path) || !existsSync(replacement)) return [];
+
+  let source: string;
+  try {
+    source = readFileSync(path, "utf8");
+  } catch {
+    return [];
+  }
+  if (!source.includes("RED_SKILLS_DEV_PLUGIN_ROOT") || !source.includes("rsp.bundle.min.mjs")) return [];
+  return [{ name: "rsp", path, replacement }];
 }
 
 /**
