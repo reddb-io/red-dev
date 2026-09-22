@@ -19,6 +19,11 @@ location on all platforms, with its legacy `.red/redcode` fallback if migration
 has not succeeded. These companion-app paths require their diagnostic-logging
 patches; red-dev never starts an older CLI by guessing an unsupported subcommand.
 
+Compatibility exception: red-dev preserves its existing `$HOME/.local/state/red-dev`
+location when `HOME` is defined in Git Bash. The same directory owns its migration
+ledger and caches, so this patch does not move it. `red-dev logs --path` resolves
+the actual location; WSL always keeps its Linux-side state separate.
+
 ```sh
 red-dev logs                   # latest run, existing interface
 red-dev logs list

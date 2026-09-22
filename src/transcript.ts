@@ -65,16 +65,16 @@ const ANSI = /\x1b\[[0-9;]*m/g;
  * anything, and LOCALAPPDATA is where a per-machine, non-roaming thing
  * belongs — the same directory the wallpapers already use.
  */
-export function transcriptDir(env?: Record<string, string | undefined>, platform = process.platform): string {
+export function transcriptDir(env?: Record<string, string | undefined>): string {
   const e = env ?? process.env;
   const local = e["LOCALAPPDATA"];
-  if (platform === "win32") {
-    const root = local && win32.isAbsolute(local) ? local : win32.join(e["USERPROFILE"] ?? homedir(), "AppData", "Local");
-    return `${root.replace(/\\/g, "/")}/red-dev/logs`;
-  }
+  // This directory also owns migration ledgers and observation caches. Preserve
+  // the established HOME/LOCALAPPDATA split rather than silently migrating state
+  // as a side effect of adding log rotation (including existing Git Bash users).
+  if (local && win32.isAbsolute(local) && !e["HOME"]) return `${local.replace(/\\/g, "/")}/red-dev/logs`;
   const state = e["XDG_STATE_HOME"];
   if (state && posix.isAbsolute(state)) return `${state}/red-dev`;
-  const home = e["HOME"] ?? homedir();
+  const home = e["HOME"] ?? e["USERPROFILE"] ?? homedir();
   return `${home.replace(/\\/g, "/")}/.local/state/red-dev`;
 }
 

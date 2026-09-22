@@ -138,7 +138,7 @@ describe("where transcripts go", () => {
 
   test("LOCALAPPDATA on native Windows", () => {
     // Per-machine and non-roaming, the same reasoning the wallpapers use.
-    expect(transcriptDir({ LOCALAPPDATA: "C:\\Users\\me\\AppData\\Local", HOME: "C:/Users/me" }, "win32")).toBe(
+    expect(transcriptDir({ LOCALAPPDATA: "C:\\Users\\me\\AppData\\Local" })).toBe(
       "C:/Users/me/AppData/Local/red-dev/logs",
     );
   });
@@ -153,7 +153,7 @@ describe("where transcripts go", () => {
   });
 
   test("relative XDG roots are not valid state directories", () => {
-    expect(transcriptDir({ XDG_STATE_HOME: "relative", HOME: "/home/me" }, "linux")).toBe("/home/me/.local/state/red-dev");
+    expect(transcriptDir({ XDG_STATE_HOME: "relative", HOME: "/home/me" })).toBe("/home/me/.local/state/red-dev");
   });
 });
 
