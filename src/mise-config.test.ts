@@ -173,6 +173,28 @@ describe("miseEntries", () => {
     expect(releaseAgeExcludes(entries)).toContain("github:reddb-io/redcode");
   });
 
+  test("each RedDB product has one canonical publication source", () => {
+    const ours = Object.fromEntries(
+      miseEntries(UBUNTU)
+        .filter((entry) => entry.alias && /^(github|npm):@?reddb-io[/-]/.test(entry.spec))
+        .map((entry) => [entry.alias!, entry.spec]),
+    );
+
+    expect(ours).toEqual({
+      dit: "github:reddb-io/dit",
+      red: "github:reddb-io/reddb",
+      "red-dev": "github:reddb-io/red-dev",
+      "red-router": "npm:@reddb-io/red-router",
+      "red-skills": "npm:@reddb-io/red-skills",
+      "red-skills-brain": "npm:@reddb-io/red-skills-brain",
+      "red-skills-dev": "npm:@reddb-io/red-skills-dev",
+      "red-skills-memory": "npm:@reddb-io/red-skills-memory",
+      redcode: "github:reddb-io/redcode",
+      tq: "github:reddb-io/toon",
+      zellij: "github:reddb-io/zellij",
+    });
+  });
+
   test("the suite CLIs are there, under the names people type", () => {
     const aliases = miseEntries(UBUNTU).map((e) => e.alias);
     expect(aliases).toContain("red");

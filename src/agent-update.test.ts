@@ -209,14 +209,7 @@ describe("the update argv of each per-host mechanism", () => {
     expect(p.mechanism).toBe("mise");
     expect(p.step).toEqual({
       kind: "command",
-      argv: [
-        "/usr/bin/mise",
-        "use",
-        "-g",
-        "--yes",
-        "--fuzzy",
-        "github:reddb-io/redcode@latest",
-      ],
+      argv: ["/usr/bin/mise", "install", "redcode@latest"],
       env: {},
     });
   });

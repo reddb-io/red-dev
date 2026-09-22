@@ -672,12 +672,20 @@ export async function installAgent(a: AgentSpec, p: Platform): Promise<void> {
   const method = agentInstallMethod(a, p);
 
   if (method === "mise" && a.mise) {
+    if (a.miseSuite) {
+      // The suite fragment already maps this command to its one canonical
+      // backend. Writing the qualified spec with `mise use -g` as well makes
+      // mise treat it as another tool identity and downloads the same release
+      // into a second install root.
+      const { miseInstallDeclared } = await import("./providers.ts");
+      await miseInstallDeclared(a.cmd, p);
+      return;
+    }
+
     // `use -g`, the same verb every other tool in the suite is placed
-    // with: it installs, writes the pin into the global config and
-    // leaves a shim on PATH, so the next `mise upgrade` knows this host
-    // exists. `ghInstallExactArchive` below places a file and leaves
-    // nothing that knows how to move it — which is the whole reason
-    // this branch is here.
+    // with for third-party hosts: it installs, writes the pin into the
+    // global config and leaves a shim on PATH. Suite hosts returned above;
+    // their generated declaration is already the durable pin.
     const { useRuntimes } = await import("./runtimes.ts");
     await useRuntimes([`${a.mise}@latest`]);
     return;

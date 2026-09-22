@@ -789,6 +789,25 @@ async function miseInstall(
 }
 
 /**
+ * Install one tool already declared by red-dev's mise fragment.
+ *
+ * Suite agent hosts use this instead of `mise use -g <spec>`. The latter
+ * writes the backend-qualified spec into the person's global config while
+ * the fragment already declares the short alias, making mise install the
+ * same release once under each identity.
+ */
+export async function miseInstallDeclared(name: string, platform: Platform): Promise<void> {
+  const mise = Bun.which("mise");
+  if (!mise) throw new RedError("mise is not on PATH — run `red-dev install core` first");
+
+  convergeMiseConfig(platform);
+  const selector = `${name}@latest`;
+  log.step(`mise: ${selector}`);
+  const code = await runMise([mise, "install", selector], platform);
+  if (code !== 0) throw new RedError(`mise could not install ${selector} (exit ${code})`);
+}
+
+/**
  * Install everything the fragment declares, in one pass.
  *
  * Exported for the migration that hands the release-installed binaries
