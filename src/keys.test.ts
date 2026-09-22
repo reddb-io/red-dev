@@ -26,6 +26,7 @@ import {
   firePlan,
   keyEntries,
   keyLines,
+  MENU_ALACRITTY_ARGS,
   searchKeys,
   VIEWER_START,
   viewerStep,
@@ -429,17 +430,39 @@ describe("the four actions the chord decision named", () => {
     // in this terminal, so firing one of them in place would put two
     // full-screen surfaces on the same frame.
     expect(firePlan("menu.open", desktop, anything)).toMatchObject({
-      argv: ["alacritty", "-e", "red-dev", "menu"],
+      argv: ["alacritty", ...MENU_ALACRITTY_ARGS, "-e", "red-dev", "menu"],
     });
     expect(firePlan("keys.viewer", desktop, anything)).toMatchObject({
       argv: ["alacritty", "-e", "red-dev", "keys"],
     });
     expect(firePlan("menu.open", windows, anything)).toMatchObject({
-      argv: ["cmd.exe", "/c", "start", "", "red-dev.exe", "menu"],
+      argv: ["cmd.exe", "/c", "start", "", "alacritty.exe", ...MENU_ALACRITTY_ARGS, "-e", "red-dev.exe", "menu"],
     });
     expect(firePlan("keys.viewer", windows, anything)).toMatchObject({
       argv: ["cmd.exe", "/c", "start", "", "red-dev.exe", "keys"],
     });
+  });
+
+  test("the shortcut opens the same compact menu as the GNOME panel", async () => {
+    const extension = await Bun.file(new URL("../config/gnome/reddb-bar/extension.gnome", import.meta.url)).text();
+    const declaration = extension.match(/const MENU_WINDOW = \[([\s\S]*?)\];/);
+    expect(declaration).not.toBeNull();
+    const panelArgs = [...(declaration?.[1] ?? "").matchAll(/'([^']*)'/g)].map(match => match[1]);
+    expect(panelArgs).toEqual([...MENU_ALACRITTY_ARGS]);
+  });
+
+  test("menu launchers retain a working fallback without Alacritty", () => {
+    expect(firePlan("menu.open", desktop, cmd => cmd === "gnome-terminal" ? "/usr/bin/gnome-terminal" : null)).toMatchObject({
+      argv: ["gnome-terminal", "--", "red-dev", "menu"],
+    });
+    for (const platform of [windows, machine({ env: "wsl" })]) {
+      expect(firePlan("menu.open", platform, nothing)).toMatchObject({
+        argv: ["cmd.exe", "/c", "start", "", "red-dev.exe", "menu"],
+      });
+      expect(firePlan("menu.open", platform, anything)).toMatchObject({
+        argv: ["cmd.exe", "/c", "start", "", "alacritty.exe", ...MENU_ALACRITTY_ARGS, "-e", "red-dev.exe", "menu"],
+      });
+    }
   });
 
   test("and a machine with no terminal emulator is told the command instead", () => {

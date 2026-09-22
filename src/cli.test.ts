@@ -8,6 +8,16 @@ const cli = buildCli();
 const parse = (argv: string[]) => parseArgs(cli, argv);
 
 describe("command parsing", () => {
+  test("desktop is a narrow repair command with a read-only default", () => {
+    expect(parse(["desktop"])).toMatchObject({ command: "desktop", desktopVerb: undefined, errors: [] });
+    expect(parse(["desktop", "status"])).toMatchObject({ desktopVerb: "status", errors: [] });
+    expect(parse(["desktop", "reconcile"])).toMatchObject({ desktopVerb: "reconcile", errors: [] });
+    expect(parse(["desktop", "reinstall"]).errors).toContain(
+      "invalid desktop action 'reinstall' (expected: status, reconcile)",
+    );
+    expect(buildCli().help(["desktop"])).toContain("reconcile");
+  });
+
   test("reads explicit unattended agent and runtime selections", () => {
     expect(parse(["agents", "claude-code,codex"]).agentKeys).toEqual([
       "claude-code",

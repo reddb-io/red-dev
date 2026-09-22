@@ -641,6 +641,8 @@ export async function collectDrift(p: Platform): Promise<DriftCheck[]> {
   checks.push(...(await inspectRouter(p)));
   checks.push(await checkSharedRoot(p));
   checks.push(await checkHotkeys(p));
+  const { inspectDesktop } = await import("./desktop.ts");
+  checks.push(...await inspectDesktop(p));
   checks.push(await checkPrivilegedWork(p));
   return checks;
 }

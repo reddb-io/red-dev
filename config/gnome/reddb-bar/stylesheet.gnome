@@ -63,6 +63,13 @@
   color: #ff2056;
 }
 
+.reddb-tray-name {
+  /* Explicit text on the original live AppIndicator button, not an extra
+   * launcher or a service-health badge. Match the other named panel controls. */
+  color: #f4f5f7;
+  margin-left: 5px;
+}
+
 .reddb-panel-button:checked .reddb-workspace-active,
 .reddb-panel-button:checked .reddb-workspace-inactive,
 .reddb-panel-button:checked .reddb-agents-icon {

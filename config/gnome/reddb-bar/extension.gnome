@@ -8,6 +8,15 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
+// Replaced with the content fingerprint by red-dev when installing the bar.
+// Unlike metadata read from disk, this identifies the JavaScript actually loaded.
+const RUNTIME_REVISION = '__RED_DEV_BAR_REVISION__';
+const RUNTIME_PATH = '/io/reddb/RedDevDesktop';
+const RUNTIME_INTERFACE = `<node><interface name="io.reddb.RedDevDesktop">
+  <method name="Get"><arg type="s" name="status" direction="out"/></method>
+</interface></node>`;
+const NAMED_TRAYS = ['RedRouter', 'Redskilled'];
+
 const MENU_WINDOW = [
   '--class', 'red-dev-menu,red-dev-menu',
   '--title', 'red-dev',
@@ -183,6 +192,122 @@ const AgentsMenu = GObject.registerClass(class AgentsMenu extends PanelMenu.Butt
   }
 });
 
+function actorState(actor) {
+  if (!actor)
+    return null;
+  return {
+    visible: actor.visible,
+    mapped: actor.mapped,
+    width: actor.width,
+    height: actor.height,
+  };
+}
+
+// GNOME 46 / Ubuntu AppIndicators exposes each live SNI as a panel button.
+// Keep that real button (including its menu, passive state and click handlers),
+// but own the two product-name actors instead of depending on the optional
+// Ayatana label bin's layout. Never create a button for an absent indicator.
+// Unknown tray implementations are left untouched.
+class NamedTrayLabels {
+  constructor() {
+    this._entries = new Map();
+    this._refresh();
+    // A small actor-only scan also covers AppIndicators enabled after this bar,
+    // helper restarts and a native label bin recreated by a label update.
+    // No subprocesses or D-Bus polling run in GNOME's render loop.
+    this._source = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 2, () => {
+      this._refresh();
+      return GLib.SOURCE_CONTINUE;
+    });
+  }
+
+  _restoreNativeLabel(entry) {
+    if (!entry.nativeBin)
+      return;
+    entry.nativeBin.disconnect(entry.nativeDestroyId);
+    entry.nativeBin.visible = entry.nativeWasVisible;
+    entry.nativeBin = null;
+  }
+
+  _hideNativeLabel(entry) {
+    const bin = entry.actor._labelBin;
+    if (bin !== entry.nativeBin) {
+      this._restoreNativeLabel(entry);
+      if (bin) {
+        entry.nativeBin = bin;
+        entry.nativeWasVisible = bin.visible;
+        entry.nativeDestroyId = bin.connect('destroy', () => {
+          entry.nativeBin = null;
+        });
+      }
+    }
+    entry.nativeBin?.hide();
+  }
+
+  _remove(actor) {
+    const entry = this._entries.get(actor);
+    if (!entry)
+      return;
+    this._entries.delete(actor);
+    actor.disconnect(entry.destroyId);
+    this._restoreNativeLabel(entry);
+    entry.label.destroy();
+  }
+
+  _refresh() {
+    const current = new Set();
+    for (const actor of Object.values(Main.panel.statusArea)) {
+      const name = actor?._indicator?.label;
+      if (!NAMED_TRAYS.includes(name) || !actor._box?.add_child)
+        continue;
+      current.add(actor);
+      let entry = this._entries.get(actor);
+      if (!entry) {
+        const label = new St.Label({text: name, y_align: 2, style_class: 'reddb-tray-name'});
+        actor._box.add_child(label);
+        entry = {actor, label, name, nativeBin: null};
+        entry.destroyId = actor.connect('destroy', () => {
+          // Its child actors are already being destroyed. Do not touch them.
+          this._entries.delete(actor);
+        });
+        this._entries.set(actor, entry);
+      }
+      entry.name = name;
+      entry.label.set_text(name);
+      this._hideNativeLabel(entry);
+    }
+    for (const actor of this._entries.keys()) {
+      if (!current.has(actor))
+        this._remove(actor);
+    }
+  }
+
+  status() {
+    // "registered" refers to the existing tray actor, not daemon health.
+    // Mapped + allocated is render evidence, not a screenshot or proof that
+    // another window / monitor configuration cannot obscure the panel.
+    return NAMED_TRAYS.map(name => {
+      const entries = [...this._entries.values()].filter(entry => entry.name === name);
+      return {
+        name,
+        registered: entries.length > 0,
+        actors: entries.map(entry => ({
+          label: {...actorState(entry.label), text: entry.label.get_text()},
+          indicator: actorState(entry.actor),
+        })),
+      };
+    });
+  }
+
+  destroy() {
+    if (this._source)
+      GLib.source_remove(this._source);
+    this._source = 0;
+    for (const actor of this._entries.keys())
+      this._remove(actor);
+  }
+}
+
 export default class RedDbBarExtension extends Extension {
   enable() {
     this._brand = new RedDbMenu(this);
@@ -196,9 +321,23 @@ export default class RedDbBarExtension extends Extension {
 
     this._activities = Main.panel.statusArea.activities?.container ?? null;
     this._activities?.hide();
+
+    this._trayNames = new NamedTrayLabels();
+    this._runtime = Gio.DBusExportedObject.wrapJSObject(RUNTIME_INTERFACE, {
+      Get: () => JSON.stringify({
+        revision: RUNTIME_REVISION,
+        menu: actorState(this._brand),
+        indicators: this._trayNames.status(),
+      }),
+    });
+    this._runtime.export(Gio.DBus.session, RUNTIME_PATH);
   }
 
   disable() {
+    this._runtime?.unexport();
+    this._runtime = null;
+    this._trayNames?.destroy();
+    this._trayNames = null;
     this._activities?.show();
     this._activities = null;
     this._agents?.destroy();
