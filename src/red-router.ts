@@ -97,6 +97,27 @@ function legacyUnitPath(home: string): string {
   return `${home}/.config/systemd/user/${LEGACY_ROUTER_SERVICE}`;
 }
 
+function routerUnitPath(home: string): string {
+  return `${home}/.config/systemd/user/${ROUTER_SERVICE}`;
+}
+
+/** A live process owes one restart exactly when its generated definition moved. */
+export function routerServiceNeedsRestart(
+  before: string | null,
+  after: string | null,
+  wasActive: boolean,
+): boolean {
+  return wasActive && before !== after && after !== null;
+}
+
+function readOptional(path: string): string | null {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return null;
+  }
+}
+
 async function retireLegacyLinux(run: Awaited<ReturnType<typeof runner>>, home: string): Promise<boolean> {
   const path = legacyUnitPath(home);
   const declared = existsSync(path);
@@ -169,7 +190,11 @@ async function convergeLinux(p: Platform, seams: RouterSeams, env: NodeJS.Proces
     return "skipped";
   }
   const run = await runner(seams);
-  const retired = await retireLegacyLinux(run, homeOf(seams));
+  const home = homeOf(seams);
+  const unitPath = routerUnitPath(home);
+  const before = readOptional(unitPath);
+  const wasActive = (await run(["systemctl", "--user", "is-active", ROUTER_SERVICE])).exitCode === 0;
+  const retired = await retireLegacyLinux(run, home);
   const argv = await routerArgv(["service", routerEnabled(env) ? "install" : "uninstall", "-p", String(routerPort(env)), "-H", routerHost(env)], seams);
   if (!argv) {
     log.warn("red-router: package is not installed — `red-dev install red-router`");
@@ -178,9 +203,16 @@ async function convergeLinux(p: Platform, seams: RouterSeams, env: NodeJS.Proces
   const result = await run(argv);
   if (result.exitCode !== 0) throw new Error(`red-router service ${routerEnabled(env) ? "install" : "uninstall"} exited ${result.exitCode}`);
   if (routerEnabled(env)) {
+    const after = readOptional(unitPath);
+    if (routerServiceNeedsRestart(before, after, wasActive)) {
+      const restarted = await run(["systemctl", "--user", "restart", ROUTER_SERVICE]);
+      if (restarted.exitCode !== 0) {
+        throw new Error("red-router service definition moved, but its running process could not be restarted");
+      }
+    }
     await retireLegacyPackage(run, seams);
     log.ok(`red-router: running as ${ROUTER_SERVICE} on http://${routerHost(env)}:${routerPort(env)}`);
-    return retired ? "installed" : "unchanged";
+    return retired || before !== after ? "installed" : "unchanged";
   }
   log.ok("red-router: service is off (RED_ROUTER=0)");
   return "removed";

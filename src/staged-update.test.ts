@@ -19,6 +19,7 @@ import { tmpdir } from "node:os";
 import type { Acquisition } from "./red-skills-acquire.ts";
 import type { CompanionOutcome } from "./red-skills-companions.ts";
 import type { HostOutcome } from "./red-skills-hosts.ts";
+import type { Platform } from "./platform.ts";
 import {
   packageSetStatePath,
   type PackageSetRevision,
@@ -30,6 +31,7 @@ import {
   hostSurface,
   lockSurface,
   readStagedUpdate,
+  restartUpdatedRedskilled,
   runStagedUpdate,
   stagedUpdateOutcome,
   stagedUpdateReport,
@@ -41,6 +43,16 @@ import {
 } from "./staged-update.ts";
 
 const fakeHome = (): string => mkdtempSync(`${tmpdir()}/red-staged-`);
+
+const SYSTEMD: Platform = {
+  os: "linux",
+  distro: "ubuntu",
+  version: "24.04",
+  codename: "noble",
+  env: "desktop",
+  arch: "x64",
+  caps: { apt: true, gui: true, systemd: true, winget: false, flatpak: false },
+};
 
 /** One acquisition, in whichever of its five endings a case needs. */
 function acquisition(
@@ -308,6 +320,35 @@ describe("running coder sessions", () => {
     expect(run.code).toBe(0);
     expect(run.restartNeeded).toEqual(["claude-code", "codex", "herdr"]);
     expect(stagedUpdateReport(home).restartNeeded).toEqual(["claude-code", "codex", "herdr"]);
+  });
+
+  test("the idle daemon alone is restarted after the Worker gate", async () => {
+    const calls: string[][] = [];
+    const acknowledged: string[] = [];
+    const out = await restartUpdatedRedskilled(
+      SYSTEMD,
+      [companion("redskilled", { reload: "restart-needed" }), companion("herdr")],
+      {
+        home: "/home/test",
+        run: async (argv) => { calls.push(argv); return { exitCode: 0 }; },
+        acknowledge: async (home) => { acknowledged.push(home); return true; },
+      },
+    );
+
+    expect(calls).toEqual([["systemctl", "--user", "restart", "redskilled.service"]]);
+    expect(acknowledged).toEqual(["/home/test"]);
+    expect(out.find((row) => row.companion === "redskilled")?.reload).toBe("current");
+  });
+
+  test("a daemon restart failure fails the companion surface", async () => {
+    const out = await restartUpdatedRedskilled(
+      SYSTEMD,
+      [companion("redskilled", { reload: "restart-needed" })],
+      { home: "/home/test", run: async () => ({ exitCode: 1 }) },
+    );
+
+    expect(out[0]).toMatchObject({ status: "failed", reload: "restart-needed" });
+    expect(companionSurface(out).state).toBe("failed");
   });
 
   test("stop being owed a restart once a fresh session has observed the revision", async () => {

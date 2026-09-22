@@ -25,6 +25,7 @@ import { captureTo } from "./log.ts";
 import {
   miseEntries,
   misePluginRoot,
+  RED_ROUTER_RECONCILE_POSTINSTALL,
   REDSKILLS_RECONCILE_POSTINSTALL,
   renderMiseConfig,
 } from "./mise-config.ts";
@@ -147,17 +148,20 @@ describe("writing it, and then not writing it again", () => {
 });
 
 describe("the fragment tells mise to call red-dev back", () => {
-  test("the RedSkills entry carries a postinstall, and only that entry", () => {
+  test("the two resident services carry reconciliation postinstalls", () => {
     const entries = miseEntries(UBUNTU);
     const core = entries.find((e) => e.spec === REDSKILLS_CORE_SPEC);
+    const router = entries.find((e) => e.alias === "red-router");
     expect(core?.postinstall).toBe(REDSKILLS_RECONCILE_POSTINSTALL);
-    for (const other of entries.filter((e) => e.spec !== REDSKILLS_CORE_SPEC)) {
+    expect(router?.postinstall).toBe(RED_ROUTER_RECONCILE_POSTINSTALL);
+    for (const other of entries.filter((e) => e.spec !== REDSKILLS_CORE_SPEC && e.alias !== "red-router")) {
       expect(other.postinstall, other.spec).toBeUndefined();
     }
   });
 
   test("the postinstall is the command red-dev actually answers to", () => {
     expect(REDSKILLS_RECONCILE_POSTINSTALL).toBe("red-dev red-skills reconcile");
+    expect(RED_ROUTER_RECONCILE_POSTINSTALL).toBe("red-dev red-router install");
     const phase = REDSKILLS_RECONCILE_POSTINSTALL.split(" ").at(-1) as string;
     expect(isPluginPhase(phase)).toBe(true);
   });
@@ -171,9 +175,18 @@ describe("the fragment tells mise to call red-dev back", () => {
         version: "latest",
         postinstall: REDSKILLS_RECONCILE_POSTINSTALL,
       },
+      {
+        spec: "npm:@reddb-io/red-router",
+        alias: "red-router",
+        version: "latest",
+        postinstall: RED_ROUTER_RECONCILE_POSTINSTALL,
+      },
     ]);
     expect(rendered).toContain(
       `red-skills = { version = "latest", postinstall = "${REDSKILLS_RECONCILE_POSTINSTALL}" }`,
+    );
+    expect(rendered).toContain(
+      `red-router = { version = "latest", postinstall = "${RED_ROUTER_RECONCILE_POSTINSTALL}" }`,
     );
     expect(rendered).toContain('red = "latest"');
   });

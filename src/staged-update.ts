@@ -683,8 +683,61 @@ function defaultConverge(
   return async () => {
     const { convergeRedSkills } = await import("./agents.ts");
     const { detect } = await import("./platform.ts");
-    return await convergeRedSkills(opts.manifestPlatform ?? detect(), opts.trigger ?? "unknown");
+    const platform = opts.manifestPlatform ?? detect();
+    const converged = await convergeRedSkills(platform, opts.trigger ?? "unknown");
+    return {
+      ...converged,
+      companions: await restartUpdatedRedskilled(platform, converged.companions, {
+        home: opts.home ?? homeOf(opts.env ?? process.env),
+      }),
+    };
   };
+}
+
+export interface RestartUpdatedRedskilledOptions {
+  home: string;
+  run?: (argv: string[]) => Promise<{ exitCode: number | null; timedOut?: boolean }>;
+  acknowledge?: (home: string) => Promise<boolean>;
+}
+
+/**
+ * Load the newly installed daemon after the Worker gate admitted this update.
+ *
+ * Hosts are deliberately outside this function: an editor or coder session
+ * keeps running on the revision it opened with. Redskilled is different — its
+ * Workers live under the init system and survive the daemon restart, and the
+ * staged update has already observed that there are none to hold activation.
+ */
+export async function restartUpdatedRedskilled(
+  platform: Platform,
+  outcomes: readonly CompanionOutcome[],
+  opts: RestartUpdatedRedskilledOptions,
+): Promise<CompanionOutcome[]> {
+  const at = outcomes.findIndex(
+    (outcome) => outcome.companion === "redskilled" && outcome.reload === "restart-needed",
+  );
+  if (at < 0 || !platform.caps.systemd) return [...outcomes];
+
+  const run = opts.run ?? (async (argv: string[]) => {
+    const { runBounded } = await import("./bounded-command.ts");
+    return await runBounded(argv, { timeoutMs: 30_000 });
+  });
+  const restarted = await run(["systemctl", "--user", "restart", "redskilled.service"]);
+  const next = outcomes.map((outcome) => ({ ...outcome }));
+  const daemon = next[at]!;
+  if (restarted.exitCode === 0 && !restarted.timedOut) {
+    const acknowledge = opts.acknowledge ?? (async (home: string) => {
+      const { acknowledgeCompanionRestart } = await import("./red-skills-companions.ts");
+      return await acknowledgeCompanionRestart(home, "redskilled");
+    });
+    await acknowledge(opts.home);
+    daemon.reload = "current";
+    log.ok("redskilled: restarted on the active package-set revision");
+  } else {
+    daemon.status = "failed";
+    daemon.reason = "the updated supervisor unit could not restart redskilled";
+  }
+  return next;
 }
 
 /**

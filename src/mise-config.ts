@@ -91,6 +91,9 @@ export interface MiseEntry {
  */
 export const REDSKILLS_RECONCILE_POSTINSTALL = "red-dev red-skills reconcile";
 
+/** Reconcile the long-running service after mise moves the package. */
+export const RED_ROUTER_RECONCILE_POSTINSTALL = "red-dev red-router install";
+
 /**
  * The alias whose entry carries that postinstall.
  *
@@ -101,6 +104,7 @@ export const REDSKILLS_RECONCILE_POSTINSTALL = "red-dev red-skills reconcile";
  * the two spellings against each other.
  */
 const REDSKILLS_ALIAS = "red-skills";
+const RED_ROUTER_ALIAS = "red-router";
 
 /**
  * Where mise keeps everything it owns on this machine.
@@ -398,12 +402,12 @@ export function miseEntries(
       ...(pr.alias ? { alias: pr.alias } : {}),
       version: pr.version ?? "latest",
       ...(pr.allowLowDownloads ? { allowLowDownloads: true as const } : {}),
-      // The RedSkills entry, and only it: whichever way mise advances
-      // the package set — a suite upgrade, a bare `mise upgrade
-      // red-skills`, a first install — the hosts are reconciled from
-      // the same place afterwards, rather than only when red-dev
-      // happened to be the one driving.
+      // Resident services reconcile after whichever mise operation moved
+      // their package. RedSkills reaches the Worker-gated host/companion
+      // walk; RedRouter rewrites its generated service definition and loads
+      // the new executable when that definition changed.
       ...(pr.alias === REDSKILLS_ALIAS ? { postinstall: REDSKILLS_RECONCILE_POSTINSTALL } : {}),
+      ...(pr.alias === RED_ROUTER_ALIAS ? { postinstall: RED_ROUTER_RECONCILE_POSTINSTALL } : {}),
     });
   }
   return entries;

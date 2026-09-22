@@ -361,13 +361,15 @@ describe("the runtimes and the daemon", () => {
     expect(readCompanionRegistry(m.home).companions["redskilled"]).toBeUndefined();
   });
 
-  test("a running daemon is told to restart, never signalled", async () => {
+  test("a running daemon is repointed but never signalled before the Worker gate", async () => {
     const m = machine();
-    const { calls } = runner(m);
-    const out = await reconcile(m, { running: (cmd) => cmd === "redskilled", run: runner(m).run });
+    const recorded = runner(m);
+    const out = await reconcile(m, { running: (cmd) => cmd === "redskilled", run: recorded.run });
 
     expect(out.find((o) => o.companion === "redskilled")?.reload).toBe("restart-needed");
-    expect(lines(calls).join("\n")).not.toMatch(/kill|systemctl|restart/);
+    expect(lines(recorded.calls)).toContain(`${join(m.bin, "redskilled")} unit install`);
+    expect(recorded.calls.some((argv) => argv[0] === "systemctl" || argv.includes("restart"))).toBe(false);
+    expect(recorded.calls.flat()).not.toContain("kill");
   });
 });
 
