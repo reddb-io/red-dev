@@ -14,12 +14,10 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "bun:test";
 import {
-  describeProvider,
   installedVersion,
   installState,
   isInstalled,
   isPresent,
-  parseVersion,
   TOOLS,
   type Tool } from "./manifest.ts";
 import { releaseApiUrl } from "./providers.ts";

@@ -28,20 +28,10 @@
  * than a failed write — and only the pure half can be tested without a
  * mise installation in the loop.
  *
- * Two things are deliberately *not* here yet.
- *
- * red-dev itself. Putting `red-dev` in this fragment is one line and
- * would make the binary self-updating, which is the open `lifecycle`
- * context in .red/CONTEXT-MAP.md. It is not one line of consequence:
- * boot.sh installs to ~/.local/bin and mise installs a shim, so a
- * machine that has run both has two copies and the winner is whichever
- * PATH order it happens to have. `mise upgrade` updating the copy
- * nobody executes is worse than no self-update at all, because it
- * reports success. That ordering has to be decided first.
- *
- * The agents (redcode and the rest). They live in agents.ts behind
- * their own install methods and their own readiness probes, which is a
- * second migration rather than another line in the manifest.
+ * red-dev itself and portable agent hosts now use the same route. Agent
+ * choices stay in agents.ts; installing one writes its `latest` selector
+ * through `mise use -g`, while RedCode also belongs to the workstation
+ * suite fragment because it is part of the default RedDB environment.
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -74,7 +64,7 @@ export interface MiseEntry {
    * are not explained.
    */
   alias?: string;
-  /** A mise version selector: "1.23.2", "0.28", "latest". */
+  /** A mise version selector. Managed catalog entries always use "latest". */
   version: string;
   /**
    * A command mise runs after it installs or upgrades this tool.
@@ -382,7 +372,7 @@ export function renderMiseConfig(entries: MiseEntry[]): string {
 export function miseEntries(
   p: Platform,
   tools: readonly Tool[] = TOOLS,
-  hosts: readonly { mise?: string; cmd: string }[] = AGENTS,
+  hosts: readonly { mise?: string; miseSuite?: true; cmd: string }[] = AGENTS,
 ): MiseEntry[] {
   const entries: MiseEntry[] = [];
 
@@ -391,7 +381,9 @@ export function miseEntries(
   // this projection `mise upgrade` would know nothing about the copy
   // red-dev installed.
   for (const host of hosts) {
-    if (host.mise) entries.push({ spec: host.mise, alias: host.cmd, version: "latest" });
+    if (host.mise && host.miseSuite) {
+      entries.push({ spec: host.mise, alias: host.cmd, version: "latest" });
+    }
   }
 
   for (const tool of tools) {

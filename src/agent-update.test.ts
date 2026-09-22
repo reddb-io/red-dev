@@ -208,13 +208,10 @@ describe("the update argv of each per-host mechanism", () => {
     expect(p.step).toEqual({ kind: "script", url: "https://dev.meta.ai/install.sh" });
   });
 
-  test("the mechanism follows how the host was installed, not the catalog order", () => {
-    // Codex carries a winget id and an npm package. Under WSL the
-    // install path takes npm, so the update path must not reach for
-    // winget just because the id is sitting in the same entry.
-    expect(agentUpdateMechanism(host("codex"), WSL)).toBe("npm");
-    expect(agentUpdateMechanism(host("codex"), WINDOWS)).toBe("winget");
-    expect(agentUpdateMechanism(host("claude-code"), WINDOWS)).toBe("winget");
+  test("mise wins over fallback installer and package-manager metadata", () => {
+    expect(agentUpdateMechanism(host("codex"), WSL)).toBe("mise");
+    expect(agentUpdateMechanism(host("codex"), WINDOWS)).toBe("mise");
+    expect(agentUpdateMechanism(host("claude-code"), WINDOWS)).toBe("mise");
   });
 
   test("every host red-dev can install on a target also has a way to be updated", () => {

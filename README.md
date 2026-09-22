@@ -541,26 +541,24 @@ WSL, on the desktop, and in Git Bash. `red-dev lang` chooses which. A version
 manager that manages nothing is how `pnpm` ends up working in one shell and not
 another on the same machine.
 
-**And so is almost everything else that is not a distro package.** On Linux the
-tools red-dev used to download release-by-release — `starship`, `atuin`,
-`carapace`, `yazi`, `lazygit`, `lazydocker`, `dust`, `glow`, `gitui`, the
-RedDB CLIs `red` and `tq`, the pinned `zellij` fork, **and red-dev itself** —
-are mise's too. The reason is not tidiness: a converge that finds a binary on
-PATH never asks how old it is, so a hand-downloaded release was installed once
-and then frozen for good. `red-dev update` now names each of them to `mise
-upgrade`, which is also what finally makes red-dev self-updating.
+**And so is every portable CLI for which mise has an official backend.** This
+applies on Linux and Windows: shell tools, terminal utilities, RedDB CLIs,
+RedRouter, dit, the RedSkills packages, the RedDB Zellij fork, red-dev itself
+and supported agent hosts all use `latest`. A converge that finds a binary on
+PATH otherwise never asks how old it is, so a hand-downloaded release can stay
+frozen forever. Both bare `mise upgrade` and `red-dev update` now advance the
+copies red-dev installed.
 
 mise picks the asset for the platform, verifies the publisher's checksum, and
 verifies GitHub build attestations where the release carries them — ours do.
 It also holds a release back for a short while after publication, which red-dev
 leaves alone: the tag cut minutes ago is the one nobody has run yet.
 
-Three deliberately stay behind. `tldr` ships a binary called `tealdeer` and
-mise will not rename it. `red-ui` ships a .deb whose desktop integration a bare
-binary would shadow, and `red-request` ships a Windows installer rather than a
-binary. On Windows nothing moved: winget is already an updater, and replacing a
-working one buys nothing — though what red-dev asks it to upgrade is now the
-list red-dev declares rather than every app on the machine (below).
+Native package managers remain for system services and libraries, plus desktop
+apps whose `.deb` or installer carries integration a bare binary cannot replace.
+`gh` remains a bootstrap package because mise uses the active `gh` account for
+authenticated GitHub downloads. Muse and Hermes keep their official installers;
+their setup includes work that a generic package backend does not reproduce.
 
 Anything mise owns lands on PATH through its shims, which — unlike `mise
 activate` — also work in a script, a systemd unit and over SSH. A machine

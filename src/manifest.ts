@@ -60,8 +60,8 @@ type ProviderSpec =
    * provider to them lasted exactly as long as it took to read the rest
    * of the manifest: every `gh` tool had the same frozen-forever
    * problem, because a converge that finds a binary on PATH never asks
-   * how old it is. So mise owns the Linux half of the third-party
-   * releases too, through its registry wherever the registry has them.
+   * how old it is. So mise owns portable third-party releases on every
+   * target wherever the registry has them.
    *
    * `gh` stays where mise would be wrong rather than merely
    * unnecessary: an asset that is an installer rather than a binary
@@ -69,9 +69,9 @@ type ProviderSpec =
    * a .deb carrying desktop integration that a bare relocatable binary
    * would shadow (red-ui).
    *
-   * winget stays on Windows. `winget upgrade --all` already refreshes
-   * what it owns, so mise there would be replacing a working updater
-   * rather than supplying the missing one.
+   * Native package managers stay for operating-system services,
+   * libraries and desktop integration. `gh` is also bootstrap: it must
+   * exist before mise can ask the selected GitHub account for a token.
    */
   | {
       kind: "mise";
@@ -391,11 +391,6 @@ const installer = (url: string, note: string, ...args: string[]): Provider => ({
   note,
   ...(args.length > 0 ? { args } : {}),
 });
-const ppa =(name: string, ...pkgs: string[]): Provider => ({
-  kind: "ppa",
-  ppa: name,
-  pkgs,
-});
 const aptrepo = (spec: {
   pkgs: string[];
   keyUrl: string;
@@ -514,31 +509,31 @@ export const TOOLS: Tool[] = [
     name: "just",
     about: "command runner; a Makefile without the Make",
     scope: "core",
-    u24: apt("just"),
-    win: winget("Casey.Just"),
+    u24: mise("just"),
+    win: mise("just"),
   },
   {
     name: "ripgrep",
     cmd: ["rg"],
     scope: "core",
-    u24: apt("ripgrep"),
-    win: winget("BurntSushi.ripgrep.MSVC"),
+    u24: mise("ripgrep"),
+    win: mise("ripgrep"),
   },
   {
     name: "fd",
     cmd: ["fdfind", "fd"],
     scope: "core",
-    u24: apt("fd-find"),
-    win: winget("sharkdp.fd"),
+    u24: mise("fd"),
+    win: mise("fd"),
   },
   {
     name: "bat",
     cmd: ["batcat", "bat"],
     scope: "core",
-    u24: apt("bat"),
-    win: winget("sharkdp.bat"),
+    u24: mise("bat"),
+    win: mise("bat"),
   },
-  { name: "eza", scope: "core", u24: apt("eza"), win: winget("eza-community.eza") },
+  { name: "eza", scope: "core", u24: mise("eza"), win: mise("eza") },
   {
     // A service, not a binary, which is why it is a builtin on both
     // columns rather than apt on one and winget on the other: `apt
@@ -585,10 +580,10 @@ export const TOOLS: Tool[] = [
     u24: apt("bash-completion"),
     win: skip("Git Bash ships its own bash-completion"),
   },
-  { name: "zoxide", scope: "core", u24: apt("zoxide"), win: winget("ajeetdsouza.zoxide") },
-  { name: "fzf", scope: "core", u24: apt("fzf"), win: winget("junegunn.fzf") },
-  { name: "btop", scope: "core", u24: apt("btop"), win: winget("aristocratos.btop4win") },
-  { name: "jq", scope: "core", u24: apt("jq"), win: winget("jqlang.jq") },
+  { name: "zoxide", scope: "core", u24: mise("zoxide"), win: mise("zoxide") },
+  { name: "fzf", scope: "core", u24: mise("fzf"), win: mise("fzf") },
+  { name: "btop", scope: "core", u24: mise("btop"), win: winget("aristocratos.btop4win") },
+  { name: "jq", scope: "core", u24: mise("jq"), win: mise("jq") },
   {
     // config/bash/functions.sh ships webm2mp4, and that helper is only
     // honest if the binary it shells out to is part of the base toolset.
@@ -644,13 +639,13 @@ export const TOOLS: Tool[] = [
     // checksum file — the asset glob this carried before verified
     // nothing beyond "a file with that name existed".
     u24: mise("starship"),
-    win: winget("Starship.Starship"),
+    win: mise("starship"),
   },
   {
     name: "atuin",
     scope: "core",
     u24: mise("atuin"),
-    win: winget("Atuinsh.Atuin"),
+    win: mise("atuin"),
   },
   {
     name: "carapace",
@@ -659,24 +654,24 @@ export const TOOLS: Tool[] = [
     // unpack; the registry hands over a binary instead, so carapace
     // stops being a reason for a converge to ask for sudo.
     u24: mise("carapace"),
-    win: winget("rsteube.Carapace"),
+    win: mise("carapace"),
   },
-  { name: "direnv", scope: "core", u24: apt("direnv"), win: winget("direnv.direnv") },
+  { name: "direnv", scope: "core", u24: mise("direnv"), win: mise("direnv") },
   {
     // Every git diff, show and log -p goes through this, and lazygit
     // picks it up too. The single largest quality change per byte
     // installed.
     name: "delta",
     scope: "core",
-    u24: apt("git-delta"),
-    win: winget("dandavison.delta"),
+    u24: mise("delta"),
+    win: mise("delta"),
   },
   {
-    // Not in the 24.04 archive; the release tarball is the only route.
+    // mise's registry follows the publisher and verifies its release.
     name: "yazi",
     scope: "core",
     u24: mise("yazi"),
-    win: winget("sxyazi.yazi"),
+    win: mise("yazi"),
   },
   {
     // Not apt. The archive ships tealdeer 1.6.1 from 2023, which points
@@ -688,23 +683,18 @@ export const TOOLS: Tool[] = [
     name: "tldr",
     cmd: ["tldr"],
     scope: "core",
-    // The one tool here that stays on gh, and the reason is the third
-    // argument: the release ships a binary called `tealdeer` and the
-    // command people type is `tldr`. gh renames it on the way in. mise
-    // cannot — neither the github: backend nor ubi's `exe=` option
-    // renames the extracted file, both verified against the real 1.8.1
-    // release, and a shim called `tealdeer` is a `tldr` that does not
-    // exist. Revisit if the registry ever adopts it.
-    u24: gh("dbrgn/tealdeer", "tealdeer-linux-x86_64-musl", "tldr"),
-    win: winget("dbrgn.tealdeer"),
+    // The registry names the project tealdeer; the alias keeps the
+    // workstation contract and `mise upgrade tldr` under the command
+    // people actually type.
+    u24: mise("tealdeer", { alias: "tldr" }),
+    win: mise("tealdeer", { alias: "tldr" }),
   },
   {
     name: "fastfetch",
     scope: "core",
-    // Not in the 24.04 archive. The PPA publishes per-suite, so this is
-    // unverified on 26.04 — no 26.04 target has run yet.
-    u24: ppa("zhangsongcui3371/fastfetch", "fastfetch"),
-    win: winget("Fastfetch-cli.Fastfetch"),
+    // The registry removes the Ubuntu-release dependency the old PPA had.
+    u24: mise("fastfetch"),
+    win: mise("fastfetch"),
   },
   {
     name: "gh",
@@ -716,22 +706,22 @@ export const TOOLS: Tool[] = [
       entry:
         "deb [arch=amd64 signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main",
     }),
+    // gh authenticates mise's GitHub downloads. Keep it on the native
+    // package manager so a clean machine can obtain it before mise asks
+    // `gh auth token` for credentials.
     win: winget("GitHub.cli"),
   },
   {
     name: "lazygit",
     scope: "core",
     u24: mise("lazygit"),
-    win: winget("JesseDuffield.lazygit"),
+    win: mise("lazygit"),
   },
   {
     name: "lazydocker",
     scope: "core",
     u24: mise("lazydocker"),
-    // Capital L. winget's --exact is case-sensitive, and the lowercase
-    // form exits 20 ("no package found") -- which this reported as a
-    // successful install for as long as non-zero was only a warning.
-    win: winget("JesseDuffield.Lazydocker"),
+    win: mise("lazydocker"),
   },
   {
     // zellij is how tiling stays identical across all five targets.
@@ -760,7 +750,7 @@ export const TOOLS: Tool[] = [
     name: "zellij",
     scope: "core",
     u24: mise("github:reddb-io/zellij", { alias: "zellij" }),
-    win: winget("Zellij.Zellij"),
+    win: mise("github:reddb-io/zellij", { alias: "zellij" }),
   },
   {
     name: "neovim",
@@ -769,16 +759,11 @@ export const TOOLS: Tool[] = [
     // requires Neovim >= 0.11.2" and exits.
     minVersion: "0.11.2",
     scope: "core",
-    // The archive ships 0.9.5 on noble, and LazyVim refuses to start on
-    // it — it requires 0.11.2 or newer and exits with a message. Since
-    // red-dev also sets EDITOR=nvim, an archive nvim does not degrade
-    // the editor, it breaks every caller of $EDITOR: git commit, zellij's
-    // EditScrollback, Claude Code's external editor. The upstream tarball
-    // is not a drop-in either: nvim needs its runtime tree, so installing
-    // just the binary produces a broken editor. The PPA packages both
-    // properly.
-    u24: ppa("neovim-ppa/unstable", "neovim"),
-    win: winget("Neovim.Neovim"),
+    // The archive ships 0.9.5 on noble, which LazyVim refuses. mise's
+    // registry installs the complete upstream distribution, runtime tree
+    // included, and keeps it current across Ubuntu and Windows.
+    u24: mise("neovim"),
+    win: mise("neovim"),
   },
   {
     name: "docker",
@@ -1163,36 +1148,36 @@ export const TOOLS: Tool[] = [
     name: "duf",
     about: "df you can read at a glance",
     scope: "optional",
-    u24: apt("duf"),
-    win: winget("muesli.duf"),
+    u24: mise("duf"),
+    win: mise("duf"),
   },
   {
     name: "dust",
     about: "du sorted by what is actually large",
     scope: "optional",
     u24: mise("dust"),
-    win: winget("bootandy.dust"),
+    win: mise("dust"),
   },
   {
     name: "hyperfine",
     about: "benchmark a command properly, with warmup and statistics",
     scope: "optional",
-    u24: apt("hyperfine"),
-    win: winget("sharkdp.hyperfine"),
+    u24: mise("hyperfine"),
+    win: mise("hyperfine"),
   },
   {
     name: "glow",
     about: "render markdown in the terminal",
     scope: "optional",
     u24: mise("glow"),
-    win: winget("charmbracelet.glow"),
+    win: mise("glow"),
   },
   {
     name: "gitui",
     about: "a lighter, keyboard-first alternative to lazygit",
     scope: "optional",
     u24: mise("gitui"),
-    win: winget("StephanDilly.gitui"),
+    win: mise("gitui"),
   },
 
   // ----------------------------------------------------------- wsl
