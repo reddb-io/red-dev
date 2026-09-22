@@ -567,6 +567,9 @@ come from npm. The generated short alias is the installed identity; red-dev
 never also writes the backend-qualified spec into the global config. Existing
 machines are migrated only after the aliased replacement is present, with the
 original config backed up before the redundant declaration is retired.
+The bootstrap download is temporary ownership: after a successful first run
+proves mise has installed `red-dev`, the bootstrap removes its own copy. A
+cancelled setup keeps that copy so the command never disappears.
 
 On the Ubuntu desktop, red-dev itself also has a tool-level postinstall: it
 runs the newly installed binary's `desktop reconcile`. That updates only the

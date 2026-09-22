@@ -175,3 +175,22 @@ $ProgressPreference = $PreviousProgressPreference
 # falls back to a line menu in a narrow one, and prints help when there is
 # no terminal at all.
 & $Bin
+$Status = $LASTEXITCODE
+
+# The downloaded executable is only the bootstrap. Once the successful first
+# run has installed the managed mise identity, the child is closed and Windows
+# releases the file lock, so this copy can be retired without scheduling a
+# second cleanup process. A cancelled setup keeps the bootstrap intact.
+if ($Status -eq 0) {
+    $Mise = Get-Command mise -ErrorAction SilentlyContinue
+    if ($Mise) {
+        $ManagedRoot = (& $Mise.Source where red-dev 2>$null | Select-Object -First 1)
+        $Managed = if ($ManagedRoot) { Join-Path $ManagedRoot 'red-dev.exe' } else { $null }
+        if ($Managed -and (Test-Path $Managed) -and ($Managed -ne $Bin)) {
+            Remove-Item $Bin -Force -ErrorAction SilentlyContinue
+            if (-not (Test-Path $Bin)) { Say "mise owns red-dev now; retired bootstrap $Bin" }
+        }
+    }
+}
+
+exit $Status

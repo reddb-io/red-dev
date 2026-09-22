@@ -219,7 +219,26 @@ export RED_DEV_BOOTSTRAP=1
 # /dev/tty is the controlling terminal regardless of what stdin was
 # redirected to. When there is none — CI, a container, a cron job — the
 # fallback is the current behaviour, which is what should happen there.
+set +e
 if [ -r /dev/tty ]; then
-  exec "$BIN" < /dev/tty
+  "$BIN" < /dev/tty
+  STATUS=$?
+else
+  "$BIN"
+  STATUS=$?
 fi
-exec "$BIN"
+set -e
+
+# The downloaded binary is a bootstrap, not a second permanent owner. Once a
+# successful first run has installed red-dev through the managed mise alias,
+# retire this copy so PATH, updates and disk all have one answer. If setup was
+# cancelled before mise acquired it, keep the bootstrap working.
+if [ "$STATUS" -eq 0 ] && command -v mise >/dev/null 2>&1; then
+  MISE_RED_DEV=$(mise where red-dev 2>/dev/null || true)
+  if [ -n "$MISE_RED_DEV" ] && [ -x "$MISE_RED_DEV/red-dev" ] && [ "$MISE_RED_DEV/red-dev" != "$BIN" ]; then
+    rm -f "$BIN"
+    say "mise owns red-dev now; retired bootstrap $BIN"
+  fi
+fi
+
+exit "$STATUS"
