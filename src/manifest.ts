@@ -1005,6 +1005,14 @@ export const TOOLS: Tool[] = [
     name: "libasound2",
     about: "the ALSA library dit links against",
     scope: "desktop",
+    // This package exposes a shared library, not a command named
+    // `libasound2`. Probing PATH therefore reports it missing even after apt
+    // installed it successfully. Ubuntu uses its Debian multiarch directory
+    // for the runtime library on both architectures red-dev supports.
+    file:
+      process.arch === "arm64"
+        ? "/usr/lib/aarch64-linux-gnu/libasound.so.2"
+        : "/usr/lib/x86_64-linux-gnu/libasound.so.2",
     u24: apt("libasound2t64"),
     win: skip(NO_GUI),
   },

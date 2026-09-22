@@ -156,6 +156,21 @@ describe("the manifest itself", () => {
     expect(installState(missing!)).toBe("absent");
   });
 
+  test("libasound2 is detected through its multiarch shared library", () => {
+    // libasound2t64 installs no command called `libasound2`. Without an
+    // explicit file probe, doctor reports a missing package immediately
+    // after apt successfully installed it.
+    const tool = TOOLS.find((candidate) => candidate.name === "libasound2");
+    expect(tool?.file).toEndWith("-linux-gnu/libasound.so.2");
+    expect(tool?.cmd).toBeUndefined();
+
+    const seen = { ...tool!, file: import.meta.path } as typeof tool;
+    expect(installState(seen!)).toBe("ok");
+
+    const missing = { ...tool!, file: "/nonexistent/libasound.so.2" } as typeof tool;
+    expect(installState(missing!)).toBe("absent");
+  });
+
   test("what init.sh sources, the manifest installs", () => {
     // The gap this closes: init.sh sourced bash_completion from the
     // first version and nothing ever declared the package. On a desktop
