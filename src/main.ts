@@ -2744,6 +2744,10 @@ async function main(): Promise<number> {
       const { statuslineCommand } = await import("./statusline-command.ts");
       return await statuslineCommand();
     }
+    case "desktop": {
+      const { desktopCommand } = await import("./desktop.ts");
+      return await desktopCommand(p, inv.desktopVerb ?? "status");
+    }
     case "rescue":
       return await cmdRescue(p, inv);
     case "reclaim":
@@ -2882,6 +2886,7 @@ async function run(): Promise<number> {
   const verb = argv[0];
   if (
     verb === "doctor" ||
+    (verb === "desktop" && (argv[1] === undefined || argv[1] === "status")) ||
     ((verb === "rescue" || verb === "reclaim") && !argv.includes("--apply")) ||
     argv.includes("--help") ||
     argv.includes("-h") ||

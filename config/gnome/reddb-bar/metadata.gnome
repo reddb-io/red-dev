@@ -1,7 +1,7 @@
 {
   "uuid": "reddb-bar@reddb.io",
   "name": "RedDB Menu Bar",
-  "description": "RedDB's menu, workspaces and agent controls in the GNOME top bar.",
+  "description": "RedDB's menu, workspaces, agent controls and live named trays in the GNOME top bar.",
   "shell-version": ["46"],
-  "version": 2
+  "version": 3
 }

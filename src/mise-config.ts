@@ -95,6 +95,13 @@ export const REDSKILLS_RECONCILE_POSTINSTALL = "red-dev red-skills reconcile";
 export const RED_ROUTER_RECONCILE_POSTINSTALL = "red-dev red-router install";
 
 /**
+ * Run the exact binary mise just installed, not an old bootstrap earlier
+ * on PATH. This hook is Linux-desktop-only and never re-enters mise.
+ * MISE_TOOL_INSTALL_PATH is supplied by mise's tool-level postinstall.
+ */
+export const RED_DEV_DESKTOP_POSTINSTALL = '"$MISE_TOOL_INSTALL_PATH/red-dev" desktop reconcile';
+
+/**
  * The alias whose entry carries that postinstall.
  *
  * Spelled here rather than imported from red-skills-set.ts, for the
@@ -408,6 +415,8 @@ export function miseEntries(
       // the new executable when that definition changed.
       ...(pr.alias === REDSKILLS_ALIAS ? { postinstall: REDSKILLS_RECONCILE_POSTINSTALL } : {}),
       ...(pr.alias === RED_ROUTER_ALIAS ? { postinstall: RED_ROUTER_RECONCILE_POSTINSTALL } : {}),
+      ...(pr.alias === "red-dev" && p.os === "linux" && p.env === "desktop"
+        ? { postinstall: RED_DEV_DESKTOP_POSTINSTALL } : {}),
     });
   }
   return entries;

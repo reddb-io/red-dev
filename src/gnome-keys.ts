@@ -49,8 +49,9 @@
 
 import { actionById, parseChord } from "./actions/index.ts";
 import type { Chord } from "./actions/index.ts";
+import type { DriftCheck } from "./drift.ts";
 import type { FirePlan } from "./keys.ts";
-import { log } from "./log.ts";
+import { log, RedError } from "./log.ts";
 import type { Platform } from "./platform.ts";
 
 /** Where GNOME keeps every custom keybinding, its own and everyone's. */
@@ -479,8 +480,13 @@ async function spawnGsettings(argv: string[]): Promise<string | null> {
       stderr: "ignore",
       stdin: "ignore",
     });
-    const out = (await new Response(proc.stdout).text()).trim();
-    return (await proc.exited) === 0 ? out : null;
+    const timeout = setTimeout(() => proc.kill("SIGKILL"), 3_000);
+    try {
+      const [out, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+      return code === 0 ? out.trim() : null;
+    } finally {
+      clearTimeout(timeout);
+    }
   } catch {
     // No gsettings on PATH at all. The caller reads null as "this
     // machine has no GNOME to register anything with".
@@ -521,11 +527,14 @@ export async function readGnomeState(run: Gsettings): Promise<GnomeState | null>
       run(["get", schema, "command"]),
       run(["get", schema, "binding"]),
     ]);
+    if (name === null || command === null || binding === null) {
+      throw new RedError(`could not read GNOME keybinding ${path}`);
+    }
     owned.push({
       path,
-      name: parseGvariantString(name ?? ""),
-      command: parseGvariantString(command ?? ""),
-      binding: parseGvariantString(binding ?? ""),
+      name: parseGvariantString(name),
+      command: parseGvariantString(command),
+      binding: parseGvariantString(binding),
     });
   }
 
@@ -535,6 +544,48 @@ export async function readGnomeState(run: Gsettings): Promise<GnomeState | null>
     owned,
     launchTerminal: terminal === null ? null : parseGvariantList(terminal),
   };
+}
+
+function keybindingsCheck(state: GnomeState, desired: GnomeDesired): DriftCheck {
+  const name = "GNOME keybindings";
+  const fix = "red-dev desktop reconcile";
+  if (!desired.customs.some(custom => custom.path === ownedPath("menu.open"))) {
+    const reason = desired.skipped.find(item => item.id === "menu.open")?.detail ?? "no menu shortcut declared";
+    return { name, status: "drift", detail: `menu.open unavailable: ${reason}`, fix };
+  }
+  const pending = gnomePlan(state, desired.customs);
+  if (pending.length > 0) {
+    return { name, status: "drift", detail: `${pending.length} managed keybinding setting change(s) pending`, fix };
+  }
+  return {
+    name,
+    status: "ok",
+    detail: `${desired.customs.length} persisted GNOME keybindings; shortcut delivery not tested`,
+  };
+}
+
+/** Inspect saved bindings, not whether GNOME delivers a physical key press. */
+export async function inspectGnomeKeys(
+  p: Platform,
+  run: Gsettings = spawnGsettings,
+  fire?: FireLookup,
+): Promise<DriftCheck> {
+  const name = "GNOME keybindings";
+  if (p.os !== "linux" || p.env !== "desktop") {
+    return { name, status: "n/a", detail: "GNOME keybindings need a Linux desktop session" };
+  }
+  try {
+    const state = await readGnomeState(run);
+    if (!state) throw new RedError("GNOME keybinding settings unavailable");
+    return keybindingsCheck(state, gnomeCustoms(fire ?? await defaultFire(p)));
+  } catch (error) {
+    return {
+      name,
+      status: "drift",
+      detail: error instanceof Error ? error.message : String(error),
+      fix: "red-dev desktop reconcile",
+    };
+  }
 }
 
 /**
@@ -550,7 +601,7 @@ export async function installGnomeKeys(
   run: Gsettings = spawnGsettings,
   fire?: FireLookup,
 ): Promise<void> {
-  if (p.env !== "desktop") {
+  if (p.os !== "linux" || p.env !== "desktop") {
     log.skip("GNOME keybindings need a desktop session");
     return;
   }
@@ -562,26 +613,34 @@ export async function installGnomeKeys(
   }
 
   const lookup = fire ?? await defaultFire(p);
-  const { customs, skipped } = gnomeCustoms(lookup);
+  const desired = gnomeCustoms(lookup);
+  const { customs, skipped } = desired;
+  if (!customs.some(custom => custom.path === ownedPath("menu.open"))) {
+    throw new RedError(keybindingsCheck(state, desired).detail);
+  }
   const steps = gnomePlan(state, customs);
 
   for (const step of steps) {
     const out = await run(step.argv);
     if (out === null) {
-      // Named rather than swallowed: a key GNOME refused is a key
-      // nothing will press, and a converge that reported success over it
-      // is how the viewer comes to promise a chord the machine does not
-      // have.
-      log.warn(`gsettings refused \`${step.argv.join(" ")}\``);
-      continue;
+      throw new RedError(`gsettings refused \`${step.argv.join(" ")}\``);
     }
     if (step.note) log.plain(`       ${step.note}`);
+  }
+
+  if (steps.length > 0) {
+    const after = await readGnomeState(run);
+    if (!after || (state.launchTerminal !== null && after.launchTerminal === null)) {
+      throw new RedError("could not read GNOME keybindings after writing them");
+    }
+    const verified = keybindingsCheck(after, desired);
+    if (verified.status !== "ok") throw new RedError(`GNOME keybinding verification failed: ${verified.detail}`);
   }
 
   for (const miss of skipped) log.plain(`       (skipped) ${miss.id}: ${miss.detail}`);
 
   if (steps.length === 0) log.ok(`${customs.length} GNOME keybinding(s), already registered`);
-  else log.ok(`${customs.length} GNOME keybinding(s)`);
+  else log.ok(`${customs.length} GNOME keybinding(s), saved and verified`);
 }
 
 /** The keys viewer's own plan, loaded only where it is about to be used. */

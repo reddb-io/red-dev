@@ -26,6 +26,7 @@ import {
   miseEntries,
   misePluginRoot,
   RED_ROUTER_RECONCILE_POSTINSTALL,
+  RED_DEV_DESKTOP_POSTINSTALL,
   REDSKILLS_RECONCILE_POSTINSTALL,
   renderMiseConfig,
 } from "./mise-config.ts";
@@ -148,13 +149,14 @@ describe("writing it, and then not writing it again", () => {
 });
 
 describe("the fragment tells mise to call red-dev back", () => {
-  test("the two resident services carry reconciliation postinstalls", () => {
+  test("the two resident services and desktop config carry reconciliation postinstalls", () => {
     const entries = miseEntries(UBUNTU);
     const core = entries.find((e) => e.spec === REDSKILLS_CORE_SPEC);
     const router = entries.find((e) => e.alias === "red-router");
     expect(core?.postinstall).toBe(REDSKILLS_RECONCILE_POSTINSTALL);
     expect(router?.postinstall).toBe(RED_ROUTER_RECONCILE_POSTINSTALL);
-    for (const other of entries.filter((e) => e.spec !== REDSKILLS_CORE_SPEC && e.alias !== "red-router")) {
+    expect(entries.find(e => e.alias === "red-dev")?.postinstall).toBe(RED_DEV_DESKTOP_POSTINSTALL);
+    for (const other of entries.filter((e) => e.spec !== REDSKILLS_CORE_SPEC && e.alias !== "red-router" && e.alias !== "red-dev")) {
       expect(other.postinstall, other.spec).toBeUndefined();
     }
   });

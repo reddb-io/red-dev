@@ -316,6 +316,20 @@ const TERMINAL_EXEC: Record<string, string> = {
   xterm: "-e",
 };
 
+/** Compact menu geometry shared by the desktop shortcut and GNOME panel. */
+export const MENU_ALACRITTY_ARGS = [
+  "--class", "red-dev-menu,red-dev-menu",
+  "--title", "red-dev",
+  "--option", "window.dimensions.columns=68",
+  "--option", "window.dimensions.lines=25",
+  "--option", "window.decorations=\"None\"",
+  "--option", "window.dynamic_title=false",
+  "--option", "window.opacity=0.97",
+  "--option", "window.padding.x=12",
+  "--option", "window.padding.y=10",
+  "--option", "scrolling.history=0",
+] as const;
+
 /** Windows is the host that registers chords, from either side of WSL. */
 function onWindowsHost(p: Platform): boolean {
   return p.env === "windows" || p.env === "wsl";
@@ -350,10 +364,13 @@ function ownSurface(
     // it and for the same reason: this process is a console process, and
     // spawning from it would hand the new surface the console red-dev is
     // drawing in. red-dev.exe is on the PATH both installers write.
+    const compactMenu = id === "menu.open" && locate("alacritty.exe") !== null;
     return {
       ok: true,
       id,
-      argv: ["cmd.exe", "/c", "start", "", "red-dev.exe", ...tail],
+      argv: compactMenu
+        ? ["cmd.exe", "/c", "start", "", "alacritty.exe", ...MENU_ALACRITTY_ARGS, "-e", "red-dev.exe", ...tail]
+        : ["cmd.exe", "/c", "start", "", "red-dev.exe", ...tail],
       note: `${description} in a new window`,
     };
   }
@@ -365,10 +382,13 @@ function ownSurface(
       detail: `no terminal emulator on PATH — run \`red-dev ${tail.join(" ")}\` here instead`,
     };
   }
+  // Wayland's compositor still controls placement; only size and decorations
+  // belong to the launcher. Other terminals retain their normal invocation.
+  const menuArgs = id === "menu.open" && found === "alacritty" ? MENU_ALACRITTY_ARGS : [];
   return {
     ok: true,
     id,
-    argv: [found, TERMINAL_EXEC[found] ?? "-e", "red-dev", ...tail],
+    argv: [found, ...menuArgs, TERMINAL_EXEC[found] ?? "-e", "red-dev", ...tail],
     note: `${description} in ${found}`,
   };
 }

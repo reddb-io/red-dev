@@ -558,6 +558,24 @@ its package set, reconciles every host and companion, and restarts its daemon
 only after the Worker gate is clear. There is no second command owed after
 `mise upgrade` on that path.
 
+On the Ubuntu desktop, red-dev itself also has a tool-level postinstall: it
+runs the newly installed binary's `desktop reconcile`. That updates only the
+managed mise declaration, GNOME menu bar and shortcuts; it does not install
+packages, restart application services or call mise recursively. Other managed
+configuration (shell, themes, and system packages) still uses `red-dev update`.
+An installation predating this hook needs **one** `red-dev desktop reconcile`
+after upgrading red-dev to register it. Subsequent red-dev upgrades invoke it
+automatically; an upgrade with no new version does not rerun postinstall.
+If an upgrade runs over SSH with no signed-in GNOME Shell, the hook reports
+desktop reconciliation as deferred; run `red-dev desktop reconcile` after
+signing in. It never logs someone out to activate an extension update.
+
+GNOME may retain extension JavaScript until the next sign-in. Reconciliation
+reports that as pending, not as a freshly loaded bar. `red-dev desktop status`
+and `red-dev doctor` compare the loaded revision with the installed files;
+where available they also report mapped menu/tray label actors. Actor state
+is not screenshot verification, and saved shortcuts do not prove key delivery.
+
 mise picks the asset for the platform, verifies the publisher's checksum, and
 verifies GitHub build attestations where the release carries them — ours do.
 It also holds a release back for a short while after publication, which red-dev
@@ -659,6 +677,8 @@ red-dev uninstall            # remove tools, or red-dev's own config
 red-dev wsl                  # Windows: set up or verify WSL 2
 red-dev ui                   # fullscreen, with live theme preview
 red-dev doctor               # report drift plus process/memory/disk health
+red-dev desktop status       # inspect GNOME files, loaded revision, labels and shortcuts
+red-dev desktop reconcile    # repair only the GNOME bar/shortcuts and register the mise hook
 red-dev rescue               # preview process groups proven orphaned
 red-dev rescue --apply       # snapshot, revalidate and end those groups
 red-dev reclaim              # preview generated logs outside retention
@@ -1383,11 +1403,28 @@ rewriting it — your zellij keybindings and the rest of `btop.conf` are yours.
 When a machine stops matching the manifest, these are the three
 places to look — in this order.
 
+### GNOME menu missing, stale, or opening a full terminal
+
+Run `red-dev desktop status`, then `red-dev desktop reconcile` to repair the
+owned configuration without a full `install core` or `install desktop`.
+The menu button and `Ctrl+Alt+Shift+M` launch the same compact Alacritty window.
+Its placement is still GNOME's decision on Wayland.
+
+If reconciliation reports a pending login, save your work, sign out and back
+in, then run `red-dev desktop status`. Toggling an extension is not proof its
+new JavaScript loaded. Status returns 2 for drift or a pending/unverified
+session; reconciliation returns 0 for successfully prepared files awaiting
+login, 1 for apply failures, and 2 for other remaining drift.
+
+RedRouter and Redskilled labels attach to their live AppIndicator actors and
+keep their existing menus. An absent tray is not reported as a healthy service:
+the daemon and its graphical tray remain separate things to inspect.
+
 ### Known limitations, per target
 
 | Target | What does not work, and why |
 | --- | --- |
-| **Ubuntu desktop** | The `desktop` scope is implemented and **has never run on real hardware** — the GNOME keybindings included. GNOME extensions and dock settings are not ported at all. |
+| **Ubuntu desktop** | GNOME bar files and persisted keybindings are checked independently from the loaded extension. New extension code can require sign-out/sign-in on Wayland; neither stored bindings nor mapped actors prove visual appearance or physical shortcut delivery. |
 | **Ubuntu 26.04** | The `u26` manifest column exists and **no 26.04 machine has exercised it**. Package-name drift is undiscovered. |
 | **WSL** | Windows interop cannot work under `sudo -u <other-user>`: `WSL_INTEROP` points at a per-session socket that sudo drops. Real invocations run as you, so this affects test harnesses only. |
 | **Native Windows** | No switching to a *numbered* virtual desktop — Windows offers only sequential navigation, and reaching a specific one means an interface that changes between builds. No zellij session persistence across reboots. No `ble.sh`-style line editor. |

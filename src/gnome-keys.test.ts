@@ -28,6 +28,7 @@ import {
   gnomePlan,
   gnomeRefusal,
   installGnomeKeys,
+  inspectGnomeKeys,
   isOwned,
   normalAccel,
   ownedPath,
@@ -36,6 +37,7 @@ import {
   type GnomeState,
 } from "./gnome-keys.ts";
 import { firePlan, keyEntries } from "./keys.ts";
+import { captureTo } from "./log.ts";
 import type { Platform } from "./platform.ts";
 
 const MEDIA_KEYS = "org.gnome.settings-daemon.plugins.media-keys";
@@ -129,7 +131,7 @@ describe("what a converge writes", () => {
     // one shortcut overwriting the other.
     for (const [id, name, command, accel] of [
       ["terminal.new", "red-dev: Terminal", "alacritty", "<Control><Alt>t"],
-      ["menu.open", "red-dev: red-dev menu", "alacritty -e red-dev menu", "<Shift><Control><Alt>m"],
+      ["menu.open", "red-dev: red-dev menu", "alacritty --class red-dev-menu,red-dev-menu --title red-dev --option window.dimensions.columns=68 --option window.dimensions.lines=25 --option 'window.decorations=\"None\"' --option window.dynamic_title=false --option window.opacity=0.97 --option window.padding.x=12 --option window.padding.y=10 --option scrolling.history=0 -e red-dev menu", "<Shift><Control><Alt>m"],
       ["keys.viewer", "red-dev: Keys viewer", "alacritty -e red-dev keys", "<Shift><Control><Alt>k"],
       ["emoji.pick", "red-dev: Emoji picker", "alacritty -e red-dev emoji", "<Shift><Control><Alt>e"],
       ["panel.network", "red-dev: Network panel", "alacritty -e red-dev panel network", "<Shift><Control><Alt>n"],
@@ -261,6 +263,115 @@ describe("a converge that finds the machine already right", () => {
     }, fire);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toEqual(["get", MEDIA_KEYS, "custom-keybindings"]);
+  });
+});
+
+describe("verifying the saved GNOME keybindings", () => {
+  function staleMenu(): GnomeState {
+    const state = converged(customs);
+    return {
+      ...state,
+      owned: state.owned.map(custom => custom.path === ownedPath("menu.open")
+        ? { ...custom, command: "alacritty -e red-dev menu" }
+        : custom),
+    };
+  }
+
+  test("reports saved configuration without claiming delivery of a physical chord", async () => {
+    const calls: string[][] = [];
+    const check = await inspectGnomeKeys(desktop, async argv => {
+      calls.push(argv);
+      return answer(argv, converged(customs, [`${CUSTOM_ROOT}custom0/`]));
+    }, fire);
+    expect(check.status).toBe("ok");
+    expect(check.detail).toContain("persisted");
+    expect(check.detail).toContain("shortcut delivery not tested");
+    expect(calls.every(argv => argv[0] === "get")).toBe(true);
+    expect(calls.some(argv => argv[1]?.includes("custom0"))).toBe(false);
+  });
+
+  test("detects an old menu command and unavailable settings", async () => {
+    expect(await inspectGnomeKeys(desktop, async argv => answer(argv, staleMenu()), fire)).toMatchObject({
+      status: "drift", fix: "red-dev desktop reconcile",
+    });
+    expect(await inspectGnomeKeys(desktop, async () => null, fire)).toMatchObject({
+      status: "drift", detail: "GNOME keybinding settings unavailable",
+    });
+  });
+
+  test("a missing menu dependency is drift even when no settings need changing", async () => {
+    const unavailable = (id: string) => firePlan(id, desktop, nothing);
+    expect(await inspectGnomeKeys(desktop, async argv => answer(argv, bare()), unavailable)).toMatchObject({
+      status: "drift", detail: expect.stringContaining("menu.open unavailable"),
+    });
+  });
+
+  test("refused writes reject the converge without printing success", async () => {
+    const lines: string[] = [];
+    const restore = captureTo(line => lines.push(line));
+    try {
+      await expect(installGnomeKeys(desktop, async argv => argv[0] === "get"
+        ? answer(argv, staleMenu()) : null, fire)).rejects.toThrow("gsettings refused");
+    } finally {
+      restore();
+    }
+    expect(lines.some(line => line.includes("GNOME keybinding(s)"))).toBe(false);
+  });
+
+  test("successful writes that do not persist fail readback verification", async () => {
+    await expect(installGnomeKeys(desktop, async argv => answer(argv, staleMenu()), fire))
+      .rejects.toThrow("GNOME keybinding verification failed");
+  });
+
+  test("unavailable and partial readback both fail", async () => {
+    for (const missing of ["list", "command"]) {
+      let wrote = false;
+      await expect(installGnomeKeys(desktop, async argv => {
+        if (argv[0] !== "get") {
+          wrote = true;
+          return "";
+        }
+        if (wrote && (missing === "list" || argv[2] === "command")) return null;
+        return answer(argv, wrote ? converged(customs) : staleMenu());
+      }, fire)).rejects.toThrow(/could not read GNOME keybinding/);
+    }
+  });
+
+  test("a partial initial read fails without any writes", async () => {
+    const writes: string[][] = [];
+    const run = async (argv: string[]) => {
+      if (argv[0] !== "get") writes.push(argv);
+      return argv[2] === "command" ? null : answer(argv, converged(customs));
+    };
+    await expect(installGnomeKeys(desktop, run, fire)).rejects.toThrow("could not read GNOME keybinding");
+    expect(writes).toEqual([]);
+    expect((await inspectGnomeKeys(desktop, run, fire)).status).toBe("drift");
+  });
+
+  test("a repair is read back and a second converge writes nothing", async () => {
+    const writes: string[][] = [];
+    let wrote = false;
+    const run = async (argv: string[]) => {
+      if (argv[0] !== "get") {
+        writes.push(argv);
+        wrote = true;
+        return "";
+      }
+      return answer(argv, wrote ? converged(customs) : staleMenu());
+    };
+    await installGnomeKeys(desktop, run, fire);
+    expect(writes).toHaveLength(3);
+    await installGnomeKeys(desktop, run, fire);
+    expect(writes).toHaveLength(3);
+    expect((await inspectGnomeKeys(desktop, run, fire)).status).toBe("ok");
+  });
+
+  test("non-desktop platforms neither read nor write GNOME settings", async () => {
+    for (const platform of [{ ...desktop, env: "server" as const }, { ...desktop, os: "windows" as const }]) {
+      const run = async () => { throw new Error("GNOME must not be called"); };
+      await installGnomeKeys(platform, run, fire);
+      expect((await inspectGnomeKeys(platform, run, fire)).status).toBe("n/a");
+    }
   });
 });
 

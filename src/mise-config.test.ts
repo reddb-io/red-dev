@@ -17,7 +17,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, chmodSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -30,6 +30,7 @@ import {
   miseToolBin,
   releaseAgeExcludes,
   renderMiseConfig,
+  RED_DEV_DESKTOP_POSTINSTALL,
   type MiseEntry,
 } from "./mise-config.ts";
 import { providerFor, TOOLS } from "./manifest.ts";
@@ -123,6 +124,38 @@ describe("renderMiseConfig", () => {
 });
 
 describe("miseEntries", () => {
+  test("red-dev reconciles GNOME after its own upgrade only on the Linux desktop", () => {
+    const entry = miseEntries(UBUNTU).find(e => e.alias === "red-dev");
+    expect(entry?.postinstall).toBe(RED_DEV_DESKTOP_POSTINSTALL);
+    for (const platform of [WINDOWS, { ...UBUNTU, env: "wsl" as const }, { ...UBUNTU, env: "server" as const }]) {
+      expect(miseEntries(platform).find(e => e.alias === "red-dev")?.postinstall).toBeUndefined();
+    }
+    expect(renderMiseConfig(miseEntries(UBUNTU))).toContain(
+      `red-dev = { version = "latest", postinstall = ${JSON.stringify(RED_DEV_DESKTOP_POSTINSTALL)} }`,
+    );
+  });
+
+  test("the self hook executes the new binary even with spaces and a stale bootstrap on PATH", async () => {
+    if (process.platform === "win32") return;
+    const root = mkdtempSync(join(tmpdir(), "red-dev-postinstall-"));
+    try {
+      const fresh = join(root, "new version");
+      const stale = join(root, "old");
+      mkdirSync(fresh);
+      mkdirSync(stale);
+      writeFileSync(join(fresh, "red-dev"), '#!/bin/sh\nprintf "new:%s:%s" "$1" "$2"\n');
+      writeFileSync(join(stale, "red-dev"), '#!/bin/sh\nexit 99\n');
+      chmodSync(join(fresh, "red-dev"), 0o755);
+      chmodSync(join(stale, "red-dev"), 0o755);
+      const proc = Bun.spawn(["/bin/sh", "-c", RED_DEV_DESKTOP_POSTINSTALL], {
+        env: { ...process.env, MISE_TOOL_INSTALL_PATH: fresh, PATH: stale },
+        stdout: "pipe", stderr: "pipe",
+      });
+      expect(await new Response(proc.stdout).text()).toBe("new:desktop:reconcile");
+      expect(await proc.exited).toBe(0);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
   test("every mise provider in the manifest reaches the fragment", () => {
     const declared = TOOLS.filter((t) => providerFor(t, UBUNTU).kind === "mise");
     // No hosts: this is about the manifest's own projection. The agent

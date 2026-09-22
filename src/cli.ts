@@ -109,6 +109,14 @@ export function buildCli(): CLI {
       doctor: {
         description: "report drift against the manifest",
       },
+      desktop: {
+        description: "inspect or reconcile the GNOME menu and shortcuts without reinstalling tools",
+        positional: [{
+          name: "desktop_verb",
+          description: "status (default) or reconcile",
+          required: false,
+        }],
+      },
       statusline: {
         description: "render the bounded Claude status line",
       },
@@ -407,6 +415,8 @@ export interface Invocation {
   redSkillsSelector: string | undefined;
   /** `red-router [status|install|uninstall]` — named apart from `phase`. */
   routerVerb: string | undefined;
+  /** Narrow GNOME repair; status is read-only. */
+  desktopVerb?: "status" | "reconcile";
   /** Explicit selections make agents/lang safe to invoke across WSL unattended. */
   agentKeys: string[] | undefined;
   /**
@@ -530,6 +540,10 @@ export function parseArgs(cli: CLI, argv: string[]): Invocation {
   const agentRun = rawAgents === "run";
   const agentUpdate = rawAgents === "update";
   const agentPlugins = rawAgents === "plugins";
+  const desktopVerb = pos["desktop_verb"];
+  if (desktopVerb !== undefined && desktopVerb !== "status" && desktopVerb !== "reconcile") {
+    errors.push(`invalid desktop action '${desktopVerb}' (expected: status, reconcile)`);
+  }
   return {
     command: r.command[0] ?? null,
     // `theme <name>` and `plan <scope>` both land in the positional map
@@ -539,6 +553,7 @@ export function parseArgs(cli: CLI, argv: string[]): Invocation {
     redSkillsPhase: typeof pos["phase"] === "string" ? pos["phase"] : undefined,
     redSkillsSelector: typeof pos["selector"] === "string" ? pos["selector"] : undefined,
     routerVerb: typeof pos["router_verb"] === "string" ? pos["router_verb"] : undefined,
+    desktopVerb: desktopVerb === "status" || desktopVerb === "reconcile" ? desktopVerb : undefined,
     agentKeys:
       typeof rawAgents === "string" && !agentDefault && !agentRun && !agentUpdate && !agentPlugins
         ? rawAgents.split(",").map((value) => value.trim()).filter(Boolean)
