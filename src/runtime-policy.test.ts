@@ -16,10 +16,10 @@ describe("runtime version policy", () => {
     ).toEqual(["node@latest", "python@latest", "rust@latest", "bun@latest"]);
   });
 
-  test("leaves the compatibility-tested selectors intact by default", () => {
+  test("moves compatibility-tested selectors to latest by default", () => {
     expect(runtimeIdsForPolicy(["node@lts", "python@3.13"], "recommended")).toEqual([
-      "node@lts",
-      "python@3.13",
+      "node@latest",
+      "python@latest",
     ]);
   });
 

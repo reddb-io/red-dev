@@ -93,7 +93,7 @@ describe("Puppeteer toolchain", () => {
       { agents: [], runtimes: [], apps: ["puppeteer"] },
       async () => false,
     );
-    expect(plan[0]).toMatchObject({ key: "node@24", kind: "runtime" });
+    expect(plan[0]).toMatchObject({ key: "node@latest", kind: "runtime" });
   });
 
   test("and leaves the node a machine already has alone", async () => {
@@ -102,7 +102,7 @@ describe("Puppeteer toolchain", () => {
       { agents: [], runtimes: [], apps: ["puppeteer"] },
       async () => true,
     );
-    expect(plan.map((step) => step.key)).not.toContain("node@24");
+    expect(plan.map((step) => step.key)).not.toContain("node@latest");
   });
 
   test("resolves the npm global CLI on either platform", () => {

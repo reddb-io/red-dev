@@ -123,9 +123,9 @@ describe("resolving npm", () => {
 });
 
 describe("Python runtime integrity", () => {
-  test("the Python 3.13 choice resolves to the verified precompiled patch", () => {
-    expect(runtimeInstallRequest("python@3.13")).toEqual({
-      id: "python@3.13.14",
+  test("the latest Python choice stays moving and refuses source compilation", () => {
+    expect(runtimeInstallRequest("python@latest")).toEqual({
+      id: "python@latest",
       env: { MISE_PYTHON_COMPILE: "0" },
     });
   });
@@ -173,7 +173,7 @@ describe("ordering and implication", () => {
     // Picking Gemini without ticking node is not a contradiction the
     // user should have to notice; it names an end and leaves the means
     // to the tool whose job that is.
-    expect(firstrun).toContain('runtimes.unshift("node@24")');
+    expect(firstrun).toContain('runtimes.unshift("node@latest")');
   });
 });
 

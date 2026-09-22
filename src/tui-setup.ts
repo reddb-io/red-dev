@@ -33,12 +33,7 @@ import { summary } from "./platform.ts";
 import { CenteredScreen, centeredFrame, Surface } from "./tui-chrome.ts";
 import { muted, ui } from "./tui-theme.ts";
 import { swatches } from "./themes.ts";
-import {
-  runtimeVersionLabel,
-  selectedRuntimeId,
-  shiftRuntimeVersion,
-  toggleRuntimeSelection,
-} from "./runtimes.ts";
+import { toggleRuntimeSelection } from "./runtimes.ts";
 import { withConsoleSelectionSuspended } from "./windows-console-mode.ts";
 // The questions live in tui-setup-model.ts and only there. They were
 // declared in both files, identically, for two interfaces that ask the
@@ -137,21 +132,6 @@ export async function runSetupTui(
         return;
       }
 
-      if (q.id === "runtimes" && (key.leftArrow || key.rightArrow || input === "h" || input === "l")) {
-        const choice = q.choices[cursor()];
-        if (choice) {
-          setPicked({
-            ...picked(),
-            [q.id]: shiftRuntimeVersion(
-              selection(),
-              choice.key,
-              key.leftArrow || input === "h" ? -1 : 1,
-            ),
-          });
-        }
-        return;
-      }
-
       if (input === " " && q.multi) {
         const choice = q.choices[cursor()];
         if (!choice || !choiceSelectable(q, choice)) return;
@@ -176,7 +156,7 @@ export async function runSetupTui(
         return;
       }
 
-      if ((key.leftArrow && q.id !== "runtimes") || key.escape) {
+      if (key.leftArrow || key.escape) {
         if (stepIndex() > 0) {
           setStepIndex(stepIndex() - 1);
           setCursor(stepInitialCursor(steps[stepIndex() - 1]!));
@@ -273,16 +253,13 @@ export async function runSetupTui(
                   )
                 )
               : q.choices.map((c, i) => {
-                  const runtimeId = selectedRuntimeId(selection(), c.key);
-                  const checked = isRuntimes
-                    ? selection().includes(runtimeId)
-                    : selection().includes(c.key);
+                  const checked = selection().includes(c.key);
                   const selectable = choiceSelectable(q, c);
                   const showNote = !isRuntimes && (q.id !== "reddb" || selectable);
                   const inventoryMarker = c.marker === "elsewhere" ? "→ " : "• ";
                   return ListItem({
                     primary: isRuntimes
-                      ? `${checked ? "[x]" : "[ ]"} ${c.label}  ‹ ${runtimeVersionLabel(runtimeId)} ›`
+                      ? `${checked ? "[x]" : "[ ]"} ${c.label}  latest`
                       : `${q.multi ? (selectable ? (checked ? "[x] " : "[ ] ") : inventoryMarker) : ""}${c.label}`,
                     ...(showNote ? { secondary: c.note } : {}),
                     selected: i === cursor(),
@@ -309,10 +286,8 @@ export async function runSetupTui(
           hints: [
             { shortcut: "up/down", action: "move" },
             ...(stepHasChoices(q) ? [{ shortcut: "space", action: "toggle" }] : []),
-            ...(isRuntimes ? [{ shortcut: "left/right", action: "version" }] : []),
             { shortcut: "enter", action: stepIndex() === steps.length - 1 ? "finish" : "next" },
-            ...(stepIndex() > 0 && !isRuntimes ? [{ shortcut: "left", action: "back" }] : []),
-            ...(stepIndex() > 0 && isRuntimes ? [{ shortcut: "esc", action: "back" }] : []),
+            ...(stepIndex() > 0 ? [{ shortcut: "left", action: "back" }] : []),
             { shortcut: "q", action: "skip setup" },
           ],
         }),

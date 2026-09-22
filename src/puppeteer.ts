@@ -51,8 +51,8 @@ export async function installPuppeteer(p: Platform): Promise<void> {
   let npm = await resolveNpm();
   let node = await runtimeTool("node");
   if (!npm || !node) {
-    log.info("Puppeteer needs Node; installing node@24 through mise first");
-    await useRuntimes(["node@24"]);
+    log.info("Puppeteer needs Node; installing node@latest through mise first");
+    await useRuntimes(["node@latest"]);
     npm = await resolveNpm();
     node = await runtimeTool("node");
   }

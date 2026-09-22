@@ -38,9 +38,6 @@ import { redSkillsHostKeys } from "./agents.ts";
 import { DEFAULT_ACTIVATED_PLUGINS, PLUGIN_CHOICES } from "./red-skills-plugins.ts";
 import {
   runtimeSelectedByDefault,
-  runtimeVersionLabel,
-  selectedRuntimeId,
-  shiftRuntimeVersion,
   toggleRuntimeSelection,
 } from "./runtimes.ts";
 
@@ -362,7 +359,7 @@ export function questions(
         "Owned by mise, so node resolves the same way in WSL, on the desktop " +
         "and in Git Bash. A version manager that manages nothing is how pnpm " +
         "ends up working in one shell and not another. Space enables a language; " +
-        "left/right chooses its version. Java, Ruby and Go start off.",
+        "every enabled runtime follows latest. Java, Ruby and Go start off.",
       multi: true,
       choices: runtimes,
       preset: runtimes.filter((runtime) => runtimeSelectedByDefault(runtime.key)).map((runtime) => runtime.key),
@@ -640,20 +637,6 @@ export function useSetupModel(steps: Question[], wizard: ReturnType<typeof creat
         setCursor(Math.min(max, cursor() + 1));
         return "handled";
       }
-      if (q.id === "runtimes" && (key.leftArrow || key.rightArrow || input === "h" || input === "l")) {
-        const choice = options[cursor()];
-        if (choice) {
-          setPicked({
-            ...picked(),
-            [q.id]: shiftRuntimeVersion(
-              selection(),
-              choice.key,
-              key.leftArrow || input === "h" ? -1 : 1,
-            ),
-          });
-        }
-        return "handled";
-      }
       if (input === " " && q.multi) {
         const choice = options[cursor()];
         if (!choice || !choiceSelectable(q, choice)) return "handled";
@@ -685,7 +668,7 @@ export function useSetupModel(steps: Question[], wizard: ReturnType<typeof creat
         for (let i = from; i < next; i++) wizard.next();
         return "handled";
       }
-      if ((key.leftArrow && q.id !== "runtimes" && !q.textInput) || key.escape) {
+      if ((key.leftArrow && !q.textInput) || key.escape) {
         const from = stepIndex();
         const back = adjacent(from, -1, picked());
         if (back !== null) {
@@ -823,16 +806,13 @@ export function SetupLayout(m: SetupModel, p: Platform, width: number, height: n
                 )
               )
             : options.map((c, i) => {
-                const runtimeId = selectedRuntimeId(m.selection(), c.key);
-                const checked = isRuntimes
-                  ? m.selection().includes(runtimeId)
-                  : m.selection().includes(c.key);
+                const checked = m.selection().includes(c.key);
                 const selectable = choiceSelectable(q, c);
                 const showNote = !isRuntimes && (q.id !== "reddb" || selectable);
                 const inventoryMarker = c.marker === "elsewhere" ? "→ " : "• ";
                 return ListItem({
                   primary: isRuntimes
-                    ? `${checked ? "[x]" : "[ ]"} ${c.label}  ‹ ${runtimeVersionLabel(runtimeId)} ›`
+                    ? `${checked ? "[x]" : "[ ]"} ${c.label}  latest`
                     : `${q.multi ? (selectable ? (checked ? "[x] " : "[ ] ") : inventoryMarker) : ""}${c.label}`,
                   ...(showNote ? { secondary: c.note } : {}),
                   selected: i === m.cursor(),
@@ -861,15 +841,14 @@ export function SetupLayout(m: SetupModel, p: Platform, width: number, height: n
             ? [{ shortcut: "type", action: "GitHub username" }]
             : [{ shortcut: "up/down", action: "move" }]),
           ...(stepHasChoices(q) ? [{ shortcut: "space", action: "toggle" }] : []),
-          ...(isRuntimes ? [{ shortcut: "left/right", action: "version" }] : []),
           {
             shortcut: "enter",
             action: position === timeline.length - 1 ? "install" : "next",
           },
-          ...(m.stepIndex() > 0 && !isRuntimes && !isTextInput
+          ...(m.stepIndex() > 0 && !isTextInput
             ? [{ shortcut: "left", action: "back" }]
             : []),
-          ...(m.stepIndex() > 0 && (isRuntimes || isTextInput)
+          ...(m.stepIndex() > 0 && isTextInput
             ? [{ shortcut: "esc", action: "back" }]
             : []),
           ...(!isTextInput ? [{ shortcut: "q", action: "skip" }] : []),

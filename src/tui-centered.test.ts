@@ -70,7 +70,7 @@ describe("the Ubuntu installer composition", () => {
   test("still fits a normal 80x24 terminal", () => {
     const rows = setupFrame(80, 24);
     expect(rows).toHaveLength(24);
-    expect(rows.some((row) => row.includes("24 LTS"))).toBe(true);
+    expect(rows.some((row) => row.includes("latest"))).toBe(true);
     expect(rows.some((row) => row.length > 80)).toBe(false);
   });
 });

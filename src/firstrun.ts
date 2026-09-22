@@ -112,17 +112,18 @@ export async function setupPlan(
     .map((key) => available.find((agent) => agent.key === key))
     .filter((agent) => agent !== undefined);
 
-  const runtimes = [...choices.runtimes];
+  const { runtimeIdsForPolicy } = await import("./runtimes.ts");
+  const runtimes = runtimeIdsForPolicy(choices.runtimes, "latest");
   if (!runtimes.some((runtime) => runtime.startsWith("node"))) {
     const needsNpm =
       chosen.some((agent) => agentInstallMethod(agent, p) === "npm") ||
       choices.apps.includes("puppeteer");
     // And only when this machine has none. `mise use -g` sets the
-    // global node rather than adding one, so adding `node@24` here to
+    // global node rather than adding one, so adding `node@latest` here to
     // satisfy an agent overwrites a version the person chose — see
     // nodeAlreadyProvided.
     const provided = hasNode ?? (await import("./runtimes.ts")).nodeAlreadyProvided;
-    if (needsNpm && !(await provided())) runtimes.unshift("node@24");
+    if (needsNpm && !(await provided())) runtimes.unshift("node@latest");
   }
   for (const runtime of chosen.flatMap((agent) => agent.runtimeNeeds ?? [])) {
     const name = runtime.split("@")[0]!;
@@ -354,14 +355,14 @@ export async function carryOutChoices(
   // with "npm not on PATH", which is the tool reporting its own missing
   // prerequisite as the user's mistake.
   const runtimes = plan.filter((step) => step.kind === "runtime");
-  if (runtimes.some((step) => step.key === "node@24") && !choices.runtimes.includes("node@24")) {
-    log.plain("       an npm-installed agent was chosen, so node@24 comes with it");
+  if (runtimes.some((step) => step.key === "node@latest") && !choices.runtimes.includes("node@latest")) {
+    log.plain("       an npm-installed agent was chosen, so node@latest comes with it");
   }
   if (
-    runtimes.some((step) => step.key === "python@3.13") &&
-    !choices.runtimes.includes("python@3.13")
+    runtimes.some((step) => step.key === "python@latest") &&
+    !choices.runtimes.includes("python@latest")
   ) {
-    log.plain("       Hermes was chosen, so python@3.13 comes with it");
+    log.plain("       Hermes was chosen, so python@latest comes with it");
   }
 
   if (runtimes.length > 0) {
@@ -551,7 +552,7 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
   }
 
   // 3. What you build with.
-  const { OFFERED_RUNTIMES, offeredRuntime, runtimeSelectedByDefault } =
+  const { OFFERED_RUNTIMES, runtimeIdsForPolicy, runtimeSelectedByDefault } =
     await import("./runtimes.ts");
   const runtimeLabels = OFFERED_RUNTIMES.map((r) => `${r.id} — ${r.about}`);
   const pickedRuntimes = await checkbox(
@@ -559,22 +560,10 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
     runtimeLabels as [string, ...string[]],
     runtimeLabels.filter((label) => runtimeSelectedByDefault(label.split(" ")[0]!)),
   );
-  const selectedRuntimes: string[] = [];
-  for (const id of pickedRuntimes.map((label) => label.split(" ")[0]!)) {
-    const runtime = offeredRuntime(id);
-    if (!runtime) {
-      selectedRuntimes.push(id);
-      continue;
-    }
-    const versions = runtime.versions.map((version) => `${version.id} — ${version.label}`);
-    const fallback = versions.find((version) => version.startsWith(`${id} `)) ?? versions[0]!;
-    const picked = await select(
-      `${runtime.label} version?`,
-      versions as [string, ...string[]],
-      fallback,
-    );
-    selectedRuntimes.push(picked.split(" ")[0]!);
-  }
+  const selectedRuntimes = runtimeIdsForPolicy(
+    pickedRuntimes.map((label) => label.split(" ")[0]!),
+    "latest",
+  );
 
   // 3b. Which RedSkills plugins the agent hosts switch on. Asked here
   //     rather than beside the paint because it decides what runs in
