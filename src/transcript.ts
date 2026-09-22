@@ -43,11 +43,15 @@
  * stories.
  */
 
-import { existsSync, mkdirSync, readdirSync } from "node:fs";
-import { appendFileSync } from "node:fs";
+import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readSync, readdirSync, unlinkSync } from "node:fs";
+import { homedir } from "node:os";
+import { posix, win32 } from "node:path";
+import { appendDiagnostic, LOG_FILE_COUNT, redactDiagnostic } from "./rotating-log.ts";
 
 /** How many runs to keep. Past this the oldest go. */
 const KEEP = 20;
+const TRANSCRIPT_BUDGET = 50 * 1024 * 1024;
+const RUN_FILE = /^\d{4}-\d{2}-\d{2}T[\w-]+\.log$/;
 
 /** SGR sequences, which are for a terminal and not for a file. */
 const ANSI = /\x1b\[[0-9;]*m/g;
@@ -64,10 +68,13 @@ const ANSI = /\x1b\[[0-9;]*m/g;
 export function transcriptDir(env?: Record<string, string | undefined>): string {
   const e = env ?? process.env;
   const local = e["LOCALAPPDATA"];
-  if (local && !e["HOME"]) return `${local.replace(/\\/g, "/")}/red-dev/logs`;
+  // This directory also owns migration ledgers and observation caches. Preserve
+  // the established HOME/LOCALAPPDATA split rather than silently migrating state
+  // as a side effect of adding log rotation (including existing Git Bash users).
+  if (local && win32.isAbsolute(local) && !e["HOME"]) return `${local.replace(/\\/g, "/")}/red-dev/logs`;
   const state = e["XDG_STATE_HOME"];
-  if (state) return `${state}/red-dev`;
-  const home = e["HOME"] ?? e["USERPROFILE"] ?? ".";
+  if (state && posix.isAbsolute(state)) return `${state}/red-dev`;
+  const home = e["HOME"] ?? e["USERPROFILE"] ?? homedir();
   return `${home.replace(/\\/g, "/")}/.local/state/red-dev`;
 }
 
@@ -80,7 +87,7 @@ export function transcriptDir(env?: Record<string, string | undefined>): string 
  */
 export function transcriptName(at: Date, command: string): string {
   const stamp = at.toISOString().replace(/[:.]/g, "-").replace(/Z$/, "");
-  const safe = command.replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "run";
+  const safe = redactDiagnostic(command).replace(/[^a-z0-9]+/gi, "-").toLowerCase().slice(0, 120) || "run";
   return `${stamp}-${safe}.log`;
 }
 
@@ -97,6 +104,62 @@ export function prunable(names: string[], keep = KEEP): string[] {
 }
 
 let handle: { path: string; write: (line: string) => void } | null = null;
+let releaseTee: (() => void) | null = null;
+
+/** Retain completed/dead-process runs only; never delete a live writer's files. */
+export function pruneTranscripts(dir: string, opts: { keep?: number; maxBytes?: number; protectedPaths?: Set<string> } = {}): string[] {
+  const families: { path: string; files: string[]; bytes: number; eligible: boolean }[] = [];
+  for (const name of readdirSync(dir).filter(name => RUN_FILE.test(name)).sort().reverse()) {
+    const path = `${dir}/${name}`;
+    const candidates = [path, ...Array.from({ length: LOG_FILE_COUNT - 1 }, (_, i) => `${path}.${i + 1}`)];
+    let bytes = 0;
+    const files: string[] = [];
+    for (const candidate of candidates) {
+      try {
+        const stat = lstatSync(candidate);
+        if (!stat.isFile() || stat.isSymbolicLink()) continue;
+        bytes += stat.size;
+        files.push(candidate);
+      } catch { /* a writer may have rotated between observations */ }
+    }
+    if (!files.includes(path)) continue;
+    let complete = false;
+    try {
+      const size = lstatSync(path).size;
+      const fd = openSync(path, "r");
+      try {
+        const tail = Buffer.alloc(Math.min(80, size));
+        readSync(fd, tail, 0, tail.length, Math.max(0, size - tail.length));
+        complete = /# exit \d+\s*$/.test(tail.toString());
+      } finally { closeSync(fd); }
+    } catch { continue; }
+    const pid = Number(/-p(\d+)\.log$/.exec(name)?.[1]);
+    let dead = false;
+    if (pid > 0) {
+      try { process.kill(pid, 0); }
+      catch (error) { dead = (error as NodeJS.ErrnoException).code === "ESRCH"; }
+    }
+    families.push({ path, files, bytes, eligible: !opts.protectedPaths?.has(path) && (pid > 0 ? dead : complete) });
+  }
+  let retainedBytes = 0;
+  let retainedRuns = 0;
+  const removed: string[] = [];
+  for (const family of families) {
+    const excess = retainedRuns >= (opts.keep ?? KEEP) || retainedBytes + family.bytes > (opts.maxBytes ?? TRANSCRIPT_BUDGET);
+    // Keep at least the newest run, and never delete live/unknown evidence.
+    if (excess && retainedRuns > 0 && family.eligible) {
+      for (const path of family.files) {
+        try {
+          const stat = lstatSync(path);
+          if (!stat.isFile() || stat.isSymbolicLink()) continue;
+          unlinkSync(path);
+          removed.push(path);
+        } catch { /* retention is best effort; a race never breaks a run */ }
+      }
+    } else { retainedRuns++; retainedBytes += family.bytes; }
+  }
+  return removed;
+}
 
 /** The transcript being written, if one is open. */
 export function transcriptPath(): string | null {
@@ -106,7 +169,7 @@ export function transcriptPath(): string | null {
 /**
  * Open a transcript for this run and tee every log line into it.
  *
- * Failure here is never fatal and never loud. A read-only home, a full
+ * Failure here is nonfatal but reported on stderr. A read-only home, a full
  * disk or a path that does not resolve must not stop a converge — the
  * transcript is a convenience, and a tool that refused to install
  * because it could not write its own log would be absurd.
@@ -114,9 +177,9 @@ export function transcriptPath(): string | null {
 export async function startTranscript(command: string, version: string, at: Date): Promise<void> {
   try {
     const dir = transcriptDir();
-    mkdirSync(dir, { recursive: true });
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
 
-    const path = `${dir}/${transcriptName(at, command)}`;
+    const path = `${dir}/${transcriptName(at, command).replace(/\.log$/, `-p${process.pid}.log`)}`;
     // The trigger, on the platform line, because two runs of the same
     // command in the same version can be entirely different runs. On the
     // machine that found this, `red-skills watch due` fired from a shell
@@ -131,7 +194,8 @@ export async function startTranscript(command: string, version: string, at: Date
       `# ${process.platform} ${process.arch} — ${trigger}`,
       "",
     ].join("\n");
-    appendFileSync(path, header);
+    appendDiagnostic(path, header);
+    try { pruneTranscripts(dir, { protectedPaths: new Set([path]) }); } catch { /* retention must not disable logging */ }
 
     handle = {
       path,
@@ -141,27 +205,36 @@ export async function startTranscript(command: string, version: string, at: Date
       // that needed one.
       write: (line: string) => {
         try {
-          appendFileSync(path, `${line.replace(ANSI, "")}\n`);
-        } catch {
+          appendDiagnostic(path, `${line.replace(ANSI, "")}\n`);
+        } catch (error) {
           // A disk that filled mid-run stops the transcript, not the run.
           handle = null;
+          process.stderr.write(`red-dev: diagnostic log unavailable at ${path}: ${String(error)}\n`);
         }
       },
     };
 
     const { transcribeTo } = await import("./log.ts");
-    transcribeTo((line) => handle?.write(line));
-  } catch {
+    releaseTee?.();
+    releaseTee = transcribeTo((line) => handle?.write(line));
+  } catch (error) {
     handle = null;
+    process.stderr.write(`red-dev: could not start diagnostic transcript: ${String(error)}\n`);
   }
 }
 
 /** Close the run, and say where it went. */
 export function finishTranscript(exitCode: number): string | null {
-  if (!handle) return null;
-  handle.write("");
-  handle.write(`# exit ${exitCode}`);
-  return handle.path;
+  if (!handle) { releaseTee?.(); releaseTee = null; return null; }
+  const active = handle;
+  active.write("");
+  active.write(`# exit ${exitCode}`);
+  const persisted = handle !== null;
+  handle = null;
+  releaseTee?.();
+  releaseTee = null;
+  try { pruneTranscripts(transcriptDir(), { protectedPaths: new Set([active.path]) }); } catch { /* nonfatal */ }
+  return persisted ? active.path : null;
 }
 
 /** The transcripts on this machine, newest first. */
@@ -169,7 +242,7 @@ export function recentTranscripts(): string[] {
   const dir = transcriptDir();
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
-    .filter((n) => n.endsWith(".log"))
+    .filter((n) => RUN_FILE.test(n))
     .sort()
     .reverse()
     .map((n) => `${dir}/${n}`);

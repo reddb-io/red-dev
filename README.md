@@ -23,6 +23,8 @@ runtime, no bash on Windows, and no second configuration to keep in sync.
 
 ## Contents
 
+Diagnostic paths, rotation and tray access: [Diagnostic logs](docs/diagnostic-logs.md).
+
 | Getting there | What it is | Living with it |
 | --- | --- | --- |
 | [Quick start](#quick-start) | [The support matrix](#the-support-matrix) | [Usage](#usage) |

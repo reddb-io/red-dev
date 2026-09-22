@@ -188,6 +188,9 @@ Read-only, safe to run at any time, and the right first move:
   print it on the following line.
 - \`red-dev logs\` — the last run's transcript. \`red-dev logs list\` for
   every kept run, \`red-dev logs 2\` for the run before last.
+- \`red-dev logs --path\` / \`--open\` — locate or open that transcript.
+  \`red-dev logs crash --open\` opens the crash log. Add
+  \`--app red-router|redskilled|redcode\` to locate another app's diagnostics.
 - \`red-dev reclaim\` — what derived artifacts are using, and what a prune
   would remove. It changes nothing without \`--apply\`.
 - \`red-dev rescue\` — process groups proven to be orphaned. Also inert
@@ -196,7 +199,10 @@ Read-only, safe to run at any time, and the right first move:
 ## Transcripts
 
 Every mutating run is written to \`${facts.state}\` as
-\`<timestamp>-<command>.log\`; the twenty newest are kept. A transcript
+\`<timestamp>-<command>-p<PID>.log\`. Each file rotates at 10 MiB, retaining
+the current file and four numbered archives. Completed/dead runs are pruned
+to twenty runs and 50 MiB; live/unknown writers and the newest run are protected.
+A transcript
 opens with a header naming the version, the time and the platform, and
 closes with \`# exit <code>\`.
 
@@ -213,7 +219,8 @@ a password.
 ## The crash log
 
 An uncaught failure appends to \`${facts.state}/crash.log\` before the
-process dies, with the previous file kept as \`crash.previous.log\`. Each
+process dies, rotating at 10 MiB into \`crash.log.1\` through \`crash.log.4\`.
+The legacy \`crash.previous.log\` is not overwritten. Each
 entry is a stack under a header naming the kind, the time, the version
 and the platform. On Windows this is the only copy that survives a
 fullscreen window closing, so it is the first file to read for "it

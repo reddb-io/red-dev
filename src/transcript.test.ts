@@ -16,8 +16,11 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { captureTo, log, logIsCaptured, transcribeTo } from "./log.ts";
-import { prunable, transcriptDir, transcriptName } from "./transcript.ts";
+import { prunable, pruneTranscripts, transcriptDir, transcriptName } from "./transcript.ts";
 
 const releases: (() => void)[] = [];
 const track = (r: () => void): void => void releases.push(r);
@@ -147,5 +150,42 @@ describe("where transcripts go", () => {
     expect(transcriptDir({ LOCALAPPDATA: "C:\\x", HOME: "/home/me" })).toBe(
       "/home/me/.local/state/red-dev",
     );
+  });
+
+  test("relative XDG roots are not valid state directories", () => {
+    expect(transcriptDir({ XDG_STATE_HOME: "relative", HOME: "/home/me" })).toBe("/home/me/.local/state/red-dev");
+  });
+});
+
+describe("automatic transcript retention", () => {
+  test("prunes completed families while protecting live writers even with an exit-like line", () => {
+    const dir = mkdtempSync(join(tmpdir(), "red-dev-transcripts-"));
+    try {
+      const old = `${dir}/2026-08-01T00-00-00-run.log`;
+      const live = `${dir}/2026-08-02T00-00-00-run-p${process.pid}.log`;
+      const latest = `${dir}/2026-08-03T00-00-00-run.log`;
+      for (const file of [old, live, latest]) writeFileSync(file, "# exit 0\n");
+      writeFileSync(`${old}.1`, "history");
+      writeFileSync(`${dir}/crash.log`, "do not touch");
+      expect(pruneTranscripts(dir, { keep: 1 })).toEqual([old, `${old}.1`]);
+      expect(existsSync(live)).toBe(true);
+      expect(existsSync(latest)).toBe(true);
+      expect(existsSync(`${dir}/crash.log`)).toBe(true);
+      expect(readdirSync(dir)).toHaveLength(3);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  test("enforces a byte budget but preserves unfinished legacy evidence", () => {
+    const dir = mkdtempSync(join(tmpdir(), "red-dev-transcripts-"));
+    try {
+      const older = `${dir}/2026-08-01T00-00-00-run.log`;
+      const unknown = `${dir}/2026-08-02T00-00-00-run.log`;
+      const latest = `${dir}/2026-08-03T00-00-00-run.log`;
+      writeFileSync(older, "x".repeat(100) + "\n# exit 1\n");
+      writeFileSync(unknown, "unfinished");
+      writeFileSync(latest, "# exit 0\n");
+      expect(pruneTranscripts(dir, { maxBytes: 20 })).toEqual([older]);
+      expect(existsSync(unknown)).toBe(true);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });

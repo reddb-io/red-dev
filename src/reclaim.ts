@@ -225,7 +225,7 @@ export function collectReclaimPlan(options: ReclaimPlanOptions): ReclaimPlan {
   }
   const redDevCrashes = filesIn(
     options.stateRoot,
-    (name) => name === "crash.log" || name === "crash.previous.log",
+    (name) => /^crash\.log(?:\.[1-4])?$/.test(name) || name === "crash.previous.log",
   );
 
   const items = [

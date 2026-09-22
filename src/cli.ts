@@ -171,11 +171,16 @@ export function buildCli(): CLI {
         },
       },
       logs: {
-        description: "show the last run's transcript",
+        description: "show, locate or open diagnostic logs",
+        options: {
+          path: { type: "boolean", description: "print only the log path", default: false },
+          open: { type: "boolean", description: "open the log in the default application", default: false },
+          app: { type: "string", description: "red-dev, red-router, redskilled or redcode" },
+        },
         positional: [
           {
             name: "which",
-            description: "'list' for every kept run, or a number: 2 is the run before last",
+            description: "'list', 'crash', or a run number: 2 is the run before last",
             required: false,
           },
         ],
@@ -405,6 +410,9 @@ export interface Invocation {
    * scope, and reusing `name` would reject it as an unknown theme.
    */
   logsWhich: string | undefined;
+  logsPath?: boolean;
+  logsOpen?: boolean;
+  logsApp?: string;
   /**
    * `red-skills <phase> [selector]` — its own two positionals, because
    * a phase mise invokes and a revision a person pins are different
@@ -550,6 +558,9 @@ export function parseArgs(cli: CLI, argv: string[]): Invocation {
     // under their own key; the caller reads whichever applies.
     scope: scope ?? (typeof rawName === "string" ? rawName : undefined),
     logsWhich: typeof pos["which"] === "string" ? pos["which"] : undefined,
+    logsPath: opts["path"] === true,
+    logsOpen: opts["open"] === true,
+    logsApp: typeof opts["app"] === "string" ? opts["app"] : undefined,
     redSkillsPhase: typeof pos["phase"] === "string" ? pos["phase"] : undefined,
     redSkillsSelector: typeof pos["selector"] === "string" ? pos["selector"] : undefined,
     routerVerb: typeof pos["router_verb"] === "string" ? pos["router_verb"] : undefined,

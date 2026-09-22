@@ -18,8 +18,8 @@
  * which is reached only once there is a crash to hand over.
  */
 
-import { appendFileSync, mkdirSync } from "node:fs";
 import { transcriptDir } from "./transcript.ts";
+import { appendDiagnostic, diagnosticRecord } from "./rotating-log.ts";
 
 /** What was written down, so a caller can act on it without re-reading. */
 export interface CrashCapture {
@@ -50,8 +50,7 @@ export interface CrashCaptureDeps {
 }
 
 function defaultAppend(path: string, entry: string): void {
-  mkdirSync(path.replace(/\/[^/]+$/, ""), { recursive: true });
-  appendFileSync(path, entry);
+  appendDiagnostic(path, entry);
 }
 
 /**
@@ -72,10 +71,12 @@ export function recordCrash(
   const version = deps.version ?? "";
   const platform = deps.platform ?? process.platform;
   const path = `${deps.dir ?? transcriptDir()}/crash.log`;
-  const entry = `\n=== ${at.toISOString()} ${kind} red-dev ${version} ${platform} ===\n${detail}\n`;
+  const entry = diagnosticRecord(`\n=== ${at.toISOString()} ${kind} red-dev ${version} ${platform} ===\n${detail}\n`);
 
+  let recorded = false;
   try {
     (deps.append ?? defaultAppend)(path, entry);
+    recorded = true;
   } catch {
     // Nothing useful to do if even this fails.
   }
@@ -83,7 +84,7 @@ export function recordCrash(
   // stderr as well as the file: on a terminal that survives, the user
   // should not have to know a log file exists.
   const say = deps.say ?? ((text: string) => process.stderr.write(text));
-  say(`\x1b[?1049l${entry}\nrecorded to ${path}\n`);
+  say(`\x1b[?1049l${entry}\n${recorded ? "recorded to" : "could not record to"} ${path}\n`);
 
   return { path, entry, kind };
 }

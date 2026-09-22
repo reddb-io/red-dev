@@ -49,8 +49,13 @@ class Actor {
 
 class Menu {
   box = new Actor();
-  addMenuItem(_item: unknown) {}
-  removeAll() {}
+  items: Actor[] = [];
+  addMenuItem(item: Actor) { this.items.push(item); }
+  removeAll() { this.items = []; }
+}
+
+class MenuItem extends Actor {
+  constructor(label: string) { super({ text: label }); }
 }
 
 class Button extends Actor {
@@ -83,7 +88,10 @@ function fixture(initial: Record<string, Actor> = {}) {
   let exportedInterface = "";
   let runtime: { Get: () => string } | null = null;
   const workspace = new Actor();
+  const launched: string[][] = [];
   const Gio = {
+    SubprocessFlags: { STDOUT_PIPE: 1, STDERR_PIPE: 2 },
+    Subprocess: { new: (argv: string[]) => { launched.push(argv); return { communicate_utf8_async: () => {} }; } },
     icon_new_for_string: (path: string) => path,
     DBus: { session: {} },
     DBusExportedObject: {
@@ -107,6 +115,8 @@ function fixture(initial: Record<string, Actor> = {}) {
     },
     source_remove: (id: number) => timers.delete(id),
     get_home_dir: () => "/test",
+    FileTest: { IS_EXECUTABLE: 1 },
+    file_test: () => true,
     file_get_contents: () => [false, new Uint8Array()],
   };
   const source = extensionSource
@@ -122,11 +132,11 @@ function fixture(initial: Record<string, Actor> = {}) {
       remove_style_class_name: () => {},
       addToStatusArea: (id: string, actor: Actor) => { statusArea[id] = actor; },
     } },
-    { Button }, { PopupImageMenuItem: Actor, PopupSeparatorMenuItem: Actor },
+    { Button }, { PopupImageMenuItem: MenuItem, PopupSeparatorMenuItem: Actor },
     { workspace_manager: Object.assign(workspace, { n_workspaces: 0, get_active_workspace_index: () => 0 }) },
   ) as { NamedTrayLabels: new () => Labels; RedDbBarExtension: new () => Bar };
   return {
-    ...classes, statusArea, timers,
+    ...classes, statusArea, timers, launched,
     tick: () => { for (const callback of timers.values()) callback(); },
     get exportedPath() { return exportedPath; },
     get exportedInterface() { return exportedInterface; },
@@ -145,6 +155,20 @@ function indicator(name: string, visible = true) {
 }
 
 describe("GNOME live named tray actors", () => {
+  test("log menu actions use red-dev's read-only resolver without opening a terminal", () => {
+    const env = fixture();
+    const bar = new env.RedDbBarExtension();
+    bar.enable();
+    for (const label of ["Open red-dev log", "Open RedCode log"]) {
+      const row = Object.values(env.statusArea).flatMap(actor => (actor as Button).menu?.items ?? []).find(item => item.text === label);
+      expect(row).toBeDefined();
+      for (const signal of row!.signals.values()) if (signal.name === "activate") signal.handler();
+    }
+    expect(env.launched.map(argv => argv.slice(1))).toEqual([
+      ["logs", "--app", "red-dev", "--open"], ["logs", "--app", "redcode", "--open"],
+    ]);
+    bar.disable();
+  });
   test("does not create service buttons for missing or unrelated indicators", () => {
     const unrelated = indicator("RedRouter preview");
     const env = fixture({ unrelated });
