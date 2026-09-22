@@ -395,6 +395,10 @@ complete new revision is verified and staged under its own immutable name,
 that Worker is using, and the next update that finds the queue drained activates
 what is already on disk without acquiring it again. `doctor` names every one of
 those states — active, staged, pending, failed, partial, restart needed.
+On a systemd machine, when no Worker holds the activation, the same postinstall
+repoints and restarts the supervised Redskilled daemon, so `mise upgrade`
+returns only after the resident process has loaded the active package-set
+revision.
 
 The Redskilled companion is provisioned after its launchers land. On a Linux
 or Windows desktop its signed tray runtime is expanded under
@@ -547,7 +551,12 @@ RedRouter, dit, the RedSkills packages, the RedDB Zellij fork, red-dev itself
 and supported agent hosts all use `latest`. A converge that finds a binary on
 PATH otherwise never asks how old it is, so a hand-downloaded release can stay
 frozen forever. Both bare `mise upgrade` and `red-dev update` now advance the
-copies red-dev installed.
+copies red-dev installed. The two resident services carry tool-level
+postinstalls. On systemd, RedRouter rewrites and restarts its service only when
+its generated definition moved, while Redskilled authenticates and activates
+its package set, reconciles every host and companion, and restarts its daemon
+only after the Worker gate is clear. There is no second command owed after
+`mise upgrade` on that path.
 
 mise picks the asset for the platform, verifies the publisher's checksum, and
 verifies GitHub build attestations where the release carries them — ours do.

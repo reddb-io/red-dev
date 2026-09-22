@@ -442,8 +442,9 @@ const runtimes: CompanionAdapter = {
  *
  * Its own record rather than a sixth runtime, because it is the one
  * companion with a process: an update that lands under a running daemon
- * converges on disk and says `restart needed`, and never signals it. A
- * daemon killed mid-run is somebody's autonomous work killed mid-run.
+ * converges on disk and says `restart needed`. The companion walk never
+ * signals it; staged-update owns that crossing because it is the layer that
+ * has already proved no Worker is active.
  */
 const redskilled: CompanionAdapter = {
   name: "redskilled",
@@ -514,7 +515,15 @@ const redskilled: CompanionAdapter = {
       }
     }
     const launcher = join(ctx.bin, ctx.platform.os === "windows" ? "redskilled.cmd" : "redskilled");
-    return (await run([launcher, "provision"])) === 0 ? null : "redskilled provision failed";
+    if ((await run([launcher, "provision"])) !== 0) return "redskilled provision failed";
+    // Provisioning preserves an existing unit as operator-owned. The explicit
+    // unit command is the daemon's managed upgrade surface and repoints
+    // ExecStart to this newly installed bundle. staged-update restarts it only
+    // after its Worker gate has observed an idle host.
+    if (ctx.platform.caps.systemd && (await run([launcher, "unit", "install"])) !== 0) {
+      return "redskilled supervisor unit could not be updated";
+    }
+    return null;
   },
   remove: () => [],
 };
@@ -839,6 +848,19 @@ async function writeCompanionRegistry(home: string, registry: CompanionRegistry)
   const path = companionRegistryPath(home);
   mkdirSync(path.slice(0, path.lastIndexOf("/")), { recursive: true });
   await Bun.write(path, `${JSON.stringify(registry, null, 2)}\n`);
+}
+
+/** Record that a supervised companion has loaded the bytes already on disk. */
+export async function acknowledgeCompanionRestart(
+  home: string,
+  companion: CompanionName,
+): Promise<boolean> {
+  const registry = readCompanionRegistry(home);
+  const recorded = registry.companions[companion];
+  if (recorded === undefined || recorded.reload !== "restart-needed") return false;
+  recorded.reload = "current";
+  await writeCompanionRegistry(home, registry);
+  return true;
 }
 
 // -------------------------------------------------------------- the outcome
