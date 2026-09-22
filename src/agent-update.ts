@@ -211,9 +211,13 @@ export function planAgentUpdate(
 
     case "mise": {
       // The same mechanism that moves the portable workstation suite.
-      // The cache is not cleared here — `mise upgrade` on a
-      // named tool re-resolves it, and the version list this depends on
-      // is refreshed by the self-update that runs beside this.
+      // `use -g ...@latest` is intentional rather than `upgrade`. An
+      // agent may predate red-dev's mise ownership and still live in
+      // ~/.local/bin; in that case `mise upgrade herdr` exits zero while
+      // updating nothing because herdr is not declared yet. `use` adopts
+      // that installed host into mise as well as advancing one mise
+      // already owns, and leaves the unpinned selector behind for every
+      // later bare `mise upgrade`.
       const mise = res.locate("mise");
       if (!mise) {
         return {
@@ -224,7 +228,11 @@ export function planAgentUpdate(
           fix: "red-dev install core",
         };
       }
-      return ready({ kind: "command", argv: [mise, "upgrade", a.mise as string], env: {} });
+      return ready({
+        kind: "command",
+        argv: [mise, "use", "-g", "--yes", `${a.mise as string}@latest`],
+        env: {},
+      });
     }
 
     case "winget":
