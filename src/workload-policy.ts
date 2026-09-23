@@ -25,6 +25,13 @@ export interface WorkloadPolicyFacts {
    * box is every ten seconds forever. Off unless the caller says so.
    */
   hostDiskGuardian?: boolean;
+  /**
+   * The host's swap, which decides whether the interactive domains may
+   * page cold memory out instead of stalling at their wall. Zero unless
+   * the caller measured it, so a policy built from bare facts keeps every
+   * interactive domain off swap.
+   */
+  swapTotalBytes?: number;
 }
 
 /** The units the guardian owns, for the converge that has to take them away. */
@@ -91,6 +98,17 @@ export function workloadLogicalCpuCount(): number {
   return Number.isFinite(reported) && reported > 0 ? Math.floor(reported) : 1;
 }
 
+/** SwapTotal from /proc/meminfo, and zero wherever that cannot be read. */
+export function workloadSwapTotalBytes(): number {
+  try {
+    const match = /^SwapTotal:\s+(\d+)\s+kB$/m.exec(readFileSync("/proc/meminfo", "utf8"));
+    if (match?.[1]) return Number(match[1]) * 1024;
+  } catch {
+    // Native Windows has no /proc, and no systemd slice to hand swap to.
+  }
+  return 0;
+}
+
 function formatMiB(value: number): string {
   return value % 1024 === 0 ? `${value / 1024}G` : `${value}M`;
 }
@@ -109,15 +127,34 @@ function resourceDomains(facts: WorkloadPolicyFacts): ResourceDomains {
   };
   const cpu = (fraction: number): string =>
     `${Math.max(1, Math.floor(cpus * 100 * fraction))}%`;
+  // Zellij's scrollback is the coldest memory on the machine, and swap is
+  // where it belongs once the control plane reaches its wall. A host with
+  // no swap keeps the old answer: zero, and the wall is the wall.
+  const swapGiB = Math.floor(Math.max(0, facts.swapTotalBytes ?? 0) / GIB);
+  const controlSwapGiB = Math.min(swapGiB, Math.ceil(nominalGiB * 0.25));
+  const controlSwap = controlSwapGiB > 0 ? `${controlSwapGiB}G` : "0";
 
+  // No MemoryHigh on any domain that holds something a person types into:
+  // the root, the control plane, the work plane and the pane aggregate.
+  //
+  // MemoryHigh never kills. Past it the kernel throttles every process in
+  // the cgroup and everything below it, and with no swap to page into the
+  // only reclaimable memory left is their own code — so the whole domain
+  // stalls, indefinitely, with plenty of RAM free outside it. On a 16G
+  // laptop that was the Zellij server stopping at a 3G MemoryHigh while
+  // the host had 9G available, and because every terminal attaches to the
+  // same session, every terminal stopped with it — including the one
+  // opened to run htop. A MemoryMax wall reclaims, then OOM-kills the
+  // largest process inside it, and the rest of the domain carries on.
+  // The agent and build aggregates keep their soft wall: slowing a
+  // runaway build down is exactly what that domain is for.
   return {
     root: {
       slice: "red-dev.slice",
       description: "red-dev global workstation budget",
       aggregate: {
-        MemoryHigh: rootMemory(0.7),
         MemoryMax: rootMemory(0.8),
-        MemorySwapMax: "512M",
+        MemorySwapMax: formatMiB(512 + controlSwapGiB * 1024),
         TasksMax: "12288",
         CPUQuota: cpu(0.8),
         CPUWeight: "100",
@@ -129,9 +166,8 @@ function resourceDomains(facts: WorkloadPolicyFacts): ResourceDomains {
       description: "red-dev protected interactive control plane",
       aggregate: {
         MemoryLow: memory(0.1),
-        MemoryHigh: memory(0.15),
-        MemoryMax: memory(0.2),
-        MemorySwapMax: "0",
+        MemoryMax: memory(0.25),
+        MemorySwapMax: controlSwap,
         TasksMax: "2048",
         CPUWeight: "1000",
         IOWeight: "1000",
@@ -141,7 +177,6 @@ function resourceDomains(facts: WorkloadPolicyFacts): ResourceDomains {
       slice: "red-dev-heavy.slice",
       description: "red-dev bounded development work plane",
       aggregate: {
-        MemoryHigh: memory(0.55, "floor"),
         MemoryMax: memory(0.65, "floor"),
         MemorySwapMax: "512M",
         TasksMax: "8192",
@@ -154,7 +189,6 @@ function resourceDomains(facts: WorkloadPolicyFacts): ResourceDomains {
       slice: "red-dev-heavy-panes.slice",
       description: "red-dev interactive pane workloads",
       aggregate: {
-        MemoryHigh: memory(0.2),
         MemoryMax: memory(0.3),
         MemorySwapMax: "0",
         TasksMax: "4096",
@@ -167,7 +201,7 @@ function resourceDomains(facts: WorkloadPolicyFacts): ResourceDomains {
         CPUWeight: "100",
         IOWeight: "100",
         // Leaf MemoryHigh can trap an interactive scope in indefinite reclaim.
-        // Aggregate domains retain the soft boundary; launches keep a hard wall.
+        // Launches keep a hard wall, like the pane aggregate above.
         MemoryMax: memory(0.15),
         MemorySwapMax: "0",
         TasksMax: "2048",
@@ -528,6 +562,7 @@ export function workloadPolicy(
   facts: WorkloadPolicyFacts = {
     totalMemoryBytes: totalmem(),
     logicalCpus: workloadLogicalCpuCount(),
+    swapTotalBytes: workloadSwapTotalBytes(),
   },
 ): WorkloadPolicy {
   const domains = resourceDomains(facts);

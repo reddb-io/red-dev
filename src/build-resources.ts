@@ -8,6 +8,7 @@ import {
   HOST_DISK_GUARDIAN_UNITS,
   hostDiskThresholds,
   workloadLogicalCpuCount,
+  workloadSwapTotalBytes,
   workloadPolicy,
 } from "./workload-policy.ts";
 
@@ -322,6 +323,7 @@ export interface BuildResourceObservation {
   systemd: readonly { path: string; content: string | null }[];
   totalMemoryBytes: number;
   logicalCpus: number;
+  swapTotalBytes?: number;
   windowsLogicalCpus?: number | null;
   wslConfig?: string | null;
   windowsPhysicalMemoryBytes?: number | null;
@@ -446,6 +448,7 @@ export function assessBuildResources(
   const isolation = workloadPolicy({
     totalMemoryBytes: observed.totalMemoryBytes,
     logicalCpus: observed.logicalCpus,
+    swapTotalBytes: observed.swapTotalBytes ?? 0,
     hostDiskGuardian: p.env === "wsl",
   });
   const sliceCurrent =
@@ -512,7 +515,13 @@ async function resourceObservation(home: string, p: Platform): Promise<BuildReso
   const systemd = `${home}/.config/systemd/user`;
   const totalMemoryBytes = totalmem();
   const logicalCpus = workloadLogicalCpuCount();
-  const isolation = workloadPolicy({ totalMemoryBytes, logicalCpus, hostDiskGuardian: p.env === "wsl" });
+  const swapTotalBytes = workloadSwapTotalBytes();
+  const isolation = workloadPolicy({
+    totalMemoryBytes,
+    logicalCpus,
+    swapTotalBytes,
+    hostDiskGuardian: p.env === "wsl",
+  });
   // The guardian's units are read everywhere, so a machine that must not
   // have them can be told it still does.
   const unitPaths = [...new Set([...Object.keys(isolation.systemd), ...HOST_DISK_GUARDIAN_UNITS])];
@@ -582,6 +591,7 @@ async function resourceObservation(home: string, p: Platform): Promise<BuildReso
     systemd: systemdFiles,
     totalMemoryBytes,
     logicalCpus,
+    swapTotalBytes,
     ...(windowsLogicalCpus === undefined ? {} : { windowsLogicalCpus }),
     ...(wslConfig === undefined ? {} : { wslConfig }),
     ...(physicalMemoryBytes === undefined ? {} : { windowsPhysicalMemoryBytes: physicalMemoryBytes }),
@@ -702,7 +712,7 @@ async function enableDiskGuardianTimer(): Promise<boolean> {
  */
 export async function convergeBuildResources(
   p: Platform,
-  facts: { totalMemoryBytes?: number; logicalCpus?: number } = {},
+  facts: { totalMemoryBytes?: number; logicalCpus?: number; swapTotalBytes?: number } = {},
 ): Promise<void> {
   if (p.os !== "linux") {
     log.skip("build resources are managed inside Linux/WSL");
@@ -712,11 +722,17 @@ export async function convergeBuildResources(
   const home = userHome();
   const totalMemoryBytes = facts.totalMemoryBytes ?? totalmem();
   const logicalCpus = facts.logicalCpus ?? workloadLogicalCpuCount();
+  const swapTotalBytes = facts.swapTotalBytes ?? workloadSwapTotalBytes();
   const policy = buildResourcePolicy({
     totalMemoryBytes,
     logicalCpus,
   });
-  const isolation = workloadPolicy({ totalMemoryBytes, logicalCpus, hostDiskGuardian: p.env === "wsl" });
+  const isolation = workloadPolicy({
+    totalMemoryBytes,
+    logicalCpus,
+    swapTotalBytes,
+    hostDiskGuardian: p.env === "wsl",
+  });
   const managedDir = `${home}/.config/red-dev`;
   const cargoDir = `${home}/.cargo`;
   mkdirSync(managedDir, { recursive: true });
