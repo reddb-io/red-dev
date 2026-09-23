@@ -63,7 +63,7 @@ describe("OpenCode input convergence", () => {
 });
 
 describe("Windows Terminal input convergence", () => {
-  test("adds Shift+Enter and Alt+V without replacing existing actions", () => {
+  test("adds Shift+Enter, Ctrl+Enter and Alt+V without replacing existing actions", () => {
     const existing = { command: "copy", keys: "ctrl+c", name: "mine" };
     const result = mergeWindowsTerminalAgentActions([existing]);
 
@@ -73,10 +73,14 @@ describe("Windows Terminal input convergence", () => {
       keys: "shift+enter",
     });
     expect(result.actions).toContainEqual({
+      command: { action: "sendInput", input: "\u001b[13;2u" },
+      keys: "ctrl+enter",
+    });
+    expect(result.actions).toContainEqual({
       command: { action: "sendInput", input: "\u0016" },
       keys: "alt+v",
     });
-    expect(result.added).toEqual(["shift+enter", "alt+v"]);
+    expect(result.added).toEqual(["shift+enter", "ctrl+enter", "alt+v"]);
   });
 
   test("sees a binding Windows Terminal 1.21 moved into keybindings", () => {
@@ -86,10 +90,12 @@ describe("Windows Terminal input convergence", () => {
     const actions = [
       { command: { action: "sendInput", input: "[13;2u" }, id: "User.sendInput.A" },
       { command: { action: "sendInput", input: "" }, id: "User.sendInput.B" },
+      { command: { action: "sendInput", input: "[13;2u" }, id: "User.sendInput.C" },
     ];
     const keybindings = [
       { id: "User.sendInput.A", keys: "shift+enter" },
       { id: "User.sendInput.B", keys: "Alt+V" },
+      { id: "User.sendInput.C", keys: "ctrl+enter" },
     ];
     const result = mergeWindowsTerminalAgentActions(actions, keybindings);
     expect(result.actions).toEqual(actions);
@@ -102,22 +108,24 @@ describe("Windows Terminal input convergence", () => {
     const keybindings = [
       { id: "User.newTab", keys: "shift+enter" },
       { id: null, keys: "alt+v" },
+      { id: null, keys: "ctrl+enter" },
     ];
     const result = mergeWindowsTerminalAgentActions(actions, keybindings);
     expect(result.actions).toEqual(actions);
     expect(result.added).toEqual([]);
-    expect(result.conflicts).toEqual(["shift+enter", "alt+v"]);
+    expect(result.conflicts).toEqual(["shift+enter", "ctrl+enter", "alt+v"]);
   });
 
   test("respects user-owned conflicts for either key", () => {
     const actions = [
       { command: "newTab", keys: "shift+enter" },
+      { command: "newTab", keys: "ctrl+enter" },
       { command: "paste", keys: ["alt+v", "ctrl+shift+v"] },
     ];
     const result = mergeWindowsTerminalAgentActions(actions);
 
     expect(result.actions).toEqual(actions);
     expect(result.added).toEqual([]);
-    expect(result.conflicts).toEqual(["shift+enter", "alt+v"]);
+    expect(result.conflicts).toEqual(["shift+enter", "ctrl+enter", "alt+v"]);
   });
 });

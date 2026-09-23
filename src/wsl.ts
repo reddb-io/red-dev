@@ -896,7 +896,17 @@ function sendInputAction(binding: InputBinding): WtAgentAction {
   };
 }
 
-const SHIFT_ENTER_ACTION = sendInputAction(NEWLINE_INPUT);
+function sendInputActions(binding: InputBinding): WtAgentAction[] {
+  return [
+    sendInputAction(binding),
+    ...(binding.layers.windowsTerminalAliases ?? []).map((keys) => ({
+      command: { action: "sendInput", input: binding.sequence },
+      keys,
+    })),
+  ];
+}
+
+const NEWLINE_ACTIONS = sendInputActions(NEWLINE_INPUT);
 
 /**
  * The image gesture shared with Alacritty and Claude Code on Windows/WSL.
@@ -940,7 +950,7 @@ export function mergeWindowsTerminalAgentActions(
   const actions = [...current];
   const added: string[] = [];
   const conflicts: string[] = [];
-  for (const wanted of [SHIFT_ENTER_ACTION, ALT_V_ACTION] as const) {
+  for (const wanted of [...NEWLINE_ACTIONS, ALT_V_ACTION]) {
     const existing = actions.find((action) => hasKey(action, wanted.keys));
     const bound = existing ? undefined : keybindings.find((b) => hasKey(b, wanted.keys));
     if (bound) {

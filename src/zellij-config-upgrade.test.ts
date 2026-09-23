@@ -71,6 +71,31 @@ describe("zellij config upgrade", () => {
     expect(zellijConfigAction(stub, shipped)).toBe("upgrade");
   });
 
+  test("upgrades an untouched generated desktop config regardless of HOME", () => {
+    // The target clipboard tail contains an absolute path, so hashing the
+    // whole file made one digest per username. Machines with the current
+    // Linux config were consequently frozen on it and could not receive a
+    // later keyboard fix. Rebuild that previous base from today's fixture
+    // by removing the three settings this change adds, then give it the
+    // exact generated tail an arbitrary Ubuntu user would have received.
+    const inputSettings = shipped.indexOf("// Zellij's startup tips");
+    const keys = shipped.indexOf("// ------------------------------------------------------------- keys");
+    const oldBase = (shipped.slice(0, inputSettings) + shipped.slice(keys)).replace(
+      '        bind "Ctrl Enter" { Write 27 91 49 51 59 50 117; }\n',
+      "",
+    );
+    const generated = `${oldBase}
+// Generated for this target by red-dev.
+//
+// The clipboard zellij should write to. Without it zellij uses OSC 52,
+// which asks the terminal to do the copying and cannot tell whether it
+// did — so a selection reports success and the clipboard keeps whatever
+// was in it.
+copy_command "bash /home/someone/.local/share/red-dev/config/bash/linux-clipboard.sh"
+`;
+    expect(zellijConfigAction(generated, shipped)).toBe("upgrade");
+  });
+
   test("upgrades the stub whatever comment sits above it", () => {
     // Recognised by what it contains rather than by its hash: the
     // comment applyZellij writes has changed before and would again.

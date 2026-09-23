@@ -28,6 +28,7 @@ import {
   repairAlacrittyToml,
   requiredImports,
   wslShellSection,
+  linuxBashShellSection,
 } from "./alacritty.ts";
 import { convergeClaudeKeybinding } from "./claude-keybindings.ts";
 import { withCodexStatusline } from "./codex-statusline.ts";
@@ -97,6 +98,15 @@ describe("alacritty TOML", () => {
     expect(doc.keyboard.bindings.length).toBeGreaterThan(0);
   });
 
+  test("imports are absolute so launching from another directory keeps every generated part", () => {
+    expect(requiredImports(null, "/home/test/.config/alacritty")).toEqual([
+      "/home/test/.config/alacritty/cursor.toml",
+      "/home/test/.config/alacritty/font.toml",
+      "/home/test/.config/alacritty/keys.toml",
+      "/home/test/.config/alacritty/shell.toml",
+    ]);
+  });
+
   test("font.toml parses for every family red-dev offers", () => {
     for (const family of ["JetBrainsMono Nerd Font", "FiraCode Nerd Font Mono", "CaskaydiaMono Nerd Font"]) {
       expect(() => strictToml(fontToml(family, 11))).not.toThrow();
@@ -107,7 +117,11 @@ describe("alacritty TOML", () => {
     expect(() => strictToml(cursorToml())).not.toThrow();
   });
 
-  test("shell.toml parses for WSL and Git Bash", () => {
+  test("shell.toml parses for Linux bash, WSL and Git Bash", () => {
+    const linux = strictToml(linuxBashShellSection()) as { terminal: { shell: { program: string } } };
+    expect(linux.terminal.shell.program).toBe("bash");
+    const linux013 = strictToml(linuxBashShellSection([0, 13, 2])) as { shell: { program: string } };
+    expect(linux013.shell.program).toBe("bash");
     const wsl = strictToml(wslShellSection("Ubuntu-24.04")) as { terminal: { shell: { args: string[] } } };
     expect(wsl.terminal.shell.args).toEqual(["-d", "Ubuntu-24.04", "--cd", "~"]);
     const bash = strictToml(gitBashShellSection("C:\\Program Files\\Git\\bin\\bash.exe")) as {

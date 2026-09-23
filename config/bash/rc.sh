@@ -136,34 +136,6 @@ if [ -n "${XDG_RUNTIME_DIR:-}" ] && ! _red_xdg_usable; then
 fi
 unset -f _red_xdg_usable
 
-# ble.sh, on by default. RED_BLE=0 opts out.
-#
-# It has to load before everything else and attach after everything
-# else: it replaces bash's line editor rather than sitting beside it, so
-# anything that binds keys must be in place between the two halves.
-#
-# It began as opt-in, because red-dev already ships atuin, fzf and
-# carapace, all of which bind into the editor ble.sh replaces. The trial
-# answered both open questions: Ctrl-R still reaches atuin under an
-# attached ble.sh (its TUI opens; atuin upstream in fact recommends
-# ble.sh for bash), and the one real casualty was carapace's completer,
-# whose plain-bash integration collides with ble.sh's \x01 escape
-# marker — init.sh now selects `carapace _carapace bash-ble` when
-# BLE_VERSION is set, which resolved it.
-if [ "${RED_BLE:-1}" = "1" ] && [ -r "$HOME/.local/share/blesh/ble.sh" ]; then
-  # shellcheck disable=SC1091
-  . "$HOME/.local/share/blesh/ble.sh" --noattach
-fi
-
-# Readline settings. INPUTRC has to be exported before bash builds its
-# line editor, which is why this sits ahead of the sourcing loop rather
-# than inside init.sh.
-if [ -r "$RED_ROOT/config/bash/inputrc" ]; then
-  INPUTRC="$RED_ROOT/config/bash/inputrc"
-  export INPUTRC
-  bind -f "$INPUTRC" 2>/dev/null || true
-fi
-
 # The shared root: one directory, reachable from both sides.
 #
 # RED_SHARE_WIN holds it the way Windows spells it — `C:\Users\me\.red\dev`
@@ -203,14 +175,46 @@ else
   unset RED_SHARE
 fi
 
-# Workload policy sits before zellij and init on purpose. It gives the zellij
-# server its protected control slice, then moves each pane into the bounded work
-# plane before init's expensive tool activations run. The scoped pane starts one
-# replacement shell, marked so this ordering does not recurse.
-# red-skills-watch is last of the sourced parts and after `path`, which
-# is what puts red-dev on PATH: it spawns nothing if the command cannot
-# be found, and finding it is the whole point of running after path.
-for _red_part in path shared build-resources zellij init aliases functions prompt red-skills-watch; do
+# Workload policy and zellij run before anything takes ownership of bash's
+# input. The outer shell exists only to start the multiplexer; loading ble.sh
+# there as well gives one physical terminal two independent line editors and
+# two protocol lifecycles. Inside a pane the zellij guard returns immediately,
+# and only that pane shell proceeds into ble.sh and the interactive tool setup.
+for _red_part in path shared build-resources zellij; do
+  _red_file="$RED_ROOT/config/bash/${_red_part}.sh"
+  if [ -r "$_red_file" ]; then
+    # shellcheck disable=SC1090
+    . "$_red_file"
+  fi
+done
+unset _red_part _red_file
+
+# ble.sh, on by default. RED_BLE=0 opts out.
+#
+# It loads after zellij has either taken over the terminal or declined to,
+# and attaches after every keybinding below. In a healthy zellij session this
+# code therefore runs only in the pane shell, never in the launcher behind it.
+#
+# red-dev also ships atuin, fzf and carapace, all of which bind into the
+# editor ble.sh replaces. Ctrl-R still reaches atuin, and carapace uses its
+# dedicated bash-ble integration in init.sh to avoid colliding with ble.sh's
+# \x01 escape marker.
+if [ "${RED_BLE:-1}" = "1" ] && [ -r "$HOME/.local/share/blesh/ble.sh" ]; then
+  # shellcheck disable=SC1091
+  . "$HOME/.local/share/blesh/ble.sh" --noattach
+fi
+
+# Readline settings land between ble.sh's load and attach. INPUTRC is also
+# exported for any nested bash that deliberately opts out of red-dev's rc.
+if [ -r "$RED_ROOT/config/bash/inputrc" ]; then
+  INPUTRC="$RED_ROOT/config/bash/inputrc"
+  export INPUTRC
+  bind -f "$INPUTRC" 2>/dev/null || true
+fi
+
+# Tool integrations bind into the editor before ble-attach. red-skills-watch
+# stays last and after `path`; it spawns nothing if red-dev cannot be found.
+for _red_part in init aliases functions prompt red-skills-watch; do
   _red_file="$RED_ROOT/config/bash/${_red_part}.sh"
   if [ -r "$_red_file" ]; then
     # shellcheck disable=SC1090

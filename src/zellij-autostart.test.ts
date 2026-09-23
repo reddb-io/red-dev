@@ -119,6 +119,10 @@ function run(
       RED_IN_ZELLIJ: "",
       RED_ZELLIJ: "",
       TERM: "xterm-256color",
+      // util-linux `script` runs its command through $SHELL. A user's
+      // interactive shell may rebuild PATH (fish does), bypassing the stub
+      // and starting a real Zellij session during the test.
+      SHELL: "/bin/sh",
       XDG_STATE_HOME: stateHome,
       ...env,
     },

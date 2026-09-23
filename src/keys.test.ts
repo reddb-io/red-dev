@@ -428,15 +428,32 @@ describe("the four actions the chord decision named", () => {
     // reason all five share one path now: the viewer is already drawing
     // in this terminal, so firing one of them in place would put two
     // full-screen surfaces on the same frame.
-    expect(firePlan("menu.open", desktop, anything)).toMatchObject({
-      argv: ["alacritty", "-e", "red-dev", "menu"],
-    });
+    const menu = firePlan("menu.open", desktop, anything);
+    expect(menu.ok).toBe(true);
+    expect(menu.ok && menu.argv).toEqual(expect.arrayContaining([
+      "alacritty",
+      "--class",
+      "red-dev-menu,red-dev-menu",
+      "window.dimensions.columns=68",
+      "window.decorations=\"None\"",
+      "-e",
+      "red-dev",
+      "menu",
+    ]));
     expect(firePlan("keys.viewer", desktop, anything)).toMatchObject({
       argv: ["alacritty", "-e", "red-dev", "keys"],
     });
-    expect(firePlan("menu.open", windows, anything)).toMatchObject({
-      argv: ["cmd.exe", "/c", "start", "", "red-dev.exe", "menu"],
-    });
+    const windowsMenu = firePlan("menu.open", windows, anything);
+    expect(windowsMenu.ok).toBe(true);
+    expect(windowsMenu.ok && windowsMenu.argv).toEqual(expect.arrayContaining([
+      "cmd.exe",
+      "/c",
+      "start",
+      "",
+      "alacritty.exe",
+      "red-dev.exe",
+      "menu",
+    ]));
     expect(firePlan("keys.viewer", windows, anything)).toMatchObject({
       argv: ["cmd.exe", "/c", "start", "", "red-dev.exe", "keys"],
     });

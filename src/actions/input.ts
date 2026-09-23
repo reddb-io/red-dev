@@ -37,11 +37,15 @@ export interface InputLayers {
    * then sends `chars`. Written to config/alacritty/keys.toml.
    */
   alacritty: { key: string; mods: string };
+  /** Additional physical chords that intentionally emit the same bytes. */
+  alacrittyAliases?: readonly { key: string; mods: string }[];
   /**
    * Windows Terminal's `keys`, paired with a `sendInput` command in
    * settings.json. The other emulator, saying the same thing.
    */
   windowsTerminal: string;
+  /** Windows Terminal spellings of the same aliases. */
+  windowsTerminalAliases?: readonly string[];
   /**
    * Claude Code's Chat-context binding, when it needs one. Absent where
    * the sequence already arrives as something Claude Code binds itself —
@@ -106,7 +110,9 @@ export const NEWLINE_INPUT = {
   alternates: ["\u001b[27;2;13~"],
   layers: {
     alacritty: { key: "Return", mods: "Shift" },
+    alacrittyAliases: [{ key: "Return", mods: "Control" }],
     windowsTerminal: "shift+enter",
+    windowsTerminalAliases: ["ctrl+enter"],
     claude: { key: "shift+enter", action: "chat:newline" },
     redcode: { field: "input_newline", value: "shift+return,ctrl+return,alt+return,ctrl+j" },
   },

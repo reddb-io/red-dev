@@ -129,7 +129,7 @@ describe("what a converge writes", () => {
     // one shortcut overwriting the other.
     for (const [id, name, command, accel] of [
       ["terminal.new", "red-dev: Terminal", "alacritty", "<Control><Alt>t"],
-      ["menu.open", "red-dev: red-dev menu", "alacritty -e red-dev menu", "<Shift><Control><Alt>m"],
+      ["menu.open", "red-dev: red-dev menu", "alacritty --class red-dev-menu,red-dev-menu --title red-dev --option window.dimensions.columns=68 --option window.dimensions.lines=25 --option 'window.decorations=\"None\"' --option window.dynamic_title=false --option window.opacity=0.97 --option window.padding.x=12 --option window.padding.y=10 --option scrolling.history=0 -e red-dev menu", "<Shift><Control><Alt>m"],
       ["keys.viewer", "red-dev: Keys viewer", "alacritty -e red-dev keys", "<Shift><Control><Alt>k"],
       ["emoji.pick", "red-dev: Emoji picker", "alacritty -e red-dev emoji", "<Shift><Control><Alt>e"],
       ["panel.network", "red-dev: Network panel", "alacritty -e red-dev panel network", "<Shift><Control><Alt>n"],

@@ -316,6 +316,29 @@ const TERMINAL_EXEC: Record<string, string> = {
   xterm: "-e",
 };
 
+/**
+ * The menu is a transient control surface, not another working terminal.
+ *
+ * Omarchy Quattro draws its menu as a compact card over the desktop. red-dev
+ * cannot depend on its compositor, but Alacritty can give the same surface
+ * its own app id and bounded geometry on every target where red-dev installs
+ * it. The compositor remains responsible for final placement, as Wayland
+ * requires; GNOME's normal new-window placement puts this small, undecorated
+ * surface near the active work rather than stretching it across the display.
+ */
+export const MENU_ALACRITTY_ARGS = [
+  "--class", "red-dev-menu,red-dev-menu",
+  "--title", "red-dev",
+  "--option", "window.dimensions.columns=68",
+  "--option", "window.dimensions.lines=25",
+  "--option", "window.decorations=\"None\"",
+  "--option", "window.dynamic_title=false",
+  "--option", "window.opacity=0.97",
+  "--option", "window.padding.x=12",
+  "--option", "window.padding.y=10",
+  "--option", "scrolling.history=0",
+] as const;
+
 /** Windows is the host that registers chords, from either side of WSL. */
 function onWindowsHost(p: Platform): boolean {
   return p.env === "windows" || p.env === "wsl";
@@ -350,10 +373,13 @@ function ownSurface(
     // it and for the same reason: this process is a console process, and
     // spawning from it would hand the new surface the console red-dev is
     // drawing in. red-dev.exe is on the PATH both installers write.
+    const alacritty = id === "menu.open" && locate("alacritty.exe") !== null;
     return {
       ok: true,
       id,
-      argv: ["cmd.exe", "/c", "start", "", "red-dev.exe", ...tail],
+      argv: alacritty
+        ? ["cmd.exe", "/c", "start", "", "alacritty.exe", ...MENU_ALACRITTY_ARGS, "-e", "red-dev.exe", ...tail]
+        : ["cmd.exe", "/c", "start", "", "red-dev.exe", ...tail],
       note: `${description} in a new window`,
     };
   }
@@ -365,10 +391,13 @@ function ownSurface(
       detail: `no terminal emulator on PATH — run \`red-dev ${tail.join(" ")}\` here instead`,
     };
   }
+  const menuArgs = id === "menu.open" && found === "alacritty"
+    ? [...MENU_ALACRITTY_ARGS]
+    : [];
   return {
     ok: true,
     id,
-    argv: [found, TERMINAL_EXEC[found] ?? "-e", "red-dev", ...tail],
+    argv: [found, ...menuArgs, TERMINAL_EXEC[found] ?? "-e", "red-dev", ...tail],
     note: `${description} in ${found}`,
   };
 }
