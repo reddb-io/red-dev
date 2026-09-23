@@ -178,6 +178,7 @@ type ProviderSpec =
         | "alacritty"
         | "wsl-interop"
         | "wsl-runtime-dir"
+        | "dit-input"
         | "blesh"
         | "build-resources"
         | "runtimes"
@@ -409,6 +410,7 @@ const builtin = (
     | "alacritty"
     | "wsl-interop"
     | "wsl-runtime-dir"
+    | "dit-input"
     | "wsl-sync"
     | "blesh"
     | "build-resources"
@@ -1022,48 +1024,52 @@ export const TOOLS: Tool[] = [
     win: ghInstaller("reddb-io/red-ui", "red-ui-windows-x86_64-setup.exe", "/S"),
   },
   {
+    // dit's one runtime dependency, which its installer used to pull in
+    // and mise will not. `libasound2` is a virtual name on 24.04 — the
+    // real package is the t64 one — and apt refuses a virtual name with
+    // no candidate rather than resolving it.
+    name: "libasound2",
+    about: "the ALSA library dit links against",
+    scope: "desktop",
+    u24: apt("libasound2t64"),
+    win: skip(NO_GUI),
+  },
+  {
     // A CLI, and still `desktop` rather than `core`, because what it
     // does is type into the focused application. Under WSL there is no
     // focused application to type into and no /dev/input to read the
     // hotkey from — the binary would install cleanly and do nothing,
     // which is the outcome this project exists to avoid.
     //
-    // The publisher's installer on Linux, not the bare binary, and for
-    // once that is not about checksums. dit reads its hotkey from
-    // /dev/input and types through /dev/uinput, so it needs you in the
-    // `input` group and a udev rule; dropping the binary in gives you a
-    // program that runs and cannot see a keypress. install.sh sets both
-    // up. --yes keeps a converge non-interactive, and --no-service
-    // leaves the autostart unit alone: a standing background service is
-    // a decision to make deliberately, and dit works without it.
-    //
-    // Windows needs no equivalent — SendInput requires no permissions —
-    // so the release binary is enough there.
+    // mise on every target, like every other tool this organisation
+    // publishes. Linux used to take the publisher's install.sh instead,
+    // because dit needs the `input` group and a udev rule besides its
+    // binary and install.sh set those up — and the price was that the
+    // converge, seeing `dit` present, never ran the installer again:
+    // the binary stayed at install day's version for good, with a mise
+    // copy of the newer one sitting shadowed beside it on one machine.
+    // The two halves are now two rows. This one is the binary, which
+    // `mise upgrade dit` moves and `mise prune` collects; the input
+    // side is `dit-input` below, and the ALSA library dit links is the
+    // apt row above it.
     name: "dit",
     about: "push-to-toggle voice dictation, typed into the focused app",
     scope: "desktop",
-    // Split on purpose, and the split is the whole point of keeping two
-    // providers around.
-    //
-    // Linux stays on the vendor installer because the binary is the
-    // smaller half of what it does: dit reads the hotkey from
-    // /dev/input and types through /dev/uinput, so it also adds the
-    // user to the `input` group and writes the uinput udev rule
-    // (dit/install.sh:339-361). mise would deliver a binary that runs
-    // and never types — working software by every check we could make,
-    // and useless.
-    u24: sudoProvider(
-      installer(
-        "https://raw.githubusercontent.com/reddb-io/dit/main/install.sh",
-        "reddb-io/dit — installs the binary and the /dev/uinput permissions it needs",
-        "--yes",
-        "--no-service",
-      ),
-    ),
-    // Windows has no such requirement — it was a plain release asset
-    // already, so here mise is a straight gain: the same download, plus
-    // an updater.
+    u24: mise("github:reddb-io/dit", { alias: "dit" }),
     win: mise("github:reddb-io/dit", { alias: "dit" }),
+  },
+  {
+    // What mise cannot do for dit: membership in the `input` group, the
+    // udev rule that hands /dev/uinput to that group, and the GNOME
+    // Shell focus bridge for Wayland. Idempotent, re-checked every
+    // converge, reported by doctor. Windows needs none of it: SendInput
+    // asks no permission.
+    name: "dit-input",
+    about: "the input group, uinput rule and GNOME focus bridge dit needs to see a keypress and type",
+    scope: "desktop",
+    managed: true,
+    u24: sudoProvider(builtin("dit-input")),
+    win: skip("SendInput needs no permissions"),
   },
 
   // ------------------------------------------------------ optional

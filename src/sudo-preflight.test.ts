@@ -27,7 +27,11 @@ describe("the sudo preflight plan", () => {
 
     expect(names).toContain("btop");
     expect(names).toContain("red-request");
-    expect(names).toContain("dit");
+    // dit's binary moved to mise; what still needs the archive is the
+    // ALSA library it links. Its input-group and udev half is a managed
+    // row, which probes for itself and is never listed here.
+    expect(names).toContain("libasound2");
+    expect(names).not.toContain("dit");
     // carapace used to be here. Its Linux column was a .deb, which is
     // the reason it asked; mise hands over a plain binary instead, so
     // the preflight has one fewer item to justify. Asserted rather than

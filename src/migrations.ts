@@ -42,6 +42,59 @@ export interface Migration {
   run: (p: Platform) => Promise<void>;
 }
 
+
+/**
+ * Hand every tool whose provider is now mise over from ~/.local/bin.
+ *
+ * Shared by the migrations that each moved a tool: a migration runs
+ * once per id, so a machine that took the 2026-08-15 handover before
+ * dit moved needs a second id to sweep dit, and the sweep itself must
+ * not be written twice.
+ */
+async function handOverToMise(p: Platform): Promise<void> {
+  const stale = staleReleaseBinaries(p);
+
+  // Install before removing, not after. A migration runs before the
+  // converge, so removing first would be fine on a good day and
+  // would leave a developer with no `red` and no `tq` on a day when
+  // GitHub is unreachable. Nothing is taken away until mise can
+  // answer for it.
+  const { miseInstallSuite } = await import("./providers.ts");
+  await miseInstallSuite(p);
+  const mise = Bun.which("mise");
+  if (!mise) throw new Error("mise is not installed yet — nothing to hand over to");
+
+  for (const { name, path } of stale) {
+    // Proof, per tool, that the replacement exists before the
+    // original goes. `mise which` resolves through the fragment, so
+    // a tool whose install quietly failed keeps its old binary and
+    // is reported rather than deleted.
+    //
+    // Asked by command name rather than by spec: mise answers to
+    // the binary, and `mise which github:reddb-io/zellij` is an
+    // error while `mise which zellij` is a path. Getting that
+    // backwards would have left every unaliased tool's stale copy
+    // in place while reporting that it had checked.
+    const which = Bun.spawnSync([mise, "which", name], { stdout: "pipe", stderr: "ignore" });
+    if (which.exitCode !== 0) {
+      log.warn(`       ${name}: mise has no copy yet, leaving ${path} in place`);
+      continue;
+    }
+    // Never delete the binary this process is running from. On
+    // Linux it would appear to work — the inode outlives the unlink
+    // — and on Windows it fails outright with the file locked. Both
+    // are the wrong thing to attempt while red-dev is updating
+    // red-dev. The shim already wins on PATH, so the next run
+    // executes the mise copy and this one sweeps the leftover.
+    if (samePath(path, process.execPath)) {
+      log.plain(`       ${name}: mise owns it now; ${path} goes on the next run`);
+      continue;
+    }
+    rmSync(path, { force: true });
+    log.plain(`       ${name}: removed ${path}; mise now owns it`);
+  }
+}
+
 export const MIGRATIONS: Migration[] = [
   {
     id: "2026-07-29-font-registration",
@@ -311,49 +364,7 @@ return {}
      * itself out of the fragment; it applies here and had to be paid.
      */
     applies: (p) => staleReleaseBinaries(p).length > 0,
-    run: async (p) => {
-      const stale = staleReleaseBinaries(p);
-
-      // Install before removing, not after. A migration runs before the
-      // converge, so removing first would be fine on a good day and
-      // would leave a developer with no `red` and no `tq` on a day when
-      // GitHub is unreachable. Nothing is taken away until mise can
-      // answer for it.
-      const { miseInstallSuite } = await import("./providers.ts");
-      await miseInstallSuite(p);
-      const mise = Bun.which("mise");
-      if (!mise) throw new Error("mise is not installed yet — nothing to hand over to");
-
-      for (const { name, path } of stale) {
-        // Proof, per tool, that the replacement exists before the
-        // original goes. `mise which` resolves through the fragment, so
-        // a tool whose install quietly failed keeps its old binary and
-        // is reported rather than deleted.
-        //
-        // Asked by command name rather than by spec: mise answers to
-        // the binary, and `mise which github:reddb-io/zellij` is an
-        // error while `mise which zellij` is a path. Getting that
-        // backwards would have left every unaliased tool's stale copy
-        // in place while reporting that it had checked.
-        const which = Bun.spawnSync([mise, "which", name], { stdout: "pipe", stderr: "ignore" });
-        if (which.exitCode !== 0) {
-          log.warn(`       ${name}: mise has no copy yet, leaving ${path} in place`);
-          continue;
-        }
-        // Never delete the binary this process is running from. On
-        // Linux it would appear to work — the inode outlives the unlink
-        // — and on Windows it fails outright with the file locked. Both
-        // are the wrong thing to attempt while red-dev is updating
-        // red-dev. The shim already wins on PATH, so the next run
-        // executes the mise copy and this one sweeps the leftover.
-        if (samePath(path, process.execPath)) {
-          log.plain(`       ${name}: mise owns it now; ${path} goes on the next run`);
-          continue;
-        }
-        rmSync(path, { force: true });
-        log.plain(`       ${name}: removed ${path}; mise now owns it`);
-      }
-    },
+    run: handOverToMise,
   },
   {
     id: "2026-08-16-red-skills-legacy-retention",
@@ -471,6 +482,17 @@ return {}
           return;
       }
     },
+  },
+  {
+    id: "2026-09-16-dit-to-mise",
+    describe: "hand dit over from its installer's ~/.local/bin copy to mise",
+    // dit joined the mise column a month after the handover above ran,
+    // so on a machine that already took that migration the installer's
+    // copy would sit ahead of nothing on PATH — the shim wins — but
+    // would still be there, still 0.3.0, still what `type -a dit`
+    // lists first in shells that do not source path.sh.
+    applies: (p) => staleReleaseBinaries(p).some((b) => b.name === "dit"),
+    run: handOverToMise,
   },
 ];
 

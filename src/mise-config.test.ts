@@ -120,13 +120,13 @@ describe("miseEntries", () => {
     expect(aliases).toContain("tq");
   });
 
-  test("a platform's entries are its own — dit is a mise tool only on Windows", () => {
-    // On Linux dit needs the uinput group and udev rule its installer
-    // writes, so it stays on the vendor script. A regression there is
-    // silent: the binary installs and simply never types.
+  test("dit is a mise tool on every target", () => {
+    // Linux used to keep dit on the vendor installer for its uinput
+    // group and udev rule, and the binary never updated again. mise now
+    // owns the binary everywhere; the input half is the dit-input row.
     const linux = miseEntries(UBUNTU).map((e) => e.spec);
     const windows = miseEntries(WINDOWS).map((e) => e.spec);
-    expect(linux).not.toContain("github:reddb-io/dit");
+    expect(linux).toContain("github:reddb-io/dit");
     expect(windows).toContain("github:reddb-io/dit");
   });
 
