@@ -126,6 +126,42 @@ done
 `;
 }
 
+/**
+ * The shape the shipped install-pi.sh actually has: a JSON manifest under
+ * `~/.pi/agent/` naming the plugin directories it installed, and nothing
+ * else — uninstall is the script's own job, replayed from its own file.
+ */
+function piJsonGenerator(): string {
+  return `#!/usr/bin/env bash
+set -euo pipefail
+tree="$(cd "$(dirname "$0")/.." && pwd)"
+action=install
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --uninstall) action=uninstall ;;
+    --source-dir) tree="$2"; shift ;;
+  esac
+  shift
+done
+agent="\${HOME:?}/.pi/agent"
+manifest="$agent/redskills-install-manifest.json"
+if [[ "$action" == "uninstall" ]]; then
+  rm -f "$manifest"
+  exit 0
+fi
+mkdir -p "$agent"
+entries=""
+for plugin in "$tree"/plugins/*/; do
+  name="$(basename "$plugin")"
+  flag="$(awk -v want="  $name:" '$0 == want { found = 1; next } found { print; exit }' "$tree/.red/config.yaml")"
+  case "$flag" in *"enabled: true"*) ;; *) continue ;; esac
+  entry="$(printf '{"name":"%s","spec":"%s","source":"local"}' "$name" "\${plugin%/}")"
+  if [[ -z "$entries" ]]; then entries="$entry"; else entries="$entries,$entry"; fi
+done
+printf '{"version":1,"scope":"user","settings_file":"%s/settings.json","plugins":[%s]}\\n' "$agent" "$entries" > "$manifest"
+`;
+}
+
 /** pi's, which writes under the home rather than under the config root. */
 function piGenerator(): string {
   return `#!/usr/bin/env bash
@@ -1570,6 +1606,32 @@ describe("what a generator's install manifest records", () => {
   test("an absent manifest is no paths rather than a throw", async () => {
     const { hostManifestPaths } = await import("./red-skills-hosts.ts");
     expect(hostManifestPaths(join(tmpdir(), "red-nope", "missing.txt"))).toEqual([]);
+  });
+
+  test("pi converges on the JSON manifest its generator really writes", async () => {
+    // The shipped install-pi.sh records a JSON manifest under ~/.pi/agent/
+    // and nothing else. A candidate list that only knew the .txt pair read
+    // that as a generator which recorded nothing, and pi failed to verify
+    // on every machine, every converge — 41 unattended updates in a row.
+    const m = machine();
+    const script = join(m.tree, "scripts", "install-pi.sh");
+    writeFileSync(script, piJsonGenerator());
+    chmodSync(script, 0o755);
+
+    const first = await reconcile(m, { run: runner(m).run, adapters: [adapterNamed("pi")] });
+    const manifest = join(m.home, ".pi", "agent", "redskills-install-manifest.json");
+    expect(first[0]?.status, first[0]?.reason).toBe("reconciled");
+    expect(existsSync(manifest)).toBe(true);
+
+    // The manifest is what red-dev owns; the specs inside it name the set,
+    // and owning those would be owning the package set itself.
+    const owned = readHostRegistry(m.home).hosts["pi"]?.owned ?? [];
+    expect(owned).toContainEqual({ kind: "path", path: manifest });
+    expect(owned.filter((o) => o.kind === "path" && o.path.startsWith(m.tree))).toEqual([]);
+
+    // And the second converge stands down: that is convergence.
+    const second = await reconcile(m, { run: runner(m).run, adapters: [adapterNamed("pi")] });
+    expect(second[0]?.status, second[0]?.reason).toBe("current");
   });
 });
 

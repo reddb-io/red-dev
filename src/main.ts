@@ -2699,6 +2699,10 @@ if (process.argv[2] !== "statusline") {
 }
 
 async function main(): Promise<number> {
+  if (typeof Bun === "undefined") {
+    log.err("red-dev runs on bun — use the binary in ~/.local/bin, or `bun run src/main.ts ...` from the checkout; under node the source crashes before any command");
+    return 1;
+  }
   const cli = buildCli();
   const argv = process.argv.slice(2);
   // Everything after `--` is meant for the program red-dev starts, so
