@@ -117,6 +117,40 @@ describe("workload policy", () => {
     );
   });
 
+  test("never soft-walls a domain a person types into, and lets Zellij swap where the host can", () => {
+    // The 16G laptop whose Zellij server stalled at a 3G MemoryHigh with 9G free.
+    const laptop = workloadPolicy({
+      totalMemoryBytes: 16 * 1024 ** 3,
+      logicalCpus: 8,
+      swapTotalBytes: 24 * 1024 ** 3,
+    });
+    for (const slice of [
+      "red-dev.slice",
+      "red-dev-interactive.slice",
+      "red-dev-heavy.slice",
+      "red-dev-heavy-panes.slice",
+    ]) {
+      expect(laptop.systemd[slice]).not.toContain("MemoryHigh=");
+    }
+    expect(laptop.systemd["red-dev-heavy-agents.slice"]).toContain("MemoryHigh=");
+    expect(laptop.systemd["red-dev-heavy-builds.slice"]).toContain("MemoryHigh=");
+
+    expect(laptop.systemd["red-dev-interactive.slice"]).toContain("MemoryMax=4G");
+    expect(laptop.systemd["red-dev-interactive.slice"]).toContain("MemorySwapMax=4G");
+    expect(laptop.systemd["red-dev.slice"]).toContain("MemorySwapMax=4608M");
+
+    const tinySwap = workloadPolicy({
+      totalMemoryBytes: 16 * 1024 ** 3,
+      logicalCpus: 8,
+      swapTotalBytes: 2 * 1024 ** 3,
+    });
+    expect(tinySwap.systemd["red-dev-interactive.slice"]).toContain("MemorySwapMax=2G");
+
+    const noSwap = workloadPolicy({ totalMemoryBytes: 16 * 1024 ** 3, logicalCpus: 8 });
+    expect(noSwap.systemd["red-dev-interactive.slice"]).toContain("MemorySwapMax=0");
+    expect(noSwap.systemd["red-dev.slice"]).toContain("MemorySwapMax=512M");
+  });
+
   test("attaches the control daemon and every Worker to the generated domains", () => {
     const policy = workloadPolicy(WORKSTATION);
 
@@ -566,7 +600,10 @@ describe("workload policy", () => {
 
     expect(FILES["build-resources.sh"]).toBe(policy.shell);
     expect(FILES["rc.sh"]).toContain(
-      "for _red_part in path shared build-resources zellij init aliases functions prompt red-skills-watch",
+      "for _red_part in path shared build-resources zellij",
+    );
+    expect(FILES["rc.sh"]).toContain(
+      "for _red_part in init aliases functions prompt red-skills-watch",
     );
     expect(FILES["zellij.sh"]).toContain("_red_dev_run_control zellij");
     expect(FILES["zellij.sh"]).toContain("refusing uncontained zellij");
