@@ -190,7 +190,11 @@ describe("paste", () => {
   });
 
   test("keeps Ctrl+Shift+V, which is what Alacritty ships", () => {
-    expect(keys).toContain("mods = 'Control|Shift'");
+    // This is built into Alacritty. Repeating it in generated config makes
+    // both Paste actions fire for one physical key press.
+    expect(keys).not.toContain(
+      "key = 'V'\nmods = 'Control|Shift'\naction = 'Paste'",
+    );
   });
 
   test("sends Alt+V through as Ctrl+V so terminal agents can paste images", () => {

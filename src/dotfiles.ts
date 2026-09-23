@@ -330,6 +330,11 @@ const SHIPPED_ZELLIJ_CONFIGS = new Set([
   // 1.0.125: session serialization is unchanged, but the managed comment
   // now describes red-dev's automatic live/serialized resume order.
   "468e71d7250c2d6a00087aa05c299c4756a06fdf8f049310f89d5425a39ed1c3",
+  // The input-stack repair: no startup modal, no enhanced Kitty keyboard
+  // negotiation in front of bash/ble.sh, and therefore one event per key.
+  "dfc85bfecb441b931130874c021b4e698f0c83e4342acab6d4a464fc10de5bc0",
+  // Ctrl+Enter joins Shift+Enter as an explicit newline gesture.
+  "389a777300d88a108040181c564c2f559bc1fc6dc595f4b6e8c258601e6c148f",
   // The three bases above as a Linux desktop received them: each plus
   // the generated `copy_command "wl-copy"`. Without these a desktop
   // machine could never be moved off wl-copy, because the file on disk
@@ -340,6 +345,8 @@ const SHIPPED_ZELLIJ_CONFIGS = new Set([
   "f2861f1902b9b14cc444991b243de765a2db69dffe1bc45f72de08cd2ff61c63",
   // 1.0.145: browser-style Ctrl+Tab and Ctrl+Shift+Tab tab navigation.
   "f8611722c0b6cbcd30981736bb29ee29b483e80913cf7d3c0462865a2ad704cb",
+  // The input-stack repair on top of 1.0.145's tab navigation.
+  "dc5ea3895fd0a711d06147871b1e16de3d8daa8231eba4c2f818ff201afffd0b",
 ]);
 
 /**
@@ -404,6 +411,20 @@ export function windowsClipboardCommand(): string {
 }
 
 /**
+ * The target-specific tail red-dev appends to its otherwise portable
+ * Zellij config. Kept as one literal because the upgrade path removes this
+ * exact generated layer before hashing the shipped base underneath it.
+ */
+const GENERATED_ZELLIJ_CLIPBOARD = `
+// Generated for this target by red-dev.
+//
+// The clipboard zellij should write to. Without it zellij uses OSC 52,
+// which asks the terminal to do the copying and cannot tell whether it
+// did — so a selection reports success and the clipboard keeps whatever
+// was in it.
+`;
+
+/**
  * The three routes, and the one target that has none.
  *
  * This is the whole clipboard layer of the product, in one function: the
@@ -455,14 +476,7 @@ export function zellijConfigFor(p: Platform): string {
   if (!argv) return zellijBase;
   const command = argv.join(" ");
 
-  return `${zellijBase}
-// Generated for this target by red-dev.
-//
-// The clipboard zellij should write to. Without it zellij uses OSC 52,
-// which asks the terminal to do the copying and cannot tell whether it
-// did — so a selection reports success and the clipboard keeps whatever
-// was in it.
-copy_command "${command}"
+  return `${zellijBase}${GENERATED_ZELLIJ_CLIPBOARD}copy_command "${command}"
 `;
 }
 
@@ -535,7 +549,19 @@ export function zellijConfigAction(
   if (current === null) return "write";
   if (current === shipped) return "keep";
   if (isThemeStub(current)) return "upgrade";
-  const digest = new Bun.CryptoHasher("sha256").update(current).digest("hex");
+  // The per-target clipboard line contains HOME, so the complete file has
+  // one hash per user and machine even when every byte red-dev owns is
+  // untouched. Strip only our exact generated tail and recognise the stable
+  // shipped base below it; otherwise a Linux desktop can never receive a
+  // later input or keybinding fix without deleting config.kdl by hand.
+  const marker = current.lastIndexOf(GENERATED_ZELLIJ_CLIPBOARD);
+  const generatedTail = marker < 0
+    ? null
+    : current.slice(marker + GENERATED_ZELLIJ_CLIPBOARD.length);
+  const hashable = generatedTail !== null && /^copy_command "[^"\r\n]+"\r?\n$/.test(generatedTail)
+    ? current.slice(0, marker)
+    : current;
+  const digest = new Bun.CryptoHasher("sha256").update(hashable).digest("hex");
   return SHIPPED_ZELLIJ_CONFIGS.has(digest) ? "upgrade" : "keep";
 }
 

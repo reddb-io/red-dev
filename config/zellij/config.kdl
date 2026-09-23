@@ -33,6 +33,19 @@ default_shell "bash"
 // which matters when the thing that exited did so because it failed.
 on_force_close "quit"
 
+// Zellij's startup tips and release notes are modal overlays: until Esc,
+// every key belongs to the overlay rather than the pane. In an always-on
+// session that looks exactly like a shell whose hotkeys and typing failed.
+show_startup_tips false
+show_release_notes false
+
+// Keep one byte protocol from Alacritty through bash and ble.sh. Zellij's
+// enhanced Kitty keyboard path has had regressions around Backspace,
+// modifiers and key repeat; the legacy path still carries red-dev's explicit
+// Shift+Enter sequence through the binding below without changing every
+// ordinary key event on the terminal.
+support_kitty_keyboard_protocol false
+
 // ------------------------------------------------------------- keys
 //
 // Locked by default, with zellij's own bindings cleared.
@@ -66,6 +79,7 @@ keybinds clear-defaults=true {
     // Only in the two modes where typing reaches the pane at all.
     shared_among "locked" "normal" {
         bind "Shift Enter" { Write 27 91 49 51 59 50 117; }
+        bind "Ctrl Enter" { Write 27 91 49 51 59 50 117; }
     }
     locked {
         bind "Ctrl g" { SwitchToMode "normal"; }

@@ -12,15 +12,11 @@
 # Ctrl+V is deliberately not bound here. Claude Code and Codex consume
 # its raw control byte to attach an image from the system clipboard; an
 # Alacritty Paste action would swallow the key before either agent saw it.
-# Ctrl+Shift+V remains the terminal text-paste convention.
+# Ctrl+Shift+V remains Alacritty's built-in terminal text-paste binding;
+# repeating it here would execute Paste twice for one key press.
 #
 # Alt+V sends the same byte as an alias and matches Claude Code's
 # documented Windows image shortcut.
-
-[[keyboard.bindings]]
-key = 'V'
-mods = 'Control|Shift'
-action = 'Paste'
 
 [[keyboard.bindings]]
 key = 'V'
@@ -69,4 +65,9 @@ action = 'CreateNewWindow'
 [[keyboard.bindings]]
 key = 'Return'
 mods = 'Shift'
+chars = "\u001b[13;2u"
+
+[[keyboard.bindings]]
+key = 'Return'
+mods = 'Control'
 chars = "\u001b[13;2u"

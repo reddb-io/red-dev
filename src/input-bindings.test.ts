@@ -54,7 +54,7 @@ describe("the terminal configs are what they were", () => {
     expect(keysToml()).toBe(pinned);
   });
 
-  test("Windows Terminal gets the same two actions, in the same order", () => {
+  test("Windows Terminal gets the same three actions, in the same order", () => {
     const { actions, added, conflicts } = mergeWindowsTerminalAgentActions([]);
     expect(JSON.stringify(actions, null, 2)).toBe(`[
   {
@@ -67,12 +67,19 @@ describe("the terminal configs are what they were", () => {
   {
     "command": {
       "action": "sendInput",
+      "input": "\\u001b[13;2u"
+    },
+    "keys": "ctrl+enter"
+  },
+  {
+    "command": {
+      "action": "sendInput",
       "input": "\\u0016"
     },
     "keys": "alt+v"
   }
 ]`);
-    expect(added).toEqual(["shift+enter", "alt+v"]);
+    expect(added).toEqual(["shift+enter", "ctrl+enter", "alt+v"]);
     expect(conflicts).toEqual([]);
   });
 });

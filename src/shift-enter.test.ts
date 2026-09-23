@@ -98,6 +98,12 @@ describe("the emulators send what the registry says", () => {
     expect(keys).toContain(`key = '${key}'\nmods = '${mods}'\nchars = "${escapedSequence(CSI_U)}"`);
   });
 
+  test("alacritty maps Ctrl+Enter to the same newline sequence", () => {
+    expect(keysToml()).toContain(
+      `key = 'Return'\nmods = 'Control'\nchars = "${escapedSequence(CSI_U)}"`,
+    );
+  });
+
   test("and sends the image gesture as the registry's byte too", () => {
     const keys = keysToml();
     const { key, mods } = IMAGE_PASTE_INPUT.layers.alacritty;
@@ -113,6 +119,10 @@ describe("the emulators send what the registry says", () => {
     expect(actions).toContainEqual({
       command: { action: "sendInput", input: CSI_U },
       keys: NEWLINE_INPUT.layers.windowsTerminal,
+    });
+    expect(actions).toContainEqual({
+      command: { action: "sendInput", input: CSI_U },
+      keys: "ctrl+enter",
     });
     expect(actions).toContainEqual({
       command: { action: "sendInput", input: IMAGE_PASTE_INPUT.sequence },
@@ -136,6 +146,7 @@ describe("zellij hands it to the pane unchanged", () => {
     // among them. A user keybind wins before that downgrade, so these
     // bytes are the same sequence in the one spelling zellij accepts.
     expect(zellij).toContain(`bind "Shift Enter" { Write ${decimalBytes(CSI_U)}; }`);
+    expect(zellij).toContain(`bind "Ctrl Enter" { Write ${decimalBytes(CSI_U)}; }`);
   });
 });
 
