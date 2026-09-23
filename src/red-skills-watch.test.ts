@@ -242,7 +242,9 @@ describe("the trigger in the shell", () => {
 
   test("is sourced after path.sh, which is what puts red-dev on PATH", async () => {
     const rc = await Bun.file(new URL("../config/bash/rc.sh", import.meta.url)).text();
-    const order = rc.match(/for _red_part in ([^;]+);/)?.[1]?.split(/\s+/) ?? [];
+    const order = [...rc.matchAll(/for _red_part in ([^;]+);/g)].flatMap(
+      (match) => match[1]?.split(/\s+/) ?? [],
+    );
     expect(order).toContain("red-skills-watch");
     expect(order.indexOf("red-skills-watch")).toBeGreaterThan(order.indexOf("path"));
   });

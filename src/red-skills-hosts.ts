@@ -288,12 +288,19 @@ function generator(source: string, script: string): string {
   return join(source, "scripts", script);
 }
 
-/** Where a generator writes down what it created, in the two usual places. */
+/**
+ * Where a generator writes down what it created, in the two usual places —
+ * and, for pi, the JSON manifest its generator actually keeps at
+ * `~/.pi/agent/`. A candidate list that only knew the .txt pair reads a
+ * generator that recorded everything as one that recorded nothing, and pi
+ * then cannot verify on any machine, ever.
+ */
 function manifestCandidates(ctx: AdapterContext, host: string): string[] {
-  return [
+  const usual = [
     join(ctx.config, host, "redskills-install-manifest.txt"),
     join(ctx.home, `.${host}`, "redskills-install-manifest.txt"),
   ];
+  return host === "pi" ? [join(ctx.home, ".pi", "agent", "redskills-install-manifest.json"), ...usual] : usual;
 }
 
 /** Where the activated plugin's payload sits inside the set. */

@@ -122,7 +122,14 @@ export function routerDataDir(
  * newest real version. Null when the manifest row has not run yet.
  */
 export function locateRouterPackage(installRoot: string): string | null {
-  const root = join(installRoot, "npm-9router");
+  for (const dir of ["9router", "npm-9router"]) {
+    const found = packageInInstallDir(join(installRoot, dir));
+    if (found !== null) return found;
+  }
+  return null;
+}
+
+function packageInInstallDir(root: string): string | null {
   let names: string[];
   try {
     names = readdirSync(root);
@@ -457,11 +464,11 @@ async function convergeUnit(
   }
   if ((await packageOf(seams, env)) === null) {
     // The unit is still declared, and enabled below, so the machine is
-    // one `red-dev install 9router` away from a working service. But
+    // one `red-dev install core` away from a working service. But
     // said here, because the unit will exit at once and doctor's
     // "enabled but not running" would send someone to the journal for
     // an answer that is one line long.
-    log.warn("9router: the package is not under mise, so the service has nothing to run — `red-dev install 9router`");
+    log.warn("9router: the package is not under mise, so the service has nothing to run — `red-dev install core`");
   }
   // A unit that hit its start limit refuses `start` until the failure is
   // cleared; this converge may be the fix it was waiting for.
@@ -642,7 +649,7 @@ export async function inspectRouter(p: Platform, seams: RouterSeams = {}): Promi
   const active = (await run(["systemctl", "--user", "is-active", ROUTER_SERVICE])).exitCode === 0;
   if (enabled && active && answering) return [{ name, status: "ok", detail: `answering on ${endpoint}, as a user service` }];
   if ((await packageOf(seams, env)) === null) {
-    return [{ name, status: "drift", detail: "the package is not installed under mise, so the service has nothing to run", fix: "red-dev install 9router" }];
+    return [{ name, status: "drift", detail: "the package is not installed under mise, so the service has nothing to run", fix: "red-dev install core" }];
   }
   if (!enabled) {
     return [{ name, status: "drift", detail: answering ? `answering on ${endpoint}, but the user service is not enabled` : "the user service is not enabled", fix: "red-dev install core" }];
@@ -673,7 +680,7 @@ export async function serveRouter(p: Platform, seams: RouterSeams = {}): Promise
   const { miseToolBin } = await import("./mise-config.ts");
   const pkg = await packageOf(seams, env);
   if (pkg === null) {
-    log.err("9router is not installed — `red-dev install 9router` puts it in place through mise");
+    log.err("9router is not installed — `red-dev install core` puts it in place through mise");
     return ROUTER_EXIT_NOT_INSTALLED;
   }
 

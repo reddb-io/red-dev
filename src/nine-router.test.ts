@@ -106,6 +106,25 @@ describe("finding the package under mise", () => {
   test("null before the manifest row has run", () => {
     expect(locateRouterPackage(mkdtempSync(join(tmpdir(), "red-9router-empty-")))).toBeNull();
   });
+
+  test("finds the package under the aliased tool directory the conf declares", () => {
+    const root = mkdtempSync(join(tmpdir(), "red-9router-alias-"));
+    const pkg = join(root, "9router", "latest", "node_modules", "9router");
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(join(pkg, "cli.js"), "");
+    expect(locateRouterPackage(root)).toBe(pkg);
+  });
+
+  test("the aliased directory wins over a legacy npm-9router one", () => {
+    const root = mkdtempSync(join(tmpdir(), "red-9router-both-"));
+    const legacy = join(root, "npm-9router", "0.5.9", "node_modules", "9router");
+    mkdirSync(legacy, { recursive: true });
+    writeFileSync(join(legacy, "cli.js"), "");
+    const aliased = join(root, "9router", "latest", "node_modules", "9router");
+    mkdirSync(aliased, { recursive: true });
+    writeFileSync(join(aliased, "cli.js"), "");
+    expect(locateRouterPackage(root)).toBe(aliased);
+  });
 });
 
 describe("the spawn the launcher would have made", () => {
@@ -316,7 +335,7 @@ describe("what doctor says", () => {
       packageDir: () => null,
     });
     expect(check?.status).toBe("drift");
-    expect(check?.fix).toBe("red-dev install 9router");
+    expect(check?.fix).toBe("red-dev install core");
   });
 
   test("a foreground `9router` somebody left running is not a service", async () => {
