@@ -347,6 +347,9 @@ const SHIPPED_ZELLIJ_CONFIGS = new Set([
   "f8611722c0b6cbcd30981736bb29ee29b483e80913cf7d3c0462865a2ad704cb",
   // The input-stack repair on top of 1.0.145's tab navigation.
   "dc5ea3895fd0a711d06147871b1e16de3d8daa8231eba4c2f818ff201afffd0b",
+  // Alt+Enter written through as ESC[13;3u, so agents can tell it from
+  // the bare ESC CR zellij forwards with the kitty protocol off.
+  "d72b8187bbd75243bc81836c83a0f59b844b09f26026dcbc5e541e0d940c995e",
 ]);
 
 /**

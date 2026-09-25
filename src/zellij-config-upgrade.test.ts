@@ -33,6 +33,20 @@ function previouslyShipped(): string {
   return legacy;
 }
 
+/**
+ * Today's fixture as it was before Alt+Enter was bound: the binding and
+ * the comment paragraph that explains it removed, nothing else.
+ */
+function withoutAltEnter(config: string): string {
+  const comment = config.indexOf("    //\n    // Alt+Enter gets the same treatment");
+  const end = config.indexOf("    shared_among \"locked\" \"normal\" {", comment);
+  expect(comment).toBeGreaterThan(-1);
+  return (config.slice(0, comment) + config.slice(end)).replace(
+    '        bind "Alt Enter" { Write 27 91 49 51 59 51 117; }\n',
+    "",
+  );
+}
+
 describe("zellij config upgrade", () => {
   test("writes when there is nothing there", () => {
     expect(zellijConfigAction(null, shipped)).toBe("write");
@@ -80,7 +94,7 @@ describe("zellij config upgrade", () => {
     // exact generated tail an arbitrary Ubuntu user would have received.
     const inputSettings = shipped.indexOf("// Zellij's startup tips");
     const keys = shipped.indexOf("// ------------------------------------------------------------- keys");
-    const oldBase = (shipped.slice(0, inputSettings) + shipped.slice(keys)).replace(
+    const oldBase = withoutAltEnter(shipped.slice(0, inputSettings) + shipped.slice(keys)).replace(
       '        bind "Ctrl Enter" { Write 27 91 49 51 59 50 117; }\n',
       "",
     );
@@ -94,6 +108,28 @@ describe("zellij config upgrade", () => {
 copy_command "bash /home/someone/.local/share/red-dev/config/bash/linux-clipboard.sh"
 `;
     expect(zellijConfigAction(generated, shipped)).toBe("upgrade");
+  });
+
+  test("upgrades the 1.0.169 config that forwarded Alt+Enter as ESC CR", () => {
+    // The config every machine had before Alt+Enter was written through.
+    // Recognised both bare and under a Linux desktop's generated tail,
+    // or those machines would never receive the ESC[13;3u binding.
+    const previous = withoutAltEnter(shipped);
+    expect(previous).not.toContain('bind "Alt Enter"');
+    expect(new Bun.CryptoHasher("sha256").update(previous).digest("hex")).toBe(
+      "dc5ea3895fd0a711d06147871b1e16de3d8daa8231eba4c2f818ff201afffd0b",
+    );
+    expect(zellijConfigAction(previous, shipped)).toBe("upgrade");
+    const desktop = `${previous}
+// Generated for this target by red-dev.
+//
+// The clipboard zellij should write to. Without it zellij uses OSC 52,
+// which asks the terminal to do the copying and cannot tell whether it
+// did — so a selection reports success and the clipboard keeps whatever
+// was in it.
+copy_command "bash /home/someone/.local/share/red-dev/config/bash/linux-clipboard.sh"
+`;
+    expect(zellijConfigAction(desktop, shipped)).toBe("upgrade");
   });
 
   test("upgrades the stub whatever comment sits above it", () => {
