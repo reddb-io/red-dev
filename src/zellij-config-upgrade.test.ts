@@ -34,17 +34,21 @@ function previouslyShipped(): string {
 }
 
 /**
- * Today's fixture as it was before Alt+Enter was bound: the binding and
- * the comment paragraph that explains it removed, nothing else.
+ * Recreate the earlier shipped config: before Alt+Enter was bound and
+ * before Ctrl+Tab was passed through to pane applications.
  */
 function withoutAltEnter(config: string): string {
   const comment = config.indexOf("    //\n    // Alt+Enter gets the same treatment");
   const end = config.indexOf("    shared_among \"locked\" \"normal\" {", comment);
   expect(comment).toBeGreaterThan(-1);
-  return (config.slice(0, comment) + config.slice(end)).replace(
-    '        bind "Alt Enter" { Write 27 91 49 51 59 51 117; }\n',
-    "",
-  );
+  return (config.slice(0, comment) + config.slice(end))
+    .replace('        bind "Alt Enter" { Write 27 91 49 51 59 51 117; }\n', "")
+    .replace(
+      '    shared_among "normal" "locked" {\n',
+      '    shared_among "normal" "locked" {\n' +
+        '        bind "Ctrl Tab" { GoToNextTab; }\n' +
+        '        bind "Ctrl Shift Tab" { GoToPreviousTab; }\n',
+    );
 }
 
 describe("zellij config upgrade", () => {

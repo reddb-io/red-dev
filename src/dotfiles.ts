@@ -350,6 +350,8 @@ const SHIPPED_ZELLIJ_CONFIGS = new Set([
   // Alt+Enter written through as ESC[13;3u, so agents can tell it from
   // the bare ESC CR zellij forwards with the kitty protocol off.
   "d72b8187bbd75243bc81836c83a0f59b844b09f26026dcbc5e541e0d940c995e",
+  // Leave Ctrl+Tab and Ctrl+Shift+Tab to applications inside the pane.
+  "37d2918b70aa2fc97c8b7b3e0f43f583576f75d4b1a79a67aeeb762cc81a5002",
 ]);
 
 /**
