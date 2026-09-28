@@ -518,7 +518,10 @@ rather than pinning the whole converge indefinitely.
 Convergence makes the input gestures a workstation contract rather than an
 agent-specific surprise. Shift+Enter is emitted as CSI-u by Alacritty and
 Windows Terminal, mapped to a newline in Claude Code, and stated explicitly in
-RedCode's OpenCode-compatible `tui.json`; Codex receives the same terminal sequence. Alt+V sends
+RedCode's OpenCode-compatible `tui.json`; Codex receives the same terminal sequence. Inside
+zellij, Alt+Enter is written through as CSI-u (`ESC[13;3u`) rather than a bare
+`ESC CR`, so agents can tell it apart from Escape and Enter; bash turns it into
+a newline, as ble.sh already does for `M-RET`. Alt+V sends
 the raw image-paste gesture on Alacritty and Windows Terminal, while
 Ctrl+Shift+V remains text paste. Plain Shift+V cannot be used because it is the
 ordinary uppercase `V`. Every config merge is non-destructive: malformed JSON
