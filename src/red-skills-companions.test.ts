@@ -42,6 +42,7 @@ import {
   pruneCompanionAssets,
   readCompanionRegistry,
   reconcileCompanions,
+  unitExecutable,
   redSkillsCompanionReport,
   redSkillsCompanionRows,
   removeCompanions,
@@ -193,6 +194,8 @@ function runner(
       calls.push(cmd);
       const forced = code(cmd);
       if (forced !== 0) return forced;
+      // A healthy machine: nothing has failed, so `is-failed` says no.
+      if (cmd[0] === "systemctl" && cmd.includes("is-failed")) return 1;
 
       if (cmd[0] === "herdr" && cmd[1] === "plugin" && cmd[2] === "link") {
         mkdirSync(join(m.config, "herdr"), { recursive: true });
@@ -922,5 +925,86 @@ describe("installing the extension on Windows", () => {
 
     const plan = vscode.plan(companionCtx(source, ["codium"], () => null));
     expect(plan.steps[0]?.argv[0]).toBe("codium");
+  });
+});
+
+// -------------------------------------------------------- the daemon's unit
+
+describe("a daemon unit that runs an executable which is gone", () => {
+  const unitDir = (m: Machine) => join(m.config, "systemd", "user");
+  const dropIn = (m: Machine, exec: string) => {
+    mkdirSync(join(unitDir(m), "redskilled.service.d"), { recursive: true });
+    writeFileSync(
+      join(unitDir(m), "redskilled.service.d", "10-current-entry.conf"),
+      `[Service]\nExecStart=\nExecStart=${exec} /bundle.mjs serve\n`,
+    );
+  };
+
+  test("reads the executable systemd would run, drop-ins applied", () => {
+    const m = machine();
+    mkdirSync(unitDir(m), { recursive: true });
+    writeFileSync(join(unitDir(m), "redskilled.service"), "[Service]\nExecStart=/old/node /bundle.mjs\n");
+    expect(unitExecutable(unitDir(m), "redskilled.service")).toBe("/old/node");
+
+    dropIn(m, "/new/node");
+    expect(unitExecutable(unitDir(m), "redskilled.service")).toBe("/new/node");
+    // A prefix systemd allows is not part of the path.
+    writeFileSync(join(unitDir(m), "dit.service"), '[Service]\nExecStart=-"/opt/my dir/dit" run\n');
+    expect(unitExecutable(unitDir(m), "dit.service")).toBe("/opt/my dir/dit");
+    expect(unitExecutable(unitDir(m), "absent.service")).toBeNull();
+  });
+
+  test("is not current: the next converge repoints it, then starts it if it had failed", async () => {
+    const m = machine();
+    await reconcile(m);
+    dropIn(m, join(m.home, "mise", "node", "26.9.0", "bin", "node"));
+
+    const calls: string[][] = [];
+    const base = runner(m);
+    const run = async (cmd: string[]) => {
+      calls.push(cmd);
+      // What `redskilled unit install` does: repoint ExecStart at a node that exists.
+      if (cmd.at(-2) === "unit" && cmd.at(-1) === "install") {
+        mkdirSync(join(m.home, "node", "bin"), { recursive: true });
+        writeFileSync(join(m.home, "node", "bin", "node"), "");
+        dropIn(m, join(m.home, "node", "bin", "node"));
+        return 0;
+      }
+      // Here systemd does say the unit failed.
+      if (cmd[0] === "systemctl" && cmd.includes("is-failed")) return 0;
+      return base.run(cmd);
+    };
+    const out = await reconcile(m, { run });
+
+    expect(statusOf(out, "redskilled")).toBe("reconciled");
+    const said = lines(calls);
+    expect(said).toContain(`${join(m.bin, "redskilled")} unit install`);
+    expect(said.indexOf("systemctl --user reset-failed redskilled.service")).toBeGreaterThan(
+      said.indexOf(`${join(m.bin, "redskilled")} unit install`),
+    );
+    expect(said).toContain("systemctl --user restart redskilled.service");
+  });
+
+  test("reports it rather than claiming success when the repoint did not take", async () => {
+    const m = machine();
+    await reconcile(m);
+    dropIn(m, join(m.home, "mise", "node", "26.9.0", "bin", "node"));
+
+    const out = await reconcile(m);
+    expect(statusOf(out, "redskilled")).toBe("failed");
+    expect(reasonOf(out, "redskilled")).toContain("no longer exists");
+  });
+
+  test("an executable that exists leaves it current, and a running daemon is never restarted", async () => {
+    const m = machine();
+    await reconcile(m);
+    mkdirSync(join(m.home, "node", "bin"), { recursive: true });
+    writeFileSync(join(m.home, "node", "bin", "node"), "");
+    dropIn(m, join(m.home, "node", "bin", "node"));
+
+    const recorded = runner(m);
+    const out = await reconcile(m, { run: recorded.run });
+    expect(statusOf(out, "redskilled")).toBe("current");
+    expect(recorded.calls).toEqual([]);
   });
 });

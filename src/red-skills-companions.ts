@@ -51,7 +51,7 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 
 import { log } from "./log.ts";
 import { redSkillsCurrentPosix } from "./red-skills-root.ts";
@@ -438,6 +438,52 @@ const runtimes: CompanionAdapter = {
 };
 
 /**
+ * The executable systemd would run for a user unit, drop-ins applied. PURE
+ * apart from reading the two places systemd reads.
+ *
+ * `ExecStart=` empty resets the list, so the last non-empty value in unit
+ * then drop-ins (which apply in name order) is the one that runs. The
+ * prefixes systemd allows before the command (`-`, `@`, `:`, `+`, `!`) are
+ * not part of the path.
+ */
+export function unitExecutable(unitDir: string, unit: string): string | null {
+  const files = [join(unitDir, unit)];
+  try {
+    const dropins = join(unitDir, `${unit}.d`);
+    for (const name of readdirSync(dropins).sort()) {
+      if (name.endsWith(".conf")) files.push(join(dropins, name));
+    }
+  } catch {
+    // No drop-in directory is the ordinary case.
+  }
+  let command: string | null = null;
+  for (const file of files) {
+    let text: string;
+    try {
+      text = readFileSync(file, "utf8");
+    } catch {
+      continue;
+    }
+    for (const line of text.split(/\r?\n/)) {
+      const match = /^ExecStart=(.*)$/.exec(line.trim());
+      if (!match) continue;
+      const value = (match[1] ?? "").trim();
+      command = value === "" ? null : value;
+    }
+  }
+  if (command === null) return null;
+  const bare = command.replace(/^[-@:+!]+/, "");
+  const quoted = /^"([^"]*)"/.exec(bare);
+  return quoted ? (quoted[1] ?? null) : (bare.split(/\s+/)[0] ?? null);
+}
+
+/** The executable redskilled.service runs, if it is an absolute path that is gone. */
+function redskilledUnitBroken(ctx: Pick<CompanionContext, "config">): string | null {
+  const executable = unitExecutable(join(ctx.config, "systemd", "user"), "redskilled.service");
+  return executable !== null && isAbsolute(executable) && !existsSync(executable) ? executable : null;
+}
+
+/**
  * The `redskilled` daemon.
  *
  * Its own record rather than a sixth runtime, because it is the one
@@ -487,6 +533,19 @@ const redskilled: CompanionAdapter = {
       ],
     });
   },
+  // The unit pins the absolute path of the node that wrote it. A node
+  // upgrade that later drops that version leaves a unit which fails with
+  // 203/EXEC on every start while this record still says "current" (the set
+  // has not changed), and nothing else would ever look. Reported as not
+  // current, so the next reconcile repoints it.
+  check: async (ctx) => {
+    if (!ctx.platform.caps.systemd) return { ok: true, witness: "" };
+    const executable = redskilledUnitBroken(ctx);
+    if (executable !== null) {
+      return { ok: false, reason: `redskilled.service runs ${executable}, which no longer exists` };
+    }
+    return { ok: true, witness: "" };
+  },
   settle: async (ctx, run) => {
     const tray = firstPath(
       join(ctx.source, "artifacts", TRAY_RUNTIME),
@@ -515,6 +574,15 @@ const redskilled: CompanionAdapter = {
       }
     }
     const launcher = join(ctx.bin, ctx.platform.os === "windows" ? "redskilled.cmd" : "redskilled");
+    // `provision` starts the daemon through its supervisor unit and waits for
+    // the socket, so a unit that runs an executable which is gone fails it
+    // before anything gets the chance to repoint the unit. Repoint first, and
+    // clear the start limit the failed attempts ran into.
+    if (ctx.platform.caps.systemd && redskilledUnitBroken(ctx)) {
+      if ((await run([launcher, "unit", "install"])) !== 0) return "redskilled supervisor unit could not be repointed";
+      await run(["systemctl", "--user", "daemon-reload"]);
+      await run(["systemctl", "--user", "reset-failed", "redskilled.service"]);
+    }
     if ((await run([launcher, "provision"])) !== 0) return "redskilled provision failed";
     // Provisioning preserves an existing unit as operator-owned. The explicit
     // unit command is the daemon's managed upgrade surface and repoints
@@ -1126,6 +1194,20 @@ export async function reconcileCompanions(
       log.warn(`${adapter.name}: ${settled}`);
       out.push({ companion: adapter.name, status: "failed", reason: settled });
       continue;
+    }
+
+    // A daemon that failed (for instance on an executable that no longer
+    // existed, which the settle above just repointed) is not running, so
+    // starting it again crosses nothing staged-update protects. One that is
+    // running is never touched: this is asked only when no process is up,
+    // and `is-failed` answers only for a failure.
+    if (adapter.name === "redskilled" && ctx.platform.caps.systemd && !running("redskilled")) {
+      if ((await run(["systemctl", "--user", "is-failed", "--quiet", "redskilled.service"])) === 0) {
+        await run(["systemctl", "--user", "daemon-reload"]);
+        await run(["systemctl", "--user", "reset-failed", "redskilled.service"]);
+        await run(["systemctl", "--user", "restart", "redskilled.service"]);
+        log.ok("redskilled: restarted after its unit was repointed");
+      }
     }
 
     const check = adapter.check ? await adapter.check(ctx) : ({ ok: true, witness: "" } as CompanionCheck);
