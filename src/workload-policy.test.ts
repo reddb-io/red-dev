@@ -393,6 +393,46 @@ describe("workload policy", () => {
     }
   });
 
+  test("a mise-managed agent's own `update` becomes `red-dev agents update`", async () => {
+    if (process.platform === "win32") return;
+    const dir = mkdtempSync(`${tmpdir()}/red-dev-agent-update-`);
+    const bin = `${dir}/bin`;
+    mkdirSync(bin);
+    try {
+      // The vendor updater must never run: it would install a second
+      // copy that the mise shim shadows.
+      writeFileSync(`${bin}/claude`, '#!/bin/sh\nprintf "VENDOR %s\\n" "$*"\n');
+      writeFileSync(`${bin}/red-dev`, '#!/bin/sh\nprintf "RED-DEV %s\\n" "$*"\n');
+      for (const command of ["claude", "red-dev"]) chmodSync(`${bin}/${command}`, 0o755);
+      const shell = `${dir}/workload.sh`;
+      writeFileSync(shell, workloadPolicy(WORKSTATION).shell);
+      const run = async (script: string) => {
+        const proc = Bun.spawn(["bash", "--noprofile", "--norc", "-c", `source "${shell}"; ${script}`], {
+          env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}`, RED_ENV: "windows", ZELLIJ: "" },
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+        const [stdout, stderr] = await Promise.all([
+          new Response(proc.stdout).text(),
+          new Response(proc.stderr).text(),
+          proc.exited,
+        ]);
+        return { stdout, stderr };
+      };
+
+      const update = await run("claude update");
+      expect(update.stdout).toBe("RED-DEV agents update\n");
+      expect(update.stderr).toContain("kept current by mise");
+
+      // Anything else, including `update` with more to say, is the
+      // vendor's own business and passes through untouched.
+      expect((await run("claude --version")).stdout).toBe("VENDOR --version\n");
+      expect((await run("claude update --check")).stdout).toBe("VENDOR update --check\n");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("preserves spaces and glob characters in wrapped command arguments", async () => {
     if (process.platform === "win32") return;
     const dir = mkdtempSync(`${tmpdir()}/red-dev-workload-argv-`);

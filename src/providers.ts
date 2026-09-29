@@ -31,6 +31,7 @@ import {
 } from "./apt-upgrade.ts";
 import { parseChecksums, pickChecksumAsset, sha256Hex, verifyChecksum } from "./checksum.ts";
 import { providerFor, TOOLS, type Provider, type Tool } from "./manifest.ts";
+import { AGENTS } from "./agents.ts";
 import {
   convergeMiseConfig,
   MISE_NO_RELEASE_AGE,
@@ -931,8 +932,10 @@ async function linkRedSkillsCore(platform: Platform): Promise<void> {
  * would replace the person's own.
  */
 export function miseReleaseAgeEnv(platform: Platform): Record<string, string> {
-  const specs = releaseAgeExcludes(miseEntries(platform));
-  return specs.length > 0 ? { MISE_MINIMUM_RELEASE_AGE_EXCLUDES: specs.join(",") } : {};
+  const entries = miseEntries(platform);
+  if (entries.length === 0) return {};
+  const specs = releaseAgeExcludes(entries, AGENTS);
+  return { MISE_MINIMUM_RELEASE_AGE_EXCLUDES: specs.join(",") };
 }
 
 /**

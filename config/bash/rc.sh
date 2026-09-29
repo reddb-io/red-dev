@@ -189,6 +189,18 @@ for _red_part in path shared build-resources zellij; do
 done
 unset _red_part _red_file
 
+# mise is the only updater of the agents it installed.
+#
+# Claude Code's own updater does not update the copy mise put on PATH: it
+# downloads into ~/.local/share/claude/versions and repoints
+# ~/.local/bin/claude, a second install (675 MB here) that the mise shim
+# shadows, so every "update" left the running binary where it was and grew
+# the disk. `red-dev agents update` (or a plain `claude update`, see
+# build-resources.sh) moves the mise-managed copy instead.
+if [ -d "${MISE_DATA_DIR:-$HOME/.local/share/mise}/installs/claude" ]; then
+  export DISABLE_AUTOUPDATER=1
+fi
+
 # ble.sh, on by default. RED_BLE=0 opts out.
 #
 # It loads after zellij has either taken over the terminal or declined to,

@@ -292,21 +292,26 @@ const HEADER = [
  * plus a log line on every single run.
  */
 /**
- * The suite is exempt from a `minimum_release_age` gate.
+ * Everything red-dev curates is exempt from a `minimum_release_age` gate.
  *
  * mise can hold a tool back until a release has been public for some
  * time — a good default against a compromised or hastily-yanked
  * upstream, and one a person sets globally for everything they install.
- * Applied to this organisation it produces a machine that cannot be
- * fixed: red-dev cut 1.0.64 to move a directory, a WSL distro with a
- * 24h gate kept resolving `latest` to 1.0.51, and the older binary
- * recreated the directory the newer one had just moved, on every run.
- * The updater being subject to the delay means the delay outlives
+ * Applied to what red-dev itself installs it produces a machine that
+ * cannot be fixed: red-dev cut 1.0.64 to move a directory, a WSL distro
+ * with a 24h gate kept resolving `latest` to 1.0.51, and the older
+ * binary recreated the directory the newer one had just moved, on every
+ * run. The updater being subject to the delay means the delay outlives
  * whatever it was protecting against.
  *
- * The exemption is narrow on purpose: it names the reddb-io specs the
- * fragment declares and nothing else, so the gate a person set still
- * covers node, python, every tool they added themselves.
+ * The same holds for the agents (claude, codex, redcode, ...) and the
+ * catalogue tools: a short list of high-quality publishers we chose on
+ * purpose, whose release the person wants the day it ships. A quarantine
+ * there only produces "update available" banners that `mise upgrade`
+ * then declines to act on.
+ *
+ * What stays outside the exemption is everything the person added to
+ * their own config.toml: the gate they set still covers those.
  *
  * ## Written twice, because the fragment alone does not carry it
  *
@@ -326,19 +331,30 @@ const HEADER = [
  * additionally passes the same list as `MISE_MINIMUM_RELEASE_AGE_EXCLUDES`
  * on its own invocations of mise (`runMise` in src/providers.ts), where
  * the environment outranks every config file. Those invocations name
- * suite tools one at a time, so replacing the list for the length of
+ * curated tools one at a time, so replacing the list for the length of
  * one `mise install` reaches nothing else the person owns.
+ *
+ * mise matches an exclusion by the name the tool is declared under, so
+ * both the registry short name (`claude`) and the backend-qualified spec
+ * (`github:reddb-io/redcode`) work; verified against mise 2026.9.
  */
-export function releaseAgeExcludes(entries: MiseEntry[]): string[] {
-  return [...new Set(entries.filter((e) => isOurs(e.spec)).map((e) => e.spec))].sort();
+export function releaseAgeExcludes(
+  entries: readonly MiseEntry[],
+  hosts: readonly { mise?: string }[] = [],
+): string[] {
+  const specs = [
+    ...entries.map((e) => e.spec),
+    ...hosts.flatMap((h) => (h.mise ? [h.mise] : [])),
+  ];
+  return [...new Set(specs)].sort();
 }
 
 /**
  * No release-age gate at all, for the mise calls red-dev makes itself.
  *
- * The exemption above covered the suite and stopped there, so the agent
- * hosts and runtimes red-dev installs still waited out mise's default
- * day. Measured on the maintainer's machine: Claude Code 2.1.284 was
+ * The exemption above names curated tools, and the runtimes red-dev
+ * installs (node, python, ...) are not among them, so they still waited
+ * out mise's default day. Measured on the maintainer's machine: Claude Code 2.1.284 was
  * published, the native installer had it, and every mise path — `mise
  * upgrade`, `red-dev agents update` — kept answering 2.1.283 as current
  * for another nineteen hours. A machine that red-dev keeps on `latest`
@@ -347,18 +363,17 @@ export function releaseAgeExcludes(entries: MiseEntry[]): string[] {
  *
  * Environment, not config: it outranks whatever the person set in their
  * own `config.toml`, and it reaches only the commands red-dev runs.
- * Their own `mise upgrade` keeps whatever gate they chose for it.
+ * Their own `mise upgrade` keeps whatever gate they chose for it, apart
+ * from the curated tools the exemption above names.
  */
 export const MISE_NO_RELEASE_AGE: Readonly<Record<string, string>> = {
   MISE_MINIMUM_RELEASE_AGE: "0",
 };
 
-/** A spec this organisation publishes, by backend and owner rather than by name. */
-function isOurs(spec: string): boolean {
-  return /^(github|npm):@?reddb-io[/-]/.test(spec);
-}
-
-export function renderMiseConfig(entries: MiseEntry[]): string {
+export function renderMiseConfig(
+  entries: MiseEntry[],
+  hosts: readonly { mise?: string }[] = [],
+): string {
   const sorted = [...entries].sort((a, b) => key(a).localeCompare(key(b)));
 
   const out: string[] = [
@@ -375,11 +390,11 @@ export function renderMiseConfig(entries: MiseEntry[]): string {
     'fetch_remote_versions_cache = "0s"',
   ];
 
-  const excludes = releaseAgeExcludes(sorted);
+  const excludes = releaseAgeExcludes(sorted, hosts);
   if (excludes.length > 0) {
     out.push(
       "",
-      "# A release-age gate must not reach the tools that carry the fix.",
+      "# A release-age gate must not hold back what red-dev curates.",
       "# See releaseAgeExcludes in src/mise-config.ts.",
       `minimum_release_age_excludes = [${excludes.map((s) => str(s)).join(", ")}]`,
     );
@@ -495,11 +510,11 @@ export interface ConvergeMiseConfigResult {
  */
 export function convergeMiseConfig(
   p: Platform,
-  opts: { home?: string; tools?: readonly Tool[] } = {},
+  opts: { home?: string; tools?: readonly Tool[]; hosts?: readonly { mise?: string }[] } = {},
 ): ConvergeMiseConfigResult {
   const path = miseConfigPath(opts.home);
   const entries = miseEntries(p, opts.tools ?? TOOLS);
-  const desired = renderMiseConfig(entries);
+  const desired = renderMiseConfig(entries, opts.hosts ?? AGENTS);
 
   const current = existsSync(path) ? readFileSync(path, "utf8") : null;
   if (current === desired) return { path, changed: false, entries: entries.length };

@@ -10,7 +10,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -22,6 +22,7 @@ import {
   migrateMiseSuiteToSingleIdentity,
   migrateMiseToolsToLatest,
   migrationLedgerPath,
+  vendorClaudeCopy,
   readMigrationLedger,
   writeMigrationLedger,
 } from "./migrations.ts";
@@ -184,5 +185,46 @@ describe("the ledger's home", () => {
     const source = await Bun.file("src/migrations.ts").text();
     expect(source).not.toContain("prefs.migrations");
     expect(source).not.toContain("{ migrations:");
+  });
+});
+
+describe("the vendor claude copy", () => {
+  function home(): { home: string; miseData: string } {
+    const root = mkdtempSync(join(tmpdir(), "red-vendor-claude-"));
+    mkdirSync(join(root, ".local", "bin"), { recursive: true });
+    mkdirSync(join(root, ".local", "share", "claude", "versions"), { recursive: true });
+    return { home: root, miseData: join(root, ".local", "share", "mise") };
+  }
+
+  test("is the symlink into the vendor's versions directory, once mise has claude", () => {
+    const { home: h, miseData } = home();
+    writeFileSync(join(h, ".local", "share", "claude", "versions", "2.1.284"), "");
+    symlinkSync(join(h, ".local", "share", "claude", "versions", "2.1.284"), join(h, ".local", "bin", "claude"));
+    mkdirSync(join(miseData, "installs", "claude"), { recursive: true });
+
+    expect(vendorClaudeCopy(h, miseData)).toEqual({
+      link: join(h, ".local", "bin", "claude"),
+      versions: join(h, ".local", "share", "claude", "versions"),
+    });
+  });
+
+  test("is left alone until mise has a claude of its own", () => {
+    const { home: h, miseData } = home();
+    writeFileSync(join(h, ".local", "share", "claude", "versions", "2.1.284"), "");
+    symlinkSync(join(h, ".local", "share", "claude", "versions", "2.1.284"), join(h, ".local", "bin", "claude"));
+    expect(vendorClaudeCopy(h, miseData)).toBeNull();
+  });
+
+  test("never touches a regular file or a link that points elsewhere", () => {
+    const { home: h, miseData } = home();
+    mkdirSync(join(miseData, "installs", "claude"), { recursive: true });
+
+    writeFileSync(join(h, ".local", "bin", "claude"), "#!/bin/sh\n");
+    expect(vendorClaudeCopy(h, miseData)).toBeNull();
+
+    rmSync(join(h, ".local", "bin", "claude"));
+    writeFileSync(join(h, "mine"), "");
+    symlinkSync(join(h, "mine"), join(h, ".local", "bin", "claude"));
+    expect(vendorClaudeCopy(h, miseData)).toBeNull();
   });
 });

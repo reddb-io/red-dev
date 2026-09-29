@@ -23,8 +23,8 @@
  *    machine does not look like it silently did something.
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 
 import { log } from "./log.ts";
 import { providerFor, TOOLS } from "./manifest.ts";
@@ -729,7 +729,60 @@ return {}
       }
     },
   },
+  {
+    id: "2026-09-29-claude-vendor-copy-retired",
+    describe: "retire the copy Claude Code's own updater installed beside mise's",
+    applies: (p) => p.os !== "windows" && vendorClaudeCopy() !== null,
+    run: async () => {
+      const copy = vendorClaudeCopy();
+      if (copy === null) return;
+      const mise = Bun.which("mise");
+      if (!mise) throw new Error("mise is not installed yet — vendor claude left intact");
+
+      // The replacement is proved before the original goes: `mise where`
+      // names the install tree itself, which `which claude` cannot, since
+      // that may answer with the very symlink being retired.
+      const where = Bun.spawnSync([mise, "where", "claude"], { stdout: "pipe", stderr: "ignore" });
+      if (where.exitCode !== 0 || where.stdout.toString().trim() === "") {
+        throw new Error("claude has no mise replacement yet — vendor copy left intact");
+      }
+
+      // Unlinking the image a running claude executes is fine on Linux;
+      // the inode lives until that process exits.
+      rmSync(copy.link, { force: true });
+      rmSync(copy.versions, { recursive: true, force: true });
+      log.plain(`       removed ${copy.link} and ${copy.versions}; mise is the only owner of claude`);
+    },
+  },
 ];
+
+/**
+ * The second claude that Claude Code's own updater leaves behind.
+ *
+ * Its updater downloads into ~/.local/share/claude/versions and points
+ * ~/.local/bin/claude at the newest one, which the mise shim then shadows
+ * on PATH. Only that exact shape is ours to retire: a symlink in
+ * ~/.local/bin whose target sits inside the vendor's versions directory,
+ * and only where mise has its own claude install. A regular file, or a link
+ * anywhere else, was put there by a person.
+ */
+export function vendorClaudeCopy(
+  home = process.env["HOME"] ?? "",
+  miseData = process.env["MISE_DATA_DIR"] ?? join(home, ".local", "share", "mise"),
+): { link: string; versions: string } | null {
+  if (!home) return null;
+  const link = join(home, ".local", "bin", "claude");
+  const versions = join(home, ".local", "share", "claude", "versions");
+  if (!existsSync(join(miseData, "installs", "claude"))) return null;
+  try {
+    if (!lstatSync(link).isSymbolicLink()) return null;
+    const target = resolve(dirname(link), readlinkSync(link));
+    if (!target.startsWith(`${versions}/`)) return null;
+  } catch {
+    return null;
+  }
+  return { link, versions };
+}
 
 /**
  * The ~/.local/bin binaries left behind by the release provider.

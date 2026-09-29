@@ -16,6 +16,7 @@
  * reddb-io release published yet.
  */
 
+import { AGENTS } from "./agents.ts";
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, chmodSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -299,8 +300,8 @@ describe("the binary of a mise-installed tool", () => {
 describe("the release-age exemption", () => {
   const entries = miseEntries(WINDOWS);
 
-  test("names every reddb-io spec the fragment declares, and only those", () => {
-    const excludes = releaseAgeExcludes(entries);
+  test("names every curated spec: the fragment's tools and the agents mise owns", () => {
+    const excludes = releaseAgeExcludes(entries, AGENTS);
     expect(excludes).toContain("github:reddb-io/red-dev");
     expect(excludes).toContain("npm:@reddb-io/red-skills");
     // The plugin packages especially: a composed set is the oldest
@@ -310,7 +311,12 @@ describe("the release-age exemption", () => {
     expect(excludes).toContain("npm:@reddb-io/red-skills-dev");
     expect(excludes).toContain("npm:@reddb-io/red-skills-memory");
     expect(excludes).toContain("npm:@reddb-io/red-skills-brain");
-    for (const spec of excludes) expect(spec).toMatch(/reddb-io/);
+    // The agents are adopted with `mise use -g` into the person's own
+    // config, so no fragment entry names them; they are exempt anyway.
+    expect(excludes).toContain("claude");
+    expect(excludes).toContain("codex");
+    // Nothing the person declared themselves is ever in this list.
+    expect(excludes).not.toContain("kubectl");
   });
 
   test("goes on red-dev's own mise invocations, where it outranks a config file", async () => {
@@ -319,7 +325,7 @@ describe("the release-age exemption", () => {
     // variable is what actually carries the exemption on their machine.
     const { miseReleaseAgeEnv } = await import("./providers.ts");
     const env = miseReleaseAgeEnv(WINDOWS);
-    expect(env["MISE_MINIMUM_RELEASE_AGE_EXCLUDES"]?.split(",")).toEqual(releaseAgeExcludes(entries));
+    expect(env["MISE_MINIMUM_RELEASE_AGE_EXCLUDES"]?.split(",")).toEqual(releaseAgeExcludes(entries, AGENTS));
   });
 
   test("declares nothing on a platform that gets nothing from mise", async () => {

@@ -82,6 +82,8 @@ interface ResourceDomains {
 }
 
 const AGENT_COMMANDS = "claude codex opencode redcode gemini pi hermes muse";
+/** Agents whose release mise owns, so their own `update` must not run. */
+const MISE_AGENT_COMMANDS = "claude codex redcode gemini pi";
 const BUILD_COMMANDS = "cargo rustc cmake ctest make ninja gcc g++ clang clang++ bun pnpm npm";
 
 export function workloadLogicalCpuCount(): number {
@@ -396,6 +398,18 @@ _red_dev_run_control() {
 }
 
 _red_dev_run_agent() {
+  # \`<agent> update\` is a vendor self-updater. On a mise-managed host it
+  # installs a second copy the shim shadows, so the running binary never
+  # moves. red-dev owns the decision of how each host is updated.
+  if [ "$#" -eq 2 ] && [ "$2" = "update" ] && command -v red-dev >/dev/null 2>&1; then
+    case " ${MISE_AGENT_COMMANDS} " in
+      *" $1 "*)
+        printf 'red-dev: %s is kept current by mise; running red-dev agents update\n' "$1" >&2
+        red-dev agents update
+        return $?
+        ;;
+    esac
+  fi
   if [ "\${RED_ENV:-server}" = "windows" ] || [ "\${RED_DEV_HEAVY_SCOPE:-1}" != "1" ]; then
     command "$@"
     return $?
