@@ -74,6 +74,53 @@ describe("RedRouter service contract", () => {
     expect(calls).toContainEqual(["systemctl", "--user", "restart", "red-router.service"]);
   });
 
+  describe("a restart that reports failure", () => {
+    /** A live router whose definition moved, with `restart` failing and `is-active` scripted. */
+    async function converge(isActive: number[], answering: boolean) {
+      const home = mkdtempSync(join(tmpdir(), "red-router-restart-race-"));
+      const unit = join(home, ".config/systemd/user/red-router.service");
+      mkdirSync(join(home, ".config/systemd/user"), { recursive: true });
+      writeFileSync(unit, "ExecStart=/old/red-router\n");
+      const calls: string[][] = [];
+      let polls = 0;
+      const outcome = convergeRouterAutostart(SYSTEMD, {
+        home,
+        routerBinary: "/fixture/red-router",
+        miseBinary: null,
+        answering: async () => answering,
+        sleep: async () => {},
+        run: async (argv) => {
+          calls.push(argv);
+          if (argv.join(" ") === "systemctl --user is-active red-router.service") {
+            return { exitCode: isActive[Math.min(polls++, isActive.length - 1)] ?? 0 };
+          }
+          if (argv[0] === "/fixture/red-router") writeFileSync(unit, "ExecStart=/new/red-router\n");
+          if (argv.includes("restart")) return { exitCode: 1 };
+          return { exitCode: argv.includes("is-enabled") ? 1 : 0 };
+        },
+      });
+      return { outcome, calls };
+    }
+
+    test("is not a failure when the supervisor's retry brings the router up", async () => {
+      // Was active before the restart, then activating twice, then serving:
+      // the shape of a start that lost the port to the old server for a moment.
+      const { outcome, calls } = await converge([0, 3, 3, 0], true);
+      expect(await outcome).toBe("installed");
+      expect(calls.filter((argv) => argv.includes("is-active"))).toHaveLength(4);
+    });
+
+    test("still fails when the router never comes back", async () => {
+      const { outcome } = await converge([0, 3], false);
+      await expect(outcome).rejects.toThrow("could not be restarted");
+    });
+
+    test("does not count an active unit whose port is silent as serving", async () => {
+      const { outcome } = await converge([0, 0], false);
+      await expect(outcome).rejects.toThrow("could not be restarted");
+    });
+  });
+
   test("mise postinstall uses the exact package it just installed and retries a transient failure", async () => {
     const home = mkdtempSync(join(tmpdir(), "red-router-mise-postinstall-"));
     const installPath = join(home, "mise-install");

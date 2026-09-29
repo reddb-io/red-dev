@@ -25,6 +25,8 @@ export interface RouterSeams {
   routerBinary?: string | null;
   miseBinary?: string | null;
   answering?: () => Promise<boolean>;
+  /** Waits between polls after a restart that reported failure. */
+  sleep?: (ms: number) => Promise<void>;
   startHidden?: (runner: string, wrapper: string) => void;
   hiddenRunner?: () => Promise<string | null>;
 }
@@ -108,6 +110,43 @@ function legacyUnitPath(home: string): string {
 
 function routerUnitPath(home: string): string {
   return `${home}/.config/systemd/user/${ROUTER_SERVICE}`;
+}
+
+/**
+ * How long a restart that reported failure is given to come back: 30 polls
+ * two seconds apart. The unit's own retry waits RestartSec=5 and the router
+ * then takes about five seconds to answer, so a minute is generous without
+ * being open-ended.
+ */
+const ROUTER_RESTART_POLL_MS = 2_000;
+const ROUTER_RESTART_POLLS = 30;
+
+/**
+ * Whether the router is serving after a `systemctl restart` said it failed.
+ *
+ * The unit is `Restart=on-failure`, and a restart can lose a race the exit
+ * code cannot explain: the old server still held the port for a moment, the
+ * new one printed "Port 25050 is already in use" and exited, `systemctl
+ * restart` reported that, and five seconds later the supervisor's own retry
+ * started it fine. Reading the exit code as the verdict made a mise upgrade
+ * fail its postinstall against a router that was up and healthy. The
+ * question is whether it serves, so that is what is asked: active, and
+ * answering on its port.
+ */
+async function restartRecovered(
+  run: Awaited<ReturnType<typeof runner>>,
+  seams: RouterSeams,
+  env: NodeJS.ProcessEnv,
+): Promise<boolean> {
+  const sleep = seams.sleep ?? ((ms: number) => Bun.sleep(ms));
+  for (let poll = 0; poll < ROUTER_RESTART_POLLS; poll++) {
+    const active = (await run(["systemctl", "--user", "is-active", ROUTER_SERVICE])).exitCode === 0;
+    if (active && (seams.answering ? await seams.answering() : await portAnswers(routerPort(env), routerHost(env)))) {
+      return true;
+    }
+    await sleep(ROUTER_RESTART_POLL_MS);
+  }
+  return false;
 }
 
 /** A live process owes one restart exactly when its generated definition moved. */
@@ -219,7 +258,10 @@ async function convergeLinux(p: Platform, seams: RouterSeams, env: NodeJS.Proces
     if (routerServiceNeedsRestart(before, after, wasActive)) {
       const restarted = await run(["systemctl", "--user", "restart", ROUTER_SERVICE]);
       if (restarted.exitCode !== 0) {
-        throw new Error("red-router service definition moved, but its running process could not be restarted");
+        log.warn("red-router: the restart reported a failure; waiting for the supervisor's retry");
+        if (!(await restartRecovered(run, seams, env))) {
+          throw new Error("red-router service definition moved, but its running process could not be restarted");
+        }
       }
     }
     await retireLegacyPackage(run, seams);
