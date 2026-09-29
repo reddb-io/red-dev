@@ -7,6 +7,7 @@ import {
   collectPackageCaches,
   inspectCargoBuildCache,
   isCacheMutatingProcess,
+  staleStoreDirs,
   type CacheCommandRunner,
 } from "./cache-policy.ts";
 
@@ -102,5 +103,48 @@ describe("Cargo build cache policy", () => {
       bytes: 1024 * 1024,
       argv: ["cargo", "clean", "--manifest-path", join(workspace, "Cargo.toml"), "--target-dir", target],
     });
+  });
+});
+
+describe("stale package stores", () => {
+  test("finds dead pnpm store versions beside the current one, and nothing else", () => {
+    const root = mkdtempSync(join(tmpdir(), "red-pnpm-stores-"));
+    roots.push(root);
+    const store = join(root, "store");
+    for (const [name, layout] of [["v3", "files"], ["v10", "index"], ["v11", "files"], ["v2", "unrelated"], ["tmp", "files"]] as const) {
+      mkdirSync(join(store, name, layout), { recursive: true });
+    }
+
+    expect(staleStoreDirs(join(store, "v11"))).toEqual([join(store, "v10"), join(store, "v3")]);
+    // A store that is not laid out like a version directory has no siblings to speak of.
+    expect(staleStoreDirs(join(store, "tmp"))).toEqual([]);
+  });
+
+  test("offers each dead store and npx's directory as a plain, named deletion", async () => {
+    const home = mkdtempSync(join(tmpdir(), "red-cache-stale-"));
+    roots.push(home);
+    for (const path of ["pnpm/store/v3/files", "pnpm/store/v11/files", "npm/_npx/abc"]) {
+      mkdirSync(join(home, path), { recursive: true });
+    }
+    const run: CacheCommandRunner = async (argv) => {
+      if (argv[0] === "npm") return result(`${home}/npm\n`);
+      if (argv[0] === "pnpm" && argv[1] === "store") return result(`${home}/pnpm/store/v11\n`);
+      if (argv[0] === "du") return result(`8\t${argv.at(-1)}\n`);
+      return { ...result("", 1) };
+    };
+
+    const caches = await collectPackageCaches({ env: { HOME: home, CARGO_HOME: "" }, run });
+    const removals = caches.filter((cache) => cache.argv?.[0] === "rm");
+
+    expect(removals.map(({ kind, argv }) => [kind, argv])).toEqual([
+      ["pnpm-store-old", ["rm", "-rf", "--", `${home}/pnpm/store/v3`]],
+      ["npm-npx", ["rm", "-rf", "--", `${home}/npm/_npx`]],
+    ]);
+    // The live store is only ever pruned, never removed.
+    expect(caches.find((cache) => cache.kind === "pnpm")?.argv).toEqual(["pnpm", "store", "prune"]);
+  });
+
+  test("treats a running npx as a cache writer", () => {
+    expect(isCacheMutatingProcess({ comm: "node", argv: ["node", "/x/bin/npx", "cowsay"] })).toBe(true);
   });
 });

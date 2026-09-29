@@ -1,5 +1,5 @@
-import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import {
   runBounded,
   type BoundedCommandOptions,
@@ -13,6 +13,8 @@ export type CacheKind =
   | "npm"
   | "pnpm"
   | "pnpm-cache"
+  | "pnpm-store-old"
+  | "npm-npx"
   | "bun";
 
 export interface CacheObservation {
@@ -43,6 +45,7 @@ export function isCacheMutatingProcess(process: { comm: string; argv: readonly s
   if (/^(?:cargo|rustc|rustdoc|sccache)$/i.test(process.comm)) return true;
   const command = process.argv.join(" ");
   return /(?:^|[\\/ ])(?:npm|pnpm)(?:\.c?js)?\b.*\b(?:install|add|update|remove|prune)\b/i.test(command) ||
+    /(?:^|[\\/ ])npx(?:\.c?js)?\b/i.test(command) ||
     /(?:^|[\\/ ])bun\b.*\b(?:install|add|update|remove|pm\s+cache)\b/i.test(command);
 }
 
@@ -83,6 +86,40 @@ async function configuredPath(
   const result = await safely(run, argv, { cwd, timeoutMs: 5_000 });
   if (!result || result.timedOut || result.exitCode !== 0) return null;
   return absolutePath(lastLine(result.stdout));
+}
+
+/**
+ * Store directories of pnpm versions that are no longer the current one.
+ *
+ * pnpm keys its store by a format version (`store/v3`, `store/v10`,
+ * `store/v11`), and a new major starts a fresh one without touching the
+ * old: this machine held 33 GB of two dead stores beside a 3.8 GB live
+ * one, and `pnpm store prune` only ever looks at the current store, so
+ * nothing could see them. A sibling counts only if its name is a store
+ * version *and* it has the layout of a pnpm store, so an unrelated `v2`
+ * directory is never a candidate. Files a project already linked from one
+ * of these stay valid (hard links), and an old pnpm simply refills its
+ * store on the next install.
+ */
+export function staleStoreDirs(
+  currentStore: string,
+  list: (dir: string) => string[] = (dir) => readdirSync(dir),
+  has: (path: string) => boolean = existsSync,
+): string[] {
+  const current = basename(currentStore);
+  if (!/^v\d+$/.test(current)) return [];
+  const parent = dirname(currentStore);
+  let names: string[];
+  try {
+    names = list(parent);
+  } catch {
+    return [];
+  }
+  return names
+    .filter((name) => /^v\d+$/.test(name) && name !== current)
+    .map((name) => join(parent, name))
+    .filter((dir) => has(join(dir, "files")) || has(join(dir, "index")))
+    .sort();
 }
 
 export async function cacheUsageBytes(
@@ -168,6 +205,32 @@ export async function collectPackageCaches(
     cwd: process.cwd(),
     note: "entire regenerable Bun package cache",
   });
+
+  // Plain deletions, and only of things that are derived and proven to be
+  // what they claim: see staleStoreDirs. Not on Windows, where there is
+  // no `rm` to hand and these paths are not the ones this was measured on.
+  if (process.platform !== "win32") {
+    if (pnpm) {
+      for (const dir of staleStoreDirs(pnpm)) {
+        definitions.push({
+          kind: "pnpm-store-old",
+          path: dir,
+          argv: ["rm", "-rf", "--", dir],
+          cwd: home,
+          note: "store of a pnpm version that is no longer current; projects keep their linked files",
+        });
+      }
+    }
+    if (npm && basename(npm) !== "_npx" && existsSync(join(npm, "_npx"))) {
+      definitions.push({
+        kind: "npm-npx",
+        path: join(npm, "_npx"),
+        argv: ["rm", "-rf", "--", join(npm, "_npx")],
+        cwd: home,
+        note: "npx's throwaway installs; `npm cache verify` never touches them",
+      });
+    }
+  }
 
   const bytes = await Promise.all(definitions.map((item) => cacheUsageBytes(item.path, run)));
   return definitions.map((item, index) => ({ ...item, bytes: bytes[index] ?? null }));
