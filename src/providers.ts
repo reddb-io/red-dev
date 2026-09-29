@@ -31,7 +31,12 @@ import {
 } from "./apt-upgrade.ts";
 import { parseChecksums, pickChecksumAsset, sha256Hex, verifyChecksum } from "./checksum.ts";
 import { providerFor, TOOLS, type Provider, type Tool } from "./manifest.ts";
-import { convergeMiseConfig, miseEntries, releaseAgeExcludes } from "./mise-config.ts";
+import {
+  convergeMiseConfig,
+  MISE_NO_RELEASE_AGE,
+  miseEntries,
+  releaseAgeExcludes,
+} from "./mise-config.ts";
 import type { Platform } from "./platform.ts";
 import { githubAuthHeaders, rateLimitAdvice } from "./github-token.ts";
 import { startProcessHeartbeat } from "./process-heartbeat.ts";
@@ -971,6 +976,10 @@ async function runMise(cmd: string[], platform: Platform): Promise<number> {
       // environment also wins over a conflicting personal setting here.
       MISE_FETCH_REMOTE_VERSIONS_CACHE: "0s",
       ...miseReleaseAgeEnv(platform),
+      // And no gate at all on red-dev's own calls — see
+      // MISE_NO_RELEASE_AGE. The excludes above stay for the case where
+      // this variable is overridden further out.
+      ...MISE_NO_RELEASE_AGE,
     },
   });
 }
@@ -2023,6 +2032,12 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
         // Redwall.
         const { convergeWatchSchedule } = await import("./watch-schedule.ts");
         await convergeWatchSchedule(ctx.platform);
+
+        // And the one that keeps `latest` meaning the latest: an hourly
+        // unattended update of the suite and the agent hosts. See
+        // src/auto-update-schedule.ts.
+        const { convergeAutoUpdateSchedule } = await import("./auto-update-schedule.ts");
+        await convergeAutoUpdateSchedule(ctx.platform);
         return;
       }
       if (pr.name === "puppeteer") {

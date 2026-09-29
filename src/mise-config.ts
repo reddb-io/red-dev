@@ -333,6 +333,26 @@ export function releaseAgeExcludes(entries: MiseEntry[]): string[] {
   return [...new Set(entries.filter((e) => isOurs(e.spec)).map((e) => e.spec))].sort();
 }
 
+/**
+ * No release-age gate at all, for the mise calls red-dev makes itself.
+ *
+ * The exemption above covered the suite and stopped there, so the agent
+ * hosts and runtimes red-dev installs still waited out mise's default
+ * day. Measured on the maintainer's machine: Claude Code 2.1.284 was
+ * published, the native installer had it, and every mise path — `mise
+ * upgrade`, `red-dev agents update` — kept answering 2.1.283 as current
+ * for another nineteen hours. A machine that red-dev keeps on `latest`
+ * installs the latest as soon as it exists; a wait is a pin with a
+ * timer on it.
+ *
+ * Environment, not config: it outranks whatever the person set in their
+ * own `config.toml`, and it reaches only the commands red-dev runs.
+ * Their own `mise upgrade` keeps whatever gate they chose for it.
+ */
+export const MISE_NO_RELEASE_AGE: Readonly<Record<string, string>> = {
+  MISE_MINIMUM_RELEASE_AGE: "0",
+};
+
 /** A spec this organisation publishes, by backend and owner rather than by name. */
 function isOurs(spec: string): boolean {
   return /^(github|npm):@?reddb-io[/-]/.test(spec);

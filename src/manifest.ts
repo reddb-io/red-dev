@@ -481,12 +481,12 @@ export const TOOLS: Tool[] = [
     // mise's shims ahead of ~/.local/bin, and the 2026-08-15 migration
     // removes the bootstrap copy once mise can answer for it.
     //
-    // Deliberately left at mise's default release age rather than
-    // MISE_MINIMUM_RELEASE_AGE=0: a release published minutes ago is
-    // exactly the one nobody has run yet, and a short wait before the
-    // fleet takes it is the same argument Omarchy makes for a mirror
-    // that trails. It means `red-dev update` will not fetch a tag cut
-    // today, which is a trade rather than a bug.
+    // No release-age wait. This once trailed mise's default day on the
+    // argument that the newest release is the one nobody has run yet;
+    // what it bought instead was an updater a day behind its own fix.
+    // Every mise call red-dev makes now carries MISE_NO_RELEASE_AGE
+    // (src/mise-config.ts), so `latest` is the newest release, not the
+    // newest one a day old.
     name: "red-dev",
     about: "this tool, kept current by the same mechanism as everything else",
     scope: "core",

@@ -159,6 +159,50 @@ async function redDevManagedMiseKeys(p: Platform): Promise<Set<string>> {
   return keys;
 }
 
+/** The config file the selectors live in, on this platform. */
+function platformMiseConfigPath(p: Platform): string | null {
+  return globalMiseConfigPath(process.env, p.os === "windows" ? "win32" : "linux");
+}
+
+/** The red-dev tool rows in the global config that name a number. */
+export async function pendingMiseLatestSelectors(p: Platform): Promise<string[]> {
+  const path = platformMiseConfigPath(p);
+  if (!path || !existsSync(path)) return [];
+  return migrateMiseToolsToLatest(readFileSync(path, "utf8"), await redDevManagedMiseKeys(p)).changed;
+}
+
+/**
+ * Put every red-dev tool row back on `latest`, on every update.
+ *
+ * This was a one-shot migration, and one shot was not enough. It ran on
+ * the maintainer's machine on 2026-09-21; a day later `mise use -g
+ * claude@2.1.280`, typed by hand, put a number back, and the ledger said
+ * the repair had already happened. `claude update` refuses under mise,
+ * `mise upgrade` honours the number, and the host stayed pinned until
+ * somebody read the config. A selector red-dev manages is `latest`
+ * because red-dev manages it, so the rule is applied whenever red-dev
+ * updates rather than remembered once.
+ *
+ * Only the rows red-dev offers are touched — the person's own tools keep
+ * whatever they wrote — and the rewrite preserves comments, order and
+ * inline-table options (see migrateMiseToolsToLatest).
+ */
+export async function enforceMiseLatestSelectors(p: Platform): Promise<string[]> {
+  const path = platformMiseConfigPath(p);
+  if (!path || !existsSync(path)) return [];
+  const result = migrateMiseToolsToLatest(
+    readFileSync(path, "utf8"),
+    await redDevManagedMiseKeys(p),
+  );
+  if (result.changed.length === 0) return [];
+
+  const temporary = `${path}.red-dev-latest.tmp`;
+  writeFileSync(temporary, result.text);
+  renameSync(temporary, path);
+  log.plain(`       ${result.changed.join(", ")} -> latest`);
+  return result.changed;
+}
+
 export const MIGRATIONS: Migration[] = [
   {
     id: "2026-07-29-font-registration",
@@ -592,28 +636,9 @@ return {}
   {
     id: "2026-09-21-mise-latest-selectors",
     describe: "move legacy red-dev mise selectors onto latest",
-    applies: async (p) => {
-      const path = globalMiseConfigPath(process.env, p.os === "windows" ? "win32" : "linux");
-      if (!path || !existsSync(path)) return false;
-      const result = migrateMiseToolsToLatest(
-        readFileSync(path, "utf8"),
-        await redDevManagedMiseKeys(p),
-      );
-      return result.changed.length > 0;
-    },
+    applies: async (p) => (await pendingMiseLatestSelectors(p)).length > 0,
     run: async (p) => {
-      const path = globalMiseConfigPath(process.env, p.os === "windows" ? "win32" : "linux");
-      if (!path || !existsSync(path)) return;
-      const result = migrateMiseToolsToLatest(
-        readFileSync(path, "utf8"),
-        await redDevManagedMiseKeys(p),
-      );
-      if (result.changed.length === 0) return;
-
-      const temporary = `${path}.red-dev-latest.tmp`;
-      writeFileSync(temporary, result.text);
-      renameSync(temporary, path);
-      log.plain(`       ${result.changed.join(", ")} -> latest`);
+      await enforceMiseLatestSelectors(p);
     },
   },
   {

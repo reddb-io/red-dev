@@ -19,6 +19,7 @@
  */
 
 import { log, RedError } from "./log.ts";
+import { MISE_NO_RELEASE_AGE } from "./mise-config.ts";
 import { startProcessHeartbeat } from "./process-heartbeat.ts";
 import type { Platform } from "./platform.ts";
 import { unattendedEnvironment } from "./unattended.ts";
@@ -254,7 +255,7 @@ export async function useRuntimes(ids: string[], observer: RuntimeObserver = {})
     const request = runtimeInstallRequest(id);
     const result = await run(
       [mise, "use", "-g", "--yes", "--fuzzy", request.id],
-      request.env,
+      { ...MISE_NO_RELEASE_AGE, ...request.env },
       true,
     );
     const { code } = result;
@@ -468,7 +469,7 @@ export async function installRuntimes(p: Platform): Promise<void> {
     log.info(`downloads from ${runtimeSource(runtime)}`);
     const result = await run(
       [mise, "use", "-g", "--yes", "--fuzzy", runtime],
-      {},
+      { ...MISE_NO_RELEASE_AGE },
       true,
     );
     const { code } = result;

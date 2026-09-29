@@ -14,8 +14,10 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import type { Platform } from "./platform.ts";
 import {
   MIGRATIONS,
+  enforceMiseLatestSelectors,
   globalMiseConfigPath,
   migrateMiseSuiteToSingleIdentity,
   migrateMiseToolsToLatest,
@@ -40,6 +42,39 @@ describe("legacy mise selectors", () => {
     expect(globalMiseConfigPath({ MISE_CONFIG_DIR: "/mise-config" }, "linux")).toBe("/mise-config/config.toml");
     expect(globalMiseConfigPath({ XDG_CONFIG_HOME: "/xdg" }, "linux")).toBe("/xdg/mise/config.toml");
     expect(globalMiseConfigPath({ APPDATA: "C:/Users/me/AppData/Roaming" }, "win32")).toBe("C:/Users/me/AppData/Roaming/mise/config.toml");
+  });
+});
+
+describe("latest, held on every update", () => {
+  const UBUNTU: Platform = {
+    os: "linux",
+    distro: "ubuntu",
+    version: "24.04",
+    codename: "noble",
+    env: "desktop",
+    arch: "x64",
+    caps: { apt: true, gui: true, systemd: true, winget: false, flatpak: true },
+  };
+
+  test("puts a hand-typed number back on latest after the migration already ran", async () => {
+    // The shape that shipped: the one-shot migration ran on 09-21, then
+    // `mise use -g claude@2.1.280` put a number back and nothing noticed.
+    const dir = mkdtempSync(join(tmpdir(), "red-dev-latest-"));
+    const path = join(dir, "config.toml");
+    const previous = process.env["MISE_CONFIG_FILE"];
+    process.env["MISE_CONFIG_FILE"] = path;
+    try {
+      writeFileSync(path, `[tools]\nclaude = "2.1.283"\nmy-own-tool = "1.2.3"\n`);
+      expect(await enforceMiseLatestSelectors(UBUNTU)).toEqual(["claude"]);
+      expect(readFileSync(path, "utf8")).toBe(`[tools]\nclaude = "latest"\nmy-own-tool = "1.2.3"\n`);
+
+      writeFileSync(path, `[tools]\nclaude = "2.1.284"\nmy-own-tool = "1.2.3"\n`);
+      expect(await enforceMiseLatestSelectors(UBUNTU)).toEqual(["claude"]);
+      expect(await enforceMiseLatestSelectors(UBUNTU)).toEqual([]);
+    } finally {
+      if (previous === undefined) delete process.env["MISE_CONFIG_FILE"];
+      else process.env["MISE_CONFIG_FILE"] = previous;
+    }
   });
 });
 

@@ -95,6 +95,11 @@ export function buildCli(): CLI {
             description: "upgrade every package on this machine, not only red-dev's",
             default: false,
           },
+          unattended: {
+            type: "boolean",
+            description: "only the stages that need nobody: suite, agents and prune",
+            default: false,
+          },
         },
       },
       privileged: {
@@ -399,6 +404,12 @@ export interface Invocation {
    * for why an implied whole-machine upgrade was the wrong default.
    */
   system: boolean;
+  /**
+   * `update --unattended`: what the hourly timer runs. The mise-owned
+   * stages only — no apt (it needs a password nobody is there to type),
+   * no RedSkills (its own watch timer owns that), no converge.
+   */
+  unattended: boolean;
   /** --yes: take defaults instead of asking on a first run. */
   yes: boolean;
   /** `share <target> [tool]` — its own positionals, see the note in buildCli. */
@@ -595,6 +606,7 @@ export function parseArgs(cli: CLI, argv: string[]): Invocation {
     reclaimWorkspace:
       typeof pos["reclaim_workspace"] === "string" ? pos["reclaim_workspace"] : undefined,
     system: opts["system"] === true,
+    unattended: opts["unattended"] === true,
     yes: opts["yes"] === true,
     shareTarget: typeof pos["target"] === "string" ? pos["target"] : undefined,
     shareTool: typeof pos["tool"] === "string" ? pos["tool"] : undefined,

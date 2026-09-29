@@ -35,6 +35,7 @@ import {
 } from "./agents.ts";
 import { runBounded } from "./bounded-command.ts";
 import { log } from "./log.ts";
+import { MISE_NO_RELEASE_AGE } from "./mise-config.ts";
 import type { ShadowRepair } from "./shadow-repair.ts";
 import type { Platform } from "./platform.ts";
 import {
@@ -232,7 +233,9 @@ export function planAgentUpdate(
           // --fuzzy keeps `latest` in config even on a machine whose
           // MISE_PIN=1 would otherwise turn this into today's number.
           : [mise, "use", "-g", "--yes", "--fuzzy", `${a.mise as string}@latest`],
-        env: {},
+        // Both forms: `latest` means the newest release, not the newest
+        // one a day old. See MISE_NO_RELEASE_AGE.
+        env: { ...MISE_NO_RELEASE_AGE },
       });
     }
 

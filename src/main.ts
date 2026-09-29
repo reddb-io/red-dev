@@ -1137,11 +1137,19 @@ async function cmdUpdate(p: Platform, inv: Invocation): Promise<number> {
   // current. Otherwise a numbered selector truthfully reports that its old
   // line is current and the machine never reaches the moving channel.
   if (!inv.dryRun) {
-    const { runPendingMigrations } = await import("./migrations.ts");
+    const { enforceMiseLatestSelectors, runPendingMigrations } = await import("./migrations.ts");
     await runPendingMigrations(p);
+    // And on every update, not only the once the ledger allows: a number
+    // typed by hand after the migration ran is the same pin it repaired.
+    await enforceMiseLatestSelectors(p);
   }
 
   const { runUpdate } = await import("./update-order.ts");
+
+  // What the hourly timer runs (see src/auto-update-schedule.ts): the
+  // stages mise owns and nothing that needs a person or a password.
+  const skipUnattended = new Set<UpdateStage>(["system", "red-skills", "converge"]);
+  const skipped = (stage: UpdateStage): boolean => inv.unattended && skipUnattended.has(stage);
 
   const stages: Record<UpdateStage, () => Promise<number | void>> = {
     system: () => systemUpdate(p, { whole: inv.system }),
@@ -1211,7 +1219,7 @@ async function cmdUpdate(p: Platform, inv: Invocation): Promise<number> {
   };
 
   const run = await runUpdate(
-    (stage) => stages[stage](),
+    (stage) => (skipped(stage) ? Promise.resolve() : stages[stage]()),
     (stage, message, fatal) => {
       // A stage that may be walked past is a warning; one that ends the
       // update is the error that ended it.
