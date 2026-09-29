@@ -1,6 +1,7 @@
 /** Keep the official RedRouter package running on every target. */
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 import type { DriftCheck } from "./drift.ts";
 import { log } from "./log.ts";
@@ -52,8 +53,16 @@ async function runner(seams: RouterSeams) {
 
 async function routerArgv(args: string[], seams: RouterSeams): Promise<string[] | null> {
   const { miseToolBin } = await import("./mise-config.ts");
+  // During a mise postinstall, PATH and the `latest` link can still point at
+  // the previous version. mise supplies the exact install being finalized.
+  const installPath = (seams.env ?? process.env)["MISE_TOOL_INSTALL_PATH"];
+  const justInstalled = installPath
+    ? join(installPath, "node_modules", ".bin", "red-router")
+    : null;
   const direct = seams.routerBinary === undefined
-    ? (Bun.which("red-router") ?? miseToolBin("red-router"))
+    ? ((justInstalled && existsSync(justInstalled) ? justInstalled : null)
+      ?? Bun.which("red-router")
+      ?? miseToolBin("red-router"))
     : seams.routerBinary;
   if (direct) return [direct, ...args];
 
@@ -200,7 +209,10 @@ async function convergeLinux(p: Platform, seams: RouterSeams, env: NodeJS.Proces
     log.warn("red-router: package is not installed — `red-dev install red-router`");
     return "skipped";
   }
-  const result = await run(argv);
+  let result = await run(argv);
+  // Service installation is idempotent. A concurrent mise upgrade can move a
+  // tool link or race a user-manager reload while this command is starting.
+  if (result.exitCode !== 0 && routerEnabled(env)) result = await run(argv);
   if (result.exitCode !== 0) throw new Error(`red-router service ${routerEnabled(env) ? "install" : "uninstall"} exited ${result.exitCode}`);
   if (routerEnabled(env)) {
     const after = readOptional(unitPath);

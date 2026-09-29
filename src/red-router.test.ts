@@ -73,4 +73,31 @@ describe("RedRouter service contract", () => {
     expect(outcome).toBe("installed");
     expect(calls).toContainEqual(["systemctl", "--user", "restart", "red-router.service"]);
   });
+
+  test("mise postinstall uses the exact package it just installed and retries a transient failure", async () => {
+    const home = mkdtempSync(join(tmpdir(), "red-router-mise-postinstall-"));
+    const installPath = join(home, "mise-install");
+    const binary = join(installPath, "node_modules", ".bin", "red-router");
+    mkdirSync(join(installPath, "node_modules", ".bin"), { recursive: true });
+    writeFileSync(binary, "");
+    const calls: string[][] = [];
+    let installs = 0;
+
+    await convergeRouterAutostart(SYSTEMD, {
+      home,
+      env: { MISE_TOOL_INSTALL_PATH: installPath },
+      miseBinary: null,
+      run: async (argv) => {
+        calls.push(argv);
+        if (argv[0] === binary) return { exitCode: ++installs === 1 ? 1 : 0 };
+        return { exitCode: 1 };
+      },
+    });
+
+    expect(installs).toBe(2);
+    expect(calls.filter((argv) => argv[0] === binary)).toEqual([
+      [binary, "service", "install", "-p", "25050", "-H", "127.0.0.1"],
+      [binary, "service", "install", "-p", "25050", "-H", "127.0.0.1"],
+    ]);
+  });
 });
