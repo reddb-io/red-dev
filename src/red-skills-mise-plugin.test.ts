@@ -163,7 +163,9 @@ describe("the fragment tells mise to call red-dev back", () => {
 
   test("the postinstall is the command red-dev actually answers to", () => {
     expect(REDSKILLS_RECONCILE_POSTINSTALL).toBe("red-dev red-skills reconcile");
-    expect(RED_ROUTER_RECONCILE_POSTINSTALL).toBe("red-dev red-router install");
+    expect(RED_ROUTER_RECONCILE_POSTINSTALL).toBe(
+      '"$MISE_TOOL_INSTALL_PATH/../../red-dev/latest/red-dev" red-router install',
+    );
     const phase = REDSKILLS_RECONCILE_POSTINSTALL.split(" ").at(-1) as string;
     expect(isPluginPhase(phase)).toBe(true);
   });
@@ -188,7 +190,7 @@ describe("the fragment tells mise to call red-dev back", () => {
       `red-skills = { version = "latest", postinstall = "${REDSKILLS_RECONCILE_POSTINSTALL}" }`,
     );
     expect(rendered).toContain(
-      `red-router = { version = "latest", postinstall = "${RED_ROUTER_RECONCILE_POSTINSTALL}" }`,
+      `red-router = { version = "latest", postinstall = ${JSON.stringify(RED_ROUTER_RECONCILE_POSTINSTALL)} }`,
     );
     expect(rendered).toContain('red = "latest"');
   });

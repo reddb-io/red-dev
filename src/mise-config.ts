@@ -91,8 +91,15 @@ export interface MiseEntry {
  */
 export const REDSKILLS_RECONCILE_POSTINSTALL = "red-dev red-skills reconcile";
 
-/** Reconcile the long-running service after mise moves the package. */
-export const RED_ROUTER_RECONCILE_POSTINSTALL = "red-dev red-router install";
+/**
+ * Reconcile the long-running service with mise's own red-dev binary.
+ * The bootstrap in ~/.local/bin can be older than the mise installation, and
+ * PATH ordering during a tool postinstall is not the interactive shell's PATH.
+ * MISE_TOOL_INSTALL_PATH is the RedRouter version directory, so ../.. is the
+ * common installs directory. Linux's `latest` link follows future upgrades.
+ */
+export const RED_ROUTER_RECONCILE_POSTINSTALL =
+  '"$MISE_TOOL_INSTALL_PATH/../../red-dev/latest/red-dev" red-router install';
 
 /**
  * Run the exact binary mise just installed, not an old bootstrap earlier
@@ -414,7 +421,9 @@ export function miseEntries(
       // walk; RedRouter rewrites its generated service definition and loads
       // the new executable when that definition changed.
       ...(pr.alias === REDSKILLS_ALIAS ? { postinstall: REDSKILLS_RECONCILE_POSTINSTALL } : {}),
-      ...(pr.alias === RED_ROUTER_ALIAS ? { postinstall: RED_ROUTER_RECONCILE_POSTINSTALL } : {}),
+      ...(pr.alias === RED_ROUTER_ALIAS
+        ? { postinstall: p.os === "linux" ? RED_ROUTER_RECONCILE_POSTINSTALL : "red-dev red-router install" }
+        : {}),
       ...(pr.alias === "red-dev" && p.os === "linux" && p.env === "desktop"
         ? { postinstall: RED_DEV_DESKTOP_POSTINSTALL } : {}),
     });
