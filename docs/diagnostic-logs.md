@@ -10,6 +10,7 @@ launch a service, install anything, or create another transcript.
 | RedRouter | `~/.local/state/red-router/logs/red-router.log` |
 | Redskilled daemon | `~/.local/state/redskilled/logs/daemon.log` |
 | RedCode | `~/.red/code/data/log/redcode.log` |
+| Resource guard (`--app workloads`) | `~/.local/state/red-dev/workloads.log` |
 
 For red-dev, RedRouter and Redskilled, absolute `XDG_STATE_HOME` replaces
 `~/.local/state` on Linux. Native Windows uses `%LOCALAPPDATA%/<app>/logs`;

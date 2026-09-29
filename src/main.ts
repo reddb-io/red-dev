@@ -1049,6 +1049,17 @@ async function cmdRedSkills(p: Platform, inv: Invocation): Promise<number> {
       trigger: triggerOf(process.env, interactive()),
     });
     announceWatch(result);
+    // The tick that asks about red-dev and RedSkills also keeps the list of
+    // curated tools that are behind, which the desktop shows. Best effort,
+    // and stamped inside, so most ticks touch nothing.
+    if (inv.redSkillsSelector === "due") {
+      try {
+        const { refreshUpdateState } = await import("./update-state.ts");
+        await refreshUpdateState(p);
+      } catch {
+        // Never let a bookkeeping failure fail the watch.
+      }
+    }
     return result.outcome === "refused" ? 1 : 0;
   }
 

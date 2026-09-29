@@ -24,6 +24,9 @@ describe("diagnostic log access", () => {
 
   test("preserves RedCode canonical and unmigrated fallback paths", () => {
     expect(appLogPath("redcode", { platform: "linux", home: "/h", env: {}, exists: () => false })).toBe("/h/.red/code/data/log/redcode.log");
+    // The resource guard's decisions sit beside red-dev's own runs.
+    expect(appLogPath("workloads", { platform: "linux", home: "/h", env: {} })).toBe("/h/.local/state/red-dev/workloads.log");
+    expect(appLogPath("workloads", { platform: "linux", home: "/h", env: { XDG_STATE_HOME: "/s" } })).toBe("/s/red-dev/workloads.log");
     expect(appLogPath("redcode", { platform: "linux", home: "/h", env: {}, exists: p => p.endsWith("redcode") })).toBe("/h/.red/redcode/data/log/redcode.log");
   });
 

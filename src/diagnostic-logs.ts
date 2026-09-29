@@ -7,7 +7,7 @@ import type { Invocation } from "./cli.ts";
 import { log } from "./log.ts";
 import { recentTranscripts, transcriptDir } from "./transcript.ts";
 
-export const LOG_APPS = ["red-dev", "red-router", "redskilled", "redcode"] as const;
+export const LOG_APPS = ["red-dev", "red-router", "redskilled", "redcode", "workloads"] as const;
 export type LogApp = typeof LOG_APPS[number];
 
 /** No subprocess, mkdir or install: safe even with older installed app versions. */
@@ -28,11 +28,15 @@ export function appLogPath(app: Exclude<LogApp, "red-dev">, opts: {
     const exists = opts.exists ?? existsSync;
     return path.join(!exists(canonical) && exists(legacy) ? legacy : canonical, "data", "log", "redcode.log");
   }
-  const file = app === "redskilled" ? "daemon.log" : "red-router.log";
-  if (platform === "darwin") return path.join(home, "Library", "Logs", app, file);
   const configured = platform === "win32" ? env.LOCALAPPDATA : env.XDG_STATE_HOME;
   const state = configured && path.isAbsolute(configured) ? configured
     : path.join(home, ...(platform === "win32" ? ["AppData", "Local"] : [".local", "state"]));
+  // What the resource guard decided for each agent, build and pane it
+  // wrapped. Written by the shell wrapper next to red-dev's own runs, and
+  // never under a `logs` directory, so it has its own path.
+  if (app === "workloads") return path.join(state, "red-dev", "workloads.log");
+  const file = app === "redskilled" ? "daemon.log" : "red-router.log";
+  if (platform === "darwin") return path.join(home, "Library", "Logs", app, file);
   return path.join(state, app, "logs", file);
 }
 

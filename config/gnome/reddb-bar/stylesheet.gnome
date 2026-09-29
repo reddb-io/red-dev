@@ -38,7 +38,9 @@
 }
 
 .reddb-brand-icon {
-  icon-size: 18px;
+  /* Smaller than before: the mark read too large beside the 16px agent icon
+   * and the "Menu" label. */
+  icon-size: 14px;
 }
 
 .reddb-workspaces {
@@ -91,4 +93,28 @@
 
 .reddb-popup-menu .popup-separator-menu-item .popup-separator-menu-item-separator {
   background-color: #333949;
+}
+
+/* Service health. Colour is never the only signal: the menu rows also carry a
+ * glyph (✕ failed, ↻ restarting) and the word for the state. */
+.reddb-health-badge {
+  margin-left: 4px;
+  font-size: 9px;
+}
+
+.reddb-health-failed {
+  color: #ff6b6b;
+}
+
+.reddb-health-restarting {
+  color: #f5b942;
+}
+
+.reddb-health-ok {
+  color: #7bd88f;
+}
+
+.reddb-pressure {
+  margin-left: 6px;
+  font-size: 10px;
 }

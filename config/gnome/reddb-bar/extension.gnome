@@ -18,6 +18,18 @@ const RUNTIME_INTERFACE = `<node><interface name="io.reddb.RedDevDesktop">
 </interface></node>`;
 const NAMED_TRAYS = ['RedRouter', 'Redskilled'];
 
+// The user services red-dev installs or depends on. Read from the systemd
+// user manager over D-Bus, so the bar can say when one of them is down instead
+// of leaving a dead tray icon to be noticed hours later.
+const WATCHED_UNITS = ['redskilled*.service', 'red-router*.service', 'dit.service', 'red-dev-*.service'];
+const SERVICE_POLL_SECONDS = 10;
+const SYSTEMD_NAME = 'org.freedesktop.systemd1';
+const SYSTEMD_PATH = '/org/freedesktop/systemd1';
+const SYSTEMD_MANAGER = 'org.freedesktop.systemd1.Manager';
+const UPDATE_POLL_SECONDS = 60;
+const RESOURCE_POLL_SECONDS = 30;
+const GIB = 1024 * 1024 * 1024;
+
 const MENU_WINDOW = [
   '--class', 'red-dev-menu,red-dev-menu',
   '--title', 'red-dev',
@@ -120,6 +132,323 @@ function openDiagnosticLog(app) {
   }
 }
 
+// One word for how a unit is doing. PURE.
+//
+// `failed` is a unit systemd gave up on; `auto-restart` is one that is
+// crash-looping and will be `failed` shortly. A oneshot that finished
+// (`inactive` or `active (exited)`) is healthy, so neither state is a problem.
+function unitHealth(unit) {
+  if (unit.active === 'failed')
+    return 'failed';
+  if (unit.active === 'activating' && unit.sub === 'auto-restart')
+    return 'restarting';
+  return 'ok';
+}
+
+function serviceName(unit) {
+  return unit.replace(/\.service$/, '');
+}
+
+const HEALTH_GLYPH = {failed: '✕', restarting: '↻', ok: '●'};
+
+// A live tail of one unit's journal in its own terminal window. The unit name
+// comes from systemd and is passed as an argv element, never through a shell.
+function openServiceLog(unit) {
+  const terminal = firstExecutable(['/usr/bin/alacritty', 'alacritty']);
+  try {
+    Gio.Subprocess.new([
+      terminal,
+      '--class', 'red-dev-log,red-dev-log',
+      '--title', `${serviceName(unit)} log`,
+      '-e', 'journalctl', '--user', '-u', unit, '-f', '-n', '200', '--output=short-iso',
+    ], Gio.SubprocessFlags.NONE);
+  } catch (error) {
+    Main.notifyError('Could not open log', error.message);
+  }
+}
+
+// Watches WATCHED_UNITS through the user manager's D-Bus API. Every call is
+// asynchronous, so nothing here blocks GNOME Shell's main loop, and a missing
+// or slow systemd only leaves the last known state on screen.
+class ServiceMonitor {
+  constructor(onChange) {
+    this._onChange = onChange;
+    this._units = [];
+    this._notified = new Set();
+    this._busy = false;
+    this._destroyed = false;
+    this._poll();
+    this._source = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, SERVICE_POLL_SECONDS, () => {
+      this._poll();
+      return GLib.SOURCE_CONTINUE;
+    });
+  }
+
+  _call(method, args, replyType, done) {
+    Gio.DBus.session.call(
+      SYSTEMD_NAME, SYSTEMD_PATH, SYSTEMD_MANAGER, method, args, replyType,
+      Gio.DBusCallFlags.NONE, 5000, null,
+      (connection, result) => {
+        if (this._destroyed)
+          return;
+        try {
+          done(null, connection.call_finish(result));
+        } catch (error) {
+          done(error, null);
+        }
+      });
+  }
+
+  _poll() {
+    if (this._busy)
+      return;
+    this._busy = true;
+    this._call(
+      'ListUnitsByPatterns',
+      new GLib.Variant('(asas)', [[], WATCHED_UNITS]),
+      new GLib.VariantType('(a(ssssssouso))'),
+      (error, reply) => {
+        this._busy = false;
+        if (error) {
+          console.error(`RedDB Menu Bar could not read the user services: ${error.message}`);
+          return;
+        }
+        const [rows] = reply.deepUnpack();
+        this._apply(rows.map(row => ({
+          name: row[0], description: row[1], load: row[2], active: row[3], sub: row[4],
+        })).filter(unit => unit.load === 'loaded').sort((a, b) => a.name.localeCompare(b.name)));
+      });
+  }
+
+  _apply(units) {
+    // Say so once per failure, and again only if it recovers and fails anew.
+    // A unit already broken when the session starts is announced too: that is
+    // exactly the one nobody has looked at.
+    for (const unit of units) {
+      const failed = unitHealth(unit) === 'failed';
+      if (failed && !this._notified.has(unit.name)) {
+        this._notified.add(unit.name);
+        Main.notify(`${serviceName(unit.name)} is not running`,
+          'Open the RedDB menu, Services, to see its log or restart it.');
+      } else if (!failed) {
+        this._notified.delete(unit.name);
+      }
+    }
+    this._units = units;
+    this._onChange(units);
+  }
+
+  // A unit that hit its start limit refuses `start` until it is reset.
+  restart(name) {
+    this._call('ResetFailedUnit', new GLib.Variant('(s)', [name]), null, () => {
+      this._call('RestartUnit', new GLib.Variant('(ss)', [name, 'replace']),
+        new GLib.VariantType('(o)'), error => {
+          if (error)
+            Main.notifyError(`Could not restart ${serviceName(name)}`, error.message);
+          this._poll();
+        });
+    });
+  }
+
+  status() {
+    return this._units.map(unit => ({name: unit.name, active: unit.active, sub: unit.sub, health: unitHealth(unit)}));
+  }
+
+  destroy() {
+    this._destroyed = true;
+    if (this._source)
+      GLib.source_remove(this._source);
+    this._source = 0;
+  }
+}
+
+function stateFile(name) {
+  const base = GLib.getenv('XDG_STATE_HOME') || `${GLib.get_home_dir()}/.local/state`;
+  return `${base}/red-dev/${name}`;
+}
+
+function readText(path) {
+  try {
+    const [ok, bytes] = GLib.file_get_contents(path);
+    return ok ? new TextDecoder().decode(bytes) : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+// The curated tools that are behind, as the watch tick last recorded them.
+// red-dev writes this file; the bar only reads it, because the Shell must
+// not touch the network and does not know which tools red-dev curates.
+function readUpdates() {
+  const text = readText(stateFile('updates.json'));
+  if (text === null)
+    return [];
+  try {
+    const outdated = JSON.parse(text).outdated;
+    return Array.isArray(outdated)
+      ? outdated.filter(tool => tool && typeof tool.name === 'string' && typeof tool.latest === 'string')
+      : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+// How tight a resource is. PURE. The memory thresholds are the ones
+// `red-dev doctor` reports (under 15% available warns, under 5% is critical);
+// the disk ones scale down to a small SSD and are absolute on a large one.
+function memoryLevel(availableKiB, totalKiB) {
+  if (!(totalKiB > 0))
+    return 'ok';
+  const free = availableKiB / totalKiB;
+  return free < 0.05 ? 'critical' : free < 0.15 ? 'warning' : 'ok';
+}
+
+function diskLevel(freeBytes, sizeBytes) {
+  if (!(sizeBytes > 0))
+    return 'ok';
+  const ratio = freeBytes / sizeBytes;
+  if (ratio < 0.05 || freeBytes < 5 * GIB)
+    return 'critical';
+  if (ratio < 0.10 || freeBytes < 10 * GIB)
+    return 'warning';
+  return 'ok';
+}
+
+function gib(bytes) {
+  const value = bytes / GIB;
+  return `${value.toFixed(value < 10 ? 1 : 0)} GiB`;
+}
+
+function readMemory() {
+  const text = readText('/proc/meminfo');
+  if (text === null)
+    return null;
+  const field = name => {
+    const match = new RegExp(`^${name}:\\s+(\\d+) kB`, 'm').exec(text);
+    return match ? Number(match[1]) : null;
+  };
+  const total = field('MemTotal');
+  const available = field('MemAvailable');
+  return total && available !== null ? {totalKiB: total, availableKiB: available} : null;
+}
+
+// Reads updates.json now and then. A plain file, so there is no subprocess
+// and no network here.
+class UpdateWatcher {
+  constructor(onChange) {
+    this._onChange = onChange;
+    this._notified = '';
+    this._read();
+    this._source = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, UPDATE_POLL_SECONDS, () => {
+      this._read();
+      return GLib.SOURCE_CONTINUE;
+    });
+  }
+
+  _read() {
+    const tools = readUpdates();
+    // Said once per set of pending versions, so a newer release is news again
+    // and an update left pending is not repeated.
+    const signature = tools.map(tool => `${tool.name}@${tool.latest}`).join(',');
+    if (tools.length > 0 && signature !== this._notified) {
+      this._notified = signature;
+      Main.notify('Updates available',
+        `${tools.map(tool => `${tool.name} ${tool.latest}`).join(', ')} — RedDB menu, Update workstation.`);
+    } else if (tools.length === 0) {
+      this._notified = '';
+    }
+    this._tools = tools;
+    this._onChange(tools);
+  }
+
+  status() {
+    return this._tools ?? [];
+  }
+
+  destroy() {
+    if (this._source)
+      GLib.source_remove(this._source);
+    this._source = 0;
+  }
+}
+
+// Memory from /proc/meminfo and free space on the home filesystem. The disk
+// query is asynchronous; meminfo is a few hundred bytes of procfs.
+class ResourceMonitor {
+  constructor(onChange) {
+    this._onChange = onChange;
+    this._levels = {memory: 'ok', disk: 'ok'};
+    this._state = {memory: null, disk: null};
+    this._destroyed = false;
+    this._poll();
+    this._source = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, RESOURCE_POLL_SECONDS, () => {
+      this._poll();
+      return GLib.SOURCE_CONTINUE;
+    });
+  }
+
+  _poll() {
+    const memory = readMemory();
+    if (memory)
+      this._state.memory = {...memory, level: memoryLevel(memory.availableKiB, memory.totalKiB)};
+    try {
+      Gio.File.new_for_path(GLib.get_home_dir()).query_filesystem_info_async(
+        'filesystem::free,filesystem::size', GLib.PRIORITY_DEFAULT, null,
+        (file, result) => {
+          if (this._destroyed)
+            return;
+          try {
+            const info = file.query_filesystem_info_finish(result);
+            const freeBytes = info.get_attribute_uint64('filesystem::free');
+            const sizeBytes = info.get_attribute_uint64('filesystem::size');
+            this._state.disk = {freeBytes, sizeBytes, level: diskLevel(freeBytes, sizeBytes)};
+          } catch (error) {
+            console.error(`RedDB Menu Bar could not read the disk: ${error.message}`);
+          }
+          this._publish();
+        });
+    } catch (error) {
+      console.error(`RedDB Menu Bar could not read the disk: ${error.message}`);
+      this._publish();
+    }
+  }
+
+  _publish() {
+    // Only the step into "critical" interrupts anybody; a warning is the
+    // indicator in the panel, and staying critical is not said again.
+    const {memory, disk} = this._state;
+    if (memory && memory.level === 'critical' && this._levels.memory !== 'critical') {
+      Main.notify('Memory is almost exhausted',
+        `${Math.round(memory.availableKiB / memory.totalKiB * 100)}% available. Close something, or see what is using it from the RedDB menu.`);
+    }
+    if (disk && disk.level === 'critical' && this._levels.disk !== 'critical') {
+      Main.notify('The disk is almost full', `${gib(disk.freeBytes)} free on the home filesystem.`);
+    }
+    this._levels = {memory: memory?.level ?? 'ok', disk: disk?.level ?? 'ok'};
+    this._onChange(this._state);
+  }
+
+  status() {
+    return this._state;
+  }
+
+  destroy() {
+    this._destroyed = true;
+    if (this._source)
+      GLib.source_remove(this._source);
+    this._source = 0;
+  }
+}
+
+function openInTerminal(argv) {
+  const terminal = firstExecutable(['/usr/bin/alacritty', 'alacritty']);
+  try {
+    Gio.Subprocess.new([terminal, ...argv], Gio.SubprocessFlags.NONE);
+  } catch (error) {
+    Main.notifyError('Could not open the terminal', error.message);
+  }
+}
+
 function item(menu, label, icon, action) {
   const row = new PopupMenu.PopupImageMenuItem(label, icon);
   row.connect('activate', action);
@@ -144,8 +473,10 @@ function openMenuOnSecondaryClick(button) {
 }
 
 const RedDbMenu = GObject.registerClass(class RedDbMenu extends PanelMenu.Button {
-  _init(extension) {
+  _init(extension, services = {}) {
     super._init(0.0, 'Menu');
+    this._services = services;
+    this._servicesSignature = '';
     this.add_style_class_name('reddb-panel-button');
     this.add_style_class_name('reddb-brand-button');
     themeMenu(this.menu);
@@ -157,6 +488,14 @@ const RedDbMenu = GObject.registerClass(class RedDbMenu extends PanelMenu.Button
       style_class: 'reddb-brand-icon',
     }));
     box.add_child(new St.Label({text: 'Menu', y_align: 2}));
+    // Only there when something is wrong: a healthy machine shows nothing.
+    this._badge = new St.Label({text: '●', y_align: 2, style_class: 'reddb-health-badge'});
+    this._badge.hide();
+    box.add_child(this._badge);
+    // "RAM 6% free" or "Disk 4.2 GiB free", present only while it is tight.
+    this._pressure = new St.Label({text: '', y_align: 2, style_class: 'reddb-pressure'});
+    this._pressure.hide();
+    box.add_child(this._pressure);
     this.add_child(box);
 
     item(this.menu, 'Applications', 'view-app-grid-symbolic', () => Main.overview.showApps());
@@ -165,10 +504,100 @@ const RedDbMenu = GObject.registerClass(class RedDbMenu extends PanelMenu.Button
     item(this.menu, 'Default agent', 'system-run-symbolic', () => command('agents', 'run'));
     item(this.menu, 'Agent multiplexer', 'view-grid-symbolic', () => herdr());
     this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+    this._servicesItem = new PopupMenu.PopupSubMenuMenuItem('Services');
+    this.menu.addMenuItem(this._servicesItem);
+    this._memoryItem = item(this.menu, 'Memory', 'utilities-system-monitor-symbolic',
+      () => openInTerminal(['-e', 'btop']));
+    this._diskItem = item(this.menu, 'Disk', 'drive-harddisk-symbolic',
+      () => openInTerminal(['--hold', '-e', 'duf']));
+    this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
     item(this.menu, 'Doctor', 'emblem-system-symbolic', () => command('doctor'));
     item(this.menu, 'Open red-dev log', 'text-x-generic-symbolic', () => openDiagnosticLog('red-dev'));
+    // The rest of the logs, for the things that have one of their own.
+    const logs = new PopupMenu.PopupSubMenuMenuItem('More logs');
+    for (const [label, app] of [['RedRouter', 'red-router'], ['Redskilled', 'redskilled'],
+      ['Resource guard', 'workloads']]) {
+      const row = new PopupMenu.PopupMenuItem(label);
+      row.connect('activate', () => openDiagnosticLog(app));
+      logs.menu.addMenuItem(row);
+    }
+    this.menu.addMenuItem(logs);
     item(this.menu, 'Apps', 'application-x-executable-symbolic', () => command('apps'));
-    item(this.menu, 'Update workstation', 'software-update-available-symbolic', () => command('update'));
+    this._updateItem = item(this.menu, 'Update workstation', 'software-update-available-symbolic',
+      () => command('update'));
+  }
+
+  setUpdates(tools) {
+    this._updateItem.label.set_text(
+      tools.length === 0 ? 'Update workstation' : `Update workstation — ${tools.length} available`);
+  }
+
+  setResources({memory, disk}) {
+    if (memory) {
+      this._memoryItem.label.set_text(
+        `Memory  ·  ${gib(memory.availableKiB * 1024)} free of ${gib(memory.totalKiB * 1024)}`);
+    }
+    if (disk)
+      this._diskItem.label.set_text(`Disk  ·  ${gib(disk.freeBytes)} free`);
+
+    // The tightest one, said in the panel; nothing at all when neither is.
+    const tight = [
+      memory && memory.level !== 'ok' && {
+        level: memory.level, rank: memory.availableKiB / memory.totalKiB,
+        text: `RAM ${Math.round(memory.availableKiB / memory.totalKiB * 100)}% free`,
+      },
+      disk && disk.level !== 'ok' && {
+        level: disk.level, rank: disk.freeBytes / disk.sizeBytes, text: `Disk ${gib(disk.freeBytes)} free`,
+      },
+    ].filter(Boolean).sort((a, b) =>
+      (a.level === b.level ? a.rank - b.rank : a.level === 'critical' ? -1 : 1))[0];
+    this._pressure.remove_style_class_name('reddb-health-failed');
+    this._pressure.remove_style_class_name('reddb-health-restarting');
+    if (tight) {
+      this._pressure.set_text(tight.text);
+      this._pressure.add_style_class_name(tight.level === 'critical' ? 'reddb-health-failed' : 'reddb-health-restarting');
+      this._pressure.show();
+    } else {
+      this._pressure.hide();
+    }
+  }
+
+  setServices(units) {
+    const signature = JSON.stringify(units.map(unit => [unit.name, unitHealth(unit)]));
+    if (signature === this._servicesSignature)
+      return;
+    this._servicesSignature = signature;
+
+    const problems = units.filter(unit => unitHealth(unit) !== 'ok');
+    const worst = problems.some(unit => unitHealth(unit) === 'failed') ? 'failed' : 'restarting';
+    this._badge.remove_style_class_name('reddb-health-failed');
+    this._badge.remove_style_class_name('reddb-health-restarting');
+    if (problems.length > 0) {
+      this._badge.add_style_class_name(`reddb-health-${worst}`);
+      this._badge.show();
+    } else {
+      this._badge.hide();
+    }
+
+    this._servicesItem.label.set_text(
+      problems.length === 0 ? 'Services' : `Services — ${problems.length} not running`);
+    const submenu = this._servicesItem.menu;
+    submenu.removeAll();
+    for (const unit of units) {
+      const health = unitHealth(unit);
+      const row = new PopupMenu.PopupMenuItem(
+        `${HEALTH_GLYPH[health]}  ${serviceName(unit.name)}  ·  ${unit.active === 'active' ? unit.sub : unit.active}`);
+      row.label.add_style_class_name(`reddb-health-${health}`);
+      row.connect('activate', () => this._services.log?.(unit.name));
+      submenu.addMenuItem(row);
+      if (health !== 'ok') {
+        const restart = new PopupMenu.PopupMenuItem(`↻  Restart ${serviceName(unit.name)}`);
+        restart.connect('activate', () => this._services.restart?.(unit.name));
+        submenu.addMenuItem(restart);
+      }
+    }
+    if (units.length === 0)
+      submenu.addMenuItem(new PopupMenu.PopupMenuItem('No RedDB services installed'));
   }
 });
 
@@ -351,7 +780,10 @@ class NamedTrayLabels {
 
 export default class RedDbBarExtension extends Extension {
   enable() {
-    this._brand = new RedDbMenu(this);
+    this._brand = new RedDbMenu(this, {
+      restart: name => this._serviceMonitor?.restart(name),
+      log: name => openServiceLog(name),
+    });
     this._workspaces = new WorkspaceMenu();
     this._agents = new AgentsMenu();
 
@@ -364,11 +796,17 @@ export default class RedDbBarExtension extends Extension {
     this._activities?.hide();
 
     this._trayNames = new NamedTrayLabels();
+    this._serviceMonitor = new ServiceMonitor(units => this._brand?.setServices(units));
+    this._updates = new UpdateWatcher(tools => this._brand?.setUpdates(tools));
+    this._resources = new ResourceMonitor(state => this._brand?.setResources(state));
     this._runtime = Gio.DBusExportedObject.wrapJSObject(RUNTIME_INTERFACE, {
       Get: () => JSON.stringify({
         revision: RUNTIME_REVISION,
         menu: actorState(this._brand),
         indicators: this._trayNames.status(),
+        services: this._serviceMonitor.status(),
+        updates: this._updates.status(),
+        resources: this._resources.status(),
       }),
     });
     this._runtime.export(Gio.DBus.session, RUNTIME_PATH);
@@ -377,6 +815,12 @@ export default class RedDbBarExtension extends Extension {
   disable() {
     this._runtime?.unexport();
     this._runtime = null;
+    this._resources?.destroy();
+    this._resources = null;
+    this._updates?.destroy();
+    this._updates = null;
+    this._serviceMonitor?.destroy();
+    this._serviceMonitor = null;
     this._trayNames?.destroy();
     this._trayNames = null;
     this._activities?.show();

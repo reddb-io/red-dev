@@ -180,7 +180,7 @@ export function buildCli(): CLI {
         options: {
           path: { type: "boolean", description: "print only the log path", default: false },
           open: { type: "boolean", description: "open the log in the default application", default: false },
-          app: { type: "string", description: "red-dev, red-router, redskilled or redcode" },
+          app: { type: "string", description: "red-dev, red-router, redskilled, redcode or workloads" },
         },
         positional: [
           {
