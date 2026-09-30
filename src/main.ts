@@ -365,6 +365,7 @@ async function cmdInstall(
     delete process.env["RED_DEV_UPDATE_CONVERGE"];
   }
   let ctx = await contextFor(p, inv, entry);
+  ctx.wslUnattended = inv.yes || inv.unattended;
   let extraScopes: Scope[] = [];
   let sudoPrepared = false;
 
@@ -2089,7 +2090,7 @@ async function cmdAgentsPlugins(
  * afterwards until the host arrives.
  */
 async function cmdAgentsDefault(p: Platform, key: string | undefined): Promise<number> {
-  const { AGENTS, availableAgents, currentAgentKeys, isAgentInstalled } = await import(
+  const { AGENTS, availableAgents, currentAgentKeys, isAgentInstalled, agentRunsHere } = await import(
     "./agents.ts"
   );
   const { isDefaultAgentCandidate, readDefaultAgent, reportDefaultAgent } = await import(
@@ -2100,6 +2101,10 @@ async function cmdAgentsDefault(p: Platform, key: string | undefined): Promise<n
 
   if (key === undefined) {
     const prefs = await readPreferences(p);
+    const selected = AGENTS.find(a => a.key === prefs.defaultAgent);
+    if (windowsWsl(p) && selected && !agentRunsHere(selected, p)) {
+      return (await import("./wsl-sync.ts")).relayWslCommand(p, "red-dev agents default");
+    }
     const report = reportDefaultAgent(
       readDefaultAgent(prefs.defaultAgent, isAgentInstalled),
       prefs.agents ?? [],
@@ -2126,7 +2131,8 @@ async function cmdAgentsDefault(p: Platform, key: string | undefined): Promise<n
 
   await writePreferences(p, { defaultAgent: spec.key });
   log.ok(`default agent: ${spec.label}`);
-  if (!isAgentInstalled(spec)) log.warn(`not installed yet — red-dev agents ${spec.key}`);
+  if (agentRunsHere(spec, p) && !isAgentInstalled(spec)) log.warn(`not installed yet — red-dev agents ${spec.key}`);
+  if (windowsWsl(p) && !agentRunsHere(spec, p)) log.plain("     execution and installation are owned by Ubuntu/WSL");
   return 0;
 }
 

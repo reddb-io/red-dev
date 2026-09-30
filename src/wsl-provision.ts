@@ -180,16 +180,15 @@ export async function isElevated(): Promise<boolean> {
  * demand a reboot, and a user who does not know that will think it
  * hung or failed.
  */
-export async function installWsl(distro = "Ubuntu-24.04"): Promise<boolean> {
+export async function installWsl(distro = "Ubuntu-24.04", unattended = false): Promise<boolean> {
   if (!(await isElevated())) {
     const { interactive } = await import("./ui.ts");
-    if (!interactive() || process.env.RED_DEV_UNATTENDED === "1") {
+    if (unattended || !interactive() || process.env.RED_DEV_UNATTENDED === "1") {
       const denied = missingRights("administrator"); log.err(`installing WSL: ${denied.cause}`); log.plain(denied.remedy); return false;
     }
     log.step(`Windows authorization: install ${distro} with WSL 2`);
-    const quote = (v: string) => `'${v.replaceAll("'", "''")}'`;
-    const proc = Bun.spawn(["powershell.exe", "-NoProfile", "-Command", `$p = Start-Process wsl.exe -ArgumentList @('--install','-d',${quote(distro)}) -Verb RunAs -Wait -PassThru; exit $p.ExitCode`], { stdin: "inherit", stdout: "inherit", stderr: "inherit" });
-    const ok = await proc.exited === 0;
+    const { elevateWindowsCommand } = await import("./privileged.ts");
+    const ok = await elevateWindowsCommand("wsl.exe", ["--install", "-d", distro]) === 0;
     if (ok) explainNextSteps(distro);
     return ok;
   }

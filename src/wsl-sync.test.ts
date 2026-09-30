@@ -54,6 +54,20 @@ describe("Windows coordinator", () => {
     expect(await relayWslCommand({ ...p(), wslDistro: "missing" }, "red-dev plan", s)).toBe(1);
     expect(calls).toEqual(["red-dev doctor"]);
   });
+  test("optional Linux failures prevent native service retirement", async () => {
+    const calls: string[] = []; const s = seams(calls, async (_d, cmd) => { calls.push(cmd); return cmd.includes("install optional") ? 1 : 0; });
+    s.scope = "optional";
+    await expect(syncWslDistro(p(), s)).rejects.toThrow("optional Linux packages failed");
+    expect(calls).not.toContain("retire native services");
+  });
+  test("unattended OS setup forwards the no-prompt choice", async () => {
+    const calls: string[] = []; const s = seams(calls);
+    s.state = async () => ({ available: false, distributions: [], distros: [], detail: "absent" });
+    s.unattended = true;
+    s.install = async (name, unattended) => { expect(name).toBe("Ubuntu-24.04"); expect(unattended).toBe(true); return false; };
+    await expect(syncWslDistro(p(), s)).rejects.toThrow("installation pending");
+    expect(calls).toEqual([]);
+  });
   test("forwards credentials in the child environment while argv contains only public commands", () => {
     const token = "fixture-secret";
     const env = wslChildEnvironment({ WSLENV: "CUSTOM/p" }, token);

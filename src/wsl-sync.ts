@@ -4,7 +4,7 @@ import { AGENTS } from "./agents.ts";
 import { log, RedError } from "./log.ts";
 import type { Platform } from "./platform.ts";
 import { readPreferences, writePreferences, type TerminalShell } from "./preferences.ts";
-import { spawnLogged } from "./providers.ts";
+import { spawnLogged, spawnInteractive } from "./providers.ts";
 import { isKnownRuntimeId } from "./runtimes.ts";
 import { detectWsl, installWsl, type WslDistribution, type WslState } from "./wsl-provision.ts";
 import { readWindowsOutput } from "./windows-output.ts";
@@ -46,16 +46,15 @@ export function distroArgv(distro: string, command: string, unattended = true): 
   return ["wsl.exe", "-d", distro, "--", "bash", "-lc", child];
 }
 
-async function runDistro(distro: string, command: string, attached = false): Promise<number> {
+async function runDistro(distro: string, command: string, attached = false, unattended = false): Promise<number> {
   const { interactive } = await import("./ui.ts");
-  if ((attached || /^red-dev (?:install|update)\b/.test(command)) && interactive() && process.env.RED_DEV_UNATTENDED !== "1") {
+  if (!unattended && (attached || /^red-dev (?:install|update)\b/.test(command)) && interactive() && process.env.RED_DEV_UNATTENDED !== "1") {
     // sudo's credential belongs to this PTY. Authenticate and provision in
     // the same WSL invocation; a separate sudo -v loses that credential.
     const argv = distroArgv(distro, command, !attached);
     if (attached) argv.splice(3, 0, "--cd", process.cwd());
-    if (!attached) argv[argv.length - 1] = `sudo -v && ${argv.at(-1)}`;
-    const child = Bun.spawn(argv, { stdin: "inherit", stdout: "inherit", stderr: "inherit", env: wslChildEnvironment() });
-    return await child.exited;
+    if (!attached) argv[argv.length - 1] = `sudo --validate && ${argv.at(-1)}`;
+    return spawnInteractive(argv, { env: wslChildEnvironment() });
   }
   return spawnLogged(distroArgv(distro, command), { env: wslChildEnvironment() });
 }
@@ -105,7 +104,7 @@ export async function ensureDistroRedDev(distro: string): Promise<number> {
 
 export interface WslSyncSeams {
   state?: () => Promise<WslState>;
-  install?: (distro: string) => Promise<boolean>;
+  install?: (distro: string, unattended?: boolean) => Promise<boolean>;
   ensure?: (distro: string) => Promise<number>;
   run?: (distro: string, command: string) => Promise<number>;
   preferences?: typeof readPreferences;
@@ -113,6 +112,7 @@ export interface WslSyncSeams {
   user?: (distro: string) => Promise<boolean>;
   migrate?: (p: Platform, distro: string) => Promise<void>;
   action?: "install" | "update";
+  unattended?: boolean;
   scope?: "core" | "desktop" | "wsl" | "optional";
   prepare?: (p: Platform, distro: string, run: (distro: string, command: string) => Promise<number>) => Promise<void>;
 }
@@ -139,11 +139,12 @@ export async function syncWslDistro(p: Platform, seams: WslSyncSeams = {}): Prom
   if (process.env.RED_DEV_NO_WSL_SYNC === "1") throw new RedError("Ubuntu/WSL coordination disabled (RED_DEV_NO_WSL_SYNC=1); workstation is incomplete");
   const prefs = await (seams.preferences ?? readPreferences)(p);
   let state = await (seams.state ?? detectWsl)();
+  const execute = seams.run ?? ((distro: string, command: string) => runDistro(distro, command, false, seams.unattended));
   const pinned = p.wslDistro ?? prefs.distro;
   let selected = selectDistro(state, pinned);
   if (!selected) {
     const name = pinned ?? DEFAULT_WSL_DISTRO;
-    if (!(await (seams.install ?? installWsl)(name))) throw new RedError("Ubuntu/WSL installation pending; finish Windows setup, then run red-dev install from PowerShell");
+    if (!(await (seams.install ?? installWsl)(name, seams.unattended))) throw new RedError("Ubuntu/WSL installation pending; finish Windows setup, then run red-dev install from PowerShell");
     state = await (seams.state ?? detectWsl)();
     selected = selectDistro(state, name);
   }
@@ -153,13 +154,13 @@ export async function syncWslDistro(p: Platform, seams: WslSyncSeams = {}): Prom
   p.wslDistro = selected.name;
   await (seams.record ?? writePreferences)(p, { terminalShell: "wsl", distro: selected.name });
   if (await (seams.ensure ?? ensureDistroRedDev)(selected.name) !== 0) throw new RedError(`${selected.name}: red-dev could not be updated`);
-  await (seams.prepare ?? (await import("./windows-wsl-migration.ts")).prepareWindowsRouterData)(p, selected.name, seams.run ?? runDistro);
+  await (seams.prepare ?? (await import("./windows-wsl-migration.ts")).prepareWindowsRouterData)(p, selected.name, execute);
   const command = seams.action === "update" ? "red-dev update --yes" : "red-dev install --yes";
-  if (await (seams.run ?? runDistro)(selected.name, command) !== 0) throw new RedError(`${selected.name}: Linux installation incomplete; retry red-dev install from PowerShell`);
-  if (seams.scope === "optional" && await (seams.run ?? runDistro)(selected.name, "red-dev install optional --yes") !== 0) throw new RedError(`${selected.name}: optional Linux packages failed`);
-  if (await syncSelectedTooling(p, selected, { ...seams, ensure: async () => 0 }) !== 0) throw new RedError(`${selected.name}: selected Linux tools failed`);
+  if (await execute(selected.name, command) !== 0) throw new RedError(`${selected.name}: Linux installation incomplete; retry red-dev install from PowerShell`);
+  if (seams.scope === "optional" && await execute(selected.name, "red-dev install optional --yes") !== 0) throw new RedError(`${selected.name}: optional Linux packages failed`);
+  if (await syncSelectedTooling(p, selected, { ...seams, run: execute, ensure: async () => 0 }) !== 0) throw new RedError(`${selected.name}: selected Linux tools failed`);
   const services = process.env.RED_ROUTER === "0" ? "redskilled.service" : "redskilled.service red-router.service";
-  if (await (seams.run ?? runDistro)(selected.name, `systemctl --user is-active ${services}`) !== 0) throw new RedError(`${selected.name}: Linux services are not active; finish WSL systemd setup and retry from PowerShell`);
+  if (await execute(selected.name, `systemctl --user is-active ${services}`) !== 0) throw new RedError(`${selected.name}: Linux services are not active; finish WSL systemd setup and retry from PowerShell`);
   const migrate = seams.migrate ?? (await import("./windows-wsl-migration.ts")).retireWindowsServices;
   await migrate(p, selected.name);
   log.ok(`Windows + Ubuntu/WSL ${selected.name}: configured`);

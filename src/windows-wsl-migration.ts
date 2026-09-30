@@ -26,7 +26,7 @@ function Quote-Arg([string] $value) {
 }
 $words = @('-d', ${psWord(distro)}, '--cd', $PWD.Path, '--', 'bash', '-lc', 'exec ${command} "$@"', '${command}') + @($args)
 $info = New-Object System.Diagnostics.ProcessStartInfo
-$info.FileName = 'wsl.exe'
+$info.FileName = (Get-Command wsl.exe -CommandType Application -ErrorAction Stop).Source
 $info.UseShellExecute = $false
 $info.Arguments = (($words | ForEach-Object { Quote-Arg $_ }) -join ' ')
 $child = [System.Diagnostics.Process]::Start($info)

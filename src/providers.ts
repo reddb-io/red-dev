@@ -207,6 +207,13 @@ export async function spawnLoggedCapture(
  * already made every product choice; a provider opening its own prompt is a
  * failure, not a second interactive interface hidden inside the first.
  */
+/** Hand the console to an explicitly interactive public command. */
+export async function spawnInteractive(cmd: string[], extra: { env?: NodeJS.ProcessEnv; cwd?: string } = {}): Promise<number> {
+  if (logIsCaptured()) throw new RedError("interactive command needs a plain terminal; close the fullscreen view first");
+  const proc = Bun.spawn(cmd, { stdin: "inherit", stdout: "inherit", stderr: "inherit", ...extra });
+  return await proc.exited;
+}
+
 export async function spawnLogged(
   cmd: string[],
   extra: {
@@ -1808,6 +1815,7 @@ export async function systemUpdate(p: Platform, opts: { whole?: boolean } = {}):
 
 export interface ApplyContext {
   wslAction?: "install" | "update";
+  wslUnattended?: boolean;
   wslScope?: import("./manifest.ts").Scope;
   // No `root`: there is nothing on disk to point at. Every config file
   // this tool writes is either a text import compiled into the binary
@@ -2098,7 +2106,7 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
       }
       if (pr.name === "wsl-sync") {
         const { syncWslDistro } = await import("./wsl-sync.ts");
-        await syncWslDistro(ctx.platform, { action: ctx.wslAction, scope: ctx.wslScope });
+        await syncWslDistro(ctx.platform, { action: ctx.wslAction, scope: ctx.wslScope, unattended: ctx.wslUnattended });
         return;
       }
       if (pr.name === "shared-root") {
