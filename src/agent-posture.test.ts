@@ -262,7 +262,7 @@ describe("reporting the posture", () => {
   });
 
   test("is what doctor prints, under a section of its own", () => {
-    const src = readFileSync(`${import.meta.dir}/main.ts`, "utf8");
+    const src = readFileSync(`${import.meta.dir}/doctor-command.ts`, "utf8");
     expect(src).toContain('log.plain("\\n[agents]")');
     expect(src).toContain("agentPostureFor(p)");
   });

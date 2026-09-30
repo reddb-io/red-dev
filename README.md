@@ -61,8 +61,8 @@ packages may still ask for sudo.
 On Windows, open a new terminal after installing — the `PATH` entry does not
 reach shells that were already running.
 
-Every push to `main` also publishes a `next` prerelease, so the newest work is
-installable without waiting for a tag:
+Every push to `main` publishes a stable release. An explicit `next` prerelease
+can also be published through the Release workflow; install that channel with:
 
 ```bash
 RED_DEV_CHANNEL=next sh -c "$(curl -fsSL https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.sh)"
@@ -74,7 +74,7 @@ $env:RED_DEV_CHANNEL='next'; irm https://raw.githubusercontent.com/reddb-io/red-
 
 | Variable | Effect |
 | --- | --- |
-| `RED_DEV_CHANNEL` | `stable` (default) or `next` — every push to `main` publishes a `next` prerelease |
+| `RED_DEV_CHANNEL` | `stable` (default) or an explicitly published `next` prerelease |
 | `RED_DEV_BIN_DIR` | Where the binary lands; defaults to `~/.local/bin` (Linux) or `%LOCALAPPDATA%\red-dev\bin` |
 | `GITHUB_TOKEN` | Raises the API rate limit; required only for a private fork |
 
@@ -619,7 +619,8 @@ GitHub lookups made by mise use the github.com account selected by
 helper and configures `github.credential_command` in its mise fragment.
 Direct `mise upgrade` and `mise bump` use this helper too. It resolves the
 current gh executable for every credential read, including after gh itself
-is upgraded, and runs `gh auth token --hostname github.com`. Existing gh
+is upgraded, using PATH and installed files without starting another mise
+process, and runs `gh auth token --hostname github.com`. Existing gh
 credential overrides are repaired automatically with a backup.
 This also reads credentials stored in the system keyring without copying
 the token into a config file.
@@ -642,6 +643,11 @@ hour, shared with other tools using that account. Authentication and caching
 reduce rate-limit failures; GitHub still enforces account and secondary limits.
 For corporate VPNs and machines running an older red-dev, see
 [mise GitHub authentication](docs/mise-github-auth.md).
+
+For timeouts, run `red-dev network`: it separates local credential lookup,
+OS HTTP reachability and mise's own request. To repair the gh integration
+without upgrading any package, preview `red-dev doctor --repair mise-auth`,
+then apply with `--apply`. See [maintenance and recovery](docs/maintenance.md).
 
 red-dev lets `npm`, `pnpm`, and `bun` run directly. It retires older shell
 wrappers that launched package managers through systemd. Its workload policy
@@ -688,6 +694,10 @@ export RED_BLE=0
 ```bash
 red-dev                      # the fullscreen interface — and what the one-liner opens
 red-dev platform             # what red-dev thinks this machine is
+red-dev network              # bounded gh/mise credential and VPN/proxy diagnostics
+red-dev network --json       # share diagnostics without credential output
+red-dev doctor --repair mise-auth # preview only this repair; add --apply to execute
+red-dev doctor --export report.json # private diagnostic report; existing files are preserved
 red-dev plan [scope]         # what would change, changes nothing
 red-dev install [scope]      # converge toward the manifest
 red-dev install --dry-run    # print the plan, touch nothing

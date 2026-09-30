@@ -8,6 +8,14 @@ const cli = buildCli();
 const parse = (argv: string[]) => parseArgs(cli, argv);
 
 describe("command parsing", () => {
+  test("network and doctor expose private reports and explicit repair previews", () => {
+    expect(parse(["network", "--json"])).toMatchObject({ command: "network", json: true, errors: [] });
+    expect(parse(["doctor", "--repair", "mise-auth"])).toMatchObject({ doctorRepair: "mise-auth", apply: false, errors: [] });
+    expect(parse(["doctor", "--repair", "mise-auth", "--apply", "--json"])).toMatchObject({ apply: true, json: true, errors: [] });
+    expect(parse(["doctor", "--export", "/tmp/report.json"])).toMatchObject({ doctorExport: "/tmp/report.json", errors: [] });
+    expect(parse(["doctor", "--apply"]).errors).toContain("doctor --apply requires --repair with a specific repair name");
+    expect(parse(["doctor", "--repair", "anything"]).errors).toContain("unknown doctor repair (expected: mise-auth, workloads, desktop)");
+  });
   test("desktop is a narrow repair command with a read-only default", () => {
     expect(parse(["desktop"])).toMatchObject({ command: "desktop", desktopVerb: undefined, errors: [] });
     expect(parse(["desktop", "status"])).toMatchObject({ desktopVerb: "status", errors: [] });

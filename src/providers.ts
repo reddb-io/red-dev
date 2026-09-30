@@ -44,6 +44,7 @@ import { miseGithubEnvironment, miseRemoteVersionsEnv } from "./mise-github.ts";
 import { startProcessHeartbeat } from "./process-heartbeat.ts";
 import { missingRights } from "./rights.ts";
 import { tlsTrustFailure, unattendedEnvironment } from "./unattended.ts";
+import { fetchWithRetry, httpFailureAdvice } from "./http-policy.ts";
 
 /**
  * Provisioning never delegates a question to a child process.
@@ -484,9 +485,11 @@ async function fetchObservedBytes(
     () => (size > 0 ? transferProgress(size, total, Date.now() - started) : null),
   );
   try {
-    const response = await (opts.fetcher ?? fetch)(url, {
-      ...opts.init,
-      signal: AbortSignal.timeout(opts.timeoutMs),
+    const response = await fetchWithRetry(url, {
+      fetcher: opts.fetcher,
+      init: opts.init,
+      timeoutMs: opts.timeoutMs,
+      onRetry: (ms, status) => log.info(`HTTP ${status}: waiting ${formatDuration(ms)} before retrying`),
     });
     heartbeat.activity();
     if (!response.body) return { response, body: new Uint8Array() };
@@ -607,7 +610,7 @@ export async function downloadVerified(
     },
   );
   const { response: res, body } = fetched;
-  if (!res.ok) throw new RedError(`download failed ${res.status}: ${url}`);
+  if (!res.ok) throw new RedError(`download failed ${res.status}: ${url}${httpFailureAdvice(res)}`);
   log.info(`received ${formatBytes(body.byteLength)} in ${formatDuration(Date.now() - started)}`);
 
   const digest = sha256Hex(body);
@@ -724,7 +727,8 @@ export async function resolveGhRelease(
         // when the publisher prefixes with `v`. Saying which tag was
         // asked for is the difference between a one-line fix and a hunt.
         (version && res.status === 404 ? ` — no release tagged '${version}'` : "") +
-        (res.status === 403 ? rateLimitAdvice(auth["Authorization"] !== undefined) : ""),
+        httpFailureAdvice(res) +
+        (res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0" ? rateLimitAdvice(auth["Authorization"] !== undefined) : ""),
     );
   }
 
@@ -864,6 +868,7 @@ export async function miseUpgradeSuite(platform: Platform): Promise<void> {
   // none did. Repointing at whatever is now installed is correct in
   // both cases, and is a no-op when nothing changed.
   await linkRedSkillsCore(platform);
+  if (code !== 0) throw new RedError(`mise upgrade exited ${code}; some tools may have updated — run red-dev network to diagnose requests`);
 }
 
 /**

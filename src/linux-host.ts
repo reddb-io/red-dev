@@ -245,18 +245,27 @@ function parseProperties(text: string): Record<string, string> {
   return properties;
 }
 
-function journalEvidence(text: string): { oomEvents: string[]; stopTimeouts: number } {
+export function journalEvidence(text: string, source: "kernel" | "user-journal" = "user-journal") {
   const oomEvents = new Set<string>();
+  const oomIncidents: import("./host-health.ts").OomIncident[] = [];
   let stopTimeouts = 0;
   for (const line of text.split("\n")) {
     if (/A process .* killed by the OOM killer|Out of memory: Killed process/i.test(line)) {
       const stamp = line.match(/^\S+/)?.[0];
       const parsed = stamp ? Date.parse(stamp) : Number.NaN;
-      if (Number.isFinite(parsed)) oomEvents.add(new Date(parsed).toISOString());
+      if (Number.isFinite(parsed)) {
+        const at = new Date(parsed).toISOString();
+        oomEvents.add(at);
+        const victim = /Killed process (\d+) \(([^)]+)\)/i.exec(line);
+        const cgroup = /(?:task_memcg|oom_memcg)=([^,\s]+)/.exec(line)?.[1] ?? null;
+        const unit = /\b([\w@.-]+\.(?:service|scope))\b/.exec(line)?.[1] ?? null;
+        const incident = { at, pid: victim ? Number(victim[1]) : null, command: victim?.[2] ?? null, cgroup, unit, source };
+        if (!oomIncidents.some(previous => JSON.stringify(previous) === JSON.stringify(incident))) oomIncidents.push(incident);
+      }
     }
     if (/stop-sigterm.*timed out|timed out.*Killing/i.test(line)) stopTimeouts++;
   }
-  return { oomEvents: [...oomEvents], stopTimeouts };
+  return { oomEvents: [...oomEvents], oomIncidents, stopTimeouts };
 }
 
 function defaultDisk(): { freeBytes: number; totalBytes: number } {
@@ -317,7 +326,9 @@ export async function collectLinuxHostSnapshot(
   let workerMemoryCurrent: number[] = [];
   let workerMemoryMax: Array<number | "infinity"> = [];
   let workerLimitsKnown = !systemd;
-  let journal = { oomEvents: [] as string[], stopTimeouts: 0 };
+  let journal: ReturnType<typeof journalEvidence> = { oomEvents: [], oomIncidents: [], stopTimeouts: 0 };
+  let kernel: ReturnType<typeof journalEvidence> = { oomEvents: [], oomIncidents: [], stopTimeouts: 0 };
+  let kernelOomEvidenceKnown = false;
   if (systemd) {
     const unitArgs = [
       "list-units", "--type=service", "--type=scope", "--all", "--no-legend", "--no-pager",
@@ -401,6 +412,13 @@ export async function collectLinuxHostSnapshot(
       { timeoutMs: 2_000 },
     );
     if (!events.timedOut && events.exitCode === 0) journal = journalEvidence(events.stdout);
+    const kernelEvents = await run(
+      ["journalctl", "--kernel", "--since", "24 hours ago", "--no-pager", "-o", "short-iso",
+        "--grep", "Out of memory: Killed process|Memory cgroup out of memory: Killed process"],
+      { timeoutMs: 2_000 },
+    );
+    kernelOomEvidenceKnown = !kernelEvents.timedOut && kernelEvents.exitCode === 0;
+    if (kernelOomEvidenceKnown) kernel = journalEvidence(kernelEvents.stdout, "kernel");
   }
 
   const meminfo = read(`${procRoot}/meminfo`);
@@ -429,7 +447,9 @@ export async function collectLinuxHostSnapshot(
       memoryTotalBytes: memoryBytes(meminfo, "MemTotal"),
       diskFreeBytes: Number.isFinite(disk.freeBytes) ? disk.freeBytes : null,
       diskTotalBytes: Number.isFinite(disk.totalBytes) ? disk.totalBytes : null,
-      oomEvents: journal.oomEvents,
+      oomEvents: kernel.oomEvents.length ? kernel.oomEvents : journal.oomEvents,
+      oomIncidents: kernel.oomIncidents.length ? kernel.oomIncidents : journal.oomIncidents,
+      kernelOomEvidenceKnown,
       stopTimeouts: journal.stopTimeouts,
       workerLimitsKnown,
       workerTasksMax,
