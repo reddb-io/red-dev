@@ -12,11 +12,14 @@ test.skipIf(process.platform !== "win32")("PowerShell 5.1 bridges preserve bash 
     const capture = join(root, "argv.json"), source = join(root, "fake-wsl.ts"), exe = join(root, "wsl.exe");
     writeFileSync(source, 'await Bun.write(process.env.RED_DEV_BRIDGE_OUTPUT!, JSON.stringify(process.argv.slice(2))); process.exit(7);');
     expect(Bun.spawnSync([process.execPath, "build", source, "--compile", "--outfile", exe]).exitCode).toBe(0);
-    const script = join(root, "redskilled-wsl.ps1"); writeFileSync(script, bridgePowerShell("Ubuntu's distro", "redskilled"));
-    const env = { ...process.env, PATH: `${root};${process.env.PATH}`, RED_DEV_BRIDGE_OUTPUT: capture };
+    const script = join(root, "redskilled-wsl.ps1"); writeFileSync(script, bridgePowerShell("Ubuntu's distro", "redskilled", exe));
+    const env: NodeJS.ProcessEnv = { ...process.env, RED_DEV_BRIDGE_OUTPUT: capture };
+    const inheritedPath = process.env.PATH ?? process.env.Path ?? "";
+    for (const key of Object.keys(env)) if (key.toLowerCase() === "path") delete env[key];
+    env.Path = `${root};${inheritedPath}`;
     const args = ["path with spaces", 'embedded"quote', "apostrophe's", "C:\\trailing\\", "$(literal)", "", "--verbose"];
     const result = Bun.spawnSync(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `& ${ps(script)} ${args.map(ps).join(" ")}`], { env, cwd: root, stdout: "pipe", stderr: "pipe" });
-    expect(result.stderr.toString()).toBe(""); expect(result.exitCode).toBe(7);
+    expect({ stderr: result.stderr.toString(), stdout: result.stdout.toString(), code: result.exitCode }).toEqual({ stderr: "", stdout: "", code: 7 });
     expect(JSON.parse(readFileSync(capture, "utf8"))).toEqual(["-d", "Ubuntu's distro", "--cd", root, "--", "bash", "-lc", 'exec redskilled "$@"', "redskilled", ...args]);
     const batch = join(root, "redskilled.cmd"); writeFileSync(batch, bridgeCmd(script));
     const cmd = Bun.spawnSync(["cmd.exe", "/c", batch, "simple", "two words"], { env, cwd: root, stdout: "pipe", stderr: "pipe" });

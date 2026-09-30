@@ -861,7 +861,9 @@ async function cmdUpdate(p: Platform, inv: Invocation): Promise<number> {
     // deliberately not handed to it. Each publisher updates its own.
     agents: async () => {
       if (inv.dryRun) return;
-      const code = await cmdAgentsUpdate(p);
+      // The workstation converge (or unattended child update) owns WSL's
+      // complete update after ensuring the child is on this version.
+      const code = await cmdAgentsUpdate(p, false);
       if (code !== 0) throw new Error("some agent hosts did not update");
     },
 
@@ -2186,7 +2188,7 @@ async function cmdAgentsRun(p: Platform, passthrough: string[]): Promise<number>
  * decisions all live there, so `red-dev update` running the same thing
  * as a stage cannot report it differently.
  */
-async function cmdAgentsUpdate(p: Platform): Promise<number> {
+async function cmdAgentsUpdate(p: Platform, includeWsl = true): Promise<number> {
   const { availableAgents, agentRunsHere } = await import("./agents.ts");
   const { reportAgentUpdate, updateAgents } = await import("./agent-update.ts");
 
@@ -2195,7 +2197,7 @@ async function cmdAgentsUpdate(p: Platform): Promise<number> {
   const outcomes = await updateAgents(hosts, p, { report: reportAgentUpdate });
 
   const failed = outcomes.filter((outcome) => outcome.state === "failed");
-  const remoteCode = windowsWsl(p)
+  const remoteCode = windowsWsl(p) && includeWsl
     ? await (await import("./wsl-sync.ts")).relayWslCommand(p, "red-dev agents update") : 0;
   const updated = outcomes.filter((outcome) => outcome.state === "updated").length;
   // Counted rather than narrated: a machine where nothing moved is the
