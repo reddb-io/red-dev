@@ -75,5 +75,6 @@ describe("Windows coordinator", () => {
     const argv = distroArgv("Ubuntu-24.04", "red-dev install --yes");
     expect(argv.join(" ")).not.toContain(token); expect(argv.at(-1)).toContain("RED_DEV_WSL_CHILD");
     expect(distroSetupCommands("wsl", ["codex", "injection; echo broken"], ["rust@latest", "unknown"])).toEqual(["red-dev lang rust@latest", "red-dev agents codex"]);
+    expect(distroSetupCommands("wsl", [], ["rust", "go@1.25", "injection; echo broken"])).toEqual(["red-dev lang rust@latest,go@latest"]);
   });
 });

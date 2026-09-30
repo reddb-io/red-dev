@@ -5,7 +5,7 @@ import { log, RedError } from "./log.ts";
 import type { Platform } from "./platform.ts";
 import { readPreferences, writePreferences, type TerminalShell } from "./preferences.ts";
 import { spawnLogged, spawnInteractive } from "./providers.ts";
-import { isKnownRuntimeId } from "./runtimes.ts";
+import { isKnownRuntimeId, runtimeIdsForPolicy } from "./runtimes.ts";
 import { detectWsl, installWsl, type WslDistribution, type WslState } from "./wsl-provision.ts";
 import { readWindowsOutput } from "./windows-output.ts";
 import { unattendedShellCommand } from "./unattended.ts";
@@ -31,7 +31,7 @@ export function wslChildEnvironment(current: NodeJS.ProcessEnv = process.env, to
 
 export function distroSetupCommands(shell: TerminalShell | undefined, agentKeys: string[], runtimeIds: string[]): string[] {
   if (shell !== "wsl") return [];
-  const runtimes = runtimeIds.filter(isKnownRuntimeId);
+  const runtimes = runtimeIdsForPolicy(runtimeIds, "latest").filter(isKnownRuntimeId);
   const agents = agentKeys.filter(key => AGENTS.some(a => a.key === key));
   return [
     ...(runtimes.length ? [`red-dev lang ${runtimes.join(",")}`] : []),

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { bridgeCmd, bridgePowerShell } from "./windows-wsl-migration.ts";
@@ -22,12 +22,13 @@ test.skipIf(process.platform !== "win32")("PowerShell 5.1 bridges preserve bash 
     const direct = Bun.spawnSync([exe, "sanity"], { env, stdout: "pipe", stderr: "pipe" });
     expect({ code: direct.exitCode, error: direct.stderr.toString() }).toEqual({ code: 7, error: "" });
     const args = ["path with spaces", 'embedded"quote', "apostrophe's", "C:\\trailing\\", "$(literal)", "", "--verbose"];
+    writeFileSync(join(root, "cwd-marker"), root);
     const invoke = join(root, "invoke.ps1"); writeFileSync(invoke, `& ${ps(script)} ${args.map(ps).join(" ")}\nexit $LASTEXITCODE\n`);
     const result = Bun.spawnSync(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", invoke], { env, cwd: root, stdout: "pipe", stderr: "pipe" });
     expect({ stderr: result.stderr.toString(), stdout: result.stdout.toString(), code: result.exitCode }).toEqual({ stderr: "", stdout: "", code: 7 });
     const observed = JSON.parse(readFileSync(capture, "utf8")) as string[];
     // PowerShell expands Windows' DOS short directory aliases.
-    expect(realpathSync(observed[3]!).toLowerCase()).toBe(realpathSync(root).toLowerCase());
+    expect(readFileSync(join(observed[3]!, "cwd-marker"), "utf8")).toBe(root);
     expect(observed).toEqual(["-d", "Ubuntu's distro", "--cd", observed[3]!, "--", "bash", "-lc", 'exec redskilled "$@"', "redskilled", ...args]);
     const batch = join(root, "redskilled.cmd"); writeFileSync(batch, bridgeCmd(script));
     const cmd = Bun.spawnSync(["cmd.exe", "/c", batch, "simple", "two words"], { env, cwd: root, stdout: "pipe", stderr: "pipe" });
