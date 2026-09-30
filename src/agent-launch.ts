@@ -29,7 +29,6 @@ import { AGENTS, npmArgv, type AgentSpec } from "./agents.ts";
 import { isDefaultAgentCandidate, readDefaultAgent, reportDefaultAgent } from "./default-agent.ts";
 import { RedError } from "./log.ts";
 import { detect, type Platform } from "./platform.ts";
-import { workloadPolicy } from "./workload-policy.ts";
 
 /**
  * What a permission bypass looks like across the hosts red-dev
@@ -214,8 +213,8 @@ export function resolveLaunch(
  * UNATTENDED_ENV exists to tell package managers that nobody is
  * watching, and here somebody is.
  */
-export async function runLaunchTarget(target: LaunchTarget, p: Platform = detect()): Promise<number> {
-  const child = Bun.spawn(workloadPolicy().launch("agent", target.argv, p), {
+export async function runLaunchTarget(target: LaunchTarget, _p: Platform = detect()): Promise<number> {
+  const child = Bun.spawn(target.argv, {
     stdin: "inherit",
     stdout: "inherit",
     stderr: "inherit",

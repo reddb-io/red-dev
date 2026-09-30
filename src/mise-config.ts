@@ -104,10 +104,12 @@ export const RED_ROUTER_RECONCILE_POSTINSTALL =
 
 /**
  * Run the exact binary mise just installed, not an old bootstrap earlier
- * on PATH. This hook is Linux-desktop-only and never re-enters mise.
+ * on PATH. Linux upgrades retire old resource controls; desktops also
+ * reconcile GNOME. Neither operation re-enters mise.
  * MISE_TOOL_INSTALL_PATH is supplied by mise's tool-level postinstall.
  */
-export const RED_DEV_DESKTOP_POSTINSTALL = '"$MISE_TOOL_INSTALL_PATH/red-dev" desktop reconcile';
+export const RED_DEV_RESOURCE_POSTINSTALL = '"$MISE_TOOL_INSTALL_PATH/red-dev" doctor --repair workloads --apply';
+export const RED_DEV_DESKTOP_POSTINSTALL = `${RED_DEV_RESOURCE_POSTINSTALL} && "$MISE_TOOL_INSTALL_PATH/red-dev" desktop reconcile`;
 
 /**
  * The alias whose entry carries that postinstall.
@@ -466,8 +468,8 @@ export function miseEntries(
       ...(pr.alias === RED_ROUTER_ALIAS
         ? { postinstall: p.os === "linux" ? RED_ROUTER_RECONCILE_POSTINSTALL : "red-dev red-router install" }
         : {}),
-      ...(pr.alias === "red-dev" && p.os === "linux" && p.env === "desktop"
-        ? { postinstall: RED_DEV_DESKTOP_POSTINSTALL } : {}),
+      ...(pr.alias === "red-dev" && p.os === "linux"
+        ? { postinstall: p.env === "desktop" ? RED_DEV_DESKTOP_POSTINSTALL : RED_DEV_RESOURCE_POSTINSTALL } : {}),
     });
   }
   return entries;

@@ -108,15 +108,7 @@ fi
 _red_zellij_log="${XDG_STATE_HOME:-$HOME/.local/state}/red-dev/zellij/crash-$$.log"
 _red_zellij_dir="${_red_zellij_log%/*}"
 mkdir -p "$_red_zellij_dir" 2>/dev/null
-if declare -F _red_dev_run_control >/dev/null 2>&1; then
-  _red_zellij_launch() { _red_dev_run_control zellij "$@"; }
-elif [ "${RED_ENV:-server}" = "windows" ]; then
-  _red_zellij_launch() { zellij "$@"; }
-else
-  printf 'red-dev: control-plane guard is unavailable; refusing uncontained zellij\n' \
-    >"$_red_zellij_log"
-  _red_zellij_status=125
-fi
+_red_zellij_launch() { zellij "$@"; }
 
 # One default session, named after the machine, every time. Herdr is the
 # exception: every pane it creates is already an independent terminal, so

@@ -1840,7 +1840,7 @@ const BUILTIN_INTENT: Partial<Record<BuiltinName, string>> = {
   "wsl-interop": "checking that Windows binaries are reachable from inside the distro",
   "wsl-runtime-dir": "making sure XDG_RUNTIME_DIR exists and is owned by this user",
   blesh: "building and installing ble.sh, the bash line editor",
-  "build-resources": "bounding Cargo/Rust parallelism and heavy-workload memory",
+  "retired-resource-controls": "removing obsolete red-dev resource controls",
   runtimes: "installing language runtimes through mise",
   "shared-root": "creating the shared workspace root and its permissions",
   hotkeys: "registering the Windows hotkeys",
@@ -1936,7 +1936,7 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
         await installRuntimes(ctx.platform);
         return;
       }
-      if (pr.name === "build-resources") {
+      if (pr.name === "retired-resource-controls") {
         const { convergeBuildResources } = await import("./build-resources.ts");
         await convergeBuildResources(ctx.platform);
         return;

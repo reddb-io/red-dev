@@ -655,11 +655,14 @@ OS HTTP reachability and mise's own request. To repair the gh integration
 without upgrading any package, preview `red-dev doctor --repair mise-auth`,
 then apply with `--apply`. See [maintenance and recovery](docs/maintenance.md).
 
-red-dev lets `npm`, `pnpm`, and `bun` run directly. It retires older shell
-wrappers that launched package managers through systemd. Its workload policy
-imposes no memory or swap caps on panes, agents, or builds; convergence also
-releases obsolete caps on already running managed scopes without restarting
-them. CPU scheduling and Cargo concurrency remain configurable separately.
+red-dev runs panes, agents, compilers and package managers directly. It imposes
+no RAM/swap, CPU, I/O, task or disk-admission policy and does not limit Cargo
+parallelism. Installation and updates retire older red-dev wrappers, resource
+slices, Worker attachments, disk-guardian timers and marked Cargo/WSL settings.
+The cleanup archives exact original bytes, releases live controls without
+restarting workloads, and preserves definitions whose owner cannot be proven.
+Existing shells need to be reopened to discard wrappers they already loaded.
+User and project settings continue to apply.
 
 ### The shell
 

@@ -40,12 +40,36 @@ they do not change proxy settings or turn certificate verification off.
 | Name | Changes |
 | --- | --- |
 | `mise-auth` | Managed gh helper, mise fragment and obsolete gh credential overrides |
-| `workloads` | Managed Cargo concurrency, workload shell and CPU/memory policy; WSL host policy where applicable |
+| `workloads` | Retire obsolete resource wrappers, quotas, Cargo defaults, disk freezer and marked WSL resource rows |
 | `desktop` | Managed GNOME menu and shortcuts; may still require a fresh login |
 
-Workload repair releases old red-dev memory/swap limits on live owned scopes
-without restarting them. It retains CPU scheduling and Cargo concurrency.
-Each operation reports unsupported platforms or remaining drift.
+Workload repair backs up recognised red-dev files and blocks, disables the old
+disk guardian, thaws controlled groups, and releases live memory/CPU/I/O/task
+controls. It removes generated policies instead of keeping permanent
+`MemoryMax=infinity` replacements. Native service resource settings are
+preserved when retiring a red-dev drop-in. It starts no workloads and restarts
+none. Already-loaded shell functions disappear when the shell is reopened.
+
+WSL settings without ownership markers are preserved: older releases did not
+record provenance for every edit, so an unmarked budget cannot safely be
+attributed to red-dev. Marked rows are retired; changes take effect at the next
+user-initiated WSL restart. Red-dev does not run `wsl --shutdown`.
+
+Retirement runs during installation/update even if a previous migration was
+recorded as complete. Generated mise hooks also run this cleanup after Linux
+red-dev upgrades; older desktop-only hooks are recognised on the upgraded
+binary. Cleanup failures remain visible and retryable. Backups live under
+`~/.local/state/red-dev/retired-resource-controls` with mode 0600.
+
+## Retiring managed defaults in future releases
+
+A release that withdraws a default must stop generating it and remove its owned
+installed definitions. Use the retirement registry to name each file/block and
+its ownership evidence. Preserve unknown owners and retain exact private backups.
+Test a clean machine, an upgrade with historical files, live quota release,
+partial failures and repeated cleanup. Doctor must report obsolete leftovers;
+it must not recommend reinstalling withdrawn controls. Resource policy is a
+user or project decision; new automatic restrictions are not part of provisioning.
 
 ## Share a doctor report
 

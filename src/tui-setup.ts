@@ -185,7 +185,6 @@ export async function runSetupTui(
     const rightWidth = twoColumn ? frame.width - leftWidth - 3 : frame.width;
     const isTheme = q.id === "theme";
     const isRuntimes = q.id === "runtimes";
-    const isWslTuning = q.id === "wsl-tuning";
     const activeKey = q.choices[cursor()]?.key ?? "";
 
     return CenteredScreen(
@@ -245,14 +244,7 @@ export async function runSetupTui(
             Text({}, ""),
             Text({ color: muted }, q.description),
             Text({}, ""),
-            ...(isWslTuning
-              ? q.choices.map((c, i) =>
-                  Text(
-                    { ...(i === cursor() ? { color: ui.accent } : {}) },
-                    `• ${c.label}: ${c.note}`,
-                  )
-                )
-              : q.choices.map((c, i) => {
+            ...(q.choices.map((c, i) => {
                   const checked = selection().includes(c.key);
                   const selectable = choiceSelectable(q, c);
                   const showNote = !isRuntimes && (q.id !== "reddb" || selectable);

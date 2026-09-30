@@ -197,7 +197,7 @@ export function questions(
   apps: Choice[],
   runtimes: Choice[],
   redApps: Choice[] = [],
-  wslTuning: Choice[] = [],
+  _retiredWslTuning: Choice[] = [],
   facts: SetupFacts = {},
   desktopApps: Choice[] = [],
 ): Question[] {
@@ -248,19 +248,6 @@ export function questions(
         { key: "gitbash", label: "Git Bash", note: "stay on Windows, same dotfiles" },
       ],
       preset: ["wsl"],
-      applies: (pl: Platform) => pl.env === "wsl" || pl.os === "windows",
-    },
-    {
-      id: "wsl-tuning",
-      title: "WSL tuning",
-      description:
-        "red-dev never stops a live distro. This is the safety policy applied " +
-        "across Windows and WSL before builds, " +
-        "tests and coding agents begin using the machine. These are safe defaults, " +
-        "not optional tools; Enter accepts the inventory and continues.",
-      multi: true,
-      choices: wslTuning,
-      preset: [],
       applies: (pl: Platform) => pl.env === "wsl" || pl.os === "windows",
     },
     {
@@ -718,7 +705,6 @@ export function SetupLayout(m: SetupModel, p: Platform, width: number, height: n
   const rightWidth = twoColumn ? frame.width - leftWidth - 3 : frame.width;
   const isTheme = q.id === "theme";
   const isRuntimes = q.id === "runtimes";
-  const isWslTuning = q.id === "wsl-tuning";
   const isTextInput = q.textInput !== undefined;
   const options = stepChoices(q, m.pickedFor);
   const activeKey = options[m.cursor()]?.key ?? "";
@@ -798,13 +784,6 @@ export function SetupLayout(m: SetupModel, p: Platform, width: number, height: n
                     : `Blank — configure later; example: ${q.textInput!.placeholder}`,
                 ),
               ]
-            : isWslTuning
-            ? options.map((c, i) =>
-                Text(
-                  { ...(i === m.cursor() ? { color: ui.accent } : {}) },
-                  `• ${c.label}: ${c.note}`,
-                )
-              )
             : options.map((c, i) => {
                 const checked = m.selection().includes(c.key);
                 const selectable = choiceSelectable(q, c);

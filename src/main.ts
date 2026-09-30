@@ -2422,6 +2422,12 @@ async function main(): Promise<number> {
       return await statuslineCommand();
     }
     case "desktop": {
+      // Old mise fragments invoke only desktop reconcile after moving red-dev.
+      // Retire the old resource controls during that existing upgrade hook too.
+      if (inv.desktopVerb === "reconcile" && process.env["MISE_TOOL_INSTALL_PATH"]) {
+        const { convergeBuildResources } = await import("./build-resources.ts");
+        await convergeBuildResources(p);
+      }
       const { desktopCommand } = await import("./desktop.ts");
       return await desktopCommand(p, inv.desktopVerb ?? "status");
     }
