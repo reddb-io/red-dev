@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { log } from "./log.ts";
 import type { Platform } from "./platform.ts";
 import { localPath } from "./shared-root.ts";
+import { releaseWorkloadMemoryLimits } from "./workload-memory.ts";
 import { powershellBin, windowsUserProfile } from "./wsl.ts";
 import {
   HOST_DISK_GUARDIAN_UNITS,
@@ -463,8 +464,7 @@ export function assessBuildResources(
           name: "workload isolation",
           status: "ok",
           detail:
-            `dynamic 80% wall (${isolation.capacity.memoryMax} memory, ` +
-            `${isolation.capacity.cpuQuota} CPU); protected Zellij and bounded panes, agents and builds`,
+            `no imposed memory or swap caps; ${isolation.capacity.cpuQuota} CPU; protected Zellij and scheduled workloads`,
         }
       : {
           name: "workload isolation",
@@ -707,8 +707,8 @@ async function enableDiskGuardianTimer(): Promise<boolean> {
 /**
  * Converge the host's safe build defaults and Linux cgroup hierarchy.
  *
- * Existing workloads are deliberately not restarted or moved. New shells use
- * the shipped wrappers, and new redskilled Workers match the prefix drop-in.
+ * Existing workloads have obsolete memory limits released without restarting.
+ * Package managers run directly; new Workers match the updated prefix drop-in.
  */
 export async function convergeBuildResources(
   p: Platform,
@@ -771,6 +771,9 @@ export async function convergeBuildResources(
     [`${systemd}/${path}`, content] as const
   );
   let changed = 0;
+  const shellPath = `${home}/.local/share/red-dev/config/bash/build-resources.sh`;
+  mkdirSync(shellPath.slice(0, shellPath.lastIndexOf("/")), { recursive: true });
+  if (await writeIfChanged(shellPath, isolation.shell)) changed++;
   if (isolation.diskGuardian !== null) {
     const guardianDir = `${home}/.local/share/red-dev/bin`;
     const guardianPath = `${guardianDir}/disk-guardian.sh`;
@@ -790,15 +793,16 @@ export async function convergeBuildResources(
     log.warn("build resource files were written, but the systemd user manager did not reload them");
     return;
   }
+  const memory = await releaseWorkloadMemoryLimits();
+  if (memory.failed.length > 0) log.warn(`could not release old workload memory limits: ${memory.failed.join(", ")}`);
   if (isolation.diskGuardian !== null && !(await enableDiskGuardianTimer())) {
     log.warn("disk guardian was installed, but its timer could not be enabled");
     return;
   }
   if (changed > 0) {
-    log.ok("Zellij, panes, agents and builds now use separate cgroup budgets");
+    log.ok("workload scheduling updated; imposed memory and swap caps removed");
     log.plain(
-      `       red-dev is capped at 80%: ${isolation.capacity.memoryMax} memory and ` +
-        `${isolation.capacity.cpuQuota} CPU`,
+      `       CPU scheduling: ${isolation.capacity.cpuQuota}; package managers run directly`,
     );
   } else {
     log.skip("heavy workload slice already current");

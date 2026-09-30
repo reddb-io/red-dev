@@ -36,6 +36,7 @@ import {
 import { runBounded } from "./bounded-command.ts";
 import { log } from "./log.ts";
 import { MISE_NO_RELEASE_AGE } from "./mise-config.ts";
+import { miseGithubEnvironment, miseRemoteVersionsEnv } from "./mise-github.ts";
 import type { ShadowRepair } from "./shadow-repair.ts";
 import type { Platform } from "./platform.ts";
 import {
@@ -235,7 +236,7 @@ export function planAgentUpdate(
           : [mise, "use", "-g", "--yes", "--fuzzy", `${a.mise as string}@latest`],
         // Both forms: `latest` means the newest release, not the newest
         // one a day old. See MISE_NO_RELEASE_AGE.
-        env: { ...MISE_NO_RELEASE_AGE },
+        env: { ...MISE_NO_RELEASE_AGE, ...miseRemoteVersionsEnv(true) },
       });
     }
 
@@ -549,7 +550,7 @@ async function performUpdate(
   // path builds, with the step's own variables on top of it.
   const env: Record<string, string | undefined> = plan.mechanism === "npm" && npm
     ? { ...(await agentRuntimeEnvironment(npm, host)), ...plan.step.env }
-    : plan.step.env;
+    : { ...(plan.mechanism === "mise" ? miseGithubEnvironment() : {}), ...plan.step.env };
   const result = await (deps.command ?? defaultCommand)(plan.step.argv, env);
   return { ...base, ...readUpdateOutcome(result) };
 }

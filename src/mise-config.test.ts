@@ -113,13 +113,13 @@ describe("renderMiseConfig", () => {
 
   test("GitHub downloads use the account already selected by gh", () => {
     expect(renderMiseConfig([])).toContain(
-      '[settings.github]\ncredential_command = "gh auth token"',
+      '[settings.github]\ncredential_command = "gh auth token --hostname github.com"',
     );
   });
 
-  test("latest asks remote sources on every direct mise upgrade", () => {
+  test("ordinary mise commands reuse remote versions for an hour", () => {
     expect(renderMiseConfig([])).toContain(
-      '[settings]\nfetch_remote_versions_cache = "0s"',
+      '[settings]\nfetch_remote_versions_cache = "1h"',
     );
   });
 });

@@ -129,7 +129,7 @@ describe("workload isolation", () => {
       },
     })).toEqual([
       { name: "Cargo resources", status: "ok", detail: "5 compiler job(s), 2 libtest thread(s)" },
-      { name: "workload isolation", status: "ok", detail: "dynamic 80% wall (16G memory, 800% CPU); protected Zellij and bounded panes, agents and builds" },
+      { name: "workload isolation", status: "ok", detail: "no imposed memory or swap caps; 800% CPU; protected Zellij and scheduled workloads" },
       { name: "host disk guard", status: "ok", detail: "35 GiB free; 30 GiB build reserve (admission open); 20 GiB freeze / 30 GiB resume; timer enabled/active; workloads running; last event action=thawed reason=host-disk-recovered" },
       { name: "WSL host resources", status: "ok", detail: "60% host RAM, CPU headroom, 4 GiB swap, one retained crash dump, cache reclaim" },
     ]);

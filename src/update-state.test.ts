@@ -102,7 +102,7 @@ describe("refreshing the state", () => {
     expect(state?.outdated.map((tool) => tool.name)).toEqual(["claude", "red-router"]);
     expect(readUpdateState(path)).toEqual(state);
     expect(seen[0]?.["MISE_MINIMUM_RELEASE_AGE_EXCLUDES"]).toContain("claude");
-    expect(seen[0]?.["MISE_FETCH_REMOTE_VERSIONS_CACHE"]).toBe("0s");
+    expect(seen[0]?.["MISE_FETCH_REMOTE_VERSIONS_CACHE"]).toBe("1h");
   });
 
   test("does not ask inside the interval", async () => {

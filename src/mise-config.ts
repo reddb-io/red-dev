@@ -42,6 +42,7 @@ import { log } from "./log.ts";
 import { providerFor, TOOLS, type Tool } from "./manifest.ts";
 import { AGENTS } from "./agents.ts";
 import type { Platform } from "./platform.ts";
+import { convergeMiseGithubAuth } from "./mise-github.ts";
 
 /**
  * One tool, as mise needs to hear about it.
@@ -267,8 +268,13 @@ export function misePluginRoot(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 /** Where the fragment lands. */
-export function miseConfigPath(home: string = homedir()): string {
-  return join(home, ".config", "mise", "conf.d", "10-reddb-io.toml");
+export function miseConfigPath(home?: string): string {
+  const root = home ? join(home, ".config", "mise") :
+    process.env["MISE_CONFIG_DIR"] ??
+    (process.platform === "win32"
+      ? join(process.env["APPDATA"] ?? join(homedir(), "AppData", "Roaming"), "mise")
+      : join(process.env["XDG_CONFIG_HOME"] ?? join(homedir(), ".config"), "mise"));
+  return join(root, "conf.d", "10-reddb-io.toml");
 }
 
 const HEADER = [
@@ -373,6 +379,7 @@ export const MISE_NO_RELEASE_AGE: Readonly<Record<string, string>> = {
 export function renderMiseConfig(
   entries: MiseEntry[],
   hosts: readonly { mise?: string }[] = [],
+  credentialCommand = "gh auth token --hostname github.com",
 ): string {
   const sorted = [...entries].sort((a, b) => key(a).localeCompare(key(b)));
 
@@ -382,12 +389,12 @@ export function renderMiseConfig(
     "# Use the account already selected by `gh auth login`. The token is",
     "# read for each mise process and never copied into this file.",
     "[settings.github]",
-    'credential_command = "gh auth token"',
+    `credential_command = ${str(credentialCommand)}`,
     "",
-    "# `latest` must ask the publisher on every upgrade. Mise otherwise",
-    "# caches remote versions for an hour and can call a new release current.",
+    "# Reuse remote metadata for ordinary installs and version checks.",
+    "# `red-dev update` bypasses this cache to discover new releases.",
     "[settings]",
-    'fetch_remote_versions_cache = "0s"',
+    'fetch_remote_versions_cache = "1h"',
   ];
 
   const excludes = releaseAgeExcludes(sorted, hosts);
@@ -514,10 +521,15 @@ export function convergeMiseConfig(
 ): ConvergeMiseConfigResult {
   const path = miseConfigPath(opts.home);
   const entries = miseEntries(p, opts.tools ?? TOOLS);
-  const desired = renderMiseConfig(entries, opts.hosts ?? AGENTS);
+  const auth = convergeMiseGithubAuth(
+    dirname(dirname(path)),
+    p.os === "windows" ? "win32" : "linux",
+    opts.home ? undefined : process.env["MISE_CONFIG_FILE"],
+  );
+  const desired = renderMiseConfig(entries, opts.hosts ?? AGENTS, auth.command);
 
   const current = existsSync(path) ? readFileSync(path, "utf8") : null;
-  if (current === desired) return { path, changed: false, entries: entries.length };
+  if (current === desired) return { path, changed: auth.changed, entries: entries.length };
 
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, desired, "utf8");

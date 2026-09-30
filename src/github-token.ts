@@ -49,7 +49,7 @@ export function forgetGithubToken(): void {
  */
 function tokenFromGh(run = spawnSync): string | null {
   try {
-    const result = run("gh", ["auth", "token"], {
+    const result = run("gh", ["auth", "token", "--hostname", "github.com"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       // Two seconds, not five: a token read is a local file read, and a
@@ -74,8 +74,10 @@ export function githubToken(
   env: NodeJS.ProcessEnv = process.env,
   run: typeof spawnSync = spawnSync,
 ): string | null {
-  const explicit = env["GITHUB_TOKEN"] ?? env["GH_TOKEN"];
-  if (explicit && explicit.trim().length > 0) return explicit.trim();
+  for (const name of ["GITHUB_TOKEN", "GH_TOKEN"]) {
+    const explicit = env[name]?.trim();
+    if (explicit) return explicit;
+  }
 
   if (memo === undefined) memo = tokenFromGh(run);
   return memo;

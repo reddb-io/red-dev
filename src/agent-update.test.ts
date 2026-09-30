@@ -210,7 +210,7 @@ describe("the update argv of each per-host mechanism", () => {
     expect(p.step).toEqual({
       kind: "command",
       argv: ["/usr/bin/mise", "install", "redcode@latest"],
-      env: { MISE_MINIMUM_RELEASE_AGE: "0" },
+      env: { MISE_MINIMUM_RELEASE_AGE: "0", MISE_FETCH_REMOTE_VERSIONS_CACHE: "0s" },
     });
   });
 
@@ -221,7 +221,7 @@ describe("the update argv of each per-host mechanism", () => {
     expect(p.step).toEqual({
       kind: "command",
       argv: ["/usr/bin/mise", "use", "-g", "--yes", "--fuzzy", "herdr@latest"],
-      env: { MISE_MINIMUM_RELEASE_AGE: "0" },
+      env: { MISE_MINIMUM_RELEASE_AGE: "0", MISE_FETCH_REMOTE_VERSIONS_CACHE: "0s" },
     });
   });
 

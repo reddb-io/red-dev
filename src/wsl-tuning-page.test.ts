@@ -58,9 +58,9 @@ describe("the dedicated WSL tuning setup page", () => {
       "Windows headroom: 19.2/32 GiB RAM · 10/12 CPUs · 4 GiB swap",
     );
     expect(rows).toContain(
-      "Workload wall: 16G RAM / 800% CPU; Zellij and redskilled stay protected",
+      "Workload scheduling: no imposed RAM cap / 800% CPU; Zellij and redskilled stay protected",
     );
-    expect(rows).toContain("Per launch: pane 3G, agent 5G, build 8G; hard walls avoid reclaim stalls");
+    expect(rows).toContain("Per launch: panes, agents and builds use available RAM and swap");
     expect(rows).toContain("Rust: Cargo 5 jobs, libtest 2 threads, nextest 5 threads");
     expect(rows).toContain(
       "Windows disk: admit at 30 GiB free, freeze at 20 GiB, resume at 30 GiB",
@@ -79,7 +79,7 @@ describe("the dedicated WSL tuning setup page", () => {
 
     expect(page.choices.map((choice) => choice.label)).toEqual([
       "Windows headroom",
-      "Workload wall",
+      "Workload scheduling",
       "Per launch",
       "Rust",
       "Windows disk",
@@ -143,7 +143,7 @@ describe("the dedicated WSL tuning setup page", () => {
     expect(text).toContain("• Windows headroom");
     expect(text).not.toContain("[ ] Windows headroom");
     expect(text).toContain("10/12 CPUs · 4 GiB swap");
-    expect(text).toContain("hard walls avoid reclaim stalls");
+    expect(text).toContain("panes, agents and builds use available RAM and swap");
     expect(text).toContain("nextest 4 threads");
     expect(text).toContain("resume at 30 GiB");
     expect(text).toContain("wsl --shutdown");

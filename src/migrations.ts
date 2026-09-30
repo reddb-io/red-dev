@@ -754,6 +754,15 @@ return {}
       log.plain(`       removed ${copy.link} and ${copy.versions}; mise is the only owner of claude`);
     },
   },
+  {
+    id: "2026-09-30-persistent-mise-gh-auth",
+    describe: "configure direct mise commands to use the active gh login",
+    applies: () => Bun.which("mise") !== null,
+    run: async (p) => {
+      const { convergeMiseConfig } = await import("./mise-config.ts");
+      convergeMiseConfig(p);
+    },
+  },
 ];
 
 /**
