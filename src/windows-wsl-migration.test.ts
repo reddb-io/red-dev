@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bridgeCmd, bridgePowerShell, ownedDaemonLauncher, ownedRouterWrapper, prepareWindowsRouterData, retireWindowsServices, routerImportCommand, snapshotRouterData } from "./windows-wsl-migration.ts";
+import { bridgeCmd, bridgePowerShell, nativeOwnerArgv, ownedDaemonLauncher, ownedRouterWrapper, prepareWindowsRouterData, retireWindowsServices, routerImportCommand, snapshotRouterData } from "./windows-wsl-migration.ts";
 import { launcherFor, runtimeBinDir } from "./red-skills-companions.ts";
 import type { Platform } from "./platform.ts";
 
@@ -22,7 +22,7 @@ function native() {
   const stopped = new Set<string>();
   const run = async (argv: string[]) => {
     calls.push(argv);
-    if (argv.includes("stop")) stopped.add(argv.join(" ").includes("red-router") ? "router" : "daemon");
+    if (argv.includes("stop") || argv.join(" ").includes("'stop'")) stopped.add(argv.join(" ").includes("red-router") ? "router" : "daemon");
     const command = argv.join(" ");
     const kind = command.includes("redskilled.bundle") ? "daemon" : "router";
     return { exitCode: 0, stdout: command.includes("Win32_Process") && stopped.has(kind) ? "0" : "1" };
@@ -50,7 +50,7 @@ describe("Windows service destination migration", () => {
     for (const workers of [2, null]) {
       const f = native();
       await expect(retireWindowsServices(windows, "Ubuntu-26.04", { ...f, workers: async () => workers })).rejects.toThrow("Workers");
-      expect(f.calls.every(args => args[0] === "powershell.exe" && !args.join(" ").includes("Copy-Item"))).toBe(true);
+      expect(f.calls.every(args => args[0] === "powershell.exe" && !/Copy-Item|'stop'/.test(args.join(" ")))).toBe(true);
       expect(readFileSync(f.daemon.path, "utf8")).toBe(f.daemon.bytes);
       expect(existsSync(join(f.root, "services-retired.json"))).toBe(false);
     }
@@ -61,8 +61,8 @@ describe("Windows service destination migration", () => {
     const data = join(f.home, ".red/redskilled/user-data"); mkdirSync(data, { recursive: true }); writeFileSync(join(data, "keep"), "work");
     const seams = { ...f, workers: async () => 0, routerExecutable: () => "C:/mise/installs/red-router/1/bin/red-router.cmd" };
     await retireWindowsServices(windows, "Ubuntu-26.04", seams);
-    expect(f.calls).toContainEqual(["cmd.exe", "/c", f.daemon.path, "stop"]);
-    expect(f.calls).toContainEqual(["cmd.exe", "/c", "C:/mise/installs/red-router/1/bin/red-router.cmd", "stop"]);
+    expect(f.calls).toContainEqual(nativeOwnerArgv(f.daemon.path, ["stop"]));
+    expect(f.calls).toContainEqual(nativeOwnerArgv("C:/mise/installs/red-router/1/bin/red-router.cmd", ["stop"]));
     expect(f.calls.some(args => args.includes("red-router") && args.includes("uninstall"))).toBe(true);
     expect(existsSync(f.router)).toBe(false);
     const archives = readdirSync(f.root).filter(name => /\.cmd\./.test(name)).map(name => readFileSync(join(f.root, name), "utf8"));
@@ -76,7 +76,7 @@ describe("Windows service destination migration", () => {
 
   test("a failed native stop keeps originals and is retried", async () => {
     const f = native();
-    await expect(retireWindowsServices(windows, "Ubuntu-26.04", { ...f, workers: async () => 0, run: async argv => ({ exitCode: argv.includes("stop") ? 1 : 0, stdout: "1" }) })).rejects.toThrow("stop cleanly");
+    await expect(retireWindowsServices(windows, "Ubuntu-26.04", { ...f, workers: async () => 0, run: async argv => ({ exitCode: argv.join(" ").includes("'stop'") ? 1 : 0, stdout: "1" }) })).rejects.toThrow("stop cleanly");
     expect(readFileSync(f.daemon.path, "utf8")).toBe(f.daemon.bytes);
     expect(existsSync(f.router)).toBe(true);
     expect(existsSync(join(f.root, "services-retired.json"))).toBe(false);

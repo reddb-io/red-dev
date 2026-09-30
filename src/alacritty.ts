@@ -25,7 +25,6 @@ import type { Platform } from "./platform.ts";
 import { cursorToml } from "./terminal-cursor.ts";
 import { joinLines, splitLines, statements, stringsIn, tomlString } from "./toml-lines.ts";
 import type { TomlLine, TomlStatement } from "./toml-lines.ts";
-import { readWindowsOutput } from "./windows-output.ts";
 
 async function capture(cmd: string[]): Promise<string> {
   const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
@@ -228,18 +227,14 @@ program = 'bash'
 /**
  * The distro WSL would open by default.
  *
- * `wsl -l -q` writes UTF-16LE when redirected, so decode the Windows
- * boundary before treating the result as normal text.
+ * The coordinator selects Ubuntu independently of Windows' default distro.
  */
-async function defaultWslDistro(): Promise<string | null> {
-  try {
-    const proc = Bun.spawn(["wsl.exe", "-l", "-q"], { stdout: "pipe", stderr: "ignore" });
-    const out = await readWindowsOutput(proc.stdout);
-    if ((await proc.exited) !== 0) return null;
-    return out.split(/\r?\n/).map((l) => l.trim()).find(Boolean) ?? null;
-  } catch {
-    return null;
-  }
+async function defaultWslDistro(p: Platform): Promise<string | null> {
+  const { defaultDistroInfo, DEFAULT_WSL_DISTRO } = await import("./wsl-sync.ts");
+  const { windowsWsl } = await import("./workstation.ts");
+  // Use the coordinator's Ubuntu selection, including its planned target on
+  // a fresh host, so the terminal is already wired when WSL finishes setup.
+  return (await defaultDistroInfo(p))?.name ?? (windowsWsl(p) ? DEFAULT_WSL_DISTRO : null);
 }
 
 /**
@@ -261,7 +256,7 @@ async function shellSectionFor(
     // shell after the user had explicitly asked for WSL. Ask WSL itself
     // as the last resort.
     let distro = prefs.distro ?? process.env["WSL_DISTRO_NAME"] ?? undefined;
-    if (!distro) distro = (await defaultWslDistro()) ?? undefined;
+    if (!distro) distro = (await defaultWslDistro(p)) ?? undefined;
     if (!distro) {
       log.warn("no WSL distro found; leaving Alacritty on its default shell");
       return "";

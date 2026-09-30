@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { bridgeCmd, bridgePowerShell } from "./windows-wsl-migration.ts";
+import { bridgeCmd, bridgePowerShell, nativeOwnerArgv } from "./windows-wsl-migration.ts";
 import { MISE_GITHUB_AUTH_PS1 } from "./mise-github.ts";
 
 const ps = (word: string) => `'${word.replaceAll("'", "''")}'`;
@@ -31,7 +31,7 @@ test.skipIf(process.platform !== "win32")("PowerShell 5.1 bridges preserve bash 
     expect(readFileSync(join(observed[3]!, "cwd-marker"), "utf8")).toBe(root);
     expect(observed).toEqual(["-d", "Ubuntu's distro", "--cd", observed[3]!, "--", "bash", "-lc", 'exec redskilled "$@"', "redskilled", ...args]);
     const batch = join(root, "redskilled.cmd"); writeFileSync(batch, bridgeCmd(script));
-    const cmd = Bun.spawnSync(["cmd.exe", "/c", batch, "simple", "two words"], { env, cwd: root, stdout: "pipe", stderr: "pipe" });
+    const cmd = Bun.spawnSync(nativeOwnerArgv(batch, ["simple", "two words"]), { env, cwd: root, stdout: "pipe", stderr: "pipe" });
     expect({ code: cmd.exitCode, stdout: cmd.stdout.toString(), stderr: cmd.stderr.toString() }).toEqual({ code: 7, stdout: "", stderr: "" });
     expect(JSON.parse(readFileSync(capture, "utf8")).slice(-2)).toEqual(["simple", "two words"]);
 
