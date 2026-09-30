@@ -69,7 +69,7 @@ export async function inspectNetwork(options: {
         return;
       }
       const status = kind === "curl" ? Number(result.stdout.trim()) : undefined;
-      if (!result.timedOut && result.exitCode === 0 && (kind !== "curl" || (status! >= 200 && status! < 400))) {
+      if (kind !== "credential" && !result.timedOut && result.exitCode === 0 && (kind !== "curl" || (status! >= 200 && status! < 400))) {
         record({ name, status: "ok", detail: kind === "curl" ? `HTTP ${status}` : "mise remote-version request succeeded", elapsedMs });
         return;
       }

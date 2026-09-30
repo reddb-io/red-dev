@@ -43,3 +43,18 @@ test("never exports proxy addresses, credentials, URLs with passwords or environ
   expect(encoded).not.toContain("private-token");
   expect(encoded).not.toContain("neverRetain");
 });
+
+test("an empty credential or mise source none is an authentication failure even with exit zero", async () => {
+  const report = await inspectNetwork({
+    locate: name => `/bin/${name}`, gh: () => "/real/gh", env: {},
+    run: async (argv) => {
+      if (argv[0] === "/real/gh") return ok("");
+      if (argv[1] === "token") return ok("Source: none\n");
+      return ok("200");
+    },
+  });
+  for (const check of report.checks.filter(check => check.name.includes("credential"))) {
+    expect(check.status).toBe("failed");
+    expect(check.failure).toBe("authentication");
+  }
+});
