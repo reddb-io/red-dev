@@ -105,6 +105,9 @@ jobs:
           }
           echo "version ${MANIFEST} consistent"
 
+      - name: Smoke — network CLI dispatch and private JSON
+        run: bun scripts/network-cli-smoke.ts ./dist/red-dev-linux-x64
+
       - name: Smoke — embedded dotfiles survive compilation
         # The distribution model rests on this: a binary that cannot
         # carry config/ installs tools and no experience.
