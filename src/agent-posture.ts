@@ -1,3 +1,4 @@
+import { windowsWsl } from "./workstation.ts";
 /**
  * The machine's agent posture, as `doctor` reports it.
  *
@@ -269,9 +270,14 @@ export async function agentPostureFor(
 ): Promise<AgentPostureRow[]> {
   const { readPreferences } = await import("./preferences.ts");
   const prefs = await readPreferences(p);
-  return agentPosture({
+  const { agentRunsHere } = await import("./agents.ts");
+  const selectedDefault = seams.defaultAgent ?? prefs.defaultAgent;
+  const remoteDefault = windowsWsl(p) && AGENTS.some(a => a.key === selectedDefault && !agentRunsHere(a, p));
+  const rows = agentPosture({
     ...seams,
-    defaultAgent: seams.defaultAgent ?? prefs.defaultAgent,
+    hosts: (seams.hosts ?? AGENTS).filter(a => agentRunsHere(a, p)),
+    defaultAgent: remoteDefault ? undefined : selectedDefault,
     selected: seams.selected ?? prefs.agents ?? [],
   });
+  return remoteDefault ? rows.map(row => row.name === "default agent" ? { name: row.name, status: "n/a" as const, detail: `${selectedDefault} is checked in Ubuntu/WSL` } : row) : rows;
 }

@@ -1807,6 +1807,8 @@ export async function systemUpdate(p: Platform, opts: { whole?: boolean } = {}):
 // -------------------------------------------------------- dispatch
 
 export interface ApplyContext {
+  wslAction?: "install" | "update";
+  wslScope?: import("./manifest.ts").Scope;
   // No `root`: there is nothing on disk to point at. Every config file
   // this tool writes is either a text import compiled into the binary
   // or generated from the theme, so a converge needs no checkout, no
@@ -2096,7 +2098,7 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
       }
       if (pr.name === "wsl-sync") {
         const { syncWslDistro } = await import("./wsl-sync.ts");
-        await syncWslDistro(ctx.platform);
+        await syncWslDistro(ctx.platform, { action: ctx.wslAction, scope: ctx.wslScope });
         return;
       }
       if (pr.name === "shared-root") {

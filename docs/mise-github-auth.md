@@ -14,6 +14,12 @@ Upgrades do gh e trocas de conta não exigem refazer a configuração.
 Overrides antigos que chamavam `gh auth token` são migrados com backup.
 O cache de versões fica em uma hora nas operações comuns.
 
+No WSL, o helper tenta primeiro o gh Linux. Se ele estiver ausente ou sem login,
+consulta o gh do Windows via PowerShell, sem copiar o armazenamento de credenciais.
+Isso também vale para `mise upgrade` e `mise bump` executados diretamente no
+Ubuntu. Durante a instalação coordenada, o token fica somente no ambiente do
+processo filho; nunca no comando ou em um arquivo do red-dev.
+
 O fluxo normal só requer uma sessão gh autenticada. Os procedimentos manuais
 abaixo são contingência para máquinas com uma versão anterior à correção.
 

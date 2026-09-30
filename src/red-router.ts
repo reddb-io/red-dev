@@ -1,3 +1,4 @@
+import { windowsWsl } from "./workstation.ts";
 /** Keep the official RedRouter package running on every target. */
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -315,6 +316,11 @@ function startHiddenDefault(runnerPath: string, wrapper: string): void {
 
 export async function convergeRouterAutostart(p: Platform, seams: RouterSeams = {}): Promise<RouterOutcome> {
   const env = seams.env ?? process.env;
+  if (windowsWsl(p)) {
+    const { relayWslCommand } = await import("./wsl-sync.ts");
+    if (await relayWslCommand(p, "red-dev red-router install") !== 0) throw new Error("Ubuntu/WSL router installation failed");
+    return "unchanged";
+  }
   return p.os === "windows" ? await convergeWindows(p, seams, env) : await convergeLinux(p, seams, env);
 }
 
@@ -340,6 +346,7 @@ export async function inspectRouter(p: Platform, seams: RouterSeams = {}): Promi
   const name = "red-router";
   if (!routerEnabled(env)) return [{ name, status: "ok", detail: "service turned off (RED_ROUTER=0)" }];
   const answering = seams.answering ? await seams.answering() : await portAnswers(routerPort(env), routerHost(env));
+  if (windowsWsl(p)) return [{ name, status: answering ? "ok" : "drift", detail: answering ? "WSL endpoint reachable from Windows" : "WSL endpoint unreachable from Windows", ...(answering ? {} : { fix: "red-dev install core" }) }];
   const run = await runner(seams);
   if (p.os === "windows") {
     const probe = await run(["powershell.exe", "-NoProfile", "-Command", `$p = Join-Path $env:APPDATA 'Microsoft\\Windows\\Start Menu\\Programs\\Startup\\${ROUTER_SHORTCUT}'; if (Test-Path $p) { 'present' } else { 'absent' }`]);

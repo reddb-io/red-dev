@@ -44,6 +44,9 @@ export interface Platform {
   env: Env;
   arch: Arch;
   caps: Capabilities;
+  /** Resolved from the durable shell choice by the Windows entry point. */
+  workstation?: "windows-wsl" | "windows-native";
+  wslDistro?: string;
 }
 
 function readOsRelease(): Record<string, string> {

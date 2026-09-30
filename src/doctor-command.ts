@@ -1,3 +1,4 @@
+import { windowsWsl } from "./workstation.ts";
 import type { Invocation } from "./cli.ts";
 import { VERSION } from "./cli.ts";
 import { captureTo, log } from "./log.ts";
@@ -385,17 +386,25 @@ async function inspectDoctor(p: Platform, inv: Invocation): Promise<number> {
   return 0;
 }
 
+async function inspectWorkstation(p: Platform, inv: Invocation): Promise<number> {
+  const own = await inspectDoctor(p, inv);
+  if (!windowsWsl(p)) return own;
+  const { relayWslCommand } = await import("./wsl-sync.ts");
+  const child = await relayWslCommand(p, "red-dev doctor");
+  return own === 0 && child === 0 ? 0 : 1;
+}
+
 export async function doctorCommand(p: Platform, inv: Invocation): Promise<number> {
   if (!inv.json && !inv.doctorExport) return inv.doctorRepair
     ? doctorRepair(p, inv.doctorRepair as DoctorRepair, inv.apply)
-    : inspectDoctor(p, inv);
+    : inspectWorkstation(p, inv);
   const lines: string[] = [];
   const restore = captureTo(line => lines.push(line));
   let code: number;
   try {
     code = inv.doctorRepair
       ? await doctorRepair(p, inv.doctorRepair as DoctorRepair, inv.apply)
-      : await inspectDoctor(p, inv);
+      : await inspectWorkstation(p, inv);
   } finally { restore(); }
   const report = { schema: "red.doctor-report.v1", version: VERSION, platform: p, exitCode: code, lines };
   const encoded = encodeDoctorReport(report);

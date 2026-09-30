@@ -42,7 +42,7 @@ Linux and WSL:
 curl -fsSL https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.sh | sh
 ```
 
-Native Windows:
+Windows (PowerShell, configura Windows e Ubuntu/WSL):
 
 ```powershell
 irm https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.ps1 | iex
@@ -60,6 +60,11 @@ packages may still ask for sudo.
 
 On Windows, open a new terminal after installing — the `PATH` entry does not
 reach shells that were already running.
+
+Run `red-dev install` in PowerShell to configure both sides. Graphical apps and
+Alacritty belong to Windows; shell, build tools, RedRouter and redskilled belong
+to Ubuntu/WSL. RedCode and red-dev are available on both sides. Native Ubuntu
+configures itself. See [Windows/WSL placement and migration](docs/windows-wsl.md).
 
 Every push to `main` publishes a stable release. An explicit `next` prerelease
 can also be published through the Release workflow; install that channel with:
@@ -127,10 +132,9 @@ os=windows distro=n/a version=n/a env=windows arch=x64
 caps: apt=0 gui=1 systemd=0 winget=1 flatpak=0
 ```
 
-Read the first as: a WSL distro with no display of its own, but able to reach
-the Windows host through `winget`. That single pair — `gui=0 winget=1` — is why
-the WSL target installs fonts and terminal configuration **on Windows** rather
-than inside Ubuntu, where they would accomplish nothing.
+The WSL distro owns Linux tooling and services. The Windows coordinator owns
+fonts, terminal configuration and graphical applications on the Windows host.
+Each manifest entry declares its destination independently of its feature scope.
 
 Adding Ubuntu 28 should mean touching [`src/platform.ts`](src/platform.ts) and
 the manifest, nothing else.
@@ -155,10 +159,8 @@ share nothing — GNOME extensions on Linux, FancyZones on Windows. Putting the
 panes **inside** the terminal is what makes tiling identical everywhere, and it
 keeps working over SSH, which no window manager can offer.
 
-On native Windows the terminal launches **Git Bash, not PowerShell**. That is
-what makes the shipped dotfiles apply there at all, and it is why standardising
-on bash rather than PowerShell is what makes "same experience" true instead of
-aspirational.
+On Windows the default terminal opens Ubuntu/WSL. An explicitly recorded Git
+Bash choice preserves native Windows mode; `red-dev shell` changes the choice.
 
 ---
 

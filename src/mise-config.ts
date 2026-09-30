@@ -1,3 +1,4 @@
+import { runsHere } from "./workstation.ts";
 /**
  * The mise config fragment that makes the reddb-io suite updatable.
  *
@@ -234,7 +235,7 @@ export function miseToolBin(
   const windows = process.platform === "win32";
   const candidates = ["latest", ...names.filter((n) => n !== "latest").sort(byVersionDesc)];
   for (const name of candidates) {
-    for (const rel of windows ? [`${exe}.exe`, join("bin", `${exe}.exe`)] : [exe, join("bin", exe)]) {
+    for (const rel of windows ? [`${exe}.exe`, join("bin", `${exe}.exe`), `${exe}.cmd`, join("bin", `${exe}.cmd`), join("node_modules", ".bin", `${exe}.cmd`)] : [exe, join("bin", exe), join("node_modules", ".bin", exe)]) {
       const path = join(root, name, rel);
       if (existsSync(path)) return path;
     }
@@ -438,7 +439,7 @@ export function renderMiseConfig(
 export function miseEntries(
   p: Platform,
   tools: readonly Tool[] = TOOLS,
-  hosts: readonly { mise?: string; miseSuite?: true; cmd: string }[] = AGENTS,
+  hosts: readonly { mise?: string; miseSuite?: true; cmd: string; placement?: import("./workstation.ts").Placement }[] = AGENTS,
 ): MiseEntry[] {
   const entries: MiseEntry[] = [];
 
@@ -447,7 +448,7 @@ export function miseEntries(
   // this projection `mise upgrade` would know nothing about the copy
   // red-dev installed.
   for (const host of hosts) {
-    if (host.mise && host.miseSuite) {
+    if (host.mise && host.miseSuite && runsHere(host.placement ?? "both", p)) {
       entries.push({ spec: host.mise, alias: host.cmd, version: "latest" });
     }
   }

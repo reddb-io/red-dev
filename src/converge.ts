@@ -35,6 +35,7 @@ import {
 import { verifyInstalled } from "./verify-install.ts";
 import { formatDuration, log } from "./log.ts";
 import type { Platform } from "./platform.ts";
+import { windowsWsl } from "./workstation.ts";
 
 /**
  * `deferred` is the one that is not a verdict on the work.
@@ -298,7 +299,9 @@ export async function converge(
   // work: a remainder that counts every step of a converge it is not
   // going to run reports `[ 1/38]` for the only item it touches.
   const onlyPrivileged = opts.only === "privileged";
-  const total = onlyPrivileged ? batch.length : countSteps(scopes);
+  const coordinate = windowsWsl(p) && !onlyPrivileged;
+  const coordinator = toolsInScope("core").find(t => t.name === "wsl-sync")!;
+  const total = onlyPrivileged ? batch.length : countSteps(scopes) + (coordinate && !scopes.includes("core") ? 1 : 0);
   let index = 0;
 
   /**
@@ -379,7 +382,7 @@ export async function converge(
   // that prints thirty-seven rows of work it did not do buries the one
   // row it did.
   for (const scope of onlyPrivileged ? [] : scopes) {
-    const tools = toolsInScope(scope).filter((t) => !batched.has(t.name));
+    const tools = toolsInScope(scope).filter((t) => !batched.has(t.name) && !(coordinate && t.name === "wsl-sync"));
     observer.scopeStart?.(scope, tools.length);
 
     // apt is batched: twenty sequential apt-get calls is the slowest
@@ -538,6 +541,18 @@ export async function converge(
           finish(tool.managed ? "applied" : "installed");
         }
       }
+    }
+  }
+
+  if (coordinate) {
+    observer.scopeStart?.("core", 1);
+    const { finish, finishError } = open("core", coordinator, "Ubuntu/WSL");
+    if (dryRun) finish("skipped", "dry run");
+    else {
+      try {
+        await applyProvider(providerFor(coordinator, p), { ...ctx, wslScope: scopes.includes("optional") ? "optional" : undefined });
+        finish("applied");
+      } catch (err) { finishError((err as Error).message); }
     }
   }
 

@@ -1,141 +1,65 @@
-/**
- * A WSL machine is two machines, and only one of them was converging.
- *
- * `boot.ps1` installed the Windows target and stopped at the boundary.
- * The distro — separate home, separate PATH, separate copy of red-dev —
- * kept whatever it had, and the terminal red-dev configures opens
- * `wsl.exe`, so the half being typed into was the half nobody updated.
- * Observed: Windows on 0.11.0 beside a distro on 0.2.2 with dotfiles
- * three days old, no error anywhere, and a feature that had just been
- * installed simply absent.
- */
-
 import { describe, expect, test } from "bun:test";
-import { planFor } from "./wsl-sync.ts";
-import { TOOLS, applicableScopes, providerFor } from "./manifest.ts";
+import { distroArgv, distroSetupCommands, planFor, selectDistro, syncSelectedTooling, syncWslDistro, relayWslCommand, wslChildEnvironment, type WslSyncSeams } from "./wsl-sync.ts";
 import type { Platform } from "./platform.ts";
-
-describe("what the distro needs", () => {
-  test("bootstraps when the distro has no red-dev at all", () => {
-    const plan = planFor(null, "0.11.1");
-    expect(plan.install).toBe(true);
-    // Nothing to upgrade: boot.sh is the only way into an empty distro.
-    expect(plan.how).toBe("bootstrap");
-    expect(plan.reason).toContain("no red-dev");
-  });
-
-  test("upgrades through the distro's own mise when it is behind", () => {
-    // The case that was actually on the machine. Re-bootstrapping here
-    // writes ~/.local/bin, which mise's shim shadows — so the distro
-    // reports the new version through no path anything executes.
-    const plan = planFor("0.2.2", "0.11.1");
-    expect(plan.install).toBe(true);
-    expect(plan.how).toBe("upgrade");
-    expect(plan.reason).toContain("0.2.2");
-    expect(plan.reason).toContain("0.11.1");
-  });
-
-  test("installs when the distro is somehow ahead", () => {
-    // Not a version comparison, a sameness one. Two halves of one
-    // machine running different builds is the condition being fixed,
-    // and which way round it is does not change that.
-    expect(planFor("0.12.0", "0.11.1").install).toBe(true);
-    expect(planFor("0.12.0", "0.11.1").how).toBe("upgrade");
-  });
-
-  test("does not download 99 MB to arrive where it already is", () => {
-    const plan = planFor("0.11.1", "0.11.1");
-    expect(plan.install).toBe(false);
-    expect(plan.reason).toContain("already");
-  });
-});
-
-describe("explicit tooling commands", () => {
-  test("update a stale distro before executing its selected tools", async () => {
-    const source = await Bun.file(new URL("./wsl-sync.ts", import.meta.url)).text();
-    const tooling = source.slice(
-      source.indexOf("export async function syncSelectedTooling"),
-      source.indexOf("/** Run a command inside the distro"),
-    );
-
-    expect(tooling).toContain("await ensureDistroRedDev(selected.name)");
-    expect(tooling.indexOf("ensureDistroRedDev")).toBeLessThan(
-      tooling.indexOf("for (const command of commands)"),
-    );
-  });
-});
-
-/** The platform shapes the manifest branches on. */
-function platform(over: Partial<Platform>): Platform {
-  return {
-    os: "linux",
-    distro: "ubuntu",
-    version: "24.04",
-    codename: "noble",
-    env: "desktop",
-    arch: "x64",
-    caps: { apt: true, gui: true, systemd: true, winget: false, flatpak: true },
-    ...over,
-  } as Platform;
+const WINDOWS: Platform = { os: "windows", env: "windows", distro: null, version: null, codename: null, arch: "x64", caps: { apt: false, gui: true, systemd: false, winget: true, flatpak: false } };
+import type { WslState } from "./wsl-provision.ts";
+const state: WslState = { available: true, distros: ["docker-desktop", "Ubuntu-24.04", "Ubuntu-26.04"], detail: "installed", distributions: [ { name: "docker-desktop", version: 2, default: true }, { name: "Ubuntu-24.04", version: 2, default: false }, { name: "Ubuntu-26.04", version: 2, default: false } ] };
+const p = () => ({ ...WINDOWS, workstation: "windows-wsl" as const });
+function seams(calls: string[], run: NonNullable<WslSyncSeams["run"]> = async (_distro, cmd) => { calls.push(cmd); return 0; }): WslSyncSeams {
+  return { state: async () => state, install: async () => { throw Error("unexpected WSL install"); }, user: async () => true, ensure: async name => { calls.push(`ensure ${name}`); return 0; }, preferences: async () => ({ terminalShell: "wsl", agents: ["redcode", "codex"], runtimes: ["rust@latest"] }), record: async (_p, prefs) => { calls.push(`record ${prefs.distro}`); }, prepare: async () => { calls.push("preserve data"); }, migrate: async () => { calls.push("retire native services"); }, run };
 }
-
-describe("where the step runs", () => {
-  const tool = TOOLS.find((t) => t.name === "wsl-sync");
-
-  test("is in the manifest", () => {
-    expect(tool).toBeDefined();
+describe("Windows coordinator", () => {
+  test("selects Ubuntu over Docker and obeys a pinned distro without silently switching", () => {
+    expect(selectDistro(state)?.name).toBe("Ubuntu-24.04");
+    expect(selectDistro(state, "Ubuntu-26.04")?.name).toBe("Ubuntu-26.04");
+    expect(selectDistro(state, "missing")).toBeNull();
   });
-
-  test("runs on native Windows", () => {
-    // The desktop scope rather than the wsl one, and that is the point:
-    // the wsl scope runs *inside* a distro reaching out to Windows, and
-    // native Windows never gets it. Putting this there would have been
-    // a step that could never fire.
-    const win = platform({ os: "windows", env: "windows", caps: { apt: false, gui: true, systemd: false, winget: true, flatpak: false } });
-    expect(applicableScopes(win)).toContain(tool!.scope);
-    expect(providerFor(tool!, win)).toEqual({ kind: "builtin", name: "wsl-sync" });
+  test("bootstraps fresh installations and upgrades only a stale red-dev", () => {
+    expect(planFor(null, "1.2.3").how).toBe("bootstrap");
+    expect(planFor("1.2.2", "1.2.3").how).toBe("upgrade");
+    expect(planFor("1.2.3", "1.2.3").install).toBe(false);
   });
-
-  test("does not run inside WSL, which has no distro to reach into", () => {
-    const wsl = platform({ env: "wsl", caps: { apt: true, gui: false, systemd: true, winget: true, flatpak: false } });
-    expect(applicableScopes(wsl)).not.toContain(tool!.scope);
+  test("configures Linux before decommissioning the native services", async () => {
+    const calls: string[] = [];
+    await syncWslDistro(p(), seams(calls));
+    expect(calls).toEqual(["record Ubuntu-24.04", "ensure Ubuntu-24.04", "preserve data", "red-dev install --yes", "red-dev lang rust@latest", "red-dev agents redcode,codex", "systemctl --user is-active redskilled.service red-router.service", "retire native services"]);
   });
-
-  test("is a documented skip on a Linux desktop rather than a builtin", () => {
-    // A Linux desktop does get the desktop scope, so the step is
-    // reached there and has to answer for itself.
-    const linux = platform({});
-    expect(applicableScopes(linux)).toContain(tool!.scope);
-    expect(providerFor(tool!, linux).kind).toBe("skip");
+  test("carries a child installation failure into the host result and preserves the native services", async () => {
+    const calls: string[] = [];
+    const s = seams(calls, async (_d, cmd) => { calls.push(cmd); return cmd.startsWith("red-dev install") ? 2 : 0; });
+    await expect(syncWslDistro(p(), s)).rejects.toThrow("Linux installation incomplete");
+    expect(calls).not.toContain("retire native services");
   });
-});
-
-describe("advancing a distro that already has red-dev", () => {
-  test("asks its mise, and falls back to the bootstrap only when that did not land", async () => {
-    const source = await Bun.file(new URL("./wsl-sync.ts", import.meta.url)).text();
-    const ensure = source.slice(source.indexOf("async function ensureDistroRedDev"));
-
-    // mise by name, for the one tool — not a bare `mise upgrade`, which
-    // would reach every runtime the person installed themselves.
-    expect(source).toContain("mise upgrade red-dev");
-
-    // The exit code is not the evidence: a release-age gate makes
-    // `mise upgrade` succeed without moving anything.
-    expect(ensure).toContain("await distroVersion(distro)");
-    expect(ensure).toContain("bootstrapArgv(distro)");
+  test("does not retire the native services when Linux services are not active", async () => {
+    const calls: string[] = [];
+    await expect(syncWslDistro(p(), seams(calls, async (_d, cmd) => cmd.startsWith("systemctl") ? 1 : 0))).rejects.toThrow("not active");
+    expect(calls).not.toContain("retire native services");
   });
-
-  test("the suite is exempt from a release-age gate, or the upgrade above cannot land", async () => {
-    const { renderMiseConfig, miseEntries } = await import("./mise-config.ts");
-    const rendered = renderMiseConfig(
-      miseEntries(platform({ os: "windows", env: "windows", distro: null, version: null, codename: null })),
-    );
-
-    expect(rendered).toContain("minimum_release_age_excludes");
-    expect(rendered).toContain('"github:reddb-io/red-dev"');
-    // Narrow: the gate a person set still covers everything else they
-    // installed, which is what it was set for.
-    expect(rendered).not.toContain('"node"');
-    expect(rendered).not.toContain("minimum_release_age =");
+  test("refuses root provisioning and does not mutate a Linux-only machine", async () => {
+    const calls: string[] = []; const s = seams(calls); s.user = async () => false;
+    await expect(syncWslDistro(p(), s)).rejects.toThrow("as root");
+    await syncWslDistro({ ...p(), os: "linux", env: "desktop" }, s);
+    expect(calls).toEqual([]);
+  });
+  test("coordinates updates and validates the selected tooling before migration", async () => {
+    const calls: string[] = []; const s = seams(calls); s.action = "update";
+    await syncWslDistro(p(), s); expect(calls).toContain("red-dev update --yes");
+    expect(calls.indexOf("retire native services")).toBeGreaterThan(calls.indexOf("red-dev update --yes"));
+    expect(await syncSelectedTooling(p(), undefined, seams([], async () => 1))).toBe(2);
+  });
+  test("read-only relay never bootstraps, repairs or selects another distro", async () => {
+    const calls: string[] = []; const s = seams(calls);
+    expect(await relayWslCommand({ ...p(), wslDistro: "Ubuntu-26.04" }, "red-dev doctor", s)).toBe(0);
+    expect(calls).toEqual(["red-dev doctor"]);
+    expect(await relayWslCommand({ ...p(), wslDistro: "missing" }, "red-dev plan", s)).toBe(1);
+    expect(calls).toEqual(["red-dev doctor"]);
+  });
+  test("forwards credentials in the child environment while argv contains only public commands", () => {
+    const token = "fixture-secret";
+    const env = wslChildEnvironment({ WSLENV: "CUSTOM/p" }, token);
+    expect(env.WSLENV).toBe("CUSTOM/p:GH_TOKEN:GITHUB_TOKEN"); expect(env.GH_TOKEN).toBe(token);
+    const argv = distroArgv("Ubuntu-24.04", "red-dev install --yes");
+    expect(argv.join(" ")).not.toContain(token); expect(argv.at(-1)).toContain("RED_DEV_WSL_CHILD");
+    expect(distroSetupCommands("wsl", ["codex", "injection; echo broken"], ["rust@latest", "unknown"])).toEqual(["red-dev lang rust@latest", "red-dev agents codex"]);
   });
 });

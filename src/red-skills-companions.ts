@@ -1,3 +1,4 @@
+import { windowsWsl } from "./workstation.ts";
 /**
  * The workstation companions, converged out of the package set itself.
  *
@@ -495,6 +496,7 @@ function redskilledUnitBroken(ctx: Pick<CompanionContext, "config">): string | n
 const redskilled: CompanionAdapter = {
   name: "redskilled",
   plan: (ctx) => {
+    if (windowsWsl(ctx.platform)) return plan({ version: ctx.setVersion, unavailable: "daemon owned by Ubuntu/WSL; Windows commands are bridged by the coordinator" });
     const version = setPackageVersion(ctx.source);
     const bins = setBinMap(ctx.source);
     const mine = Object.entries(DAEMON_BINS).filter(([bin]) => bin in bins);
