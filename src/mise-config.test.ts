@@ -32,6 +32,7 @@ import {
   releaseAgeExcludes,
   renderMiseConfig,
   RED_DEV_DESKTOP_POSTINSTALL,
+  RED_DEV_RESOURCE_POSTINSTALL,
   type MiseEntry,
 } from "./mise-config.ts";
 import { providerFor, TOOLS } from "./manifest.ts";
@@ -125,11 +126,12 @@ describe("renderMiseConfig", () => {
 });
 
 describe("miseEntries", () => {
-  test("red-dev reconciles GNOME after its own upgrade only on the Linux desktop", () => {
+  test("red-dev retires resource controls on Linux upgrades and reconciles GNOME on desktop", () => {
     const entry = miseEntries(UBUNTU).find(e => e.alias === "red-dev");
     expect(entry?.postinstall).toBe(RED_DEV_DESKTOP_POSTINSTALL);
-    for (const platform of [WINDOWS, { ...UBUNTU, env: "wsl" as const }, { ...UBUNTU, env: "server" as const }]) {
-      expect(miseEntries(platform).find(e => e.alias === "red-dev")?.postinstall).toBeUndefined();
+    expect(miseEntries(WINDOWS).find(e => e.alias === "red-dev")?.postinstall).toBeUndefined();
+    for (const platform of [{ ...UBUNTU, env: "wsl" as const }, { ...UBUNTU, env: "server" as const }]) {
+      expect(miseEntries(platform).find(e => e.alias === "red-dev")?.postinstall).toBe(RED_DEV_RESOURCE_POSTINSTALL);
     }
     expect(renderMiseConfig(miseEntries(UBUNTU))).toContain(
       `red-dev = { version = "latest", postinstall = ${JSON.stringify(RED_DEV_DESKTOP_POSTINSTALL)} }`,
@@ -152,7 +154,7 @@ describe("miseEntries", () => {
         env: { ...process.env, MISE_TOOL_INSTALL_PATH: fresh, PATH: stale },
         stdout: "pipe", stderr: "pipe",
       });
-      expect(await new Response(proc.stdout).text()).toBe("new:desktop:reconcile");
+      expect(await new Response(proc.stdout).text()).toBe("new:doctor:--repairnew:desktop:reconcile");
       expect(await proc.exited).toBe(0);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });

@@ -5,7 +5,7 @@ export const DOCTOR_REPAIRS = ["mise-auth", "workloads", "desktop"] as const;
 export type DoctorRepair = typeof DOCTOR_REPAIRS[number];
 export const REPAIR_CHANGES: Record<DoctorRepair, readonly string[]> = {
   "mise-auth": ["replace the managed gh credential helper without calling mise", "refresh the owned mise fragment; back up obsolete personal gh overrides", "keep tokens in gh storage; install or upgrade no packages"],
-  workloads: ["refresh managed Cargo concurrency, CPU scheduling and workload shell configuration", "remove red-dev RAM/swap caps on owned slices and live scopes without restarting workloads", "on WSL, reconcile the existing host resource policy"],
+  workloads: ["archive and remove obsolete red-dev Cargo settings, shell wrappers and systemd resource definitions", "disable the retired disk guardian and release live red-dev resource controls without restarting processes", "retire marked WSL resource rows while preserving settings of other owners"],
   desktop: ["reconcile the managed GNOME menu and shortcuts; a fresh login may remain necessary"],
 };
 
@@ -14,7 +14,8 @@ export async function doctorRepair(p: Platform, repair: DoctorRepair, apply = fa
 ): Promise<number> {
   log.step(`repair plan: ${repair}`);
   for (const change of REPAIR_CHANGES[repair]) log.plain(`  - ${change}`);
-  if (repair !== "mise-auth" && (p.os !== "linux" || (repair === "desktop" && p.env !== "desktop"))) {
+  if ((repair === "desktop" && (p.os !== "linux" || p.env !== "desktop")) ||
+    (repair === "workloads" && p.os !== "linux" && p.os !== "windows")) {
     log.err(`${repair} repair is unavailable on this target`); return 1;
   }
   if (!apply) {

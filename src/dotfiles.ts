@@ -38,7 +38,6 @@ import linuxClipboardSh from "../config/bash/linux-clipboard.sh" with { type: "t
 import inputrc from "../config/bash/inputrc.conf" with { type: "text" };
 import starshipToml from "../config/bash/starship.toml" with { type: "text" };
 import zellijBase from "../config/zellij/config.kdl" with { type: "text" };
-import { workloadPolicy } from "./workload-policy.ts";
 
 /** Exported so `doctor` can compare what is deployed against what this
  * binary would deploy — an upgraded red-dev with stale files on disk is
@@ -49,7 +48,6 @@ export const FILES: Record<string, string> = {
   "init.sh": initSh,
   "aliases.sh": aliasesSh,
   "functions.sh": functionsSh,
-  "build-resources.sh": workloadPolicy().shell,
   "prompt.sh": promptSh,
   "shared.sh": sharedSh,
   "zellij.sh": zellijSh,

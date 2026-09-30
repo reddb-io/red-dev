@@ -175,12 +175,12 @@ else
   unset RED_SHARE
 fi
 
-# Workload policy and zellij run before anything takes ownership of bash's
+# Zellij runs before anything takes ownership of bash's
 # input. The outer shell exists only to start the multiplexer; loading ble.sh
 # there as well gives one physical terminal two independent line editors and
 # two protocol lifecycles. Inside a pane the zellij guard returns immediately,
 # and only that pane shell proceeds into ble.sh and the interactive tool setup.
-for _red_part in path shared build-resources zellij; do
+for _red_part in path shared zellij; do
   _red_file="$RED_ROOT/config/bash/${_red_part}.sh"
   if [ -r "$_red_file" ]; then
     # shellcheck disable=SC1090
@@ -195,8 +195,7 @@ unset _red_part _red_file
 # downloads into ~/.local/share/claude/versions and repoints
 # ~/.local/bin/claude, a second install (675 MB here) that the mise shim
 # shadows, so every "update" left the running binary where it was and grew
-# the disk. `red-dev agents update` (or a plain `claude update`, see
-# build-resources.sh) moves the mise-managed copy instead.
+# the disk. `red-dev agents update` moves the mise-managed copy instead.
 if [ -d "${MISE_DATA_DIR:-$HOME/.local/share/mise}/installs/claude" ]; then
   export DISABLE_AUTOUPDATER=1
 fi

@@ -27,7 +27,7 @@ const desktop: Platform = {
 describe("the Alacritty -> Zellij -> bash -> ble.sh input path", () => {
   test("starts Zellij before ble.sh takes ownership of bash input", () => {
     const rc = FILES["rc.sh"] ?? "";
-    const zellijPhase = rc.indexOf("for _red_part in path shared build-resources zellij");
+    const zellijPhase = rc.indexOf("for _red_part in path shared zellij");
     const bleLoad = rc.indexOf('. "$HOME/.local/share/blesh/ble.sh" --noattach');
     const shellInit = rc.indexOf("for _red_part in init aliases functions prompt red-skills-watch");
 

@@ -192,7 +192,7 @@ type ProviderSpec =
         | "dit-input"
         | "dit-autostart"
         | "blesh"
-        | "build-resources"
+        | "retired-resource-controls"
         | "runtimes"
         | "shared-root"
         | "hotkeys"
@@ -410,7 +410,7 @@ const builtin = (
     | "dit-autostart"
     | "wsl-sync"
     | "blesh"
-    | "build-resources"
+    | "retired-resource-controls"
     | "runtimes"
     | "shared-root"
     | "hotkeys"
@@ -876,11 +876,11 @@ export const TOOLS: Tool[] = [
     win: builtin("red-router-autostart"),
   },
   {
-    name: "build-resources",
+    name: "retired-resource-controls",
     scope: "core",
     managed: true,
-    u24: builtin("build-resources"),
-    win: skip("build resource containment is managed inside Linux/WSL"),
+    u24: builtin("retired-resource-controls"),
+    win: builtin("retired-resource-controls"),
   },
   {
     // On by default; RED_BLE=0 opts out. See the note in src/blesh.ts
