@@ -293,7 +293,7 @@ describe("host pressure", () => {
     expect(report.rows.map((row) => row.kind)).toEqual(["error", "error", "error"]);
   });
 
-  test("zombies, deleted working directories and unbounded Worker memory are visible", () => {
+  test("zombies and deleted working directories are visible without requiring Worker memory caps", () => {
     const input = snapshot([
       processRecord({ pid: 701, pgid: 701, state: "Z", argv: ["sleep"] }),
       processRecord({ pid: 702, pgid: 702, cwdDeleted: true, argv: ["python"] }),
@@ -303,7 +303,6 @@ describe("host pressure", () => {
     expect(assessHost(input).findings.map(({ id, level }) => [id, level])).toEqual([
       ["zombies", "warning"],
       ["deleted-cwd", "warning"],
-      ["worker-memory-max", "critical"],
     ]);
   });
 

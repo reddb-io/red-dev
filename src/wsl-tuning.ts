@@ -148,8 +148,8 @@ export function wslTuningChoices(facts: WslTuningFacts): Choice[] {
     },
     {
       key: "wall",
-      label: "Workload wall",
-      note: `${isolation.capacity.memoryMax} RAM / ${isolation.capacity.cpuQuota} CPU; ` +
+      label: "Workload scheduling",
+      note: `no imposed RAM cap / ${isolation.capacity.cpuQuota} CPU; ` +
         "Zellij and redskilled stay protected",
       selectable: false,
       marker: "included",
@@ -157,9 +157,7 @@ export function wslTuningChoices(facts: WslTuningFacts): Choice[] {
     {
       key: "launch",
       label: "Per launch",
-      note: `pane ${isolation.capacity.paneMemoryMax}, ` +
-        `agent ${isolation.capacity.agentMemoryMax}, ` +
-        `build ${isolation.capacity.buildMemoryMax}; hard walls avoid reclaim stalls`,
+      note: "panes, agents and builds use available RAM and swap",
       selectable: false,
       marker: "included",
     },

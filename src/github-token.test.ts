@@ -45,7 +45,7 @@ describe("which token is sent", () => {
   test("otherwise the gh CLI is asked, and its answer trimmed", () => {
     const { run, calls } = gh("gho_fromCli\n");
     expect(githubToken({}, run)).toBe("gho_fromCli");
-    expect(calls).toEqual([["gh", "auth", "token"]]);
+    expect(calls).toEqual([["gh", "auth", "token", "--hostname", "github.com"]]);
   });
 
   test("is asked once per process, not once per repository", () => {
@@ -70,6 +70,12 @@ describe("which token is sent", () => {
   test("an empty environment variable does not count as set", () => {
     const { run } = gh("gho_fromCli\n");
     expect(githubToken({ GITHUB_TOKEN: "   " }, run)).toBe("gho_fromCli");
+  });
+
+  test("an empty GITHUB_TOKEN does not hide a valid GH_TOKEN", () => {
+    const { run, calls } = gh("gho_fromCli\n");
+    expect(githubToken({ GITHUB_TOKEN: " ", GH_TOKEN: "ghp_env" }, run)).toBe("ghp_env");
+    expect(calls).toEqual([]);
   });
 });
 

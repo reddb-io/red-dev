@@ -17,18 +17,37 @@ const LINUX_SYSTEMD: Platform = {
 const WORKSTATION = { totalMemoryBytes: 20 * 1024 ** 3, logicalCpus: 10, hostDiskGuardian: true };
 
 describe("workload policy", () => {
+  test("package managers run directly and old owned wrappers are retired", async () => {
+    if (process.platform === "win32") return;
+    const dir = mkdtempSync(`${tmpdir()}/red-dev-package-direct-`);
+    try {
+      const shell = `${dir}/workload.sh`;
+      writeFileSync(shell, workloadPolicy(WORKSTATION).shell);
+      const proc = Bun.spawn(["bash", "--noprofile", "--norc", "-c", `
+        npm() { _red_dev_run_build npm "$@"; }
+        pnpm() { _red_dev_run_build pnpm "$@"; }
+        bun() { printf 'USER FUNCTION'; }
+        source "${shell}"
+        declare -F npm pnpm >/dev/null && exit 7
+        bun
+      `], { env: { ...process.env, ZELLIJ: "", RED_ENV: "server" }, stdout: "pipe", stderr: "pipe" });
+      expect(await proc.exited).toBe(0);
+      expect(await new Response(proc.stdout).text()).toBe("USER FUNCTION");
+      expect(await new Response(proc.stderr).text()).toBe("");
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
   test("keeps Zellij protected while every ordinary pane enters the bounded work plane", async () => {
     const policy = workloadPolicy(WORKSTATION);
 
     expect(policy.systemd["red-dev-interactive.slice"]).toContain("MemoryLow=2G");
-    expect(policy.systemd["red-dev-heavy-panes.slice"]).toContain("MemoryMax=6G");
+    expect(policy.systemd["red-dev-heavy-panes.slice"]).toContain("MemoryMax=infinity");
     const paneLaunch = policy.launch("pane", ["bash"], LINUX_SYSTEMD);
     expect(paneLaunch.slice(0, 6)).toEqual([
       "systemd-run", "--user", "--scope", "--quiet", "--collect",
       "--slice=red-dev-heavy-panes.slice",
     ]);
-    expect(paneLaunch).toContain("--property=MemoryMax=3G");
-    expect(paneLaunch.some((arg) => arg.startsWith("--property=MemoryHigh="))).toBe(false);
+    expect(paneLaunch).toContain("--property=MemoryMax=infinity");
+    expect(paneLaunch.some((arg) => arg === "--property=MemoryHigh=infinity")).toBe(true);
     expect(paneLaunch.slice(-3)).toEqual(["red-dev-heavy-panes.slice", "pane", "bash"]);
     expect(paneLaunch[paneLaunch.indexOf("-c") + 1]).toContain("cat /proc/self/cgroup");
     if (process.platform === "win32") return;
@@ -79,76 +98,54 @@ describe("workload policy", () => {
   test("routes agents and builds through the same aggregate work budget", () => {
     const policy = workloadPolicy(WORKSTATION);
 
-    expect(policy.systemd["red-dev-heavy-agents.slice"]).toContain("MemoryMax=8G");
+    expect(policy.systemd["red-dev-heavy-agents.slice"]).toContain("MemoryMax=infinity");
     expect(policy.systemd["red-dev-heavy-builds.slice"]).toContain("CPUWeight=50");
     const agentLaunch = policy.launch("agent", ["redcode", "--yolo"], LINUX_SYSTEMD);
     expect(agentLaunch).toContain("--slice=red-dev-heavy-agents.slice");
-    expect(agentLaunch).toContain("--property=MemoryMax=5G");
-    expect(agentLaunch.some((arg) => arg.startsWith("--property=MemoryHigh="))).toBe(false);
+    expect(agentLaunch).toContain("--property=MemoryMax=infinity");
+    expect(agentLaunch.some((arg) => arg === "--property=MemoryHigh=infinity")).toBe(true);
     expect(agentLaunch.slice(-4)).toEqual([
       "red-dev-heavy-agents.slice", "agent", "redcode", "--yolo",
     ]);
     const buildLaunch = policy.launch("build", ["cargo", "test"], LINUX_SYSTEMD);
     expect(buildLaunch).toContain("--slice=red-dev-heavy-builds.slice");
-    expect(buildLaunch).toContain("--property=MemoryMax=8G");
-    expect(buildLaunch.some((arg) => arg.startsWith("--property=MemoryHigh="))).toBe(false);
+    expect(buildLaunch).toContain("--property=MemoryMax=infinity");
+    expect(buildLaunch.some((arg) => arg === "--property=MemoryHigh=infinity")).toBe(true);
     expect(buildLaunch.slice(-7)).toEqual([
       "red-dev-heavy-builds.slice", "build", "nice", "-n", "10", "cargo", "test",
     ]);
   });
 
-  test("scales every domain under an 80 percent host wall", () => {
+  test("scales CPU scheduling without imposing memory caps", () => {
     const small = workloadPolicy({ totalMemoryBytes: 20 * 1024 ** 3, logicalCpus: 10 });
-    expect(small.systemd["red-dev.slice"]).toContain("MemoryMax=16G");
+    expect(small.systemd["red-dev.slice"]).toContain("MemoryMax=infinity");
     expect(small.systemd["red-dev.slice"]).toContain("CPUQuota=800%");
-    expect(small.systemd["red-dev-heavy.slice"]).toContain("MemoryMax=13G");
+    expect(small.systemd["red-dev-heavy.slice"]).toContain("MemoryMax=infinity");
     expect(small.launch("pane", ["bash"], LINUX_SYSTEMD)).toContain(
-      "--property=MemoryMax=3G",
+      "--property=MemoryMax=infinity",
     );
 
     const large = workloadPolicy({ totalMemoryBytes: 40 * 1024 ** 3, logicalCpus: 20 });
-    expect(large.systemd["red-dev.slice"]).toContain("MemoryMax=32G");
+    expect(large.systemd["red-dev.slice"]).toContain("MemoryMax=infinity");
     expect(large.systemd["red-dev.slice"]).toContain("CPUQuota=1600%");
     expect(large.launch("agent", ["redcode"], LINUX_SYSTEMD)).toContain(
-      "--property=MemoryMax=10G",
+      "--property=MemoryMax=infinity",
     );
     expect(large.launch("build", ["cargo"], LINUX_SYSTEMD)).toContain(
-      "--property=MemoryMax=16G",
+      "--property=MemoryMax=infinity",
     );
   });
 
-  test("never soft-walls a domain a person types into, and lets Zellij swap where the host can", () => {
-    // The 16G laptop whose Zellij server stalled at a 3G MemoryHigh with 9G free.
-    const laptop = workloadPolicy({
-      totalMemoryBytes: 16 * 1024 ** 3,
-      logicalCpus: 8,
-      swapTotalBytes: 24 * 1024 ** 3,
-    });
-    for (const slice of [
-      "red-dev.slice",
-      "red-dev-interactive.slice",
-      "red-dev-heavy.slice",
-      "red-dev-heavy-panes.slice",
-    ]) {
-      expect(laptop.systemd[slice]).not.toContain("MemoryHigh=");
+  test("removes reclaim throttles, hard limits and swap bans from every managed domain", () => {
+    for (const swapTotalBytes of [0, 2 * 1024 ** 3, 24 * 1024 ** 3]) {
+      const policy = workloadPolicy({ totalMemoryBytes: 16 * 1024 ** 3, logicalCpus: 8, swapTotalBytes });
+      for (const [unit, content] of Object.entries(policy.systemd)) {
+        if (!unit.endsWith(".slice")) continue;
+        for (const property of ["MemoryHigh", "MemoryMax", "MemorySwapMax"]) {
+          expect(content).toContain(`${property}=infinity`);
+        }
+      }
     }
-    expect(laptop.systemd["red-dev-heavy-agents.slice"]).toContain("MemoryHigh=");
-    expect(laptop.systemd["red-dev-heavy-builds.slice"]).toContain("MemoryHigh=");
-
-    expect(laptop.systemd["red-dev-interactive.slice"]).toContain("MemoryMax=4G");
-    expect(laptop.systemd["red-dev-interactive.slice"]).toContain("MemorySwapMax=4G");
-    expect(laptop.systemd["red-dev.slice"]).toContain("MemorySwapMax=4608M");
-
-    const tinySwap = workloadPolicy({
-      totalMemoryBytes: 16 * 1024 ** 3,
-      logicalCpus: 8,
-      swapTotalBytes: 2 * 1024 ** 3,
-    });
-    expect(tinySwap.systemd["red-dev-interactive.slice"]).toContain("MemorySwapMax=2G");
-
-    const noSwap = workloadPolicy({ totalMemoryBytes: 16 * 1024 ** 3, logicalCpus: 8 });
-    expect(noSwap.systemd["red-dev-interactive.slice"]).toContain("MemorySwapMax=0");
-    expect(noSwap.systemd["red-dev.slice"]).toContain("MemorySwapMax=512M");
   });
 
   test("attaches the control daemon and every Worker to the generated domains", () => {
@@ -158,13 +155,13 @@ describe("workload policy", () => {
       "# Managed by red-dev.\n[Service]\nSlice=red-dev-interactive.slice\n",
     );
     expect(policy.systemd["red-worker-.service.d/50-red-dev-heavy-slice.conf"]).toContain(
-      "Slice=red-dev-heavy-agents.slice\nCPUQuota=250%",
+      "Slice=red-dev-heavy-agents.slice\nMemoryHigh=infinity\nCPUQuota=250%",
     );
     expect(policy.systemd["red-worker-.service.d/50-red-dev-heavy-slice.conf"]).toContain(
-      "MemoryMax=5G",
+      "MemoryMax=infinity",
     );
-    expect(policy.systemd["red-worker-.service.d/50-red-dev-heavy-slice.conf"]).not.toContain(
-      "MemoryHigh=",
+    expect(policy.systemd["red-worker-.service.d/50-red-dev-heavy-slice.conf"]).toContain(
+      "MemoryHigh=infinity",
     );
     expect(policy.systemd["red-fleet-.scope.d/50-red-dev-heavy-slice.conf"]).toBe(
       "# Managed by red-dev.\n[Scope]\nSlice=red-dev-heavy-agents.slice\n",
@@ -382,10 +379,10 @@ describe("workload policy", () => {
       expect(exit).toBe(0);
       expect(stderr).toBe("");
       expect(stdout).toContain("--slice=red-dev-heavy-agents.slice");
-      expect(stdout).toContain("--property=MemoryMax=5G --property=MemorySwapMax=128M");
+      expect(stdout).toContain("--property=MemoryMax=infinity --property=MemorySwapMax=infinity");
       expect(stdout).toContain("red-dev-heavy-agents.slice agent redcode ask");
       expect(stdout).toContain("--slice=red-dev-heavy-builds.slice");
-      expect(stdout).toContain("--property=MemoryMax=8G --property=MemorySwapMax=128M");
+      expect(stdout).toContain("--property=MemoryMax=infinity --property=MemorySwapMax=infinity");
       expect(stdout).toContain("red-dev-heavy-builds.slice build nice -n 10 cargo test");
     } finally {
       manager.stop(true);

@@ -614,11 +614,40 @@ activate` — also work in a script, a systemd unit and over SSH. A machine
 upgrading from an older release hands its `~/.local/bin` copies over on the
 next converge, and never before mise can answer for them.
 
-GitHub lookups made by mise use the account selected by `gh auth login`.
-red-dev writes `github.credential_command = "gh auth token"` into its managed
-mise fragment, so `mise upgrade` receives the authenticated API allowance
-without storing a second token. `gh auth switch` changes the account used by
-the next upgrade.
+GitHub lookups made by mise use the github.com account selected by
+`gh auth login`. During install/update, red-dev installs a persistent credential
+helper and configures `github.credential_command` in its mise fragment.
+Direct `mise upgrade` and `mise bump` use this helper too. It resolves the
+current gh executable for every credential read, including after gh itself
+is upgraded, and runs `gh auth token --hostname github.com`. Existing gh
+credential overrides are repaired automatically with a backup.
+This also reads credentials stored in the system keyring without copying
+the token into a config file.
+`gh auth switch --hostname github.com` changes the account used by the next
+command. Explicit GitHub token environment variables take precedence.
+
+Remote version metadata is cached for one hour during ordinary installs,
+`mise outdated`, and direct mise commands. `red-dev update` and
+`red-dev agents update` bypass that cache to discover new releases immediately.
+For a manual update with fresh metadata:
+
+```bash
+MISE_FETCH_REMOTE_VERSIONS_CACHE=0s mise upgrade
+```
+
+Check the credential source with `mise token github` (masked by default) and
+the authenticated allowance with `gh api rate_limit`. Anonymous REST requests
+normally allow 60 per hour per IP; a signed-in user normally gets 5,000 per
+hour, shared with other tools using that account. Authentication and caching
+reduce rate-limit failures; GitHub still enforces account and secondary limits.
+For corporate VPNs and machines running an older red-dev, see
+[mise GitHub authentication](docs/mise-github-auth.md).
+
+red-dev lets `npm`, `pnpm`, and `bun` run directly. It retires older shell
+wrappers that launched package managers through systemd. Its workload policy
+imposes no memory or swap caps on panes, agents, or builds; convergence also
+releases obsolete caps on already running managed scopes without restarting
+them. CPU scheduling and Cargo concurrency remain configurable separately.
 
 ### The shell
 

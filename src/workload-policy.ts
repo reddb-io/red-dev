@@ -3,7 +3,6 @@ import { totalmem } from "node:os";
 import type { Platform } from "./platform.ts";
 
 const GIB = 1024 ** 3;
-const MIB = 1024 ** 2;
 const GIB_KIB = 1024 ** 2;
 const DOCUMENTATION = "https://github.com/reddb-io/red-dev";
 const HOST_DISK_RESERVE_GIB = 30;
@@ -25,12 +24,7 @@ export interface WorkloadPolicyFacts {
    * box is every ten seconds forever. Off unless the caller says so.
    */
   hostDiskGuardian?: boolean;
-  /**
-   * The host's swap, which decides whether the interactive domains may
-   * page cold memory out instead of stalling at their wall. Zero unless
-   * the caller measured it, so a policy built from bare facts keeps every
-   * interactive domain off swap.
-   */
+  /** Observed host swap; kept for compatibility with callers and diagnostics. */
   swapTotalBytes?: number;
 }
 
@@ -84,7 +78,7 @@ interface ResourceDomains {
 const AGENT_COMMANDS = "claude codex opencode redcode gemini pi hermes muse";
 /** Agents whose release mise owns, so their own `update` must not run. */
 const MISE_AGENT_COMMANDS = "claude codex redcode gemini pi";
-const BUILD_COMMANDS = "cargo rustc cmake ctest make ninja gcc g++ clang clang++ bun pnpm npm";
+const BUILD_COMMANDS = "cargo rustc cmake ctest make ninja gcc g++ clang clang++";
 
 export function workloadLogicalCpuCount(): number {
   try {
@@ -111,16 +105,9 @@ export function workloadSwapTotalBytes(): number {
   return 0;
 }
 
-function formatMiB(value: number): string {
-  return value % 1024 === 0 ? `${value / 1024}G` : `${value}M`;
-}
-
 function resourceDomains(facts: WorkloadPolicyFacts): ResourceDomains {
-  const totalMiB = Math.max(1024, Math.floor(facts.totalMemoryBytes / MIB));
   const nominalGiB = Math.max(1, Math.round(facts.totalMemoryBytes / GIB));
   const cpus = Math.max(1, Math.floor(facts.logicalCpus));
-  const rootMemory = (fraction: number): string =>
-    formatMiB(Math.max(512, Math.floor(totalMiB * fraction)));
   const memory = (fraction: number, rounding: "ceil" | "floor" = "ceil"): string => {
     const amount = rounding === "ceil"
       ? Math.ceil(nominalGiB * fraction)
@@ -129,34 +116,16 @@ function resourceDomains(facts: WorkloadPolicyFacts): ResourceDomains {
   };
   const cpu = (fraction: number): string =>
     `${Math.max(1, Math.floor(cpus * 100 * fraction))}%`;
-  // Zellij's scrollback is the coldest memory on the machine, and swap is
-  // where it belongs once the control plane reaches its wall. A host with
-  // no swap keeps the old answer: zero, and the wall is the wall.
-  const swapGiB = Math.floor(Math.max(0, facts.swapTotalBytes ?? 0) / GIB);
-  const controlSwapGiB = Math.min(swapGiB, Math.ceil(nominalGiB * 0.25));
-  const controlSwap = controlSwapGiB > 0 ? `${controlSwapGiB}G` : "0";
-
-  // No MemoryHigh on any domain that holds something a person types into:
-  // the root, the control plane, the work plane and the pane aggregate.
-  //
-  // MemoryHigh never kills. Past it the kernel throttles every process in
-  // the cgroup and everything below it, and with no swap to page into the
-  // only reclaimable memory left is their own code — so the whole domain
-  // stalls, indefinitely, with plenty of RAM free outside it. On a 16G
-  // laptop that was the Zellij server stopping at a 3G MemoryHigh while
-  // the host had 9G available, and because every terminal attaches to the
-  // same session, every terminal stopped with it — including the one
-  // opened to run htop. A MemoryMax wall reclaims, then OOM-kills the
-  // largest process inside it, and the rest of the domain carries on.
-  // The agent and build aggregates keep their soft wall: slowing a
-  // runaway build down is exactly what that domain is for.
+  // Remove old hard caps, reclaim throttles and swap bans explicitly.
+  // Explicit infinity also resets limits on units from older installations.
   return {
     root: {
       slice: "red-dev.slice",
-      description: "red-dev global workstation budget",
+      description: "red-dev workstation scheduling",
       aggregate: {
-        MemoryMax: rootMemory(0.8),
-        MemorySwapMax: formatMiB(512 + controlSwapGiB * 1024),
+        MemoryHigh: "infinity",
+        MemoryMax: "infinity",
+        MemorySwapMax: "infinity",
         TasksMax: "12288",
         CPUQuota: cpu(0.8),
         CPUWeight: "100",
@@ -167,9 +136,10 @@ function resourceDomains(facts: WorkloadPolicyFacts): ResourceDomains {
       slice: "red-dev-interactive.slice",
       description: "red-dev protected interactive control plane",
       aggregate: {
+        MemoryHigh: "infinity",
         MemoryLow: memory(0.1),
-        MemoryMax: memory(0.25),
-        MemorySwapMax: controlSwap,
+        MemoryMax: "infinity",
+        MemorySwapMax: "infinity",
         TasksMax: "2048",
         CPUWeight: "1000",
         IOWeight: "1000",
@@ -177,10 +147,11 @@ function resourceDomains(facts: WorkloadPolicyFacts): ResourceDomains {
     },
     work: {
       slice: "red-dev-heavy.slice",
-      description: "red-dev bounded development work plane",
+      description: "red-dev development work plane",
       aggregate: {
-        MemoryMax: memory(0.65, "floor"),
-        MemorySwapMax: "512M",
+        MemoryHigh: "infinity",
+        MemoryMax: "infinity",
+        MemorySwapMax: "infinity",
         TasksMax: "8192",
         CPUQuota: cpu(0.7),
         CPUWeight: "50",
@@ -191,21 +162,21 @@ function resourceDomains(facts: WorkloadPolicyFacts): ResourceDomains {
       slice: "red-dev-heavy-panes.slice",
       description: "red-dev interactive pane workloads",
       aggregate: {
-        MemoryMax: memory(0.3),
-        MemorySwapMax: "0",
+        MemoryHigh: "infinity",
+        MemoryMax: "infinity",
+        MemorySwapMax: "infinity",
         TasksMax: "4096",
         CPUQuota: cpu(0.5),
         CPUWeight: "100",
         IOWeight: "100",
       },
       scope: {
+        MemoryHigh: "infinity",
         CPUQuota: cpu(0.3),
         CPUWeight: "100",
         IOWeight: "100",
-        // Leaf MemoryHigh can trap an interactive scope in indefinite reclaim.
-        // Launches keep a hard wall, like the pane aggregate above.
-        MemoryMax: memory(0.15),
-        MemorySwapMax: "0",
+        MemoryMax: "infinity",
+        MemorySwapMax: "infinity",
         TasksMax: "2048",
         OOMPolicy: "continue",
       },
@@ -214,21 +185,21 @@ function resourceDomains(facts: WorkloadPolicyFacts): ResourceDomains {
       slice: "red-dev-heavy-agents.slice",
       description: "red-dev coding agents",
       aggregate: {
-        MemoryHigh: memory(0.3),
-        MemoryMax: memory(0.4),
-        MemorySwapMax: "256M",
+        MemoryHigh: "infinity",
+        MemoryMax: "infinity",
+        MemorySwapMax: "infinity",
         TasksMax: "4096",
         CPUQuota: cpu(0.5),
         CPUWeight: "200",
         IOWeight: "100",
       },
       scope: {
+        MemoryHigh: "infinity",
         CPUQuota: cpu(0.25),
         CPUWeight: "200",
         IOWeight: "100",
-        // Let the hard wall invoke memcg OOM instead of indefinite reclaim.
-        MemoryMax: memory(0.25),
-        MemorySwapMax: "128M",
+        MemoryMax: "infinity",
+        MemorySwapMax: "infinity",
         TasksMax: "2048",
         OOMPolicy: "continue",
       },
@@ -237,20 +208,21 @@ function resourceDomains(facts: WorkloadPolicyFacts): ResourceDomains {
       slice: "red-dev-heavy-builds.slice",
       description: "red-dev builds and tests",
       aggregate: {
-        MemoryHigh: memory(0.3),
-        MemoryMax: memory(0.4),
-        MemorySwapMax: "256M",
+        MemoryHigh: "infinity",
+        MemoryMax: "infinity",
+        MemorySwapMax: "infinity",
         TasksMax: "4096",
         CPUQuota: cpu(0.5),
         CPUWeight: "50",
         IOWeight: "25",
       },
       scope: {
+        MemoryHigh: "infinity",
         CPUQuota: cpu(0.5),
         CPUWeight: "50",
         IOWeight: "25",
-        MemoryMax: memory(0.4),
-        MemorySwapMax: "128M",
+        MemoryMax: "infinity",
+        MemorySwapMax: "infinity",
         TasksMax: "2048",
         OOMPolicy: "continue",
       },
@@ -457,6 +429,14 @@ _red_dev_define_workload_command() {
   eval "function $1 { _red_dev_run_$2 '$1' \\\"\\$@\\\"; }"
 }
 
+# Retire only our old package-manager wrappers when this file is re-sourced.
+for _red_dev_package_command in npm pnpm bun; do
+  if declare -f "$_red_dev_package_command" 2>/dev/null | command grep -F '_red_dev_run_build' >/dev/null; then
+    unset -f "$_red_dev_package_command"
+  fi
+done
+unset _red_dev_package_command
+
 for _red_dev_workload_command in ${AGENT_COMMANDS}; do
   _red_dev_define_workload_command "$_red_dev_workload_command" agent
 done
@@ -554,7 +534,7 @@ export interface WorkloadPolicy {
    * plane. Null where there is no Windows host disk to watch.
    */
   diskGuardian: string | null;
-  /** The global wall shown by doctor and status surfaces. */
+  /** Scheduling settings shown by doctor and status surfaces. */
   capacity: {
     memoryMax: string;
     cpuQuota: string;

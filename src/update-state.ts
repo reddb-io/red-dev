@@ -18,6 +18,7 @@ import { dirname, join } from "node:path";
 import { AGENTS } from "./agents.ts";
 import { runBounded, type BoundedCommandResult } from "./bounded-command.ts";
 import { miseEntries } from "./mise-config.ts";
+import { miseGithubEnvironment, miseRemoteVersionsEnv } from "./mise-github.ts";
 import type { Platform } from "./platform.ts";
 import { redDevStateRoot } from "./reclaim.ts";
 
@@ -126,7 +127,8 @@ export async function refreshUpdateState(p: Platform, opts: RefreshOptions = {})
   try {
     result = await run(["mise", "outdated", "--json"], {
       ...process.env,
-      MISE_FETCH_REMOTE_VERSIONS_CACHE: "0s",
+      ...miseGithubEnvironment(),
+      ...miseRemoteVersionsEnv(),
       ...miseReleaseAgeEnv(p),
       ...opts.env,
     });

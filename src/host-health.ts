@@ -253,13 +253,6 @@ export function assessHost(snapshot: HostSnapshot): HostAssessment {
       detail: `${deletedCwds} process(es) with a deleted working directory`,
     });
   }
-  if (snapshot.metrics.workerMemoryMax.includes("infinity")) {
-    findings.push({
-      id: "worker-memory-max",
-      level: "critical",
-      detail: "a Worker has MemoryMax=infinity",
-    });
-  }
 
   for (const [pgid, members] of groupByPgid(snapshot.processes)) {
     const statusline = members.some(isKnownStatusline);
