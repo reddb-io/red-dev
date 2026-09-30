@@ -87,14 +87,27 @@ export function planFor(version: string | null, ours = VERSION): SyncPlan {
 function bootstrapArgv(distro: string): string[] {
   return distroArgv(distro, `curl -fsSL ${BOOT_URL} | ${unattendedShellCommand("sh", { RED_DEV_NO_LAUNCH: "1" })}`);
 }
-export async function ensureDistroRedDev(distro: string): Promise<number> {
-  const plan = planFor(await distroVersion(distro));
+export interface DistroRedDevSeams {
+  version?: typeof distroVersion;
+  bootstrap?: (distro: string) => Promise<number>;
+  install?: (distro: string, command: string) => Promise<number>;
+}
+export async function ensureDistroRedDev(distro: string, seams: DistroRedDevSeams = {}): Promise<number> {
+  const version = seams.version ?? distroVersion;
+  const plan = planFor(await version(distro));
   log.step(`Ubuntu/WSL ${distro}: ${plan.reason}`);
   if (!plan.install) return 0;
-  const code = plan.how === "upgrade"
-    ? await runDistro(distro, "mise upgrade red-dev")
-    : await spawnLogged(bootstrapArgv(distro), { env: wslChildEnvironment() });
-  const now = code === 0 ? await distroVersion(distro) : null;
+  if (plan.how === "bootstrap") {
+    const boot = seams.bootstrap ? await seams.bootstrap(distro)
+      : await spawnLogged(bootstrapArgv(distro), { env: wslChildEnvironment() });
+    if (boot !== 0) return boot;
+  }
+  // GitHub backend metadata may still resolve latest to the previous release
+  // immediately after publication. Install the coordinator's exact version;
+  // `install` leaves the user's moving selector and unrelated tools intact.
+  const command = unattendedShellCommand(`mise install red-dev@${VERSION}`, { MISE_MINIMUM_RELEASE_AGE: "0" });
+  const code = await (seams.install ?? runDistro)(distro, command);
+  const now = code === 0 ? await version(distro) : null;
   if (now !== VERSION) {
     log.err(`${distro}: expected red-dev ${VERSION}, observed ${now ?? "unavailable"}; run red-dev update from PowerShell and retry`);
     return 1;

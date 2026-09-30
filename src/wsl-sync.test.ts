@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { distroArgv, distroSetupCommands, planFor, selectDistro, syncSelectedTooling, syncWslDistro, relayWslCommand, wslChildEnvironment, type WslSyncSeams } from "./wsl-sync.ts";
+import { distroArgv, distroSetupCommands, ensureDistroRedDev, planFor, selectDistro, syncSelectedTooling, syncWslDistro, relayWslCommand, wslChildEnvironment, type WslSyncSeams } from "./wsl-sync.ts";
+import { VERSION } from "./cli.ts";
 import type { Platform } from "./platform.ts";
 const WINDOWS: Platform = { os: "windows", env: "windows", distro: null, version: null, codename: null, arch: "x64", caps: { apt: false, gui: true, systemd: false, winget: true, flatpak: false } };
 import type { WslState } from "./wsl-provision.ts";
@@ -18,6 +19,30 @@ describe("Windows coordinator", () => {
     expect(planFor(null, "1.2.3").how).toBe("bootstrap");
     expect(planFor("1.2.2", "1.2.3").how).toBe("upgrade");
     expect(planFor("1.2.3", "1.2.3").install).toBe(false);
+  });
+  test("installs the coordinator version even while latest metadata is stale; keeps configuration unpinned", async () => {
+    const commands: string[] = []; let observed = "1.0.1";
+    expect(await ensureDistroRedDev("Ubuntu-26.04", {
+      version: async () => observed,
+      bootstrap: async () => { throw new Error("existing distro must not bootstrap"); },
+      install: async (_d, cmd) => { commands.push(cmd); observed = VERSION; return 0; },
+    })).toBe(0);
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toContain(`mise install red-dev@${VERSION}`);
+    expect(commands[0]).not.toContain("mise use");
+    expect(commands[0]).not.toContain("mise upgrade");
+    expect(commands[0]).toContain("MISE_MINIMUM_RELEASE_AGE");
+  });
+  test("fresh bootstrap is followed by the exact install and a verified version", async () => {
+    const calls: string[] = []; let observed: string | null = null;
+    expect(await ensureDistroRedDev("Ubuntu-26.04", {
+      version: async () => observed,
+      bootstrap: async () => { calls.push("bootstrap"); observed = "1.0.1"; return 0; },
+      install: async (_d, cmd) => { calls.push(cmd); observed = VERSION; return 0; },
+    })).toBe(0);
+    expect(calls[0]).toBe("bootstrap"); expect(calls[1]).toContain(`mise install red-dev@${VERSION}`);
+    expect(await ensureDistroRedDev("Ubuntu-26.04", { version: async () => VERSION, install: async () => { throw Error("already current"); } })).toBe(0);
+    expect(await ensureDistroRedDev("Ubuntu-26.04", { version: async () => "1.0.1", install: async () => 0 })).toBe(1);
   });
   test("configures Linux before decommissioning the native services", async () => {
     const calls: string[] = [];
