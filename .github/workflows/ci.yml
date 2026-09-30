@@ -28,6 +28,20 @@ permissions:
   contents: read
 
 jobs:
+  windows-boundary:
+    name: Windows command boundaries
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install
+        run: bun install --frozen-lockfile
+      - name: PowerShell and cmd argument forwarding
+        run: bun test src/windows-wsl-bridge.test.ts
+
   # Does this red-dev still read what red-skills actually publishes?
   #
   # Separate from `check` because it is the one job that can fail

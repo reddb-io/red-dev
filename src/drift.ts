@@ -1,3 +1,4 @@
+import { windowsWsl } from "./workstation.ts";
 /**
  * Configuration drift.
  *
@@ -611,8 +612,7 @@ async function checkRedSkillsSource(): Promise<DriftCheck> {
 
 export async function collectDrift(p: Platform): Promise<DriftCheck[]> {
   const checks: DriftCheck[] = [];
-  checks.push(await checkDotfiles());
-  checks.push(await checkShellWiring());
+  if (!windowsWsl(p)) { checks.push(await checkDotfiles()); checks.push(await checkShellWiring()); }
   checks.push(...(await checkTheme(p)));
   checks.push(await checkWallpaper(p));
   checks.push(await checkWslArchitecture(p));
@@ -626,11 +626,9 @@ export async function collectDrift(p: Platform): Promise<DriftCheck[]> {
   // configuration drift; reporting the choice twice under two headings
   // is how a reader ends up wondering which line is the real one. See
   // src/agent-posture.ts.
-  checks.push(await checkDelta());
-  checks.push(await checkRuntimes());
+  if (!windowsWsl(p)) { checks.push(await checkDelta()); checks.push(await checkRuntimes()); }
   checks.push(await checkDocker(p));
-  checks.push(await checkToolchainParity(p));
-  checks.push(await checkBlesh());
+  if (!windowsWsl(p)) { checks.push(await checkToolchainParity(p)); checks.push(await checkBlesh()); }
   {
     const { inspectDitInput } = await import("./dit.ts");
     checks.push(inspectDitInput(p));

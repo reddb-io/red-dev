@@ -1,16 +1,15 @@
 /**
  * A Windows workstation with WSL is two execution environments.
  *
- * Graphical applications belong to the Windows host. CLI agents belong on
- * both sides when the chosen terminal opens WSL, so Git Bash/PowerShell and
- * the normal Alacritty→WSL path are both usable.
+ * Graphical applications belong to Windows. Selected CLI agents and language
+ * runtimes are delegated to Linux; redcode remains available on both sides.
  */
 
 import { describe, expect, test } from "bun:test";
 import { distroSetupCommands } from "./wsl-sync.ts";
 
 describe("selected tooling sent into WSL", () => {
-  test("duplicates CLI agents and runtimes when WSL is the terminal", () => {
+  test("delegates CLI agents and normalizes legacy runtime selectors", () => {
     expect(
       distroSetupCommands(
         "wsl",
@@ -18,7 +17,7 @@ describe("selected tooling sent into WSL", () => {
         ["node@lts", "python@3.13"],
       ),
     ).toEqual([
-      "red-dev lang node@lts,python@3.13",
+      "red-dev lang node@latest,python@latest",
       "red-dev agents claude-code,codex",
     ]);
   });
@@ -46,7 +45,7 @@ describe("selected tooling sent into WSL", () => {
         ["node@lts", "bad; command", "python@latest", "ruby@3.4.7"],
       ),
     ).toEqual([
-      "red-dev lang node@lts,python@latest,ruby@3.4.7",
+      "red-dev lang node@latest,python@latest,ruby@latest",
       "red-dev agents claude-code",
     ]);
   });

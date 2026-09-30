@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { convergeMiseGithubAuth, migrateMiseGithubCredential, miseGithubCredentialCommand, miseRemoteVersionsEnv } from "./mise-github.ts";
+import { convergeMiseGithubAuth, migrateMiseGithubCredential, miseGithubCredentialCommand, miseRemoteVersionsEnv, MISE_GITHUB_AUTH_SH } from "./mise-github.ts";
 import { convergeMiseConfig, miseConfigPath } from "./mise-config.ts";
 import type { Platform } from "./platform.ts";
 
@@ -126,7 +126,7 @@ describe("persistent authentication owned by red-dev", () => {
     symlinkSync(Bun.which("sh")!, join(bin, "sh"));
     symlinkSync(Bun.which("cat")!, join(bin, "cat"));
     const env: NodeJS.ProcessEnv = { ...process.env, PATH: `${shims}:${bin}`, MISE_CONFIG_DIR: root, MISE_DATA_DIR: data };
-    for (const name of ["MISE_CONFIG_FILE", "MISE_GITHUB_CREDENTIAL_COMMAND", "MISE_GITHUB_TOKEN", "GITHUB_TOKEN", "GITHUB_API_TOKEN", "GH_TOKEN"]) delete env[name];
+    for (const name of ["MISE_CONFIG_FILE", "MISE_GITHUB_CREDENTIAL_COMMAND", "MISE_GITHUB_TOKEN", "GITHUB_TOKEN", "GITHUB_API_TOKEN", "GH_TOKEN", "WSL_INTEROP", "WSL_DISTRO_NAME"]) delete env[name];
     const lookup = () => {
       const argv = realMise ? [realMise, "token", "github", "--raw"] : ["sh", join(root, "red-dev-github-auth.sh")];
       const result = Bun.spawnSync(argv, { env, stdout: "pipe", stderr: "pipe", timeout: 5_000 });
@@ -145,5 +145,28 @@ describe("persistent authentication owned by red-dev", () => {
     expect(lookup()).toBe("fixture_account_two");
     expect(existsSync(join(bin, "mise-invoked"))).toBe(false);
     expect(convergeMiseConfig(platform, { home, tools: [] }).changed).toBe(false);
+  });
+});
+
+
+describe("WSL credential fallback", () => {
+  test.skipIf(process.platform === "win32")("uses Windows gh only when the local account is unavailable; never invokes mise", () => {
+    const root = temp(), bin = join(root, "bin"); mkdirSync(bin);
+    const account = join(root, "host-account"), observed = join(root, "host-script");
+    const quote = (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`;
+    const gh = join(bin, "gh"), ps = join(bin, "powershell.exe"), script = join(root, "auth.sh");
+    writeFileSync(script, MISE_GITHUB_AUTH_SH);
+    writeFileSync(gh, "#!/bin/sh\nexit 1\n"); chmodSync(gh, 0o700);
+    writeFileSync(ps, `#!/bin/sh\ncat > ${quote(observed)}\ncat ${quote(account)}\n`); chmodSync(ps, 0o700);
+    for (const name of ["cat", "tr"]) symlinkSync(Bun.which(name)!, join(bin, name));
+    const env = { PATH: bin, HOME: root, MISE_DATA_DIR: join(root, "no-installs"), WSL_DISTRO_NAME: "Ubuntu-fixture" };
+    const read = () => Bun.spawnSync([Bun.which("sh")!, script], { env, stdout: "pipe", stderr: "pipe" });
+    for (const accountName of ["fixture-windows-one", "fixture-windows-two"]) {
+      writeFileSync(account, accountName + "\r\n"); const r = read(); expect(r.exitCode).toBe(0); expect(r.stdout.toString().trim()).toBe(accountName);
+    }
+    expect(readFileSync(observed, "utf8")).toContain("Get-Command gh.exe");
+    expect(readFileSync(observed, "utf8")).not.toContain("mise which");
+    rmSync(observed); writeFileSync(gh, "#!/bin/sh\nprintf '%s\\n' fixture-linux-account\n");
+    const r = read(); expect(r.exitCode).toBe(0); expect(r.stdout.toString().trim()).toBe("fixture-linux-account"); expect(existsSync(observed)).toBe(false);
   });
 });

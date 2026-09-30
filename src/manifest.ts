@@ -1,3 +1,4 @@
+import { runsHere } from "./workstation.ts";
 /**
  * The single place where "what to install" lives.
  *
@@ -245,6 +246,8 @@ export type Provider = ProviderSpec & {
 };
 
 export interface Tool {
+  /** Owner when the workstation consists of Windows and Ubuntu/WSL. */
+  placement?: import("./workstation.ts").Placement;
   /** Stable logical name — what the user thinks they have. */
   name: string;
   /** One line shown when offering this tool in a selection list. */
@@ -452,7 +455,7 @@ export const TOOLS: Tool[] = [
     //
     // Nothing else in core depends on a peer, which is why this is the
     // only entry that has to say so.
-    name: "mise",
+    name: "mise", placement: "both",
     scope: "core",
     u24: aptrepo({
       pkgs: ["mise"],
@@ -487,16 +490,16 @@ export const TOOLS: Tool[] = [
     // Every mise call red-dev makes now carries MISE_NO_RELEASE_AGE
     // (src/mise-config.ts), so `latest` is the newest release, not the
     // newest one a day old.
-    name: "red-dev",
+    name: "red-dev", placement: "both",
     about: "this tool, kept current by the same mechanism as everything else",
     scope: "core",
     u24: mise("github:reddb-io/red-dev", { alias: "red-dev" }),
     win: mise("github:reddb-io/red-dev", { alias: "red-dev" }),
   },
-  { name: "git", scope: "core", u24: apt("git"), win: winget("Git.Git") },
-  { name: "curl", scope: "core", u24: apt("curl"), win: winget("cURL.cURL") },
+  { name: "git", placement: "both", scope: "core", u24: apt("git"), win: winget("Git.Git") },
+  { name: "curl", placement: "both", scope: "core", u24: apt("curl"), win: winget("cURL.cURL") },
   {
-    name: "unzip",
+    name: "unzip", placement: "both",
     scope: "core",
     u24: apt("unzip"),
     win: skip("Windows expands archives natively"),
@@ -506,34 +509,34 @@ export const TOOLS: Tool[] = [
     // and a machine that converged without `just` fails its first
     // `just dev` with "command not found" — which reads as a broken
     // checkout rather than as an unticked box on a page nobody revisits.
-    name: "just",
+    name: "just", placement: "linux",
     about: "command runner; a Makefile without the Make",
     scope: "core",
     u24: mise("just"),
     win: mise("just"),
   },
   {
-    name: "ripgrep",
+    name: "ripgrep", placement: "linux",
     cmd: ["rg"],
     scope: "core",
     u24: mise("ripgrep"),
     win: mise("ripgrep"),
   },
   {
-    name: "fd",
+    name: "fd", placement: "linux",
     cmd: ["fdfind", "fd"],
     scope: "core",
     u24: mise("fd"),
     win: mise("fd"),
   },
   {
-    name: "bat",
+    name: "bat", placement: "linux",
     cmd: ["batcat", "bat"],
     scope: "core",
     u24: mise("bat"),
     win: mise("bat"),
   },
-  { name: "eza", scope: "core", u24: mise("eza"), win: mise("eza") },
+  { name: "eza", placement: "linux", scope: "core", u24: mise("eza"), win: mise("eza") },
   {
     // A service, not a binary, which is why it is a builtin on both
     // columns rather than apt on one and winget on the other: `apt
@@ -553,7 +556,7 @@ export const TOOLS: Tool[] = [
     // in a summary that still reported success. Ubuntu keeps the plain
     // column: apt-get through sudo is the path every other package here
     // already takes.
-    name: "ssh-server",
+    name: "ssh-server", placement: "linux",
     scope: "core",
     managed: true,
     u24: sudoProvider(builtin("ssh-server")),
@@ -570,7 +573,7 @@ export const TOOLS: Tool[] = [
     //
     // No `win`: Git Bash carries its own copy, and there is no winget
     // package that would put one where MSYS bash reads from.
-    name: "bash-completion",
+    name: "bash-completion", placement: "linux",
     scope: "core",
     // The file config/bash/init.sh sources, which is the only observable
     // this package leaves behind — it installs no binary, so the default
@@ -580,14 +583,14 @@ export const TOOLS: Tool[] = [
     u24: apt("bash-completion"),
     win: skip("Git Bash ships its own bash-completion"),
   },
-  { name: "zoxide", scope: "core", u24: mise("zoxide"), win: mise("zoxide") },
-  { name: "fzf", scope: "core", u24: mise("fzf"), win: mise("fzf") },
-  { name: "btop", scope: "core", u24: mise("btop"), win: winget("aristocratos.btop4win") },
-  { name: "jq", scope: "core", u24: mise("jq"), win: mise("jq") },
+  { name: "zoxide", placement: "linux", scope: "core", u24: mise("zoxide"), win: mise("zoxide") },
+  { name: "fzf", placement: "linux", scope: "core", u24: mise("fzf"), win: mise("fzf") },
+  { name: "btop", placement: "linux", scope: "core", u24: mise("btop"), win: winget("aristocratos.btop4win") },
+  { name: "jq", placement: "linux", scope: "core", u24: mise("jq"), win: mise("jq") },
   {
     // config/bash/functions.sh ships webm2mp4, and that helper is only
     // honest if the binary it shells out to is part of the base toolset.
-    name: "ffmpeg",
+    name: "ffmpeg", placement: "linux",
     scope: "core",
     u24: apt("ffmpeg"),
     win: winget("Gyan.FFmpeg"),
@@ -601,7 +604,7 @@ export const TOOLS: Tool[] = [
     // alias is not decoration: without it mise would expose this as
     // `toon`, and `toon --version` answering "tq 0.28.2" is the kind of
     // small wrongness nobody reports and everybody trips on.
-    name: "tq",
+    name: "tq", placement: "linux",
     about: "query and convert TOON, the token-oriented notation",
     scope: "core",
     u24: mise("github:reddb-io/toon", { alias: "tq" }),
@@ -617,7 +620,7 @@ export const TOOLS: Tool[] = [
     // run. mise picks it on its own: verified against the real 1.23.2
     // release, which it resolved to red-linux-x86_64 with the build
     // attestation checked.
-    name: "red",
+    name: "red", placement: "linux",
     about: "the RedDB CLI — embedded, server, cluster",
     // The name collides with GNU ed's restricted mode, which Ubuntu
     // installs at /usr/bin/red. Without this the probe found that,
@@ -632,7 +635,7 @@ export const TOOLS: Tool[] = [
   // Every one of these is cross-shell and cross-platform, which is why
   // they belong in core rather than in a Linux-only corner.
   {
-    name: "starship",
+    name: "starship", placement: "linux",
     scope: "core",
     // Registry rather than github:, here and for the six below it. The
     // registry entry resolves through aqua, which knows the upstream
@@ -642,13 +645,13 @@ export const TOOLS: Tool[] = [
     win: mise("starship"),
   },
   {
-    name: "atuin",
+    name: "atuin", placement: "linux",
     scope: "core",
     u24: mise("atuin"),
     win: mise("atuin"),
   },
   {
-    name: "carapace",
+    name: "carapace", placement: "linux",
     scope: "core",
     // The .deb this replaces was the one asset here that needed root to
     // unpack; the registry hands over a binary instead, so carapace
@@ -656,19 +659,19 @@ export const TOOLS: Tool[] = [
     u24: mise("carapace"),
     win: mise("carapace"),
   },
-  { name: "direnv", scope: "core", u24: mise("direnv"), win: mise("direnv") },
+  { name: "direnv", placement: "linux", scope: "core", u24: mise("direnv"), win: mise("direnv") },
   {
     // Every git diff, show and log -p goes through this, and lazygit
     // picks it up too. The single largest quality change per byte
     // installed.
-    name: "delta",
+    name: "delta", placement: "linux",
     scope: "core",
     u24: mise("delta"),
     win: mise("delta"),
   },
   {
     // mise's registry follows the publisher and verifies its release.
-    name: "yazi",
+    name: "yazi", placement: "linux",
     scope: "core",
     u24: mise("yazi"),
     win: mise("yazi"),
@@ -680,7 +683,7 @@ export const TOOLS: Tool[] = [
     // leaving a binary that answers every query with "Page cache not
     // found". A tool that cannot fetch its own data is not installed in
     // any sense that matters.
-    name: "tldr",
+    name: "tldr", placement: "linux",
     cmd: ["tldr"],
     scope: "core",
     // The registry names the project tealdeer; the alias keeps the
@@ -690,14 +693,14 @@ export const TOOLS: Tool[] = [
     win: mise("tealdeer", { alias: "tldr" }),
   },
   {
-    name: "fastfetch",
+    name: "fastfetch", placement: "linux",
     scope: "core",
     // The registry removes the Ubuntu-release dependency the old PPA had.
     u24: mise("fastfetch"),
     win: mise("fastfetch"),
   },
   {
-    name: "gh",
+    name: "gh", placement: "both",
     scope: "core",
     u24: aptrepo({
       pkgs: ["gh"],
@@ -712,13 +715,13 @@ export const TOOLS: Tool[] = [
     win: winget("GitHub.cli"),
   },
   {
-    name: "lazygit",
+    name: "lazygit", placement: "linux",
     scope: "core",
     u24: mise("lazygit"),
     win: mise("lazygit"),
   },
   {
-    name: "lazydocker",
+    name: "lazydocker", placement: "linux",
     scope: "core",
     u24: mise("lazydocker"),
     win: mise("lazydocker"),
@@ -747,13 +750,13 @@ export const TOOLS: Tool[] = [
     // Keep following the fork's newest release. The fork is the channel;
     // an exact version here would freeze every workstation until red-dev
     // itself shipped again.
-    name: "zellij",
+    name: "zellij", placement: "linux",
     scope: "core",
     u24: mise("github:reddb-io/zellij", { alias: "zellij" }),
     win: mise("github:reddb-io/zellij", { alias: "zellij" }),
   },
   {
-    name: "neovim",
+    name: "neovim", placement: "linux",
     cmd: ["nvim"],
     // LazyVim's own floor. Below it nvim starts, prints "LazyVim
     // requires Neovim >= 0.11.2" and exits.
@@ -766,7 +769,7 @@ export const TOOLS: Tool[] = [
     win: mise("neovim"),
   },
   {
-    name: "docker",
+    name: "docker", placement: "host",
     scope: "core",
     u24: aptrepo({
       pkgs: [
@@ -795,14 +798,14 @@ export const TOOLS: Tool[] = [
   // which is why standardising on bash rather than PowerShell is what
   // makes "same experience" true instead of aspirational.
   {
-    name: "dotfiles",
+    name: "dotfiles", placement: "linux",
     scope: "core",
     managed: true,
     u24: builtin("dotfiles"),
     win: builtin("dotfiles"),
   },
   {
-    name: "alacritty-config",
+    name: "alacritty-config", placement: "host",
     scope: "core",
     managed: true,
     u24: builtin("alacritty"),
@@ -817,7 +820,7 @@ export const TOOLS: Tool[] = [
     // Installing mise without using it leaves the machine with a
     // version manager and no versions — which is how `pnpm` ends up
     // resolving in one shell and not another on the same box.
-    name: "runtimes",
+    name: "runtimes", placement: "both",
     scope: "core",
     managed: true,
     u24: builtin("runtimes"),
@@ -847,7 +850,7 @@ export const TOOLS: Tool[] = [
     // not wait for a red-dev release before workstations can receive it.
     //
     // The package only. What keeps it running is the row below.
-    name: "red-router",
+    name: "red-router", placement: "linux",
     about: "one local endpoint for every coding agent, routed across many AI providers",
     cmd: ["red-router"],
     scope: "core",
@@ -868,7 +871,7 @@ export const TOOLS: Tool[] = [
     // Its own row rather than a flag on the one above, because the two
     // fail differently and doctor reports them apart: mise answers for
     // the package, systemd or Explorer for the service.
-    name: "red-router-autostart",
+    name: "red-router-autostart", placement: "linux",
     about: "keeps red-router running — a user service on Linux, a Startup shortcut on Windows",
     scope: "core",
     managed: true,
@@ -876,7 +879,7 @@ export const TOOLS: Tool[] = [
     win: builtin("red-router-autostart"),
   },
   {
-    name: "retired-resource-controls",
+    name: "retired-resource-controls", placement: "both",
     scope: "core",
     managed: true,
     u24: builtin("retired-resource-controls"),
@@ -885,7 +888,7 @@ export const TOOLS: Tool[] = [
   {
     // On by default; RED_BLE=0 opts out. See the note in src/blesh.ts
     // for how the trial that earned the default played out.
-    name: "blesh",
+    name: "blesh", placement: "linux",
     scope: "core",
     managed: true,
     u24: builtin("blesh"),
@@ -896,13 +899,13 @@ export const TOOLS: Tool[] = [
   // The honest boundary of "same experience": these exist on bare-metal
   // Ubuntu and nowhere else.
   {
-    name: "gnome-tweaks",
+    name: "gnome-tweaks", placement: "linux",
     scope: "desktop",
     u24: apt("gnome-tweaks"),
     win: skip(NO_GUI),
   },
   {
-    name: "gnome-menu-bar",
+    name: "gnome-menu-bar", placement: "linux",
     about: "a RedDB menu, workspace switcher and agent controls in GNOME's top bar",
     scope: "desktop",
     managed: true,
@@ -910,12 +913,12 @@ export const TOOLS: Tool[] = [
     win: skip(NO_GUI),
   },
   {
-    name: "alacritty",
+    name: "alacritty", placement: "host",
     scope: "desktop",
     u24: apt("alacritty"),
     win: winget("Alacritty.Alacritty"),
   },
-  { name: "flatpak", scope: "desktop", u24: apt("flatpak"), win: skip(NO_GUI) },
+  { name: "flatpak", placement: "linux", scope: "desktop", u24: apt("flatpak"), win: skip(NO_GUI) },
   {
     // Zellij's configured copy command on a Linux desktop is
     // config/bash/linux-clipboard.sh, which picks wl-copy under Wayland
@@ -926,14 +929,14 @@ export const TOOLS: Tool[] = [
     // them — used to get a copy_command that could not connect to
     // anything, and a "Copied!" that copied nothing. WSL and native
     // Windows use their own clipboard bridges.
-    name: "wl-clipboard",
+    name: "wl-clipboard", placement: "linux",
     cmd: ["wl-copy", "wl-paste"],
     scope: "desktop",
     u24: apt("wl-clipboard"),
     win: skip(NO_GUI),
   },
   {
-    name: "xclip",
+    name: "xclip", placement: "linux",
     scope: "desktop",
     u24: apt("xclip"),
     win: skip(NO_GUI),
@@ -967,7 +970,7 @@ export const TOOLS: Tool[] = [
     // the `rr` shortcut with it.
     //
     // Revisit if upstream ever publishes a plain relocatable binary.
-    name: "red-request",
+    name: "red-request", placement: "linux",
     about: "open-source API client, powered by recker",
     cmd: ["red-request", "rr"],
     scope: "desktop",
@@ -995,14 +998,14 @@ export const TOOLS: Tool[] = [
     // Not a mise tool, for the same reason as red-request directly
     // above: the .deb carries the desktop integration and the `red`
     // sidecar, and an AppImage on PATH shadows it (red-ui/install.sh:293).
-    name: "red-ui",
+    name: "red-ui", placement: "linux",
     about: "universal client for reddb — embedded, server, docker, cluster",
     scope: "desktop",
     u24: gh("reddb-io/red-ui", "red-ui_*_amd64.deb"),
     win: ghInstaller("reddb-io/red-ui", "red-ui-windows-x86_64-setup.exe", "/S"),
   },
   {
-    name: "libasound2",
+    name: "libasound2", placement: "linux",
     about: "the ALSA library dit links against",
     scope: "desktop",
     // This package exposes a shared library, not a command named
@@ -1027,14 +1030,14 @@ export const TOOLS: Tool[] = [
     // on the copy people actually run. Linux input access and startup
     // are separate managed rows because they fail independently from
     // downloading the binary.
-    name: "dit",
+    name: "dit", placement: "linux",
     about: "push-to-toggle voice dictation, typed into the focused app",
     scope: "desktop",
     u24: mise("github:reddb-io/dit", { alias: "dit" }),
     win: mise("github:reddb-io/dit", { alias: "dit" }),
   },
   {
-    name: "dit-input",
+    name: "dit-input", placement: "linux",
     about: "the input group, uinput rule and GNOME focus bridge dit needs to see a keypress and type",
     scope: "desktop",
     managed: true,
@@ -1042,7 +1045,7 @@ export const TOOLS: Tool[] = [
     win: skip("SendInput needs no permissions"),
   },
   {
-    name: "dit-autostart",
+    name: "dit-autostart", placement: "linux",
     about: "keeps dit running so its hotkey and tray are available after login",
     scope: "desktop",
     managed: true,
@@ -1054,7 +1057,7 @@ export const TOOLS: Tool[] = [
   // Chosen, never assumed. `red-dev apps` offers these; a plain
   // converge ignores them entirely.
   {
-    name: "codex-desktop",
+    name: "codex-desktop", placement: "host",
     about: "ChatGPT desktop app with Codex — official Linux preview",
     cmd: ["chatgpt"],
     scope: "optional",
@@ -1069,7 +1072,7 @@ export const TOOLS: Tool[] = [
     win: msstore("9PLM9XGG6VKS"),
   },
   {
-    name: "claude-desktop",
+    name: "claude-desktop", placement: "host",
     about: "Claude Desktop — Chat, Cowork and Claude Code",
     cmd: ["claude-desktop"],
     scope: "optional",
@@ -1083,7 +1086,7 @@ export const TOOLS: Tool[] = [
     win: winget("Anthropic.Claude"),
   },
   {
-    name: "antigravity",
+    name: "antigravity", placement: "host",
     about: "Google's desktop development environment with coding agents",
     cmd: ["antigravity"],
     scope: "optional",
@@ -1097,7 +1100,7 @@ export const TOOLS: Tool[] = [
     win: winget("Google.Antigravity"),
   },
   {
-    name: "vscode",
+    name: "vscode", placement: "host",
     about: "Visual Studio Code — Microsoft's desktop code editor",
     cmd: ["code"],
     scope: "optional",
@@ -1111,14 +1114,14 @@ export const TOOLS: Tool[] = [
     win: winget("Microsoft.VisualStudioCode"),
   },
   {
-    name: "t3code",
+    name: "t3code", placement: "host",
     about: "T3 Tools' desktop editor",
     scope: "optional",
     u24: skip("T3 Code does not publish a Linux desktop build"),
     win: winget("T3Tools.T3Code"),
   },
   {
-    name: "puppeteer",
+    name: "puppeteer", placement: "linux",
     about: "browser automation CLI + Chrome for Testing + Ubuntu libraries — about 280 MB",
     cmd: ["puppeteer"],
     scope: "optional",
@@ -1138,7 +1141,7 @@ export const TOOLS: Tool[] = [
     //
     // Windows only, and that falls out of the provider rather than being
     // asserted: there is no Linux PowerToys to skip toward.
-    name: "powertoys",
+    name: "powertoys", placement: "host",
     about: "FancyZones window tiling, launcher, key remapping — Microsoft's own",
     // A location, not a name: PowerToys never touches PATH.
     cmd: ["%LOCALAPPDATA%\\PowerToys\\PowerToys.exe"],
@@ -1152,7 +1155,7 @@ export const TOOLS: Tool[] = [
     // one will not open in the other, and `gh` reads neither .tar.xz nor
     // a 1.2 GB tree that has to stay whole. src/blender.ts says the
     // rest.
-    name: "blender",
+    name: "blender", placement: "host",
     about: "3D creation suite — 1.2 GB, the official build",
     scope: "optional",
     managed: true,
@@ -1165,7 +1168,7 @@ export const TOOLS: Tool[] = [
     // neither needs a checkout, a pnpm install, or a build here. That is
     // also the only way they can still be installed — the published
     // package stopped carrying monorepo source.
-    name: "red-skills-vscode",
+    name: "red-skills-vscode", placement: "host",
     about: "RedSkills panel for VS Code — the published .vsix",
     scope: "optional",
     managed: true,
@@ -1173,7 +1176,7 @@ export const TOOLS: Tool[] = [
     win: builtin("red-skills-vscode"),
   },
   {
-    name: "red-skills-herdr",
+    name: "red-skills-herdr", placement: "linux",
     about: "RedSkills plugin for herdr — live workers, logs and PRs",
     scope: "optional",
     managed: true,
@@ -1181,35 +1184,35 @@ export const TOOLS: Tool[] = [
     win: skip("herdr has no stable Windows build"),
   },
   {
-    name: "duf",
+    name: "duf", placement: "linux",
     about: "df you can read at a glance",
     scope: "optional",
     u24: mise("duf"),
     win: mise("duf"),
   },
   {
-    name: "dust",
+    name: "dust", placement: "linux",
     about: "du sorted by what is actually large",
     scope: "optional",
     u24: mise("dust"),
     win: mise("dust"),
   },
   {
-    name: "hyperfine",
+    name: "hyperfine", placement: "linux",
     about: "benchmark a command properly, with warmup and statistics",
     scope: "optional",
     u24: mise("hyperfine"),
     win: mise("hyperfine"),
   },
   {
-    name: "glow",
+    name: "glow", placement: "linux",
     about: "render markdown in the terminal",
     scope: "optional",
     u24: mise("glow"),
     win: mise("glow"),
   },
   {
-    name: "gitui",
+    name: "gitui", placement: "linux",
     about: "a lighter, keyboard-first alternative to lazygit",
     scope: "optional",
     u24: mise("gitui"),
@@ -1229,7 +1232,7 @@ export const TOOLS: Tool[] = [
     // Ubuntu there is no Windows side to share with, and on a server
     // there is no second anything — the provider says so rather than
     // creating a directory nothing will ever read.
-    name: "shared-root",
+    name: "shared-root", placement: "linux",
     about: "one directory for configuration both environments read",
     scope: "core",
     managed: true,
@@ -1247,7 +1250,7 @@ export const TOOLS: Tool[] = [
     // writes GNOME custom keybindings instead. The builtin picks the one
     // that belongs to this host and says so out loud on a machine with
     // neither, which is any server.
-    name: "hotkeys",
+    name: "hotkeys", placement: "host",
     about: "the chord family, as Start Menu shortcuts and GNOME custom keybindings",
     scope: "core",
     managed: true,
@@ -1262,7 +1265,7 @@ export const TOOLS: Tool[] = [
     // import verifies too. Spawned rather than reimplemented: a
     // signature verifier is the one component that must be the same
     // program the publisher's own verifier runs. src/red-skills-set.ts.
-    name: "cosign",
+    name: "cosign", placement: "both",
     about: "verifies the RedSkills package set's release signature",
     scope: "core",
     u24: mise("cosign"),
@@ -1290,7 +1293,7 @@ export const TOOLS: Tool[] = [
     // below wires agents against the payload, and wiring against a
     // payload that is not there yet is the ordering bug that costs a
     // whole converge.
-    name: "red-skills-core",
+    name: "red-skills-core", placement: "both",
     about: "the RedSkills runtime bundles, resolved and kept current by mise",
     scope: "core",
     managed: true,
@@ -1315,7 +1318,7 @@ export const TOOLS: Tool[] = [
   // the whole argument for spending an entry per plugin. src/red-skills-
   // plugins.ts derives the set back out of this.
   {
-    name: "red-skills-dev",
+    name: "red-skills-dev", placement: "both",
     about: "RedSkills dev plugin — engineering skills for coding agents",
     scope: "core",
     managed: true,
@@ -1323,7 +1326,7 @@ export const TOOLS: Tool[] = [
     win: mise("npm:@reddb-io/red-skills-dev", { alias: "red-skills-dev", allowLowDownloads: true }),
   },
   {
-    name: "red-skills-memory",
+    name: "red-skills-memory", placement: "both",
     about: "RedSkills memory plugin — governed operational memory, on top of dev",
     scope: "core",
     managed: true,
@@ -1331,7 +1334,7 @@ export const TOOLS: Tool[] = [
     win: mise("npm:@reddb-io/red-skills-memory", { alias: "red-skills-memory", allowLowDownloads: true }),
   },
   {
-    name: "red-skills-brain",
+    name: "red-skills-brain", placement: "both",
     about: "RedSkills brain plugin — a project-local knowledge repository",
     scope: "core",
     managed: true,
@@ -1343,7 +1346,7 @@ export const TOOLS: Tool[] = [
     // exist and wires each one, so running it on a machine with none
     // configures nothing and reports success. It sits at the end of
     // core for that reason.
-    name: "red-skills",
+    name: "red-skills", placement: "both",
     about: "the RedSkills marketplace, in whichever agents are installed",
     scope: "core",
     managed: true,
@@ -1351,7 +1354,7 @@ export const TOOLS: Tool[] = [
     win: builtin("red-skills"),
   },
   {
-    name: "codex-statusline",
+    name: "codex-statusline", placement: "both",
     about: "project, branch, model, effort, context and quota windows in the Codex TUI",
     scope: "core",
     managed: true,
@@ -1362,7 +1365,7 @@ export const TOOLS: Tool[] = [
     // Skipped silently when claude is not installed. Idempotent and
     // non-destructive: malformed JSON and explicit conflicting bindings
     // are never overwritten silently.
-    name: "claude-keybindings",
+    name: "claude-keybindings", placement: "both",
     about: "Shift+Enter → newline in Claude Code Chat",
     scope: "core",
     managed: true,
@@ -1380,7 +1383,7 @@ export const TOOLS: Tool[] = [
     // names an absolute path to red-dev, and a hook declared before
     // there is anything at that path has the daemon exec nothing on
     // every Worker birth until the next converge.
-    name: "redwall-hook",
+    name: "redwall-hook", placement: "host",
     about: "keeps the Redwall current, through the RedSkills host hook",
     scope: "core",
     managed: true,
@@ -1388,7 +1391,7 @@ export const TOOLS: Tool[] = [
     win: builtin("redwall-hook"),
   },
   {
-    name: "wsl-interop",
+    name: "wsl-interop", placement: "linux",
     scope: "wsl",
     managed: true,
     u24: builtin("wsl-interop"),
@@ -1398,7 +1401,7 @@ export const TOOLS: Tool[] = [
     // WSL exports XDG_RUNTIME_DIR but never creates it, and the parent
     // is root-owned — so the programs that trust the variable get EACCES
     // rather than a fallback. zellij is the visible casualty.
-    name: "wsl-runtime-dir",
+    name: "wsl-runtime-dir", placement: "linux",
     about: "XDG_RUNTIME_DIR that exists, so zellij can start",
     scope: "wsl",
     managed: true,
@@ -1406,14 +1409,14 @@ export const TOOLS: Tool[] = [
     win: skip("native Windows has no XDG runtime dir"),
   },
   {
-    name: "nerd-font",
+    name: "nerd-font", placement: "host",
     scope: "desktop",
     managed: true,
     u24: builtin("nerd-font"),
     win: builtin("nerd-font"),
   },
   {
-    name: "nerd-font",
+    name: "nerd-font", placement: "host",
     scope: "wsl",
     managed: true,
     u24: builtin("nerd-font"),
@@ -1423,7 +1426,7 @@ export const TOOLS: Tool[] = [
     // The terminal that will run this distro lives on the host, so it
     // is installed there. winget.exe is reachable through interop —
     // which is exactly what upstream's PATH replacement was breaking.
-    name: "alacritty-host",
+    name: "alacritty-host", placement: "host",
     scope: "wsl",
     managed: true,
     u24: winget("Alacritty.Alacritty"),
@@ -1434,15 +1437,15 @@ export const TOOLS: Tool[] = [
     // the wsl scope runs inside the distro and reaches out to Windows,
     // and native Windows never gets it. This is the crossing in the
     // other direction, so it belongs to the target that can make it.
-    name: "wsl-sync",
-    about: "the WSL distro, converged from the Windows side",
-    scope: "desktop",
+    name: "wsl-sync", placement: "host",
+    about: "Ubuntu/WSL, configured by the Windows coordinator",
+    scope: "core",
     managed: true,
     u24: skip("no distro to reach into from a Linux desktop"),
     win: builtin("wsl-sync"),
   },
   {
-    name: "windows-terminal",
+    name: "windows-terminal", placement: "host",
     scope: "wsl",
     managed: true,
     u24: builtin("windows-terminal"),
@@ -1452,6 +1455,9 @@ export const TOOLS: Tool[] = [
 
 /** Pick the provider column that applies to this machine. */
 export function providerFor(tool: Tool, p: Platform): Provider {
+  if (tool.placement && !runsHere(tool.placement, p)) {
+    return skip(tool.placement === "linux" ? "owned by Ubuntu/WSL" : "owned by the graphical host");
+  }
   if (p.os === "darwin") {
     throw new RedError(
       "unsupported platform: darwin. macOS support is planned in Phase 5 as an adapter of the platform contracts; this is not a broken Ubuntu install.",

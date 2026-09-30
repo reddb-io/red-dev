@@ -683,7 +683,7 @@ function defaultConverge(
   return async () => {
     const { convergeRedSkills } = await import("./agents.ts");
     const { detect } = await import("./platform.ts");
-    const platform = opts.manifestPlatform ?? detect();
+    const platform = opts.manifestPlatform ?? await (await import("./workstation.ts")).resolveWorkstation(detect());
     const converged = await convergeRedSkills(platform, opts.trigger ?? "unknown");
     return {
       ...converged,

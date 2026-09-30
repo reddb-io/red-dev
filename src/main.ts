@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { windowsWsl, resolveWorkstation } from "./workstation.ts";
 /**
  * red-dev — one dev environment across Ubuntu 24, Ubuntu 26, WSL and Windows.
  */
@@ -87,6 +88,20 @@ async function cmdPlan(p: Platform, inv: Invocation): Promise<number> {
   // reason for saying it here rather than at the item that needs the
   // rights.
   for (const line of administratorNotice(p, scopes)) log.plain(line);
+  if (windowsWsl(p)) {
+    const { defaultDistroInfo, distroVersion, relayWslCommand } = await import("./wsl-sync.ts");
+    const distro = await defaultDistroInfo(p);
+    if (distro?.version === 2 && await distroVersion(distro.name)) return relayWslCommand(p, `red-dev plan ${inv.scope ?? ""}`);
+    const linux: Platform = { ...p, os: "linux", env: "wsl", distro: "ubuntu", version: "24.04", workstation: undefined,
+      caps: { apt: true, gui: false, systemd: true, winget: false, flatpak: false } };
+    log.plain("\n[Ubuntu/WSL — planned destinations; installation not observed]");
+    for (const scope of resolveScopes(linux, inv.scope)) {
+      for (const tool of toolsInScope(scope)) {
+        const provider = providerFor(tool, linux);
+        if (provider.kind !== "skip") log.plain(`  ${tool.name.padEnd(17)}${describeProvider(provider)}`);
+      }
+    }
+  }
   return 0;
 }
 
@@ -350,6 +365,7 @@ async function cmdInstall(
     delete process.env["RED_DEV_UPDATE_CONVERGE"];
   }
   let ctx = await contextFor(p, inv, entry);
+  ctx.wslUnattended = inv.yes || inv.unattended;
   let extraScopes: Scope[] = [];
   let sudoPrepared = false;
 
@@ -446,7 +462,7 @@ async function cmdInstall(
   // Fullscreen when there is a terminal wide enough for it: the live
   // view is the default experience, and the line report is what runs in
   // CI, in a pipe, over a dumb SSH session and on a narrow window.
-  if (!inv.dryRun && interactive() && (process.stdout.columns ?? 0) >= 60) {
+  if (!inv.dryRun && interactive() && (process.stdout.columns ?? 0) >= 60 && !windowsWsl(p)) {
     const { runInstallTui } = await import("./tui-install.ts");
     const outcome = await runInstallTui({ platform: p, ctx, scopes });
     // The banner again, after the frame is released. The completion
@@ -585,6 +601,7 @@ async function endInstall(
  * whether it took a consent prompt to get there.
  */
 async function cmdPrivileged(p: Platform, inv: Invocation): Promise<number> {
+  if (windowsWsl(p)) return cmdInstall(p, { ...inv, scope: inv.scope ?? "core", yes: false });
   const { privilegedItems } = await import("./privileged.ts");
   const scopes = resolveScopes(p, inv.scope);
   const items = privilegedItems(p, scopes);
@@ -844,7 +861,9 @@ async function cmdUpdate(p: Platform, inv: Invocation): Promise<number> {
     // deliberately not handed to it. Each publisher updates its own.
     agents: async () => {
       if (inv.dryRun) return;
-      const code = await cmdAgentsUpdate(p);
+      // The workstation converge (or unattended child update) owns WSL's
+      // complete update after ensuring the child is on this version.
+      const code = await cmdAgentsUpdate(p, false);
       if (code !== 0) throw new Error("some agent hosts did not update");
     },
 
@@ -884,6 +903,10 @@ async function cmdUpdate(p: Platform, inv: Invocation): Promise<number> {
     else log.warn(detail);
   }
   if (run.code === 3) log.warn("update was partial — inspect failed stages before retrying");
+  if (windowsWsl(p) && inv.unattended && !inv.dryRun) {
+    const { relayWslCommand } = await import("./wsl-sync.ts");
+    if (await relayWslCommand(p, "red-dev update --unattended --yes") !== 0) return 3;
+  }
   return run.code;
 }
 
@@ -1207,7 +1230,8 @@ async function cmdApps(p: Platform, inv: Invocation): Promise<number> {
 
   const lines = catalogueLines({ tools, webApps, canAdd: support.ok });
   const byLabel = new Map(lines.map((line) => [line.label, line]));
-  const labels = lines.map((line) => line.label);
+  const remoteApps = "Choose Ubuntu/WSL applications…";
+  const labels = [...lines.map((line) => line.label), ...(windowsWsl(p) ? [remoteApps] : [])];
   const ticked = lines.filter((line) => line.ticked).map((line) => line.label);
 
   // Every install choice is opt-out, but a fallback must never install
@@ -1260,6 +1284,11 @@ async function cmdApps(p: Platform, inv: Invocation): Promise<number> {
     (context ??= await contextFor(p, inv, "install"));
 
   for (const label of picked) {
+    if (label === remoteApps) {
+      const { relayWslCommand } = await import("./wsl-sync.ts");
+      if (await relayWslCommand(p, "red-dev apps", {}, true) !== 0) failures++;
+      continue;
+    }
     const row = byLabel.get(label)?.row;
     if (!row) continue;
 
@@ -1445,6 +1474,7 @@ async function cmdSsh(p: Platform, inv: Invocation): Promise<number> {
  * converges that contract and reports the endpoint agents use.
  */
 async function cmdRouter(p: Platform, inv: Invocation): Promise<number> {
+  if (windowsWsl(p)) return (await import("./wsl-sync.ts")).relayWslCommand(p, `red-dev red-router ${inv.routerVerb ?? "status"}`);
   const { inspectRouter, manageRouterService, routerHost, routerPort } = await import("./red-router.ts");
   const verb = inv.routerVerb;
   if (verb === "install" || verb === "uninstall") return await manageRouterService(p, verb);
@@ -1554,8 +1584,10 @@ async function cmdShell(p: Platform, inv: Invocation): Promise<number> {
   }
 
   if (p.os === "windows" && choice === "wsl") {
-    const { syncSelectedTooling } = await import("./wsl-sync.ts");
-    return (await syncSelectedTooling(p)) > 0 ? 1 : 0;
+    await resolveWorkstation(p);
+    const { syncWslDistro } = await import("./wsl-sync.ts");
+    await syncWslDistro(p);
+    return 0;
   }
   return 0;
 }
@@ -1633,6 +1665,8 @@ async function cmdUninstall(p: Platform): Promise<number> {
  * first, then the chosen command runs normally.
  */
 async function cmdUi(p: Platform, inv: Invocation): Promise<number> {
+  // The Windows/WSL installer needs the console for OS setup and sudo.
+  if (windowsWsl(p)) return cmdMenu(p, inv, buildCli().help());
   if (!interactive()) {
     log.err("the fullscreen interface needs a terminal");
     log.plain("     Use `red-dev` for the menu, or a command directly.");
@@ -1897,7 +1931,7 @@ async function cmdAgents(p: Platform, inv: Invocation): Promise<number> {
     log.plain("");
     if (await confirm("Install red-skills for these agents?", true)) {
       try {
-        await installRedSkills();
+        await installRedSkills(p);
         log.ok("red-skills");
       } catch (err) {
         log.err(`red-skills: ${(err as Error).message}`);
@@ -2058,7 +2092,7 @@ async function cmdAgentsPlugins(
  * afterwards until the host arrives.
  */
 async function cmdAgentsDefault(p: Platform, key: string | undefined): Promise<number> {
-  const { AGENTS, availableAgents, currentAgentKeys, isAgentInstalled } = await import(
+  const { AGENTS, availableAgents, currentAgentKeys, isAgentInstalled, agentRunsHere } = await import(
     "./agents.ts"
   );
   const { isDefaultAgentCandidate, readDefaultAgent, reportDefaultAgent } = await import(
@@ -2069,6 +2103,10 @@ async function cmdAgentsDefault(p: Platform, key: string | undefined): Promise<n
 
   if (key === undefined) {
     const prefs = await readPreferences(p);
+    const selected = AGENTS.find(a => a.key === prefs.defaultAgent);
+    if (windowsWsl(p) && selected && !agentRunsHere(selected, p)) {
+      return (await import("./wsl-sync.ts")).relayWslCommand(p, "red-dev agents default");
+    }
     const report = reportDefaultAgent(
       readDefaultAgent(prefs.defaultAgent, isAgentInstalled),
       prefs.agents ?? [],
@@ -2095,7 +2133,8 @@ async function cmdAgentsDefault(p: Platform, key: string | undefined): Promise<n
 
   await writePreferences(p, { defaultAgent: spec.key });
   log.ok(`default agent: ${spec.label}`);
-  if (!isAgentInstalled(spec)) log.warn(`not installed yet — red-dev agents ${spec.key}`);
+  if (agentRunsHere(spec, p) && !isAgentInstalled(spec)) log.warn(`not installed yet — red-dev agents ${spec.key}`);
+  if (windowsWsl(p) && !agentRunsHere(spec, p)) log.plain("     execution and installation are owned by Ubuntu/WSL");
   return 0;
 }
 
@@ -2115,6 +2154,15 @@ async function cmdAgentsRun(p: Platform, passthrough: string[]): Promise<number>
   const { readPreferences } = await import("./preferences.ts");
 
   const prefs = await readPreferences(p);
+  if (windowsWsl(p) && prefs.defaultAgent) {
+    const { AGENTS, agentRunsHere } = await import("./agents.ts");
+    const agent = AGENTS.find(a => a.key === prefs.defaultAgent);
+    if (agent && !agentRunsHere(agent, p)) {
+      const { relayWslCommand, wslCommand } = await import("./wsl-sync.ts");
+      // Delegate the publisher's plain invocation with the user's exact arguments.
+      return relayWslCommand(p, wslCommand([agent.cmd, ...passthrough]), {}, true);
+    }
+  }
   const decision = resolveLaunch(prefs, commandPath, passthrough);
   if (!decision.ok) {
     log.err(decision.detail);
@@ -2140,21 +2188,23 @@ async function cmdAgentsRun(p: Platform, passthrough: string[]): Promise<number>
  * decisions all live there, so `red-dev update` running the same thing
  * as a stage cannot report it differently.
  */
-async function cmdAgentsUpdate(p: Platform): Promise<number> {
-  const { availableAgents } = await import("./agents.ts");
+async function cmdAgentsUpdate(p: Platform, includeWsl = true): Promise<number> {
+  const { availableAgents, agentRunsHere } = await import("./agents.ts");
   const { reportAgentUpdate, updateAgents } = await import("./agent-update.ts");
 
-  const hosts = availableAgents(p);
+  const hosts = availableAgents(p).filter(a => agentRunsHere(a, p));
   log.step(`agents: updating ${hosts.length} known hosts, each by its publisher`);
   const outcomes = await updateAgents(hosts, p, { report: reportAgentUpdate });
 
   const failed = outcomes.filter((outcome) => outcome.state === "failed");
+  const remoteCode = windowsWsl(p) && includeWsl
+    ? await (await import("./wsl-sync.ts")).relayWslCommand(p, "red-dev agents update") : 0;
   const updated = outcomes.filter((outcome) => outcome.state === "updated").length;
   // Counted rather than narrated: a machine where nothing moved is the
   // ordinary result of running this twice, and it should read like one.
   if (failed.length === 0) {
     log.ok(updated === 0 ? "every agent host was already current" : `${updated} agent host(s) updated`);
-    return 0;
+    return remoteCode === 0 ? 0 : 1;
   }
   log.err(`${failed.length} agent host(s) failed: ${failed.map((f) => f.key).join(", ")}`);
   return 1;
@@ -2219,7 +2269,7 @@ async function cmdLang(p: Platform, inv: Invocation): Promise<number> {
 
   let failures = 0;
   try {
-    await useRuntimes(ids, {
+    if (!windowsWsl(p)) await useRuntimes(ids, {
       stepEnd: (_id, error) => {
         if (error) failures++;
       },
@@ -2263,7 +2313,7 @@ async function cmdMenu(p: Platform, inv: Invocation, cliHelp: string): Promise<n
     return 0;
   }
 
-  if ((process.stdout.columns ?? 0) >= 60) {
+  if ((process.stdout.columns ?? 0) >= 60 && !windowsWsl(p)) {
     return await cmdUi(p, inv);
   }
 
@@ -2404,7 +2454,8 @@ async function main(): Promise<number> {
     return 1;
   }
 
-  const p = detect();
+  const { resolveWorkstation } = await import("./workstation.ts");
+  const p = await resolveWorkstation(detect());
 
   switch (inv.command) {
     case "platform":

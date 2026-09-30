@@ -259,6 +259,7 @@ describe("the manifest itself", () => {
       .filter((tool) => providerFor(tool, DESKTOP).kind !== "skip")
       .map((tool) => tool.name);
     expect(plan).toContain("nerd-font");
+    expect(plan).not.toContain("alacritty-host");
   });
 
   test("native Windows installs the configured Nerd Font", () => {
@@ -267,14 +268,17 @@ describe("the manifest itself", () => {
       .filter((tool) => providerFor(tool, WINDOWS).kind !== "skip")
       .map((tool) => tool.name);
     expect(plan).toContain("nerd-font");
+    expect(plan).not.toContain("alacritty-host");
   });
 
-  test("WSL keeps installing the font on the Windows host", () => {
+  test("WSL delegates fonts and the graphical terminal to the Windows coordinator", () => {
     const plan = applicableScopes(WSL24)
       .flatMap((scope) => toolsInScope(scope))
       .filter((tool) => providerFor(tool, WSL24).kind !== "skip")
       .map((tool) => tool.name);
-    expect(plan).toContain("nerd-font");
+    expect(plan).not.toContain("nerd-font");
+    expect(plan).not.toContain("alacritty-host");
+    expect(plan).toContain("wsl-interop");
   });
 
   test("every skip carries a reason", () => {

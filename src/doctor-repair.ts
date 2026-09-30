@@ -1,3 +1,4 @@
+import { windowsWsl } from "./workstation.ts";
 import { log } from "./log.ts";
 import type { Platform } from "./platform.ts";
 
@@ -9,7 +10,7 @@ export const REPAIR_CHANGES: Record<DoctorRepair, readonly string[]> = {
   desktop: ["reconcile the managed GNOME menu and shortcuts; a fresh login may remain necessary"],
 };
 
-export async function doctorRepair(p: Platform, repair: DoctorRepair, apply = false,
+async function repairLocal(p: Platform, repair: DoctorRepair, apply = false,
   injected?: (repair: DoctorRepair) => Promise<number>,
 ): Promise<number> {
   log.step(`repair plan: ${repair}`);
@@ -40,4 +41,14 @@ export async function doctorRepair(p: Platform, repair: DoctorRepair, apply = fa
   }
   const { desktopCommand } = await import("./desktop.ts");
   return desktopCommand(p, "reconcile");
+}
+
+export async function doctorRepair(p: Platform, repair: DoctorRepair, apply = false,
+  injected?: (repair: DoctorRepair) => Promise<number>,
+): Promise<number> {
+  const own = await repairLocal(p, repair, apply, injected);
+  if (!windowsWsl(p) || repair === "desktop") return own;
+  const { relayWslCommand } = await import("./wsl-sync.ts");
+  const child = await relayWslCommand(p, `red-dev doctor --repair ${repair}${apply ? " --apply" : ""}`);
+  return own === 0 && child === 0 ? 0 : 1;
 }

@@ -12,7 +12,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { captureTo, logIsCaptured } from "./log.ts";
-import { spawnLogged } from "./providers.ts";
+import { spawnLogged, spawnInteractive } from "./providers.ts";
 
 /** Collect whatever the log emits while `body` runs. */
 async function collect(body: () => Promise<void>): Promise<string[]> {
@@ -121,8 +121,18 @@ describe("mise, which used to write straight onto the frame", () => {
     // inherits unconditionally is the bug coming back under a new name.
     const source = await Bun.file(new URL("./providers.ts", import.meta.url)).text();
     const inherits = source.split("\n").filter((line) => line.includes('stdout: "inherit"'));
-    // Exactly one: the branch inside spawnLogged that already checked.
-    expect(inherits).toHaveLength(1);
-    expect(source.slice(0, source.indexOf('stdout: "inherit"'))).toContain("if (!logIsCaptured())");
+    // Providers inherit only in spawnLogged's uncaptured branch. Explicit
+    // console handovers refuse a frame instead of spawning behind it.
+    expect(inherits).toHaveLength(2);
+    const handover = source.slice(source.indexOf("export async function spawnInteractive"), source.indexOf("export async function spawnLogged("));
+    const provider = source.slice(source.indexOf("export async function spawnLogged("));
+    expect(handover.slice(0, handover.indexOf('stdout: "inherit"'))).toContain("if (logIsCaptured()) throw");
+    expect(provider.slice(0, provider.indexOf('stdout: "inherit"'))).toContain("if (!logIsCaptured())");
+  });
+
+  test("interactive handover refuses a captured console before starting a child", async () => {
+    await collect(async () => {
+      await expect(spawnInteractive(["must-not-be-started-fixture"])).rejects.toThrow("plain terminal");
+    });
   });
 });

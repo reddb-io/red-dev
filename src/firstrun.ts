@@ -1,3 +1,4 @@
+import { windowsWsl, resolveWorkstation } from "./workstation.ts";
 /**
  * The questions omakub asks on a first run.
  *
@@ -104,15 +105,16 @@ export async function setupPlan(
    */
   hasNode?: () => Promise<boolean>,
 ): Promise<SetupPlanStep[]> {
-  const { agentInstallMethod, availableAgents, hostsRedSkills } = await import("./agents.ts");
+  const { agentInstallMethod, availableAgents, hostsRedSkills, agentRunsHere } = await import("./agents.ts");
   const agents = choices.agents ?? [];
   const available = availableAgents(p);
   const chosen = agents
     .map((key) => available.find((agent) => agent.key === key))
-    .filter((agent) => agent !== undefined);
+    .filter((agent) => agent !== undefined)
+    .filter((agent) => agentRunsHere(agent, p));
 
   const { runtimeIdsForPolicy } = await import("./runtimes.ts");
-  const runtimes = runtimeIdsForPolicy(choices.runtimes, "latest");
+  const runtimes = runtimeIdsForPolicy(windowsWsl(p) ? [] : choices.runtimes, "latest");
   if (!runtimes.some((runtime) => runtime.startsWith("node"))) {
     const needsNpm =
       chosen.some((agent) => agentInstallMethod(agent, p) === "npm") ||
@@ -340,6 +342,7 @@ export async function carryOutChoices(
   // Harmless on Linux and WSL, where the agents use vendor installers
   // and do not care. Ordering a dependency before its dependent is right
   // everywhere; it just only showed on the target that had one.
+  await resolveWorkstation(p);
   const agents = choices.agents ?? [];
   const plan = await setupPlan(p, choices);
   observer.begin?.(plan);
@@ -527,11 +530,6 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
 
   // 1. Does this machine get a Linux side? Nothing else reframes the
   //    rest of the run the way this does.
-  if (p.os === "windows") {
-    const { offerWsl } = await import("./wsl-provision.ts");
-    await offerWsl(p);
-  }
-
   // 2. Where a terminal lands, now that we know whether both sides
   //    exist.
   let terminalShell: Preferences["terminalShell"];
@@ -543,6 +541,8 @@ export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> 
       `wsl — ${distro}, in its own filesystem`,
     );
     terminalShell = picked.startsWith("wsl") ? "wsl" : "gitbash";
+    const { applyWorkstationPreferences } = await import("./workstation.ts");
+    applyWorkstationPreferences(p, { terminalShell });
   }
 
   // 3. What you build with.

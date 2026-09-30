@@ -1,3 +1,4 @@
+import { runsHere, windowsWsl } from "./workstation.ts";
 /**
  * Coding agents, and the skills that go with them.
  *
@@ -31,6 +32,7 @@ import type { HostOutcome } from "./red-skills-hosts.ts";
 import { redSkillsCurrentPosix } from "./red-skills-root.ts";
 
 export interface AgentSpec {
+  placement?: import("./workstation.ts").Placement;
   key: string;
   label: string;
   about: string;
@@ -158,7 +160,7 @@ export function redSkillsHostKeys(selected: readonly string[]): string[] {
 
 export const AGENTS: AgentSpec[] = [
   {
-    key: "claude-code",
+    key: "claude-code", placement: "linux",
     label: "Claude Code",
     about: "Anthropic's CLI",
     cmd: "claude",
@@ -170,7 +172,7 @@ export const AGENTS: AgentSpec[] = [
     selfUpdate: ["update"],
   },
   {
-    key: "codex",
+    key: "codex", placement: "linux",
     label: "Codex CLI",
     about: "OpenAI's CLI",
     cmd: "codex",
@@ -186,7 +188,7 @@ export const AGENTS: AgentSpec[] = [
     selfUpdate: ["update"],
   },
   {
-    key: "redcode",
+    key: "redcode", placement: "both",
     label: "RedCode",
     about: "RedDB's OpenCode-compatible terminal agent",
     cmd: "redcode",
@@ -223,7 +225,7 @@ export const AGENTS: AgentSpec[] = [
     // Herdr is in mise's registry, backed by its public GitHub releases.
     // Keeping it here means `mise upgrade` advances the same copy red-dev
     // installed instead of leaving an installer-owned binary behind.
-    key: "herdr",
+    key: "herdr", placement: "linux",
     label: "Herdr",
     about: "run several coding agents in one terminal, alive over SSH",
     cmd: "herdr",
@@ -232,7 +234,7 @@ export const AGENTS: AgentSpec[] = [
     multiplexer: true,
   },
   {
-    key: "openclaw",
+    key: "openclaw", placement: "linux",
     label: "OpenClaw",
     about: "personal assistant, any platform",
     cmd: "openclaw",
@@ -242,7 +244,7 @@ export const AGENTS: AgentSpec[] = [
     npm: "openclaw",
   },
   {
-    key: "hermes",
+    key: "hermes", placement: "linux",
     label: "Hermes Agent",
     about: "Nous Research's agent",
     cmd: "hermes",
@@ -256,7 +258,7 @@ export const AGENTS: AgentSpec[] = [
     probeArgs: ["--version"],
   },
   {
-    key: "pi",
+    key: "pi", placement: "linux",
     label: "Pi",
     about: "badlogic's minimal coding agent",
     cmd: "pi",
@@ -279,7 +281,7 @@ export const AGENTS: AgentSpec[] = [
     // is the one method that reaches every target. The npm package
     // exists but declares `engines.bun`, and a bin that needs bun to
     // start is not what `npm install -g` promises, so it is not offered.
-    key: "oh-my-pi",
+    key: "oh-my-pi", placement: "linux",
     label: "oh-my-pi",
     about: "Pi fork with the IDE wired in — the `omp` command",
     cmd: "omp",
@@ -289,7 +291,7 @@ export const AGENTS: AgentSpec[] = [
     probeArgs: ["--version"],
   },
   {
-    key: "muse",
+    key: "muse", placement: "linux",
     label: "Muse",
     about: "Meta's coding agent",
     cmd: "muse",
@@ -316,8 +318,13 @@ export function currentAgentKeys(keys: readonly string[]): string[] {
 }
 
 /** Which agents can be installed here. */
+export function agentRunsHere(a: AgentSpec, p: Platform): boolean {
+  return runsHere(a.placement ?? "both", p);
+}
+
 export function availableAgents(p: Platform): AgentSpec[] {
   return AGENTS.filter((a) => {
+    if (windowsWsl(p) && !agentRunsHere(a, p)) return Boolean(a.release?.linux[p.arch] ?? a.installer ?? a.npm ?? a.mise);
     // mise's GitHub backend resolves the asset for whatever platform it
     // runs on, so a host that declares mise and nothing narrower is
     // available everywhere mise is — which, on a machine red-dev set up,
@@ -652,6 +659,7 @@ export function agentInstallMethod(a: AgentSpec, p: Platform): AgentInstallMetho
 }
 
 export async function installAgent(a: AgentSpec, p: Platform): Promise<void> {
+  if (!agentRunsHere(a, p)) { log.skip(`${a.label}: installed in Ubuntu/WSL by the coordinator`); return; }
   const method = agentInstallMethod(a, p);
 
   if (method === "mise" && a.mise) {

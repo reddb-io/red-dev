@@ -40,9 +40,11 @@ export interface WslDistribution {
 
 async function capture(cmd: string[]): Promise<{ out: string; code: number }> {
   const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
-  const out = await readWindowsOutput(proc.stdout);
-  const code = await proc.exited;
-  return { out, code };
+  const timer = setTimeout(() => { try { proc.kill(); } catch {} }, 15_000);
+  try {
+    const [out, , code] = await Promise.all([readWindowsOutput(proc.stdout), readWindowsOutput(proc.stderr), proc.exited]);
+    return { out, code };
+  } finally { clearTimeout(timer); }
 }
 
 /** Parse decoded `wsl -l -v` output, tolerating the old NUL-separated form too. */
@@ -76,7 +78,7 @@ export function parseWslVerbose(out: string): WslDistribution[] {
  */
 export async function detectWsl(): Promise<WslState> {
   const wsl = process.platform === "win32" ? "wsl.exe" : "wsl.exe";
-  const verbose = await capture([wsl, "-l", "-v"]);
+  const verbose = await capture([wsl, "-l", "-v"]).catch(() => ({ out: "", code: 1 }));
 
   if (verbose.code === 0) {
     const distributions = parseWslVerbose(verbose.out);
@@ -94,7 +96,7 @@ export async function detectWsl(): Promise<WslState> {
   // Old inbox WSL builds do not support `--verbose`. They can still be
   // detected, but the architecture stays unknown and red-dev will not
   // silently claim they are WSL 2.
-  const { out, code } = await capture([wsl, "-l", "-q"]);
+  const { out, code } = await capture([wsl, "-l", "-q"]).catch(() => ({ out: "", code: 1 }));
 
   if (code !== 0) {
     return {
@@ -178,27 +180,23 @@ export async function isElevated(): Promise<boolean> {
  * demand a reboot, and a user who does not know that will think it
  * hung or failed.
  */
-export async function installWsl(distro = "Ubuntu-24.04"): Promise<boolean> {
+export async function installWsl(distro = "Ubuntu-24.04", unattended = false): Promise<boolean> {
   if (!(await isElevated())) {
-    // The same named outcome every other item reports when it runs out
-    // of rights; only the sentence naming what is left differs. Telling
-    // the operator to type `wsl --install` themselves was the old
-    // advice and it is one step too many — from an elevated shell this
-    // function runs it, which is the promise the shared remedy makes.
-    const denied = missingRights("administrator");
-    log.err(`installing WSL: ${denied.cause}`);
-    log.plain(`     ${denied.remedy}`);
-    log.plain(`     From there red-dev installs ${distro} itself.`);
-    return false;
+    const { interactive } = await import("./ui.ts");
+    if (unattended || !interactive() || process.env.RED_DEV_UNATTENDED === "1") {
+      const denied = missingRights("administrator"); log.err(`installing WSL: ${denied.cause}`); log.plain(denied.remedy); return false;
+    }
+    log.step(`Windows authorization: install ${distro} with WSL 2`);
+    const { elevateWindowsCommand } = await import("./privileged.ts");
+    const ok = await elevateWindowsCommand("wsl.exe", ["--install", "-d", distro]) === 0;
+    if (ok) explainNextSteps(distro);
+    return ok;
   }
 
   // `wsl --install` defaults to WSL 2 on current Windows releases, but
   // make the invariant explicit so an older machine or previous user
   // preference cannot silently create a WSL 1 distro.
-  if (!(await setWsl2Default())) {
-    log.err("refusing to install a distro without confirming WSL 2 as the default");
-    return false;
-  }
+  if ((await detectWsl()).available && !(await setWsl2Default())) return false;
 
   log.step(`wsl --install -d ${distro}`);
   log.plain("     This enables the Windows feature, downloads the kernel and");
@@ -234,11 +232,8 @@ export function explainNextSteps(distro: string): void {
   log.plain(`     2. Launch ${distro} once. It will ask you to choose a`);
   log.plain(`        username and password — that is the distro's own setup,`);
   log.plain(`        not red-dev's, and only you can answer it.`);
-  log.plain(`     3. Inside that distro, run:`);
-  log.plain(`          curl -fsSL https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.sh | sh`);
-  log.plain("");
-  log.plain("     That second run is what installs the Linux side: the shell,");
-  log.plain("     the tools, and the terminal configuration on this Windows host.");
+  log.plain(`     3. Back in PowerShell, run: red-dev install`);
+  log.plain(`        The Windows entry configures Windows and ${distro} together.`);
 }
 
 /**
@@ -253,8 +248,9 @@ export async function offerWsl(p: Platform): Promise<boolean> {
   const { confirm, select } = await import("./ui.ts");
   const state = await detectWsl();
 
-  if (state.distros.length > 0) {
-    const preferred = state.distributions.find((distro) => distro.default) ?? state.distributions[0]!;
+  const { selectDistro } = await import("./wsl-sync.ts");
+  const preferred = selectDistro(state, p.wslDistro);
+  if (preferred) {
     await setWsl2Default();
 
     if (preferred.version === 2) {
@@ -287,7 +283,7 @@ export async function offerWsl(p: Platform): Promise<boolean> {
       "Yes — install Ubuntu-24.04 (needs Administrator, may reboot)",
       "No — native Windows only",
     ] as const,
-    "No — native Windows only",
+    "Yes — install Ubuntu-24.04 (needs Administrator, may reboot)",
   );
 
   if (choice.startsWith("No")) {

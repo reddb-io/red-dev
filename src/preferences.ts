@@ -148,7 +148,7 @@ export async function writePreferences(p: Platform, prefs: Preferences): Promise
 export async function resolveTerminalShell(p: Platform): Promise<TerminalShell> {
   const prefs = await readPreferences(p);
   if (prefs.terminalShell) return prefs.terminalShell;
-  return p.env === "wsl" ? "wsl" : "gitbash";
+  return p.env === "wsl" || p.os === "windows" ? "wsl" : "gitbash";
 }
 
 /**
@@ -232,8 +232,11 @@ export async function applyContextForEntry(
   _entry: ApplyContextEntryPath,
 ): Promise<ApplyContext> {
   const prefs = await readPreferences(p);
+  const { applyWorkstationPreferences } = await import("./workstation.ts");
+  applyWorkstationPreferences(p, prefs);
   return {
     platform: p,
+    wslAction: _entry === "update" ? "update" : "install",
     // resolveThemeSlug, not the raw value: every machine red-dev has
     // touched has one of the ten retired slugs recorded here, and this
     // is the read that heals it. No write and no ledger, so it is

@@ -1,352 +1,186 @@
-/**
- * The Windows side, reaching into its own distro.
- *
- * A Windows machine running WSL is two machines. They have separate
- * home directories, separate PATHs and separate copies of red-dev, and
- * until now converging one said nothing about the other: `boot.ps1`
- * installed the Windows target and stopped at the boundary, leaving the
- * distro on whatever it had.
- *
- * That is not a hypothetical. A machine converged from Windows to
- * 0.11.0 had a distro still on 0.2.2 with dotfiles from three days
- * earlier, and the terminal — which opens `wsl.exe` — was the one
- * reading the old ones. Nothing failed, nothing was missing, and the
- * feature that had just been installed was simply not there.
- *
- * The wsl scope is the mirror of this, distro reaching out to host, for
- * the terminal and the fonts that live on the Windows side. This is the
- * same boundary crossed the other way, and it belongs to the Windows
- * target for the same reason: whoever is converging owns the crossing.
- *
- * No recursion to worry about. This runs in the desktop scope, native
- * Windows is the only target that gets both desktop and a distro, and
- * what it runs inside is `install core` — a scope that does not contain
- * this step.
- */
-
+/** Windows coordinates its selected Ubuntu distro; Linux never calls back. */
 import { VERSION } from "./cli.ts";
 import { AGENTS } from "./agents.ts";
 import { log, RedError } from "./log.ts";
 import type { Platform } from "./platform.ts";
-import { readPreferences, type TerminalShell } from "./preferences.ts";
-import { spawnLogged } from "./providers.ts";
-import { isKnownRuntimeId } from "./runtimes.ts";
-import { detectWsl, setWsl2Default, type WslDistribution } from "./wsl-provision.ts";
+import { readPreferences, writePreferences, type TerminalShell } from "./preferences.ts";
+import { spawnLogged, spawnInteractive } from "./providers.ts";
+import { isKnownRuntimeId, runtimeIdsForPolicy } from "./runtimes.ts";
+import { detectWsl, installWsl, type WslDistribution, type WslState } from "./wsl-provision.ts";
 import { readWindowsOutput } from "./windows-output.ts";
 import { unattendedShellCommand } from "./unattended.ts";
+import { windowsWsl } from "./workstation.ts";
+import { githubToken } from "./github-token.ts";
 
 const BOOT_URL = "https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.sh";
+export const DEFAULT_WSL_DISTRO = "Ubuntu-24.04";
 
-/** Commands that reproduce the chosen CLI environment inside WSL. */
-export function distroSetupCommands(
-  terminalShell: TerminalShell | undefined,
-  agentKeys: string[],
-  runtimeIds: string[],
-): string[] {
-  if (terminalShell !== "wsl") return [];
+export function selectDistro(state: WslState, pinned?: string): WslDistribution | null {
+  if (pinned) return state.distributions.find(d => d.name === pinned) ?? null;
+  const ubuntu = state.distributions.filter(d => /^Ubuntu(?:[- ]|$)/i.test(d.name));
+  return ubuntu.find(d => d.default) ?? ubuntu[0] ?? null;
+}
 
-  // Preferences are user-editable JSON and eventually cross a shell
-  // boundary. Resolve them against closed catalogs before constructing
-  // argv text: unknown data is ignored, never interpolated.
-  const runtimes = runtimeIds.filter(isKnownRuntimeId);
-  const cliAgents = agentKeys.filter((key) => {
-    const agent = AGENTS.find((candidate) => candidate.key === key);
-    return agent !== undefined;
-  });
+/** Forward gh's current identity only to this child; never put credentials in argv. */
+export function wslChildEnvironment(current: NodeJS.ProcessEnv = process.env, token = githubToken(current)): NodeJS.ProcessEnv {
+  const forwarded = new Set((current.WSLENV ?? "").split(":").filter(Boolean));
+  for (const name of ["RED_ROUTER", "RED_ROUTER_HOST", "RED_ROUTER_PORT"]) if (current[name] !== undefined) forwarded.add(name);
+  if (token) { forwarded.add("GH_TOKEN"); forwarded.add("GITHUB_TOKEN"); }
+  return { ...current, ...(token ? { GH_TOKEN: token, GITHUB_TOKEN: token } : {}), WSLENV: [...forwarded].join(":") };
+}
 
+export function distroSetupCommands(shell: TerminalShell | undefined, agentKeys: string[], runtimeIds: string[]): string[] {
+  if (shell !== "wsl") return [];
+  const runtimes = runtimeIdsForPolicy(runtimeIds, "latest").filter(isKnownRuntimeId);
+  const agents = agentKeys.filter(key => AGENTS.some(a => a.key === key));
   return [
-    ...(runtimes.length > 0 ? [`red-dev lang ${runtimes.join(",")}`] : []),
-    ...(cliAgents.length > 0 ? [`red-dev agents ${cliAgents.join(",")}`] : []),
+    ...(runtimes.length ? [`red-dev lang ${runtimes.join(",")}`] : []),
+    ...(agents.length ? [`red-dev agents ${agents.join(",")}`] : []),
   ];
 }
 
-/**
- * Reproduce the workstation's selected command-line tools in its WSL distro.
- *
- * Explicit `agents` and `lang` commands make this safe and deterministic:
- * there is no prompt inside the child distro, desktop-only applications are
- * absent from the command, and the Linux-side command never calls back into
- * Windows because this function only runs for a native Windows platform.
- */
-export async function syncSelectedTooling(
-  p: Platform,
-  knownDistro?: WslDistribution,
-): Promise<number> {
-  if (p.os !== "windows" || process.env["RED_DEV_NO_WSL_SYNC"] === "1") return 0;
+export function distroArgv(distro: string, command: string, unattended = true): string[] {
+  const child = unattended
+    ? unattendedShellCommand(command, { RED_DEV_WSL_CHILD: "1" })
+    : `env RED_DEV_WSL_CHILD=1 ${command}`;
+  return ["wsl.exe", "-d", distro, "--", "bash", "-lc", child];
+}
 
-  const prefs = await readPreferences(p);
-  const commands = distroSetupCommands(
-    prefs.terminalShell,
-    prefs.agents ?? [],
-    prefs.runtimes ?? [],
-  );
-  if (commands.length === 0) return 0;
+async function runDistro(distro: string, command: string, attached = false, unattended = false): Promise<number> {
+  const { interactive } = await import("./ui.ts");
+  if (!unattended && (attached || /^red-dev (?:install|update)\b/.test(command)) && interactive() && process.env.RED_DEV_UNATTENDED !== "1") {
+    // sudo's credential belongs to this PTY. Authenticate and provision in
+    // the same WSL invocation; a separate sudo -v loses that credential.
+    const argv = distroArgv(distro, command, !attached);
+    if (attached) argv.splice(3, 0, "--cd", process.cwd());
+    if (!attached) argv[argv.length - 1] = `sudo --validate && ${argv.at(-1)}`;
+    return spawnInteractive(argv, { env: wslChildEnvironment() });
+  }
+  return spawnLogged(distroArgv(distro, command), { env: wslChildEnvironment() });
+}
 
-  const selected = knownDistro ?? (await defaultDistroInfo());
-  if (!selected) {
-    log.warn("selected tools were not copied to WSL: no distro is installed");
+/** Bounded read-only observation; drain both streams even when WSL reports an error. */
+async function inDistro(distro: string, script: string): Promise<{ out: string; code: number }> {
+  const proc = Bun.spawn(["wsl.exe", "-d", distro, "--", "bash", "-lc", script], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+  const timer = setTimeout(() => proc.kill(), 15_000);
+  try {
+    const [out, , code] = await Promise.all([readWindowsOutput(proc.stdout), readWindowsOutput(proc.stderr), proc.exited]);
+    return { out: out.trim(), code };
+  } finally { clearTimeout(timer); }
+}
+
+export async function defaultDistroInfo(p?: Platform): Promise<WslDistribution | null> {
+  const pinned = p?.wslDistro ?? (p ? (await readPreferences(p)).distro : undefined);
+  return selectDistro(await detectWsl(), pinned);
+}
+export async function defaultDistro(): Promise<string | null> { return (await defaultDistroInfo())?.name ?? null; }
+export async function distroVersion(distro: string): Promise<string | null> {
+  const { out, code } = await inDistro(distro, "red-dev --version 2>/dev/null");
+  const line = out.split("\n").pop()?.trim() ?? "";
+  return code === 0 && /^\d+\.\d+\.\d+$/.test(line) ? line : null;
+}
+export interface SyncPlan { install: boolean; how: "bootstrap" | "upgrade"; reason: string; }
+export function planFor(version: string | null, ours = VERSION): SyncPlan {
+  return version === null ? { install: true, how: "bootstrap", reason: "no red-dev in the distro" }
+    : { install: version !== ours, how: "upgrade", reason: version === ours ? `distro already on ${ours}` : `distro has ${version}, this is ${ours}` };
+}
+function bootstrapArgv(distro: string): string[] {
+  return distroArgv(distro, `curl -fsSL ${BOOT_URL} | ${unattendedShellCommand("sh", { RED_DEV_NO_LAUNCH: "1" })}`);
+}
+export async function ensureDistroRedDev(distro: string): Promise<number> {
+  const plan = planFor(await distroVersion(distro));
+  log.step(`Ubuntu/WSL ${distro}: ${plan.reason}`);
+  if (!plan.install) return 0;
+  const code = plan.how === "upgrade"
+    ? await runDistro(distro, "mise upgrade red-dev")
+    : await spawnLogged(bootstrapArgv(distro), { env: wslChildEnvironment() });
+  const now = code === 0 ? await distroVersion(distro) : null;
+  if (now !== VERSION) {
+    log.err(`${distro}: expected red-dev ${VERSION}, observed ${now ?? "unavailable"}; run red-dev update from PowerShell and retry`);
     return 1;
   }
-  if (selected.version !== 2) {
-    log.warn(`selected tools were not copied to ${selected.name}: it is not WSL 2`);
-    return 1;
-  }
+  return 0;
+}
 
-  // `lang` and `agents` are public entry points too, not merely the tail
-  // of a full desktop converge.  They can therefore reach a distro whose
-  // red-dev predates the Windows binary.  Update that binary before asking
-  // it to interpret today's runtime/agent choices; otherwise an old child
-  // can silently run an old installer (the v2 RedSkills URL was observed
-  // here while Windows was already on the v3 contract).
-  const bootstrapCode = await ensureDistroRedDev(selected.name);
-  if (bootstrapCode !== 0) {
-    log.warn(`${selected.name}: updating red-dev failed (${bootstrapCode})`);
-    return 1;
-  }
+export interface WslSyncSeams {
+  state?: () => Promise<WslState>;
+  install?: (distro: string, unattended?: boolean) => Promise<boolean>;
+  ensure?: (distro: string) => Promise<number>;
+  run?: (distro: string, command: string) => Promise<number>;
+  preferences?: typeof readPreferences;
+  record?: typeof writePreferences;
+  user?: (distro: string) => Promise<boolean>;
+  migrate?: (p: Platform, distro: string) => Promise<void>;
+  action?: "install" | "update";
+  unattended?: boolean;
+  scope?: "core" | "desktop" | "wsl" | "optional";
+  prepare?: (p: Platform, distro: string, run: (distro: string, command: string) => Promise<number>) => Promise<void>;
+}
 
+export async function syncSelectedTooling(p: Platform, knownDistro?: WslDistribution, seams: WslSyncSeams = {}): Promise<number> {
+  if (p.os !== "windows" || process.env.RED_DEV_NO_WSL_SYNC === "1") return 0;
+  const prefs = await (seams.preferences ?? readPreferences)(p);
+  const commands = distroSetupCommands(windowsWsl(p) ? "wsl" : prefs.terminalShell, prefs.agents ?? [], prefs.runtimes ?? []);
+  if (!commands.length) return 0;
+  const selected = knownDistro ?? selectDistro(await (seams.state ?? detectWsl)(), p.wslDistro ?? prefs.distro);
+  if (!selected || selected.version !== 2) { log.err("Ubuntu/WSL tooling: selected Ubuntu distro is absent or is not WSL 2"); return 1; }
+  if (await (seams.ensure ?? ensureDistroRedDev)(selected.name) !== 0) return 1;
   let failures = 0;
   for (const command of commands) {
-    log.step(`${selected.name}: ${command}`);
-    const code = await spawnLogged([
-      "wsl.exe",
-      "-d",
-      selected.name,
-      "--",
-      "bash",
-      "-lc",
-      unattendedShellCommand(command),
-    ]);
-    if (code !== 0) {
-      log.warn(`${selected.name}: \`${command}\` failed (${code})`);
-      failures++;
-    }
+    log.step(`Ubuntu/WSL ${selected.name}: ${command}`);
+    if (await (seams.run ?? runDistro)(selected.name, command) !== 0) failures++;
   }
   return failures;
 }
 
-/** Run a command inside the distro and return its stdout. */
-async function inDistro(distro: string, script: string): Promise<{ out: string; code: number }> {
-  const proc = Bun.spawn(["wsl.exe", "-d", distro, "--", "bash", "-lc", script], {
-    stdout: "pipe",
-    stderr: "pipe",
-    stdin: "ignore",
-  });
-  const out = await readWindowsOutput(proc.stdout);
-  const code = await proc.exited;
-  // A distro's stdout is UTF-8, but a failure notice from wsl.exe itself
-  // is UTF-16LE. The boundary decoder handles both without losing text.
-  return { out: out.trim(), code };
-}
-
-/**
- * Which distro to converge.
- *
- * The default one, which is what `wsl.exe` with no `-d` opens and
- * therefore what the terminal red-dev configures will land in. The
- * verbose listing marks it with `*`, which also lets us verify that it
- * is actually WSL 2 before executing anything inside it.
- */
-export async function defaultDistro(): Promise<string | null> {
-  return (await defaultDistroInfo())?.name ?? null;
-}
-
-/** The default distro and, unlike the legacy quiet listing, its architecture. */
-export async function defaultDistroInfo(): Promise<WslDistribution | null> {
-  const state = await detectWsl();
-  return state.distributions.find((distro) => distro.default) ?? state.distributions[0] ?? null;
-}
-
-/** What red-dev the distro has, or null when it has none. */
-export async function distroVersion(distro: string): Promise<string | null> {
-  // Through a login shell: the binary lands in ~/.local/bin, which is
-  // on PATH only once the profile has run.
-  const { out, code } = await inDistro(distro, "red-dev --version 2>/dev/null");
-  if (code !== 0) return null;
-  const line = out.split("\n").pop()?.trim() ?? "";
-  return /^\d+\.\d+\.\d+/.test(line) ? line : null;
-}
-
-export interface SyncPlan {
-  /** Bring the distro's binary up to this one's version first. */
-  install: boolean;
-  /**
-   * How: `bootstrap` curls boot.sh, `upgrade` advances the distro's own
-   * mise. A distro with no red-dev has nothing to upgrade; one that has
-   * a red-dev has a mise that owns it (the manifest declares red-dev as
-   * a mise tool), and going round mise is what produced the split this
-   * whole step exists to end — see ensureDistroRedDev.
-   */
-  how: "bootstrap" | "upgrade";
-  /** Why, in one line, for the log. */
-  reason: string;
-}
-
-/**
- * What the distro needs, from what it reports.
- *
- * Separated from doing it because this is the part worth testing: the
- * costs are asymmetric. Skipping a needed install leaves exactly the
- * silent drift this step exists to end; installing when nothing changed
- * costs a 99 MB download for nothing.
- */
-export function planFor(distroVersion: string | null, ours: string = VERSION): SyncPlan {
-  if (distroVersion === null) {
-    return { install: true, how: "bootstrap", reason: "no red-dev in the distro" };
-  }
-  if (distroVersion !== ours) {
-    return { install: true, how: "upgrade", reason: `distro has ${distroVersion}, this is ${ours}` };
-  }
-  return { install: false, how: "upgrade", reason: `distro already on ${ours}` };
-}
-
-/** boot.sh, unattended: the only way into a distro that has no red-dev yet. */
-function bootstrapArgv(distro: string): string[] {
-  // The env prefix goes on `sh`, not on curl: it is the script that
-  // must not hand over to the interface, and there is nobody inside
-  // the distro to hand over to.
-  return [
-    "wsl.exe",
-    "-d",
-    distro,
-    "--",
-    "bash",
-    "-lc",
-    `curl -fsSL ${BOOT_URL} | ${unattendedShellCommand("sh", { RED_DEV_NO_LAUNCH: "1" })}`,
-  ];
-}
-
-/**
- * Advance a distro that already has red-dev, through its own mise.
- *
- * boot.sh drops a binary in `~/.local/bin`, and the manifest then
- * declares red-dev as a mise tool — so a converged distro has both, and
- * mise's shim wins on PATH. Re-running the bootstrap to "update" the
- * distro therefore updated the copy nobody executes: 1.0.64 landed in
- * `~/.local/bin`, the shim went on serving mise's 1.0.51, and the older
- * binary undid the newer one's work on the next run. The distro's mise
- * is the owner; this asks it, by name, for the one tool.
- *
- * `mise upgrade` reaches today's release because red-dev's own config
- * fragment exempts the suite from `minimum_release_age`
- * (src/mise-config.ts) — without that, a person's global release-age
- * gate holds the distro on yesterday's build and this reports success
- * while nothing moved. Which is why the caller re-reads the version
- * rather than trusting the exit code.
- */
-function upgradeArgv(distro: string): string[] {
-  return ["wsl.exe", "-d", distro, "--", "bash", "-lc", "mise upgrade red-dev"];
-}
-
-/** Ensure a child distro understands the same contracts as its Windows host. */
-async function ensureDistroRedDev(distro: string): Promise<number> {
-  const plan = planFor(await distroVersion(distro));
-  log.step(`wsl sync: ${distro} — ${plan.reason}`);
-  if (!plan.install) return 0;
-
-  if (plan.how === "upgrade") {
-    const code = await spawnLogged(upgradeArgv(distro));
-    const now = code === 0 ? await distroVersion(distro) : null;
-    if (now === VERSION) {
-      log.ok(`wsl sync: ${distro} upgraded to ${now} through its own mise`);
-      return 0;
-    }
-    // Not fatal, and not silent. A distro whose mise cannot reach the
-    // release — offline, a gate red-dev does not own, a backend that
-    // refused — still gets the bootstrap, because a distro on the wrong
-    // version is the condition this step exists to end.
-    log.warn(
-      `wsl sync: ${distro} is on ${now ?? "an unknown version"} after mise upgrade — bootstrapping instead`,
-    );
-  }
-
-  return spawnLogged(bootstrapArgv(distro));
-}
-
-/**
- * Bring the distro up to this machine's red-dev, converge it, then
- * reproduce the selected command-line tools there.
- *
- * The converge runs whether or not the binary changed. Same version is
- * not the same state — a distro can carry this exact binary and have
- * never run it — and `install core` on a converged distro is a list of
- * `command -v` probes that costs seconds. The expensive case is a distro
- * that needed the work, which is the case worth paying for.
- */
-export async function syncWslDistro(p: Platform): Promise<void> {
-  if (p.os !== "windows") {
-    log.skip("wsl sync: only the Windows side reaches into a distro");
-    return;
-  }
-
-  if (process.env["RED_DEV_NO_WSL_SYNC"] === "1") {
-    log.skip("wsl sync: off (RED_DEV_NO_WSL_SYNC=1)");
-    return;
-  }
-
-  // Keep future installs on WSL 2 even when there is no distro yet.
-  // A failed preference is visible but does not hide the more specific
-  // architecture diagnosis below.
-  await setWsl2Default();
-
-  const selected = await defaultDistroInfo();
+/** Every child failure belongs to the same workstation result as its host. */
+export async function syncWslDistro(p: Platform, seams: WslSyncSeams = {}): Promise<void> {
+  if (p.os !== "windows" || !windowsWsl(p)) { log.skip("Ubuntu/WSL coordination: Windows native mode or local Linux"); return; }
+  if (process.env.RED_DEV_NO_WSL_SYNC === "1") throw new RedError("Ubuntu/WSL coordination disabled (RED_DEV_NO_WSL_SYNC=1); workstation is incomplete");
+  const prefs = await (seams.preferences ?? readPreferences)(p);
+  let state = await (seams.state ?? detectWsl)();
+  const execute = seams.run ?? ((distro: string, command: string) => runDistro(distro, command, false, seams.unattended));
+  const pinned = p.wslDistro ?? prefs.distro;
+  let selected = selectDistro(state, pinned);
   if (!selected) {
-    // Loudly, because "no distro" and "distro left alone" are different
-    // states and only one of them is fine.
-    log.skip("wsl sync: no WSL distro on this machine");
-    return;
+    const name = pinned ?? DEFAULT_WSL_DISTRO;
+    if (!(await (seams.install ?? installWsl)(name, seams.unattended))) throw new RedError("Ubuntu/WSL installation pending; finish Windows setup, then run red-dev install from PowerShell");
+    state = await (seams.state ?? detectWsl)();
+    selected = selectDistro(state, name);
   }
+  if (!selected || selected.version !== 2) throw new RedError("Ubuntu/WSL is not ready as WSL 2; finish distro initialization, then run red-dev install from PowerShell");
+  const userReady = seams.user ? await seams.user(selected.name) : await distroUserReady(selected.name);
+  if (!userReady) throw new RedError(`${selected.name}: finish Ubuntu's user setup first, then retry red-dev install from PowerShell; provisioning as root is refused`);
+  p.wslDistro = selected.name;
+  await (seams.record ?? writePreferences)(p, { terminalShell: "wsl", distro: selected.name });
+  if (await (seams.ensure ?? ensureDistroRedDev)(selected.name) !== 0) throw new RedError(`${selected.name}: red-dev could not be updated`);
+  await (seams.prepare ?? (await import("./windows-wsl-migration.ts")).prepareWindowsRouterData)(p, selected.name, execute);
+  const command = seams.action === "update" ? "red-dev update --yes" : "red-dev install --yes";
+  if (await execute(selected.name, command) !== 0) throw new RedError(`${selected.name}: Linux installation incomplete; retry red-dev install from PowerShell`);
+  if (seams.scope === "optional" && await execute(selected.name, "red-dev install optional --yes") !== 0) throw new RedError(`${selected.name}: optional Linux packages failed`);
+  if (await syncSelectedTooling(p, selected, { ...seams, run: execute, ensure: async () => 0 }) !== 0) throw new RedError(`${selected.name}: selected Linux tools failed`);
+  const services = process.env.RED_ROUTER === "0" ? "redskilled.service" : "redskilled.service red-router.service";
+  if (await execute(selected.name, `systemctl --user is-active ${services}`) !== 0) throw new RedError(`${selected.name}: Linux services are not active; finish WSL systemd setup and retry from PowerShell`);
+  const migrate = seams.migrate ?? (await import("./windows-wsl-migration.ts")).retireWindowsServices;
+  await migrate(p, selected.name);
+  log.ok(`Windows + Ubuntu/WSL ${selected.name}: configured`);
+}
 
-  if (selected.version !== 2) {
-    const observed = selected.version === 1 ? "WSL 1" : "an unknown WSL version";
-    throw new RedError(
-      `${selected.name} uses ${observed}; run \`red-dev wsl\` from Windows to migrate it to WSL 2`,
-    );
-  }
+async function distroUserReady(distro: string): Promise<boolean> {
+  const uid = await inDistro(distro, "id -u");
+  return uid.code === 0 && /^\d+$/.test(uid.out) && Number(uid.out) > 0;
+}
 
-  const distro = selected.name;
+/** Public read-only commands and explicit repair all use the selected distro. */
+export async function relayWslCommand(p: Platform, command: string, seams: WslSyncSeams = {}, attached = false): Promise<number> {
+  const prefs = await (seams.preferences ?? readPreferences)(p);
+  const selected = selectDistro(await (seams.state ?? detectWsl)(), p.wslDistro ?? prefs.distro);
+  if (!selected || selected.version !== 2) { log.err("Ubuntu/WSL: selected distro is not ready; run red-dev install from PowerShell"); return 1; }
+  log.step(`Ubuntu/WSL ${selected.name}`);
+  return seams.run ? seams.run(selected.name, command) : runDistro(selected.name, command, attached);
+}
 
-  const bootstrapCode = await ensureDistroRedDev(distro);
-  if (bootstrapCode !== 0) {
-    throw new RedError(`installing red-dev in ${distro} failed (${bootstrapCode})`);
-  }
-
-  // Said before the distro's own output arrives, and again after.
-  //
-  // What runs below is a whole second converge — its own steps, its own
-  // counts, its own `— summary —` with its own `failed` line — and
-  // spawnLogged pumps every line of it into this run's log. On the
-  // converge screen that lands beside the Windows panel's counts, so a
-  // machine with two Windows failures and a clean distro showed
-  // "Failed: red-skills, nerd-font" on the right and "failed 0" on the
-  // left, in one frame. Both were true and nothing said of what.
-  log.step(`${distro}: its own converge starts here`);
-  const converged = await spawnLogged([
-    "wsl.exe",
-    "-d",
-    distro,
-    "--",
-    "bash",
-    "-lc",
-    unattendedShellCommand("red-dev install core"),
-  ]);
-  log.plain(`       ── end of ${distro}; counts above are the distro's, not this run's`);
-  if (converged !== 0) {
-    // Not fatal to the Windows converge. The most likely cause is sudo
-    // wanting a password that no unattended run can supply, and the
-    // Windows half of the machine is not wrong because of it.
-    log.warn(
-      `${distro} did not converge cleanly (${converged}) — ` +
-        `run \`red-dev install core\` inside it to see why`,
-    );
-  } else {
-    log.ok(`${distro} converged`);
-  }
-
-  const toolingFailures = await syncSelectedTooling(p, selected);
-  if (toolingFailures === 0) {
-    const prefs = await readPreferences(p);
-    if (distroSetupCommands(prefs.terminalShell, prefs.agents ?? [], prefs.runtimes ?? []).length > 0) {
-      log.ok(`${distro}: selected CLI tools synchronized`);
-    }
-  }
+/** Quote user arguments before crossing bash's command-string boundary. */
+export function wslCommand(words: string[]): string {
+  return words.map(word => `'${word.replaceAll("'", `'"'"'`)}'`).join(" ");
 }

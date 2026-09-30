@@ -327,6 +327,15 @@ export function batchHost(p: Platform, apply: (tool: Tool) => Promise<void>): Ba
  * so there is no WSL path translation to do here — the paths this
  * handles are the ones the process itself is already using.
  */
+/** WSL activation is a Windows OS setup boundary, using the shared elevator. */
+export async function elevateWindowsCommand(executable: string, args: string[]): Promise<number> {
+  const ps = (value: string) => `'${value.replaceAll("'", "''")}'`;
+  const native = (value: string) => '"' + value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/g, '$1$1') + '"';
+  const { spawnInteractive } = await import("./providers.ts");
+  const command = `$p = Start-Process ${ps(executable)} -ArgumentList ${ps(args.map(native).join(" "))} -Verb RunAs -Wait -PassThru; exit $p.ExitCode`;
+  return spawnInteractive(["powershell.exe", "-NoProfile", "-Command", command]);
+}
+
 async function elevateAndRun(items: Tool[]): Promise<Elevation> {
   const dir = process.env["TEMP"] ?? process.env["TMP"] ?? ".";
   const scriptPath = `${dir}\\red-dev-privileged.ps1`;

@@ -46,7 +46,8 @@ describe("the dedicated RedDB setup page", () => {
     const red = steps.find((step) => step.id === "reddb");
     expect(red?.title).toBe("RedDB");
     expect(red?.choices.some((choice) => choice.key === "red-dev")).toBe(true);
-    expect(red?.choices.some((choice) => choice.key === "red-skills-vscode")).toBe(true);
+    expect(red?.choices.some((choice) => choice.key === "red-skills-vscode")).toBe(false);
+    expect(red?.choices.some((choice) => choice.key === "red-skills-herdr")).toBe(true);
   });
 
   test("names the apps and every declared RedSkills plugin/integration", () => {
