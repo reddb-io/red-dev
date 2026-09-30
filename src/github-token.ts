@@ -30,6 +30,7 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { resolveGithubCli } from "./github-cli-bin.ts";
 
 /** Cleared only by the process ending. `undefined` means "not asked yet". */
 let memo: string | null | undefined;
@@ -47,9 +48,11 @@ export function forgetGithubToken(): void {
  * reporting — the caller simply makes an unauthenticated request, which
  * is what it did before this existed.
  */
-function tokenFromGh(run = spawnSync): string | null {
+function tokenFromGh(run = spawnSync, locate = resolveGithubCli): string | null {
   try {
-    const result = run("gh", ["auth", "token", "--hostname", "github.com"], {
+    const gh = locate();
+    if (!gh) return null;
+    const result = run(gh, ["auth", "token", "--hostname", "github.com"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       // Two seconds, not five: a token read is a local file read, and a
@@ -73,13 +76,14 @@ function tokenFromGh(run = spawnSync): string | null {
 export function githubToken(
   env: NodeJS.ProcessEnv = process.env,
   run: typeof spawnSync = spawnSync,
+  locate: () => string | null = resolveGithubCli,
 ): string | null {
   for (const name of ["GITHUB_TOKEN", "GH_TOKEN"]) {
     const explicit = env[name]?.trim();
     if (explicit) return explicit;
   }
 
-  if (memo === undefined) memo = tokenFromGh(run);
+  if (memo === undefined) memo = tokenFromGh(run, locate);
   return memo;
 }
 
@@ -87,8 +91,9 @@ export function githubToken(
 export function githubAuthHeaders(
   env: NodeJS.ProcessEnv = process.env,
   run: typeof spawnSync = spawnSync,
+  locate: () => string | null = resolveGithubCli,
 ): Record<string, string> {
-  const token = githubToken(env, run);
+  const token = githubToken(env, run, locate);
   return token === null ? {} : { Authorization: `Bearer ${token}` };
 }
 

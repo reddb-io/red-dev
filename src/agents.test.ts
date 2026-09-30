@@ -11,7 +11,31 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 
-import { commandPath } from "./agents.ts";
+import { AGENTS, availableAgents, commandPath, currentAgentKeys } from "./agents.ts";
+import { WORKSTATION_APPS, REQUIRED_WORKSTATION_APPS } from "./workstation-lock.ts";
+import type { Platform } from "./platform.ts";
+
+describe("retired Gemini CLI installer", () => {
+  test("is absent from current CLI and offline installation catalogues", () => {
+    expect(AGENTS.some((agent) => agent.key === "gemini")).toBe(false);
+    expect(WORKSTATION_APPS.some((app) => app.id === "gemini")).toBe(false);
+    expect([...REQUIRED_WORKSTATION_APPS] as string[]).not.toContain("gemini");
+    for (const os of ["linux", "windows"] as const) {
+      const p: Platform = {
+        os, env: os === "linux" ? "desktop" : "windows", arch: "x64",
+        distro: null, version: null, codename: null,
+        caps: { apt: os === "linux", gui: true, systemd: false, winget: os === "windows", flatpak: false },
+      };
+      expect(availableAgents(p).some((agent) => agent.key === "gemini")).toBe(false);
+    }
+  });
+
+  test("drops legacy installer selections while preserving other migrations", () => {
+    expect(currentAgentKeys(["gemini", "codex", "opencode", "redcode", "gemini"]))
+      .toEqual(["codex", "redcode"]);
+    expect(currentAgentKeys(["gemini"])).toEqual([]);
+  });
+});
 
 describe("resolving a command on Windows", () => {
   test("prefers an extension the OS can execute over one it cannot", () => {

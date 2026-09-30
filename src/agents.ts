@@ -207,23 +207,6 @@ export const AGENTS: AgentSpec[] = [
     },
   },
   {
-    // npm only, and that is not an oversight: winget's repository has no
-    // Google entry for it, and searching it for "gemini" returns
-    // ChatALL, Chatbox and Nekot — third-party chat clients that happen
-    // to speak to Gemini. Same trap as the ChatGPT wrappers below.
-    //
-    // @google/gemini-cli is Google's own: published by google-wombot
-    // from google-gemini/gemini-cli, and its bin really is `gemini`.
-    key: "gemini",
-    label: "Gemini CLI",
-    about: "Google's CLI",
-    cmd: "gemini",
-    configFiles: [".gemini/settings.json"],
-    recommended: false,
-    mise: "gemini",
-    npm: "@google/gemini-cli",
-  },
-  {
     // Not an agent — the thing agents run inside. It multiplexes them
     // into one terminal and keeps them alive on the far side of an SSH
     // connection, so it belongs in this list even though it does not
@@ -327,9 +310,9 @@ export const AGENTS: AgentSpec[] = [
   },
 ];
 
-/** Translate the retired OpenCode selection without uninstalling OpenCode itself. */
+/** Normalize retired installer selections while preserving existing user installations. */
 export function currentAgentKeys(keys: readonly string[]): string[] {
-  return [...new Set(keys.map((key) => key === "opencode" ? "redcode" : key))];
+  return [...new Set(keys.filter((key) => key !== "gemini").map((key) => key === "opencode" ? "redcode" : key))];
 }
 
 /** Which agents can be installed here. */

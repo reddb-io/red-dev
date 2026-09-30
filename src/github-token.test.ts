@@ -32,20 +32,20 @@ function gh(stdout: string, status = 0) {
 describe("which token is sent", () => {
   test("an explicit GITHUB_TOKEN wins, because somebody meant it", () => {
     const { run, calls } = gh("gho_fromCli\n");
-    expect(githubToken({ GITHUB_TOKEN: "ghp_explicit" }, run)).toBe("ghp_explicit");
+    expect(githubToken({ GITHUB_TOKEN: "ghp_explicit" }, run, () => "/fixture/gh")).toBe("ghp_explicit");
     // And `gh` is not even asked: a subprocess for an answer already held.
     expect(calls).toEqual([]);
   });
 
   test("GH_TOKEN is honoured too, which is what gh itself reads", () => {
     const { run } = gh("gho_fromCli\n");
-    expect(githubToken({ GH_TOKEN: "ghp_env" }, run)).toBe("ghp_env");
+    expect(githubToken({ GH_TOKEN: "ghp_env" }, run, () => "/fixture/gh")).toBe("ghp_env");
   });
 
   test("otherwise the gh CLI is asked, and its answer trimmed", () => {
     const { run, calls } = gh("gho_fromCli\n");
-    expect(githubToken({}, run)).toBe("gho_fromCli");
-    expect(calls).toEqual([["gh", "auth", "token", "--hostname", "github.com"]]);
+    expect(githubToken({}, run, () => "/fixture/gh")).toBe("gho_fromCli");
+    expect(calls).toEqual([["/fixture/gh", "auth", "token", "--hostname", "github.com"]]);
   });
 
   test("is asked once per process, not once per repository", () => {
@@ -53,9 +53,9 @@ describe("which token is sent", () => {
     // one spawning `gh auth token` would be a subprocess for an answer
     // that cannot have changed.
     const { run, calls } = gh("gho_fromCli\n");
-    githubToken({}, run);
-    githubToken({}, run);
-    githubToken({}, run);
+    githubToken({}, run, () => "/fixture/gh");
+    githubToken({}, run, () => "/fixture/gh");
+    githubToken({}, run, () => "/fixture/gh");
     expect(calls).toHaveLength(1);
   });
 
@@ -63,18 +63,18 @@ describe("which token is sent", () => {
     for (const [stdout, status] of [["", 0], ["", 1], ["   \n", 0]] as const) {
       forgetGithubToken();
       const { run } = gh(stdout, status);
-      expect(githubToken({}, run)).toBeNull();
+      expect(githubToken({}, run, () => "/fixture/gh")).toBeNull();
     }
   });
 
   test("an empty environment variable does not count as set", () => {
     const { run } = gh("gho_fromCli\n");
-    expect(githubToken({ GITHUB_TOKEN: "   " }, run)).toBe("gho_fromCli");
+    expect(githubToken({ GITHUB_TOKEN: "   " }, run, () => "/fixture/gh")).toBe("gho_fromCli");
   });
 
   test("an empty GITHUB_TOKEN does not hide a valid GH_TOKEN", () => {
     const { run, calls } = gh("gho_fromCli\n");
-    expect(githubToken({ GITHUB_TOKEN: " ", GH_TOKEN: "ghp_env" }, run)).toBe("ghp_env");
+    expect(githubToken({ GITHUB_TOKEN: " ", GH_TOKEN: "ghp_env" }, run, () => "/fixture/gh")).toBe("ghp_env");
     expect(calls).toEqual([]);
   });
 });
@@ -82,10 +82,10 @@ describe("which token is sent", () => {
 describe("the header", () => {
   test("is a bearer when there is a token, and absent when there is none", () => {
     const { run } = gh("gho_fromCli\n");
-    expect(githubAuthHeaders({}, run)).toEqual({ Authorization: "Bearer gho_fromCli" });
+    expect(githubAuthHeaders({}, run, () => "/fixture/gh")).toEqual({ Authorization: "Bearer gho_fromCli" });
     forgetGithubToken();
     const none = gh("", 1);
-    expect(githubAuthHeaders({}, none.run)).toEqual({});
+    expect(githubAuthHeaders({}, none.run, () => "/fixture/gh")).toEqual({});
   });
 });
 

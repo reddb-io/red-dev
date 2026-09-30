@@ -131,10 +131,12 @@ export interface AgentUsageReading {
   readonly windows: readonly AgentUsageWindowReading[];
 }
 
-/** Agent host binaries, taken from the install specs so they cannot drift. */
-const AGENT_COMMANDS: ReadonlySet<string> = new Set(
-  AGENTS.map((agent) => agent.cmd).filter((cmd) => cmd !== ""),
-);
+/** Include retired hosts that can still be present on existing machines. */
+const AGENT_COMMANDS: ReadonlySet<string> = new Set([
+  ...AGENTS.map((agent) => agent.cmd).filter((cmd) => cmd !== ""),
+  "gemini",
+  "opencode",
+]);
 
 /**
  * Every token in an argv that names an agent host binary. PURE.

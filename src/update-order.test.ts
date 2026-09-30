@@ -71,6 +71,24 @@ describe("an update", () => {
     // now converged, and the converge is what knows.
     expect((await walk({}, 0)).code).toBe(0);
     expect((await walk({}, 2)).code).toBe(2);
-    expect((await walk({ agents: "one host failed" }, 0)).code).toBe(0);
+    expect((await walk({ agents: "one host failed" }, 0)).code).toBe(3);
+  });
+
+  test("reports partial progress per stage and keeps a failed converge fatal", async () => {
+    const run = await runUpdate(async stage => {
+      if (stage === "suite") throw new Error("VPN timeout");
+      if (stage === "converge") return 0;
+    }, () => {});
+    expect(run.code).toBe(3);
+    expect(run.results.find(result => result.stage === "suite")).toEqual({ stage: "suite", status: "failed", detail: "VPN timeout" });
+    expect(run.results.find(result => result.stage === "converge")?.status).toBe("ok");
+    expect((await walk({ agents: "failed" }, 1)).code).toBe(1);
+  });
+
+  test("does not prune after a failed converge and names unattended skips", async () => {
+    const failed = await walk({}, 1);
+    expect(failed.ran).not.toContain("prune");
+    const run = await runUpdate(async () => {}, () => {}, { skip: stage => stage === "system" });
+    expect(run.results[0]).toEqual({ stage: "system", status: "skipped" });
   });
 });

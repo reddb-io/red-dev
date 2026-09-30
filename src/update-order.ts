@@ -46,9 +46,8 @@ export const UPDATE_STAGES: readonly UpdateStageSpec[] = [
   { stage: "suite" },
   { stage: "agents" },
   { stage: "converge", fatal: true },
-  // Not fatal, and last: retention is the one stage whose failure costs
-  // disk rather than correctness. An update that could not prune is
-  // still an update, and the exit code stays the converge's.
+  // Last and nonfatal: a failed prune is reported as partial progress,
+  // and does not undo already installed updates.
   { stage: "prune" },
 ];
 
@@ -60,8 +59,9 @@ export function updateStageOrder(): UpdateStage[] {
 export interface UpdateRun {
   /** Which stages were reached, in the order they were reached. */
   ran: UpdateStage[];
-  /** The exit code of the update, which is the converge's own. */
+  /** 0 complete; 1 failed convergence; 2 pending rights; 3 partial update. */
   code: number;
+  results: Array<{ stage: UpdateStage; status: "ok" | "failed" | "pending" | "skipped"; detail?: string }>;
 }
 
 /**
@@ -75,18 +75,26 @@ export interface UpdateRun {
 export async function runUpdate(
   perform: (stage: UpdateStage) => Promise<number | void>,
   onFailure: (stage: UpdateStage, message: string, fatal: boolean) => void,
+  options: { skip?: (stage: UpdateStage) => boolean } = {},
 ): Promise<UpdateRun> {
   const ran: UpdateStage[] = [];
+  const results: UpdateRun["results"] = [];
   let code = 0;
   for (const spec of UPDATE_STAGES) {
     ran.push(spec.stage);
+    if (options.skip?.(spec.stage)) { results.push({ stage: spec.stage, status: "skipped" }); continue; }
     try {
       const result = await perform(spec.stage);
-      if (typeof result === "number") code = result;
+      if (typeof result === "number") code = Math.max(code, result);
+      results.push({ stage: spec.stage, status: result === 2 ? "pending" : result ? "failed" : "ok" });
+      if (result === 1 && spec.fatal) return { ran, code: 1, results };
     } catch (err) {
       onFailure(spec.stage, (err as Error).message, spec.fatal === true);
-      if (spec.fatal) return { ran, code: 1 };
+      results.push({ stage: spec.stage, status: "failed", detail: (err as Error).message });
+      if (spec.fatal) return { ran, code: 1, results };
     }
   }
-  return { ran, code };
+  // A usable/converged machine can still have tools that did not update.
+  if (code === 0 && results.some(result => result.status === "failed")) code = 3;
+  return { ran, code, results };
 }

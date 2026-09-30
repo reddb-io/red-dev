@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import type { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { convergeMiseGithubAuth, migrateMiseGithubCredential, miseGithubCredentialCommand, miseRemoteVersionsEnv } from "./mise-github.ts";
@@ -18,51 +17,39 @@ function temp(): string {
 }
 
 describe("mise credentials without re-entering its shim", () => {
-  test("a native gh needs no mise subprocess and selects github.com explicitly", () => {
-    const command = miseGithubCredentialCommand(
-      () => "/usr/bin/gh",
-      (() => { throw new Error("must not spawn"); }) as typeof spawnSync,
-    );
-    expect(command).toBe('"/usr/bin/gh" auth token --hostname github.com');
+  test("a native gh is used directly and selects github.com explicitly", () => {
+    expect(miseGithubCredentialCommand({ locate: () => "/usr/bin/gh" }))
+      .toBe('"/usr/bin/gh" auth token --hostname github.com');
   });
 
-  test("a shim is resolved with local which, never auth token through mise", () => {
-    const calls: unknown[] = [];
-    const executable = "/data/mise/installs/github-cli/latest/bin/gh";
-    const run = ((cmd: string, args: string[], opts: unknown) => {
-      calls.push({ cmd, args, opts });
-      return { status: 0, stdout: `${executable}\n` };
-    }) as typeof spawnSync;
-    expect(miseGithubCredentialCommand(
-      (cmd) => cmd === "gh" ? "/data/mise/shims/gh" : "/usr/bin/mise",
-      run,
-      (path) => path === executable,
-    )).toBe(`"${executable}" auth token --hostname github.com`);
-    expect(calls).toEqual([{
-      cmd: "/usr/bin/mise", args: ["which", "gh"],
-      opts: expect.objectContaining({ timeout: 2_000, env: expect.objectContaining({ MISE_AUTO_INSTALL: "0" }) }),
-    }]);
+  test("a shim is bypassed using the filesystem, including archive directories", () => {
+    const executable = "/data/mise/installs/github-cli/latest/gh_2_linux_amd64/bin/gh";
+    expect(miseGithubCredentialCommand({
+      locate: () => "/data/mise/shims/gh",
+      env: { PATH: "/data/mise/shims", MISE_DATA_DIR: "/data/mise" },
+      has: path => path === executable,
+      list: path => path.endsWith("/latest") ? ["gh_2_linux_amd64"] : [],
+    })).toBe(`"${executable}" auth token --hostname github.com`);
   });
 
-  test("failed or recursive resolution disables the command rather than invoking the shim", () => {
-    for (const stdout of ["", "/data/mise/shims/gh\n", "/missing/gh\n", "relative/gh\n"]) {
-      const run = (() => ({ status: 0, stdout })) as unknown as typeof spawnSync;
-      expect(miseGithubCredentialCommand(
-        (cmd) => cmd === "gh" ? "/data/mise/shims/gh" : "/usr/bin/mise",
-        run,
-        () => false,
-      )).toBe("");
-    }
+  test("a native gh later on PATH is preferred over the shim", () => {
+    expect(miseGithubCredentialCommand({
+      locate: () => "/data/mise/shims/gh",
+      env: { PATH: "/data/mise/shims:/usr/bin" },
+      has: path => path === "/usr/bin/gh", list: () => [],
+    })).toBe('"/usr/bin/gh" auth token --hostname github.com');
+  });
+
+  test("a missing real executable disables the command, without invoking a shim", () => {
+    expect(miseGithubCredentialCommand({
+      locate: () => "/data/mise/shims/gh", env: { PATH: "", MISE_DATA_DIR: "/missing" },
+      has: () => false, list: () => [],
+    })).toBe("");
   });
 
   test("Windows paths with spaces remain one command argument", () => {
-    expect(miseGithubCredentialCommand(() => "C:\\Program Files\\GitHub CLI\\gh.exe"))
+    expect(miseGithubCredentialCommand({ locate: () => "C:/Program Files/GitHub CLI/gh.exe" }))
       .toBe('"C:/Program Files/GitHub CLI/gh.exe" auth token --hostname github.com');
-  });
-
-  test("a fresh machine uses the gh installed later by its native provider", () => {
-    expect(miseGithubCredentialCommand(() => null))
-      .toBe("gh auth token --hostname github.com");
   });
 });
 
@@ -107,7 +94,7 @@ describe("persistent authentication owned by red-dev", () => {
     expect(result.command).toContain("powershell.exe -NoProfile -NonInteractive");
     expect(result.command).toContain(JSON.stringify(join(root, "red-dev-github-auth.ps1")));
     const script = readFileSync(join(root, "red-dev-github-auth.ps1"), "utf8");
-    expect(script).toContain("mise which gh");
+    expect(script).not.toContain("mise which gh");
     expect(script).toContain("auth token --hostname github.com");
   });
 
@@ -117,14 +104,17 @@ describe("persistent authentication owned by red-dev", () => {
     const root = join(home, ".config", "mise");
     const bin = join(home, "fixture bin");
     mkdirSync(bin, { recursive: true });
-    const activeGh = join(bin, "active-gh");
+    const data = join(home, "mise data");
+    const installs = join(data, "installs", "github-cli");
+    const shims = join(data, "shims");
+    mkdirSync(shims, { recursive: true });
     const account = join(bin, "account");
     const quote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
     const fixtureMise = join(bin, "mise");
-    writeFileSync(fixtureMise, `#!/bin/sh\n[ "$1 $2" = "which gh" ] || exit 2\ncat ${quote(activeGh)}\n`);
+    writeFileSync(fixtureMise, `#!/bin/sh\nprintf invoked > ${quote(join(bin, "mise-invoked"))}\nsleep 30\n`);
     chmodSync(fixtureMise, 0o700);
     for (const version of ["v1", "v2"]) {
-      const executable = join(bin, version, "gh");
+      const executable = join(installs, version, "gh_fixture_linux_amd64", "bin", "gh");
       mkdirSync(dirname(executable), { recursive: true });
       writeFileSync(executable, `#!/bin/sh\n[ "$*" = "auth token --hostname github.com" ] || exit 3\ncat ${quote(account)}\n`);
       chmodSync(executable, 0o700);
@@ -133,7 +123,9 @@ describe("persistent authentication owned by red-dev", () => {
     convergeMiseConfig(platform, { home, tools: [] });
     const config = Bun.TOML.parse(readFileSync(miseConfigPath(home), "utf8")) as AuthConfig;
     expect(config.settings.github.credential_command).toContain("red-dev-github-auth.sh");
-    const env: NodeJS.ProcessEnv = { ...process.env, PATH: `${bin}:${process.env.PATH}`, MISE_CONFIG_DIR: root };
+    symlinkSync(Bun.which("sh")!, join(bin, "sh"));
+    symlinkSync(Bun.which("cat")!, join(bin, "cat"));
+    const env: NodeJS.ProcessEnv = { ...process.env, PATH: `${shims}:${bin}`, MISE_CONFIG_DIR: root, MISE_DATA_DIR: data };
     for (const name of ["MISE_CONFIG_FILE", "MISE_GITHUB_CREDENTIAL_COMMAND", "MISE_GITHUB_TOKEN", "GITHUB_TOKEN", "GITHUB_API_TOKEN", "GH_TOKEN"]) delete env[name];
     const lookup = () => {
       const argv = realMise ? [realMise, "token", "github", "--raw"] : ["sh", join(root, "red-dev-github-auth.sh")];
@@ -141,13 +133,17 @@ describe("persistent authentication owned by red-dev", () => {
       expect(result.exitCode).toBe(0);
       return result.stdout.toString().trim();
     };
-    writeFileSync(activeGh, join(bin, "v1", "gh"));
+    writeFileSync(join(shims, "gh"), "#!/bin/sh\nexit 77\n");
+    chmodSync(join(shims, "gh"), 0o700);
+    symlinkSync(join(installs, "v1"), join(installs, "latest"));
     writeFileSync(account, "fixture_account_one\n");
     expect(lookup()).toBe("fixture_account_one");
-    writeFileSync(activeGh, join(bin, "v2", "gh"));
-    rmSync(join(bin, "v1"), { recursive: true });
+    rmSync(join(installs, "latest"));
+    symlinkSync(join(installs, "v2"), join(installs, "latest"));
+    rmSync(join(installs, "v1"), { recursive: true });
     writeFileSync(account, "fixture_account_two\n");
     expect(lookup()).toBe("fixture_account_two");
+    expect(existsSync(join(bin, "mise-invoked"))).toBe(false);
     expect(convergeMiseConfig(platform, { home, tools: [] }).changed).toBe(false);
   });
 });

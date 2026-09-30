@@ -43,11 +43,22 @@ export interface HostMetrics {
   diskFreeBytes: number | null;
   diskTotalBytes: number | null;
   oomEvents: string[];
+  oomIncidents?: OomIncident[];
+  kernelOomEvidenceKnown?: boolean;
   stopTimeouts: number;
   workerLimitsKnown: boolean;
   workerTasksMax: Array<number | "infinity">;
   workerMemoryCurrent: number[];
   workerMemoryMax: Array<number | "infinity">;
+}
+
+export interface OomIncident {
+  at: string;
+  pid: number | null;
+  command: string | null;
+  cgroup: string | null;
+  unit: string | null;
+  source: "kernel" | "user-journal";
 }
 
 export interface HostSnapshot {

@@ -61,8 +61,8 @@ packages may still ask for sudo.
 On Windows, open a new terminal after installing — the `PATH` entry does not
 reach shells that were already running.
 
-Every push to `main` also publishes a `next` prerelease, so the newest work is
-installable without waiting for a tag:
+Every push to `main` publishes a stable release. An explicit `next` prerelease
+can also be published through the Release workflow; install that channel with:
 
 ```bash
 RED_DEV_CHANNEL=next sh -c "$(curl -fsSL https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.sh)"
@@ -74,7 +74,7 @@ $env:RED_DEV_CHANNEL='next'; irm https://raw.githubusercontent.com/reddb-io/red-
 
 | Variable | Effect |
 | --- | --- |
-| `RED_DEV_CHANNEL` | `stable` (default) or `next` — every push to `main` publishes a `next` prerelease |
+| `RED_DEV_CHANNEL` | `stable` (default) or an explicitly published `next` prerelease |
 | `RED_DEV_BIN_DIR` | Where the binary lands; defaults to `~/.local/bin` (Linux) or `%LOCALAPPDATA%\red-dev\bin` |
 | `GITHUB_TOKEN` | Raises the API rate limit; required only for a private fork |
 
@@ -341,16 +341,22 @@ service. dit reads `ELEVENLABS_API_KEY` from `~/.red/dit/.env`, or can use
 `--engine local` for offline Whisper.
 
 **Coding agents** are chosen rather than assumed — `red-dev agents` offers
-every agent applicable to the current platform pre-ticked, including the
-Claude, Codex and T3 Code desktop apps on Windows. Untick any of them to opt
-out. `herdr` is not an agent but the thing agents run inside — it
-multiplexes several into one terminal and keeps them alive across an SSH
-disconnect. Each
-installs by the path its publisher supports rather than one uniform mechanism,
-and *whose* path it is gets checked: winget has no Google entry for Gemini —
-searching it returns third-party chat clients that merely speak to Gemini — so
-that one is npm, while T3 Code went the other way, because npm's `t3code-cli` is
-a third-party wrapper and winget's `T3Tools.T3Code` is the publisher's own.
+CLI agents applicable to the current platform. Claude Code, Codex CLI and
+RedCode are recommended; the remaining agents are opt-in. Gemini CLI is no
+longer offered or refreshed by red-dev. Existing Gemini installations and
+configuration remain available to their owner, including existing RedSkills
+integrations. User-declared mise tools still follow the user's mise config.
+`herdr` multiplexes several agents in one terminal and keeps them alive across
+an SSH disconnect. Each agent installs through its publisher's supported path.
+
+**Desktop apps** have a separate opt-in setup page: Codex Desktop (ChatGPT),
+Claude Desktop, Antigravity and Visual Studio Code. T3 Code remains available
+on Windows. They are also offered by `red-dev apps`. Antigravity uses Google's
+official apt repository on Ubuntu 24/26 and `Google.Antigravity` on Windows;
+VS Code uses Microsoft's apt repository and `Microsoft.VisualStudioCode`.
+These applications are separate from CLI agents and are never installed by
+an unselected plain converge.
+
 Picking any CLI agent then offers
 [RedSkills](https://github.com/reddb-io/red-skills), the canonical skill and
 marketplace content, which registers its marketplace in Claude Code and Codex
@@ -619,7 +625,8 @@ GitHub lookups made by mise use the github.com account selected by
 helper and configures `github.credential_command` in its mise fragment.
 Direct `mise upgrade` and `mise bump` use this helper too. It resolves the
 current gh executable for every credential read, including after gh itself
-is upgraded, and runs `gh auth token --hostname github.com`. Existing gh
+is upgraded, using PATH and installed files without starting another mise
+process, and runs `gh auth token --hostname github.com`. Existing gh
 credential overrides are repaired automatically with a backup.
 This also reads credentials stored in the system keyring without copying
 the token into a config file.
@@ -642,6 +649,11 @@ hour, shared with other tools using that account. Authentication and caching
 reduce rate-limit failures; GitHub still enforces account and secondary limits.
 For corporate VPNs and machines running an older red-dev, see
 [mise GitHub authentication](docs/mise-github-auth.md).
+
+For timeouts, run `red-dev network`: it separates local credential lookup,
+OS HTTP reachability and mise's own request. To repair the gh integration
+without upgrading any package, preview `red-dev doctor --repair mise-auth`,
+then apply with `--apply`. See [maintenance and recovery](docs/maintenance.md).
 
 red-dev lets `npm`, `pnpm`, and `bun` run directly. It retires older shell
 wrappers that launched package managers through systemd. Its workload policy
@@ -688,6 +700,10 @@ export RED_BLE=0
 ```bash
 red-dev                      # the fullscreen interface — and what the one-liner opens
 red-dev platform             # what red-dev thinks this machine is
+red-dev network              # bounded gh/mise credential and VPN/proxy diagnostics
+red-dev network --json       # share diagnostics without credential output
+red-dev doctor --repair mise-auth # preview only this repair; add --apply to execute
+red-dev doctor --export report.json # private diagnostic report; existing files are preserved
 red-dev plan [scope]         # what would change, changes nothing
 red-dev install [scope]      # converge toward the manifest
 red-dev install --dry-run    # print the plan, touch nothing

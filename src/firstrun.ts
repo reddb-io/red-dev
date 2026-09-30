@@ -335,7 +335,7 @@ export async function carryOutChoices(
   // Runtimes first, because agents are installed with them.
   //
   // This ran agents then runtimes, and on native Windows that is the
-  // wrong way round: Gemini, OpenClaw and Hermes are npm packages there,
+  // wrong way round: Pi, OpenClaw and Hermes are npm packages there,
   // so all three failed with "npm not on PATH — install a Node runtime
   // first" and mise installed node@lts four lines later. The advice was
   // correct and the run had already been told to follow it.
@@ -349,7 +349,7 @@ export async function carryOutChoices(
 
   // An npm agent implies node, whether or not anyone ticked it.
   //
-  // On Windows, Gemini, OpenClaw and Hermes install through npm. A user
+  // On Windows, Pi, OpenClaw and Hermes install through npm. A user
   // themselves — they have named an end and left the means to the tool
   // whose job that is. Without this the converge failed those agents
   // with "npm not on PATH", which is the tool reporting its own missing

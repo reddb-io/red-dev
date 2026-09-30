@@ -113,6 +113,16 @@ export function buildCli(): CLI {
       },
       doctor: {
         description: "report drift against the manifest",
+        options: {
+          json: { type: "boolean", description: "print a redacted JSON diagnostic report", default: false },
+          export: { type: "string", description: "write a private diagnostic report to a new file" },
+          repair: { type: "string", description: "preview a specific repair: mise-auth, workloads or desktop" },
+          apply: { type: "boolean", description: "apply only the named repair", default: false },
+        },
+      },
+      network: {
+        description: "diagnose local gh/mise credentials, VPN/proxy reachability and mise requests",
+        options: { json: { type: "boolean", description: "export diagnostics without credentials", default: false } },
       },
       desktop: {
         description: "inspect or reconcile the GNOME menu and shortcuts without reinstalling tools",
@@ -383,6 +393,9 @@ export function buildCli(): CLI {
 }
 
 export interface Invocation {
+  json?: boolean;
+  doctorRepair?: string;
+  doctorExport?: string;
   command: string | null;
   scope: string | undefined;
   themeName: string;
@@ -560,10 +573,17 @@ export function parseArgs(cli: CLI, argv: string[]): Invocation {
   const agentUpdate = rawAgents === "update";
   const agentPlugins = rawAgents === "plugins";
   const desktopVerb = pos["desktop_verb"];
+  if (r.command[0] === "doctor") {
+    if (opts["repair"] !== undefined && !["mise-auth", "workloads", "desktop"].includes(String(opts["repair"]))) errors.push("unknown doctor repair (expected: mise-auth, workloads, desktop)");
+    if (opts["apply"] === true && !opts["repair"]) errors.push("doctor --apply requires --repair with a specific repair name");
+  }
   if (desktopVerb !== undefined && desktopVerb !== "status" && desktopVerb !== "reconcile") {
     errors.push(`invalid desktop action '${desktopVerb}' (expected: status, reconcile)`);
   }
   return {
+    json: opts["json"] === true,
+    doctorRepair: typeof opts["repair"] === "string" ? opts["repair"] : undefined,
+    doctorExport: typeof opts["export"] === "string" ? opts["export"] : undefined,
     command: r.command[0] ?? null,
     // `theme <name>` and `plan <scope>` both land in the positional map
     // under their own key; the caller reads whichever applies.

@@ -9,7 +9,8 @@ esse limite; limites secundários e problemas de rede continuam possíveis.
 O novo red-dev configura essa integração durante `red-dev install` e
 `red-dev update`. Ele instala um helper persistente, usado pelo próprio mise
 em `mise upgrade` e `mise bump`, que resolve o gh atual a cada leitura da
-credencial. Upgrades do gh e trocas de conta não exigem refazer a configuração.
+credencial, usando PATH e os arquivos instalados, sem executar outro mise.
+Upgrades do gh e trocas de conta não exigem refazer a configuração.
 Overrides antigos que chamavam `gh auth token` são migrados com backup.
 O cache de versões fica em uma hora nas operações comuns.
 
@@ -57,6 +58,17 @@ O procedimento PowerShell deve ser executado no PC Windows; foi escrito para
 a CLI suportada, mas não foi validado em um host Windows nesta avaliação.
 
 ## Como interpretar
+
+Para separar um travamento local do comando de credenciais de um problema de
+VPN, DNS, proxy ou certificado, use `red-dev network`. Ele testa a leitura local
+da credencial, o acesso HTTP pelo sistema e uma consulta pelo próprio mise,
+com prazo máximo por etapa. `red-dev network --json` produz um relatório para
+compartilhar sem tokens nem os valores das variáveis de ambiente.
+
+Se curl funcionar e o comando de credenciais mise travar, não é uma prova de
+rate limit: o helper deve localizar o gh sem chamar mise, evitando reentrada.
+Se a leitura local funcionar e os acessos HTTP falharem, investigar a rede e
+o host indicado pelo diagnóstico.
 
 `mise token github` mostra a fonte e uma credencial mascarada. O resultado
 esperado é `source: credential_command`, salvo quando uma variável de token

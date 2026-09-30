@@ -118,7 +118,7 @@ const offMachine = {
 
 describe("the update argv of each per-host mechanism", () => {
   test("npm reinstalls the package globally, pinned to latest", () => {
-    const p = planSpec(withoutMise("gemini"), LINUX);
+    const p = planSpec(withoutMise("pi"), LINUX);
     expect(p.state).toBe("ready");
     if (p.state !== "ready") return;
     expect(p.mechanism).toBe("npm");
@@ -128,7 +128,7 @@ describe("the update argv of each per-host mechanism", () => {
         "/home/u/.local/share/mise/shims/npm",
         "install",
         "-g",
-        "@google/gemini-cli@latest",
+        "@earendil-works/pi-coding-agent@latest",
       ],
       env: { MISE_SKIP_RESHIM: "1" },
     });
@@ -139,7 +139,7 @@ describe("the update argv of each per-host mechanism", () => {
     // "Reshimming mise 24..." forever. The install path suppresses it;
     // an update path that spawned the same npm without this would have
     // reintroduced exactly the hang that suppression was added for.
-    for (const key of ["codex", "gemini", "openclaw"]) {
+    for (const key of ["codex", "pi", "openclaw"]) {
       const p = planSpec(withoutMise(key), WSL);
       expect(p.state).toBe("ready");
       if (p.state !== "ready" || p.step.kind !== "command") continue;
@@ -254,7 +254,7 @@ describe("the update argv of each per-host mechanism", () => {
 
 describe("a host with nothing to do", () => {
   test("is a skip with a reason when it is not installed at all", () => {
-    const spec = host("gemini");
+    const spec = host("pi");
     const p = planAgentUpdate(spec, LINUX, { locate: () => null, npm: "/usr/bin/npm" });
     expect(p.state).toBe("skip");
     if (p.state !== "skip") return;
@@ -364,11 +364,11 @@ describe("one host failing", () => {
     // front of it.
     const order: string[] = [];
     const outcomes = await updateAgents(
-      [withoutMise("claude-code"), RELEASE_HOST, withoutMise("gemini")],
+      [withoutMise("claude-code"), RELEASE_HOST, withoutMise("pi")],
       LINUX,
       {
         ...offMachine,
-        locate: found("claude", "toy", "gemini"),
+        locate: found("claude", "toy", "pi"),
         npm: async () => "/usr/bin/npm",
         releaseTag: async () => null,
         version: async () => null,
@@ -389,7 +389,7 @@ describe("one host failing", () => {
       detail: "GitHub API 404 for example/toy",
     });
     // The host after the failure ran, and ran its own mechanism.
-    expect(order[2]).toContain("@google/gemini-cli@latest");
+    expect(order[2]).toContain("@earendil-works/pi-coding-agent@latest");
   });
 
   test("is named, so a run of eleven hosts says which one it was", async () => {
@@ -407,9 +407,9 @@ describe("one host failing", () => {
   });
 
   test("and a host that cannot be updated at all names the fix", async () => {
-    const outcomes = await updateAgents([host("gemini")], LINUX, {
+    const outcomes = await updateAgents([host("pi")], LINUX, {
       ...offMachine,
-      locate: found("gemini"),
+      locate: found("pi"),
       // Spelled out after the spread, because it is the subject here
       // rather than a machine question being kept out of the way.
       npm: async () => null,
@@ -472,11 +472,11 @@ describe("when the catalog and the machine disagree about npm", () => {
   });
 
   test("a host with no self-updater is left on npm, wrong or not", () => {
-    // Gemini declares npm and no `update` subcommand. Reclassifying it
+    // Pi declares npm and no `update` subcommand. Reclassifying it
     // would be inventing a mechanism its publisher never shipped.
-    const gemini = withoutMise("gemini");
-    expect(gemini.selfUpdate).toBeUndefined();
-    expect(agentUpdateMechanism(gemini, WSL, res(() => false))).toBe("npm");
+    const pi = withoutMise("pi");
+    expect(pi.selfUpdate).toBeUndefined();
+    expect(agentUpdateMechanism(pi, WSL, res(() => false))).toBe("npm");
   });
 
   test("Claude Code is unaffected: its installer already elected self-update", () => {
