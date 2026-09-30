@@ -133,7 +133,7 @@ describe("multi-choice defaults", () => {
       "codex",
       "redcode",
     ]);
-    for (const key of ["openclaw", "hermes", "gemini", "muse", "pi", "oh-my-pi"]) {
+    for (const key of ["openclaw", "hermes", "muse", "pi", "oh-my-pi"]) {
       expect(AGENTS.find((a) => a.key === key)?.recommended, key).toBe(false);
     }
   });

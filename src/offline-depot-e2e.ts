@@ -74,11 +74,10 @@ import {
   type ObservedTarget,
 } from "./workstation-lock.ts";
 
-/** The seven managed coder hosts of ADR 0010, as the lock names them. */
+/** The six current coder installers, as the lock names them. */
 export const CODER_CLIS = [
   "claude-code",
   "codex",
-  "gemini",
   "hermes",
   "opencode",
   "pi",
@@ -262,7 +261,7 @@ export async function runUbuntu24OfflineJourney(
     "coder-clis",
     missingClis.length === 0,
     missingClis.length === 0
-      ? `all seven coder CLIs installed: ${CODER_CLIS.join(", ")}`
+      ? `all six coder CLIs installed: ${CODER_CLIS.join(", ")}`
       : `missing ${missingClis.join(", ")}`,
   );
   const missingCompanions = COMPANIONS.filter((id) => !have.has(id));

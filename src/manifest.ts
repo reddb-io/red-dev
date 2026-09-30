@@ -1083,6 +1083,34 @@ export const TOOLS: Tool[] = [
     win: winget("Anthropic.Claude"),
   },
   {
+    name: "antigravity",
+    about: "Google's desktop development environment with coding agents",
+    cmd: ["antigravity"],
+    scope: "optional",
+    u24: aptrepo({
+      pkgs: ["antigravity"],
+      keyUrl: "https://us-central1-apt.pkg.dev/doc/repo-signing-key.gpg",
+      keyring: "/etc/apt/keyrings/antigravity-repo-key.gpg",
+      entry:
+        "deb [arch=amd64,arm64 signed-by=/etc/apt/keyrings/antigravity-repo-key.gpg] https://us-central1-apt.pkg.dev/projects/antigravity-auto-updater-dev/ antigravity-debian main",
+    }),
+    win: winget("Google.Antigravity"),
+  },
+  {
+    name: "vscode",
+    about: "Visual Studio Code — Microsoft's desktop code editor",
+    cmd: ["code"],
+    scope: "optional",
+    u24: aptrepo({
+      pkgs: ["code"],
+      keyUrl: "https://packages.microsoft.com/keys/microsoft.asc",
+      keyring: "/etc/apt/keyrings/packages.microsoft.gpg",
+      entry:
+        "deb [arch=amd64,arm64 signed-by=/etc/apt/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main",
+    }),
+    win: winget("Microsoft.VisualStudioCode"),
+  },
+  {
     name: "t3code",
     about: "T3 Tools' desktop editor",
     scope: "optional",

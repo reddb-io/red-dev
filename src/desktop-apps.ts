@@ -4,7 +4,15 @@ import { isInstalled, providerFor, toolsInScope } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
 import type { Choice } from "./tui-setup-model.ts";
 
-export const DESKTOP_APP_NAMES = new Set(["codex-desktop", "claude-desktop", "t3code"]);
+const DESKTOP_APP_LABELS: Readonly<Record<string, string>> = {
+  "codex-desktop": "Codex Desktop (ChatGPT)",
+  "claude-desktop": "Claude Desktop",
+  antigravity: "Antigravity",
+  vscode: "Visual Studio Code",
+  t3code: "T3 Code",
+};
+
+export const DESKTOP_APP_NAMES = new Set(Object.keys(DESKTOP_APP_LABELS));
 
 export function desktopAppChoices(p: Platform): Choice[] {
   if (!p.caps.gui) return [];
@@ -13,11 +21,7 @@ export function desktopAppChoices(p: Platform): Choice[] {
     .filter((tool) => providerFor(tool, p).kind !== "skip")
     .map((tool) => ({
       key: tool.name,
-      label: tool.name === "codex-desktop"
-        ? "Codex Desktop (ChatGPT)"
-        : tool.name === "claude-desktop"
-          ? "Claude Desktop"
-          : "T3 Code",
+      label: DESKTOP_APP_LABELS[tool.name]!,
       note: `${tool.about ?? tool.name}${isInstalled(tool) ? " — installed" : ""}`,
     }));
 }

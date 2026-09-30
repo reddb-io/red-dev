@@ -361,9 +361,9 @@ describe("importing a depot", () => {
       expect(record?.bytes).toBe(rehearsalArtifact(app));
     }
 
-    // The seven coder CLIs, and the companions beside them.
+    // The six coder CLIs, and the companions beside them.
     const installed = new Set(seen.map((r) => r.app));
-    for (const id of ["claude-code", "codex", "gemini", "hermes", "opencode", "pi", "redcode"]) {
+    for (const id of ["claude-code", "codex", "hermes", "opencode", "pi", "redcode"]) {
       expect(installed.has(id)).toBe(true);
     }
     for (const id of ["mise", "red-dev", "node", "python", "herdr", "zellij", "vscode"]) {

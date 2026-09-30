@@ -341,16 +341,22 @@ service. dit reads `ELEVENLABS_API_KEY` from `~/.red/dit/.env`, or can use
 `--engine local` for offline Whisper.
 
 **Coding agents** are chosen rather than assumed — `red-dev agents` offers
-every agent applicable to the current platform pre-ticked, including the
-Claude, Codex and T3 Code desktop apps on Windows. Untick any of them to opt
-out. `herdr` is not an agent but the thing agents run inside — it
-multiplexes several into one terminal and keeps them alive across an SSH
-disconnect. Each
-installs by the path its publisher supports rather than one uniform mechanism,
-and *whose* path it is gets checked: winget has no Google entry for Gemini —
-searching it returns third-party chat clients that merely speak to Gemini — so
-that one is npm, while T3 Code went the other way, because npm's `t3code-cli` is
-a third-party wrapper and winget's `T3Tools.T3Code` is the publisher's own.
+CLI agents applicable to the current platform. Claude Code, Codex CLI and
+RedCode are recommended; the remaining agents are opt-in. Gemini CLI is no
+longer offered or refreshed by red-dev. Existing Gemini installations and
+configuration remain available to their owner, including existing RedSkills
+integrations. User-declared mise tools still follow the user's mise config.
+`herdr` multiplexes several agents in one terminal and keeps them alive across
+an SSH disconnect. Each agent installs through its publisher's supported path.
+
+**Desktop apps** have a separate opt-in setup page: Codex Desktop (ChatGPT),
+Claude Desktop, Antigravity and Visual Studio Code. T3 Code remains available
+on Windows. They are also offered by `red-dev apps`. Antigravity uses Google's
+official apt repository on Ubuntu 24/26 and `Google.Antigravity` on Windows;
+VS Code uses Microsoft's apt repository and `Microsoft.VisualStudioCode`.
+These applications are separate from CLI agents and are never installed by
+an unselected plain converge.
+
 Picking any CLI agent then offers
 [RedSkills](https://github.com/reddb-io/red-skills), the canonical skill and
 marketplace content, which registers its marketplace in Claude Code and Codex

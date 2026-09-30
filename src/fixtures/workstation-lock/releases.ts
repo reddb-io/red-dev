@@ -43,7 +43,6 @@ export const FIXTURE_RELEASES: Record<string, FixtureRelease> = {
     artifact: same("claude-code-2.0.36-linux-x64.tar.gz"),
   },
   codex: { version: "0.55.0", artifact: same("codex-0.55.0.tgz") },
-  gemini: { version: "0.14.2", artifact: same("gemini-cli-0.14.2.tgz") },
   herdr: { version: "0.9.4", artifact: same("herdr-0.9.4-linux-x64.tar.gz") },
   hermes: { version: "1.2.0", artifact: same("hermes-1.2.0-linux-x64.tar.gz") },
   mise: {

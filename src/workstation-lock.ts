@@ -195,9 +195,8 @@ export interface WorkstationLock {
 /**
  * Every application a complete workstation has to end up with.
  *
- * The seven managed coder hosts of ADR 0010 — the same seven
- * `HOST_ADAPTERS` walks — plus the companions the spec names, plus the
- * two runtimes the set cannot run without: node, which red-dev and four
+ * The active workstation coder installers, the companions the spec names,
+ * and the two runtimes the set cannot run without: node, which red-dev and four
  * of the CLIs are written against, and python, which hermes declares as a
  * runtime need in src/agents.ts. A lock missing any of them is incomplete
  * and cannot provision a clean machine, which is a fact about the lock
@@ -206,7 +205,6 @@ export interface WorkstationLock {
 export const REQUIRED_WORKSTATION_APPS = [
   "claude-code",
   "codex",
-  "gemini",
   "herdr",
   "hermes",
   "mise",
@@ -805,14 +803,6 @@ export const WORKSTATION_APPS: readonly WorkstationApp[] = [
     runs: "cli",
     cloudAuth: { service: "OpenAI", evidence: "~/.codex/auth.json" },
     sourcing: npmSource("@openai/codex", "OpenAI"),
-  },
-  {
-    id: "gemini",
-    label: "Gemini CLI",
-    kind: "coder",
-    runs: "cli",
-    cloudAuth: { service: "Google", evidence: "~/.gemini/oauth_creds.json" },
-    sourcing: npmSource("@google/gemini-cli", "Google"),
   },
   {
     id: "herdr",

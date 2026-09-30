@@ -47,9 +47,9 @@ describe("the ubuntu 24.04 offline depot journey", () => {
     expect(result.root).toBeNull();
   });
 
-  test("it provisions the target the spec names, with seven CLIs and seven companions", () => {
+  test("it provisions the target the spec names, with six CLIs and seven companions", () => {
     expect(JOURNEY_TARGET).toBe("ubuntu-24.04-x64");
-    expect(CODER_CLIS).toHaveLength(7);
+    expect(CODER_CLIS).toHaveLength(6);
     expect(new Set([...CODER_CLIS, ...COMPANIONS]).size).toBe(CODER_CLIS.length + COMPANIONS.length);
   });
 

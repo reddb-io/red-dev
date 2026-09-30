@@ -132,7 +132,7 @@ describe("resolving a lock", () => {
   test("the Windows target puts the CLIs in WSL and the editor on Windows", () => {
     const lock = fixtureLock(WINDOWS);
     const surfaceOf = (id: string) => lock.apps.filter((a) => a.id === id).map((a) => a.surface);
-    for (const cli of ["claude-code", "codex", "opencode", "redcode", "gemini", "pi", "hermes"]) {
+    for (const cli of ["claude-code", "codex", "opencode", "redcode", "pi", "hermes"]) {
       expect(surfaceOf(cli)).toEqual(["wsl-ubuntu-24.04-x64"]);
     }
     expect(surfaceOf("zellij")).toEqual(["wsl-ubuntu-24.04-x64"]);
@@ -271,15 +271,14 @@ describe("planning a clean target", () => {
         planned.plan.steps.filter((s) => s.action === "install").map((s) => s.app.id),
       );
       for (const required of REQUIRED_WORKSTATION_APPS) expect(installing).toContain(required);
-      // Seven coder CLIs, named rather than counted: a lock that dropped
-      // one and gained a companion would still count to seven.
+      // Six coder CLIs, named rather than counted: a lock that dropped
+      // one and gained a companion would still count to six.
       expect([...installing].filter((appId) =>
         lock.apps.some((a) => a.id === appId && a.kind === "coder")
       ).sort()).toEqual([
         "claude-code",
         "codex",
-        "gemini",
-        "hermes",
+              "hermes",
         "opencode",
         "pi",
         "redcode",
@@ -327,8 +326,7 @@ describe("cloud authentication", () => {
     expect(planned.plan.unconfigured.map((u) => u.app)).toEqual([
       "claude-code",
       "codex",
-      "gemini",
-      "hermes",
+          "hermes",
       "opencode",
       "pi",
       "redcode",
@@ -354,13 +352,13 @@ describe("cloud authentication", () => {
     expect(installed.length).toBe(lock.apps.length);
     expect(result.report.unconfigured.map((u) => u.app)).toContain("claude-code");
 
-    // And the machine that run produced is ready, with the same seven
+    // And the machine that run produced is ready, with the same six
     // accounts still waiting for a person.
     const after = planLockedInstall(lock, provisionedTarget(lock));
     expect(after.ok).toBe(true);
     if (!after.ok) return;
     expect(lockReadiness(after.plan).ready).toBe(true);
-    expect(lockReadiness(after.plan).unconfigured.length).toBe(7);
+    expect(lockReadiness(after.plan).unconfigured.length).toBe(6);
   });
 
   test("readiness ignores authentication entirely", () => {
@@ -370,7 +368,7 @@ describe("cloud authentication", () => {
     if (!planned.ok) return;
     const readiness = lockReadiness(planned.plan);
     expect(readiness.ready).toBe(true);
-    expect(readiness.unconfigured.length).toBe(7);
+    expect(readiness.unconfigured.length).toBe(6);
   });
 
   test("an account already configured stops being reported", () => {
