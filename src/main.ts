@@ -2413,6 +2413,10 @@ async function main(): Promise<number> {
       return await cmdPlan(p, inv);
     case "doctor":
       return await cmdDoctor(p, inv);
+    case "network": {
+      const { networkCommand } = await import("./network-diagnostics.ts");
+      return await networkCommand(inv.json);
+    }
     case "statusline": {
       const { statuslineCommand } = await import("./statusline-command.ts");
       return await statuslineCommand();
@@ -2527,6 +2531,7 @@ async function run(): Promise<number> {
   const verb = argv[0];
   if (
     verb === "doctor" ||
+    verb === "network" ||
     verb === "logs" ||
     (verb === "desktop" && (argv[1] === undefined || argv[1] === "status")) ||
     ((verb === "rescue" || verb === "reclaim") && !argv.includes("--apply")) ||

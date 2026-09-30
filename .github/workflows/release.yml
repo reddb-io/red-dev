@@ -267,6 +267,7 @@ jobs:
           }
           ./dist/red-dev-linux-x64 platform
           ./dist/red-dev-linux-x64 plan core
+          bun scripts/network-cli-smoke.ts ./dist/red-dev-linux-x64
 
       - name: Checksums
         run: |
