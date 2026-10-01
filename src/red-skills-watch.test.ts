@@ -186,73 +186,23 @@ describe("a watch run", () => {
   });
 });
 
-describe("the trigger in the shell", () => {
-  test("hangs off the prompt, which is the event that happens while somebody works", async () => {
-    // It used to fire once at shell start, and a terminal opened in the
-    // morning and kept all day never asked again: measured at 107
-    // minutes behind, one release stale, with the shell open the whole
-    // time. A prompt is a person; a shell start is a person once.
-    const source = await Bun.file(
-      new URL("../config/bash/red-skills-watch.sh", import.meta.url),
-    ).text();
-
-    expect(source).toContain("PROMPT_COMMAND");
-    // Appended, never replacing: `history -a` and whatever the operator
-    // set for themselves both have to keep running.
-    expect(source).toContain('PROMPT_COMMAND="_red_skills_watch_tick${PROMPT_COMMAND:+; $PROMPT_COMMAND}"');
-    // And installed once, however many times the profile is sourced.
-    expect(source).toContain("*_red_skills_watch_tick*");
-  });
-
-  test("costs no fork per prompt, which is the whole reason it can be there", async () => {
-    const source = await Bun.file(
-      new URL("../config/bash/red-skills-watch.sh", import.meta.url),
-    ).text();
-    const tick = source.slice(source.indexOf("_red_skills_watch_tick() {"));
-
-    // $EPOCHSECONDS is a bash builtin. `date` or `stat` here would be a
-    // process per prompt, which is the timer this design refuses,
-    // wearing a different hat.
-    expect(tick).toContain("EPOCHSECONDS");
-    expect(tick).not.toContain("$(date");
-    expect(tick).not.toContain("$(stat");
-    // The guard returns before anything is spawned.
-    expect(tick.indexOf("return 0")).toBeLessThan(tick.indexOf("red-dev red-skills watch"));
-  });
-
-  test("is detached, interactive-only, and off when RED_SKILLS_WATCH=0", async () => {
-    const source = await Bun.file(
-      new URL("../config/bash/red-skills-watch.sh", import.meta.url),
-    ).text();
-
-    // Nothing may wait for it: a shell that started while the publisher
-    // was unreachable is a shell that started.
-    expect(source).toContain(">/dev/null 2>&1 &");
-    // A script or a hook sourcing the profile has not asked for
-    // background work, and a non-interactive shell that spawns one is
-    // how a converge races itself.
-    expect(source).toContain('case "$-" in');
-    expect(source).toContain("*i*");
-    expect(source).toContain("RED_SKILLS_WATCH:-1");
-    // `due` and not a bare `watch`: a shell is not a person typing.
-    expect(source).toContain("red-skills watch due");
-    // And it never runs where red-dev is not on PATH yet.
-    expect(source).toContain("command -v red-dev");
-  });
-
-  test("is sourced after path.sh, which is what puts red-dev on PATH", async () => {
-    const rc = await Bun.file(new URL("../config/bash/rc.sh", import.meta.url)).text();
-    const order = [...rc.matchAll(/for _red_part in ([^;]+);/g)].flatMap(
-      (match) => match[1]?.split(/\s+/) ?? [],
-    );
-    expect(order).toContain("red-skills-watch");
-    expect(order.indexOf("red-skills-watch")).toBeGreaterThan(order.indexOf("path"));
-  });
-
-  test("ships in the binary, or a converge deploys a file that does not exist", async () => {
+describe("retirement of the prompt updater", () => {
+  test("fresh shells launch no network command; existing string/array prompts lose only the owned entry", async () => {
     const { FILES } = await import("./dotfiles.ts");
-    expect(Object.keys(FILES)).toContain("red-skills-watch.sh");
-    expect(FILES["red-skills-watch.sh"]).toContain("red-skills watch due");
+    const script = FILES["red-skills-watch.sh"]!;
+    for (const setup of ['PROMPT_COMMAND="_red_skills_watch_tick; history -a"', 'PROMPT_COMMAND=("history -a" "_red_skills_watch_tick" "echo ok")']) {
+      const proc = Bun.spawn(["bash", "--noprofile", "--norc", "-c", `${setup}; source /dev/stdin; declare -p PROMPT_COMMAND`], { stdin: new Blob([script]), stdout: "pipe", stderr: "pipe" });
+      const output = await new Response(proc.stdout).text();
+      expect(await proc.exited).toBe(0);
+      expect(output).not.toContain("_red_skills_watch_tick");
+      expect(output).toContain("history -a");
+    }
+    expect(script).not.toContain("red-dev red-skills watch");
+  });
+  test("an already-open old shell trigger performs no update", async () => {
+    const result = await watchRedSkills({ home: home(), trigger: "shell", force: true,
+      upgrade: async () => { throw Error("retired trigger must not request"); } });
+    expect(result.outcome).toBe("not-due");
   });
 });
 

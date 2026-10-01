@@ -102,6 +102,15 @@ export function buildCli(): CLI {
           },
         },
       },
+      maintenance: { description: "run due automatic updates through one coordinator" },
+      policy: {
+        description: "show or choose ownership of a portable tool",
+        positional: [
+          { name: "policy_tool", description: "tool name", required: false },
+          { name: "policy_mode", description: "follow, fixed or external", required: false },
+          { name: "policy_version", description: "exact version for fixed", required: false },
+        ],
+      },
       privileged: {
         // No positional and no flags, for the same reason `redwall` has
         // none: what it does is settled by the manifest and by what this
@@ -393,6 +402,9 @@ export function buildCli(): CLI {
 }
 
 export interface Invocation {
+  policyTool?: string;
+  policyMode?: string;
+  policyVersion?: string;
   json?: boolean;
   doctorRepair?: string;
   doctorExport?: string;
@@ -592,6 +604,9 @@ export function parseArgs(cli: CLI, argv: string[]): Invocation {
     logsPath: opts["path"] === true,
     logsOpen: opts["open"] === true,
     logsApp: typeof opts["app"] === "string" ? opts["app"] : undefined,
+    policyTool: typeof pos["policy_tool"] === "string" ? pos["policy_tool"] : undefined,
+    policyMode: typeof pos["policy_mode"] === "string" ? pos["policy_mode"] : undefined,
+    policyVersion: typeof pos["policy_version"] === "string" ? pos["policy_version"] : undefined,
     redSkillsPhase: typeof pos["phase"] === "string" ? pos["phase"] : undefined,
     redSkillsSelector: typeof pos["selector"] === "string" ? pos["selector"] : undefined,
     routerVerb: typeof pos["router_verb"] === "string" ? pos["router_verb"] : undefined,

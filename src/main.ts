@@ -355,7 +355,15 @@ async function cmdReclaim(p: Platform, inv: Invocation): Promise<number> {
   return result.skipped.length > 0 || result.failed.length > 0 || cacheFailed ? 1 : 0;
 }
 
-async function cmdInstall(
+async function cmdInstall(p: Platform, inv: Invocation, entry: "install" | "update" = "install"): Promise<number> {
+  if (inv.dryRun) return cmdInstallUnlocked(p, inv, entry);
+  const { withUpdateLock } = await import("./update-coordinator.ts");
+  const held = await withUpdateLock(() => cmdInstallUnlocked(p, inv, entry));
+  if (held.busy) { log.warn("another installation or update is running"); return 2; }
+  return held.value;
+}
+
+async function cmdInstallUnlocked(
   p: Platform,
   inv: Invocation,
   entry: "install" | "update" = "install",
@@ -722,11 +730,16 @@ async function cmdRedSkills(p: Platform, inv: Invocation): Promise<number> {
     return 1;
   }
   const { chosenPlugins } = await import("./red-skills-plugins.ts");
-  return await runPluginPhase(phase, {
+  const runPhase = async () => runPluginPhase(phase, {
     manifestPlatform: p,
     activated: await chosenPlugins(p),
     ...(inv.redSkillsSelector ? { selector: inv.redSkillsSelector } : {}),
   });
+  if (phase === "list-all" || phase === "latest-stable") return runPhase();
+  const { withUpdateLock } = await import("./update-coordinator.ts");
+  const held = await withUpdateLock(runPhase);
+  if (held.busy) { log.warn("another installation or update is running"); return 2; }
+  return held.value;
 }
 
 /**
@@ -761,6 +774,12 @@ async function cmdRedSkillsAdopt(): Promise<number> {
  * — so a second sync with no edits in between writes nothing at all.
  */
 async function cmdRedSkillsSync(p: Platform, inv: Invocation): Promise<number> {
+  const { withUpdateLock } = await import("./update-coordinator.ts");
+  const held = await withUpdateLock(() => cmdRedSkillsSyncUnlocked(p, inv));
+  if (held.busy) { log.warn("another installation or update is running"); return 2; }
+  return held.value;
+}
+async function cmdRedSkillsSyncUnlocked(p: Platform, inv: Invocation): Promise<number> {
   const dir = inv.redSkillsSelector;
   if (!dir) {
     log.err("red-skills sync needs the checkout to sync: `red-dev red-skills sync <path>`");
@@ -796,15 +815,22 @@ async function cmdRedSkillsSync(p: Platform, inv: Invocation): Promise<number> {
  * in and which of them may fail without ending the run.
  */
 async function cmdUpdate(p: Platform, inv: Invocation): Promise<number> {
-  // Repair old global selectors before any update stage asks mise what is
-  // current. Otherwise a numbered selector truthfully reports that its old
-  // line is current and the machine never reaches the moving channel.
+  if (inv.dryRun) return cmdUpdateUnlocked(p, inv);
+  const { withUpdateLock, runUpdateJob } = await import("./update-coordinator.ts");
+  const { autoUpdateMinutes } = await import("./auto-update-schedule.ts");
+  let code = 0;
+  const result = await withUpdateLock(async () => {
+    await runUpdateJob("suite", autoUpdateMinutes() * 60_000, async () => { code = await cmdUpdateUnlocked(p, inv); return code === 0; }, { force: true });
+    return code;
+  });
+  if (result.busy) { log.warn("another update is running; retry when it completes"); return 2; }
+  return result.value;
+}
+
+async function cmdUpdateUnlocked(p: Platform, inv: Invocation, includeWsl = true): Promise<number> {
   if (!inv.dryRun) {
-    const { enforceMiseLatestSelectors, runPendingMigrations } = await import("./migrations.ts");
+    const { runPendingMigrations } = await import("./migrations.ts");
     await runPendingMigrations(p);
-    // And on every update, not only the once the ledger allows: a number
-    // typed by hand after the migration ran is the same pin it repaired.
-    await enforceMiseLatestSelectors(p);
   }
 
   const { runUpdate } = await import("./update-order.ts");
@@ -863,7 +889,7 @@ async function cmdUpdate(p: Platform, inv: Invocation): Promise<number> {
       if (inv.dryRun) return;
       // The workstation converge (or unattended child update) owns WSL's
       // complete update after ensuring the child is on this version.
-      const code = await cmdAgentsUpdate(p, false);
+      const code = await cmdAgentsUpdate(p, false, true);
       if (code !== 0) throw new Error("some agent hosts did not update");
     },
 
@@ -871,7 +897,7 @@ async function cmdUpdate(p: Platform, inv: Invocation): Promise<number> {
     // binary replaced), so always re-converge afterwards.
     converge: async () => {
       const { convergeUpdatedBinary } = await import("./update-handover.ts");
-      return convergeUpdatedBinary(VERSION, inv, () => cmdInstall(p, inv, "update"));
+      return convergeUpdatedBinary(VERSION, inv, () => cmdInstallUnlocked(p, inv, "update"));
     },
 
     // And then the versions nobody points at any more, which nothing on
@@ -903,9 +929,11 @@ async function cmdUpdate(p: Platform, inv: Invocation): Promise<number> {
     else log.warn(detail);
   }
   if (run.code === 3) log.warn("update was partial — inspect failed stages before retrying");
-  if (windowsWsl(p) && inv.unattended && !inv.dryRun) {
-    const { relayWslCommand } = await import("./wsl-sync.ts");
-    if (await relayWslCommand(p, "red-dev update --unattended --yes") !== 0) return 3;
+  if (windowsWsl(p) && includeWsl && inv.unattended && !inv.dryRun) {
+    const { relayWslCommand, defaultDistroInfo, ensureDistroRedDev } = await import("./wsl-sync.ts");
+    const distro = await defaultDistroInfo(p);
+    if (!distro || await ensureDistroRedDev(distro.name) !== 0) return 3;
+    if (await relayWslCommand(p, "red-dev maintenance") !== 0) return 3;
   }
   return run.code;
 }
@@ -2188,7 +2216,13 @@ async function cmdAgentsRun(p: Platform, passthrough: string[]): Promise<number>
  * decisions all live there, so `red-dev update` running the same thing
  * as a stage cannot report it differently.
  */
-async function cmdAgentsUpdate(p: Platform, includeWsl = true): Promise<number> {
+async function cmdAgentsUpdate(p: Platform, includeWsl = true, coordinated = false): Promise<number> {
+  if (!coordinated) {
+    const { withUpdateLock } = await import("./update-coordinator.ts");
+    const held = await withUpdateLock(() => cmdAgentsUpdate(p, includeWsl, true));
+    if (held.busy) { log.warn("another update is running"); return 2; }
+    return held.value;
+  }
   const { availableAgents, agentRunsHere } = await import("./agents.ts");
   const { reportAgentUpdate, updateAgents } = await import("./agent-update.ts");
 
@@ -2492,6 +2526,22 @@ async function main(): Promise<number> {
       return await cmdInstall(p, inv);
     case "update":
       return await cmdUpdate(p, inv);
+    case "maintenance": {
+      const { runMaintenance } = await import("./maintenance.ts");
+      return runMaintenance(p, {
+        update: () => cmdUpdateUnlocked(p, { ...inv, unattended: true, yes: true }, false),
+        ...(windowsWsl(p) ? { remote: async () => {
+          const { relayWslCommand, defaultDistroInfo, ensureDistroRedDev } = await import("./wsl-sync.ts");
+          const distro = await defaultDistroInfo(p);
+          if (!distro || await ensureDistroRedDev(distro.name) !== 0) return 3;
+          return relayWslCommand(p, "red-dev maintenance");
+        } } : {}),
+      });
+    }
+    case "policy": {
+      const { policyCommand } = await import("./policy-command.ts");
+      return policyCommand(p, inv.policyTool, inv.policyMode, inv.policyVersion);
+    }
     case "privileged":
       return await cmdPrivileged(p, inv);
     case "theme":

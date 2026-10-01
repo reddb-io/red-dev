@@ -20,7 +20,6 @@ import {
   enforceMiseLatestSelectors,
   globalMiseConfigPath,
   migrateMiseSuiteToSingleIdentity,
-  migrateMiseToolsToLatest,
   migrationLedgerPath,
   vendorClaudeCopy,
   readMigrationLedger,
@@ -28,17 +27,6 @@ import {
 } from "./migrations.ts";
 
 describe("legacy mise selectors", () => {
-  const managed = new Set(["go", "gemini", "github:reddb-io/redcode"]);
-
-  test("moves only red-dev-owned selectors to latest and preserves the file", () => {
-    const source = `[tools]\n# chosen long ago\ngo = "1.24.4" # old default\ngemini = { version = "0.60.0", allow_builds = ["node-pty"] }\n"github:reddb-io/redcode" = '0.38.4'\nprivate-tool = "2.3.4"\n`;
-    const first = migrateMiseToolsToLatest(source, managed);
-
-    expect(first.changed).toEqual(["go", "gemini", "github:reddb-io/redcode"]);
-    expect(first.text).toBe(`[tools]\n# chosen long ago\ngo = "latest" # old default\ngemini = { version = "latest", allow_builds = ["node-pty"] }\n"github:reddb-io/redcode" = 'latest'\nprivate-tool = "2.3.4"\n`);
-    expect(migrateMiseToolsToLatest(first.text, managed)).toEqual({ text: first.text, changed: [] });
-  });
-
   test("finds the global config without assuming one home layout", () => {
     expect(globalMiseConfigPath({ MISE_CONFIG_DIR: "/mise-config" }, "linux")).toBe("/mise-config/config.toml");
     expect(globalMiseConfigPath({ XDG_CONFIG_HOME: "/xdg" }, "linux")).toBe("/xdg/mise/config.toml");
@@ -46,7 +34,7 @@ describe("legacy mise selectors", () => {
   });
 });
 
-describe("latest, held on every update", () => {
+describe("retired selector enforcement", () => {
   const UBUNTU: Platform = {
     os: "linux",
     distro: "ubuntu",
@@ -57,7 +45,7 @@ describe("latest, held on every update", () => {
     caps: { apt: true, gui: true, systemd: true, winget: false, flatpak: true },
   };
 
-  test("puts a hand-typed number back on latest after the migration already ran", async () => {
+  test("preserves hand-typed selectors after retiring the latest migration", async () => {
     // The shape that shipped: the one-shot migration ran on 09-21, then
     // `mise use -g claude@2.1.280` put a number back and nothing noticed.
     const dir = mkdtempSync(join(tmpdir(), "red-dev-latest-"));
@@ -66,11 +54,11 @@ describe("latest, held on every update", () => {
     process.env["MISE_CONFIG_FILE"] = path;
     try {
       writeFileSync(path, `[tools]\nclaude = "2.1.283"\nmy-own-tool = "1.2.3"\n`);
-      expect(await enforceMiseLatestSelectors(UBUNTU)).toEqual(["claude"]);
-      expect(readFileSync(path, "utf8")).toBe(`[tools]\nclaude = "latest"\nmy-own-tool = "1.2.3"\n`);
+      expect(await enforceMiseLatestSelectors(UBUNTU)).toEqual([]);
+      expect(readFileSync(path, "utf8")).toBe(`[tools]\nclaude = "2.1.283"\nmy-own-tool = "1.2.3"\n`);
 
       writeFileSync(path, `[tools]\nclaude = "2.1.284"\nmy-own-tool = "1.2.3"\n`);
-      expect(await enforceMiseLatestSelectors(UBUNTU)).toEqual(["claude"]);
+      expect(await enforceMiseLatestSelectors(UBUNTU)).toEqual([]);
       expect(await enforceMiseLatestSelectors(UBUNTU)).toEqual([]);
     } finally {
       if (previous === undefined) delete process.env["MISE_CONFIG_FILE"];

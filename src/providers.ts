@@ -1,3 +1,4 @@
+import { installSelector } from "./tool-policy.ts";
 /**
  * Provider execution. Each provider knows how to make one tool present
  * on one platform; the caller decides which provider applies.
@@ -796,7 +797,8 @@ async function miseInstall(
 
   convergeMiseConfig(platform);
 
-  const selector = `${pr.alias ?? pr.spec}@${pr.version ?? "latest"}`;
+  const selector = installSelector(pr.alias ?? pr.spec, pr.spec);
+  if (!selector) { log.skip(`${pr.alias ?? pr.spec}: externally managed`); return; }
   log.step(`mise: ${pr.spec}`);
   log.info(`installing ${selector} — mise resolves the asset and verifies it`);
 
@@ -814,12 +816,13 @@ async function miseInstall(
  * the fragment already declares the short alias, making mise install the
  * same release once under each identity.
  */
-export async function miseInstallDeclared(name: string, platform: Platform): Promise<void> {
+export async function miseInstallDeclared(name: string, platform: Platform, spec = name): Promise<void> {
   const mise = Bun.which("mise");
   if (!mise) throw new RedError("mise is not on PATH — run `red-dev install core` first");
 
   convergeMiseConfig(platform);
-  const selector = `${name}@latest`;
+  const selector = installSelector(name, spec);
+  if (!selector) { log.skip(`${name}: externally managed`); return; }
   log.step(`mise: ${selector}`);
   const code = await runMise([mise, "install", selector], platform);
   if (code !== 0) throw new RedError(`mise could not install ${selector} (exit ${code})`);
@@ -841,7 +844,9 @@ export async function miseInstallSuite(platform: Platform): Promise<void> {
   if (entries === 0) return;
 
   log.step(`mise: installing ${entries} tools`);
-  const code = await runMise([mise, "install"], platform);
+  const { miseEntries } = await import("./mise-config.ts");
+  const selectors = miseEntries(platform).map(e => `${e.alias ?? e.spec}@${e.version}`);
+  const code = await runMise([mise, "install", ...selectors], platform);
   if (code !== 0) throw new RedError(`mise could not install the suite (exit ${code})`);
 
   await linkRedSkillsCore(platform);
@@ -866,6 +871,7 @@ export async function miseUpgradeSuite(platform: Platform): Promise<void> {
 
   const { miseToolNames } = await import("./mise-config.ts");
   const names = miseToolNames(platform);
+  if (names.length === 0) return;
   log.step(`mise: upgrading ${names.length} tools`);
   const code = await runMise([mise, "upgrade", "--yes", ...names], platform);
   if (code !== 0) log.err(`mise upgrade exited ${code}`);
@@ -2041,18 +2047,15 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
         // printed one — including the refusal, which is the operator's
         // own declaration standing where red-dev would have put its.
         await applyRedwallHook(ctx.platform);
-
-        // Beside it because both are "what asks red-dev something while
-        // nobody is typing", and this one is the floor under the shell
-        // hook rather than a competitor to it. See src/watch-schedule.ts
-        // for why a timer is defensible here and was not for the
-        // Redwall.
+        return;
+      }
+      if (pr.name === "maintenance-schedule") {
+        // One OS schedule owns maintenance; prompts no longer update tools.
+        // WSL must converge this even though its desktop hook lives on Windows.
         const { convergeWatchSchedule } = await import("./watch-schedule.ts");
         await convergeWatchSchedule(ctx.platform);
 
-        // And the one that keeps `latest` meaning the latest: an hourly
-        // unattended update of the suite and the agent hosts. See
-        // src/auto-update-schedule.ts.
+        // Retire the separate hourly clock left by earlier installations.
         const { convergeAutoUpdateSchedule } = await import("./auto-update-schedule.ts");
         await convergeAutoUpdateSchedule(ctx.platform);
         return;

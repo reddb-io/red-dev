@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -114,16 +114,20 @@ describe("converging the schedule", () => {
     expect(r.calls).toEqual([]);
   });
 
-  test("writes the pair, enables it, and is quiet the second time", async () => {
+  test("retires the owned pair with a backup and is quiet the second time", async () => {
     const home = mkdtempSync(join(tmpdir(), "red-dev-auto-update-"));
     try {
       const r = recorder();
       const seams = { home, env: { PATH: "/usr/bin" }, run: r.run, binary: "/opt/red-dev" };
-      expect(await convergeAutoUpdateSchedule(UBUNTU, seams)).toBe("installed");
       const dir = join(home, ".config/systemd/user");
-      expect(readFileSync(join(dir, AUTO_UPDATE_SERVICE), "utf8")).toContain("/opt/red-dev update --unattended");
-      expect(existsSync(join(dir, AUTO_UPDATE_TIMER))).toBe(true);
-      expect(r.calls).toContainEqual(["systemctl", "--user", "enable", "--now", AUTO_UPDATE_TIMER]);
+      mkdirSync(dir, { recursive: true });
+      const units = autoUpdateUnits("/opt/red-dev", 60);
+      writeFileSync(join(dir, AUTO_UPDATE_SERVICE), units.service);
+      writeFileSync(join(dir, AUTO_UPDATE_TIMER), units.timer);
+      expect(await convergeAutoUpdateSchedule(UBUNTU, seams)).toBe("removed");
+      expect(existsSync(join(dir, AUTO_UPDATE_TIMER))).toBe(false);
+      expect(existsSync(join(home, ".local/state/red-dev/retired-update-triggers"))).toBe(true);
+      expect(r.calls).toContainEqual(["systemctl", "--user", "disable", "--now", AUTO_UPDATE_TIMER]);
 
       r.calls.length = 0;
       expect(await convergeAutoUpdateSchedule(UBUNTU, seams)).toBe("unchanged");
@@ -137,7 +141,10 @@ describe("converging the schedule", () => {
     const home = mkdtempSync(join(tmpdir(), "red-dev-auto-update-"));
     try {
       const r = recorder();
-      await convergeAutoUpdateSchedule(UBUNTU, { home, env: {}, run: r.run, binary: "/opt/red-dev" });
+      const dir = join(home, ".config/systemd/user"); mkdirSync(dir, { recursive: true });
+      const units = autoUpdateUnits("/opt/red-dev", 60);
+      writeFileSync(join(dir, AUTO_UPDATE_SERVICE), units.service);
+      writeFileSync(join(dir, AUTO_UPDATE_TIMER), units.timer);
       r.calls.length = 0;
 
       const outcome = await convergeAutoUpdateSchedule(UBUNTU, {

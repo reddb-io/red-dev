@@ -1,3 +1,4 @@
+import { toolPolicy } from "./tool-policy.ts";
 /**
  * Updating the agent hosts — each one by its own publisher's mechanism.
  *
@@ -157,6 +158,10 @@ export function planAgentUpdate(
   res: UpdateResolution,
 ): AgentUpdatePlan {
   const { key, label } = a;
+  if (a.mise) {
+    const policy = toolPolicy(a.cmd, a.mise);
+    if (policy.mode !== "follow") return { state: "skip", key, label, reason: policy.mode === "external" ? "externally managed" : `fixed selector ${policy.version}` };
+  }
   const mechanism = agentUpdateMechanism(a, p, res);
   if (!mechanism) return { state: "skip", key, label, reason: "no update mechanism here" };
 

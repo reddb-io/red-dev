@@ -143,6 +143,13 @@ async function deployTo(homeDir: string, label: string): Promise<void> {
 
   let changed = 0;
   for (const [name, content] of Object.entries(FILES)) {
+    if (name === "red-skills-watch.sh" && existsSync(`${dest}/${name}`)) {
+      const old = await Bun.file(`${dest}/${name}`).text();
+      if (old.includes("_red_skills_watch_tick()") && old.includes("red-skills watch due")) {
+        const { archiveUpdateTrigger } = await import("./retire-update-schedule.ts");
+        archiveUpdateTrigger(homeDir, name, old);
+      }
+    }
     if (await writeIfChanged(`${dest}/${name}`, content)) changed++;
   }
 

@@ -64,11 +64,6 @@ export function globalMiseConfigPath(
   return root ? join(root, "mise", "config.toml") : null;
 }
 
-export interface MiseLatestMigrationResult {
-  text: string;
-  changed: string[];
-}
-
 export interface MiseIdentityMigrationResult {
   text: string;
   removed: string[];
@@ -99,6 +94,9 @@ export function migrateMiseSuiteToSingleIdentity(
     if (statement.kind !== "assignment" || statement.table !== "tools") continue;
     const alias = aliases.get(statement.key);
     if (!alias) continue;
+    const value = ((Bun.TOML.parse(source) as { tools?: Record<string, unknown> }).tools)?.[statement.key];
+    const selector = typeof value === "object" && value !== null ? (value as { version?: unknown }).version : value;
+    if (selector !== "latest") continue;
 
     for (let i = statement.line; i <= statement.end; i++) {
       const line = lines[i]!;
@@ -112,95 +110,9 @@ export function migrateMiseSuiteToSingleIdentity(
   return { text, removed };
 }
 
-/**
- * Rewrite only known red-dev tool rows in `[tools]`, preserving the person's
- * comments, ordering, quoting and inline-table options.
- */
-export function migrateMiseToolsToLatest(
-  source: string,
-  managed: ReadonlySet<string>,
-): MiseLatestMigrationResult {
-  const lines = splitLines(source);
-  const changed: string[] = [];
-
-  for (const statement of statements(lines)) {
-    if (statement.kind !== "assignment" || statement.table !== "tools") continue;
-    if (!managed.has(statement.key) || statement.line !== statement.end) continue;
-
-    const line = lines[statement.line]!;
-    let next = line.text;
-    const inline = /\b(version\s*=\s*)(["'])([^"']+)\2/;
-    const scalar = /(=\s*)(["'])([^"']+)\2/;
-    const match = inline.exec(next) ?? scalar.exec(next);
-    if (!match || match[3] === "latest") continue;
-
-    next = `${next.slice(0, match.index)}${match[1]}${match[2]}latest${match[2]}${next.slice(match.index + match[0].length)}`;
-    lines[statement.line] = { text: next, eol: line.eol };
-    changed.push(statement.key);
-  }
-
-  const text = joinLines(lines);
-  if (changed.length > 0) Bun.TOML.parse(text);
-  return { text, changed };
-}
-
-async function redDevManagedMiseKeys(p: Platform): Promise<Set<string>> {
-  const [{ OFFERED_RUNTIMES }, { AGENTS }, { miseEntries }] = await Promise.all([
-    import("./runtimes.ts"),
-    import("./agents.ts"),
-    import("./mise-config.ts"),
-  ]);
-  const keys = new Set(OFFERED_RUNTIMES.map((runtime) => runtime.id.split("@")[0]!));
-  for (const agent of AGENTS) if (agent.mise) keys.add(agent.mise);
-  for (const entry of miseEntries(p)) {
-    keys.add(entry.spec);
-    if (entry.alias) keys.add(entry.alias);
-  }
-  return keys;
-}
-
-/** The config file the selectors live in, on this platform. */
-function platformMiseConfigPath(p: Platform): string | null {
-  return globalMiseConfigPath(process.env, p.os === "windows" ? "win32" : "linux");
-}
-
-/** The red-dev tool rows in the global config that name a number. */
-export async function pendingMiseLatestSelectors(p: Platform): Promise<string[]> {
-  const path = platformMiseConfigPath(p);
-  if (!path || !existsSync(path)) return [];
-  return migrateMiseToolsToLatest(readFileSync(path, "utf8"), await redDevManagedMiseKeys(p)).changed;
-}
-
-/**
- * Put every red-dev tool row back on `latest`, on every update.
- *
- * This was a one-shot migration, and one shot was not enough. It ran on
- * the maintainer's machine on 2026-09-21; a day later `mise use -g
- * claude@2.1.280`, typed by hand, put a number back, and the ledger said
- * the repair had already happened. `claude update` refuses under mise,
- * `mise upgrade` honours the number, and the host stayed pinned until
- * somebody read the config. A selector red-dev manages is `latest`
- * because red-dev manages it, so the rule is applied whenever red-dev
- * updates rather than remembered once.
- *
- * Only the rows red-dev offers are touched — the person's own tools keep
- * whatever they wrote — and the rewrite preserves comments, order and
- * inline-table options (see migrateMiseToolsToLatest).
- */
-export async function enforceMiseLatestSelectors(p: Platform): Promise<string[]> {
-  const path = platformMiseConfigPath(p);
-  if (!path || !existsSync(path)) return [];
-  const result = migrateMiseToolsToLatest(
-    readFileSync(path, "utf8"),
-    await redDevManagedMiseKeys(p),
-  );
-  if (result.changed.length === 0) return [];
-
-  const temporary = `${path}.red-dev-latest.tmp`;
-  writeFileSync(temporary, result.text);
-  renameSync(temporary, path);
-  log.plain(`       ${result.changed.join(", ")} -> latest`);
-  return result.changed;
+/** Retired: explicit global selectors belong to the user. */
+export async function enforceMiseLatestSelectors(_p: Platform): Promise<string[]> {
+  return [];
 }
 
 export const MIGRATIONS: Migration[] = [
@@ -631,14 +543,6 @@ return {}
           for (const file of result.cleared) log.plain(`       cleared ${file}; the hosts are re-registered at the new path below`);
           return;
       }
-    },
-  },
-  {
-    id: "2026-09-21-mise-latest-selectors",
-    describe: "move legacy red-dev mise selectors onto latest",
-    applies: async (p) => (await pendingMiseLatestSelectors(p)).length > 0,
-    run: async (p) => {
-      await enforceMiseLatestSelectors(p);
     },
   },
   {

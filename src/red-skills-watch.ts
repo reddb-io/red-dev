@@ -1,3 +1,4 @@
+import { runUpdateJob, withUpdateLock, updateClockPath } from "./update-coordinator.ts";
 /**
  * Taking a new RedSkills release as soon as the machine sees one.
  *
@@ -197,6 +198,8 @@ export interface WatchResult {
 }
 
 export interface WatchOptions {
+  coordinated?: boolean;
+  coordinatorPath?: string;
   home?: string;
   nowMs?: number;
   /** Ask even inside the interval. What a person typing the command means. */
@@ -227,6 +230,22 @@ export interface WatchOptions {
  * output of. Only a run that changed something speaks.
  */
 export async function watchRedSkills(opts: WatchOptions = {}): Promise<WatchResult> {
+  if (opts.trigger === "shell") return { outcome: "not-due", reason: "retired prompt trigger; maintenance uses the OS scheduler" };
+  const path = opts.coordinatorPath ?? (opts.home ? `${opts.home}/.local/state/red-dev/update-coordinator.json` : updateClockPath());
+  const run = async (): Promise<WatchResult> => {
+    let result: WatchResult = { outcome: "not-due", reason: "next automatic attempt is scheduled" };
+    await runUpdateJob("skills", opts.intervalMs ?? WATCH_INTERVAL_MS, async () => {
+      result = await watchRedSkillsUnlocked(opts);
+      return result.outcome !== "unreachable" && result.outcome !== "refused";
+    }, { path, now: opts.nowMs, force: opts.force });
+    return result;
+  };
+  if (opts.coordinated) return run();
+  const held = await withUpdateLock(run, path);
+  return held.busy ? { outcome: "busy", reason: "another update is running" } : held.value;
+}
+
+async function watchRedSkillsUnlocked(opts: WatchOptions): Promise<WatchResult> {
   const home = opts.home ?? (process.env["HOME"] ?? process.env["USERPROFILE"] ?? "").replace(/\\/g, "/");
   const nowMs = opts.nowMs ?? Date.now();
   const stamp = watchStampPath(home);
@@ -249,13 +268,14 @@ export async function watchRedSkills(opts: WatchOptions = {}): Promise<WatchResu
     // trigger, which is ten minutes away and costs nothing to wait for.
     const upgraded = await (opts.upgrade ?? (() => defaultUpgrade(opts)))();
     announceSelfUpdate(upgraded);
+    if (upgraded.outcome === "unreachable" || upgraded.outcome === "refused") return { outcome: upgraded.outcome === "unreachable" ? "unreachable" : "refused", reason: upgraded.reason };
 
     const result = await (opts.take ?? (() => defaultTake(opts)))();
 
     // The other half of a WSL machine, whatever this half found: the
     // Windows side keeps its own stamp, so asking it costs nothing when
     // it asked recently and is the only trigger it has when it did not.
-    if (opts.manifestPlatform) {
+    if (opts.manifestPlatform && process.env.RED_DEV_WSL_CHILD !== "1") {
       const crossing = await (opts.cross ?? crossToWindows)(opts.manifestPlatform);
       // Said out loud only to a person who typed the command. A skip is
       // the ordinary answer on a machine with one half, and the first

@@ -1,3 +1,4 @@
+import { toolPolicy } from "./tool-policy.ts";
 /**
  * Language runtimes, owned by mise on every target.
  *
@@ -249,7 +250,11 @@ export async function useRuntimes(ids: string[], observer: RuntimeObserver = {})
     throw new RedError(detail);
   }
 
-  for (const id of runtimeIdsForPolicy(ids, "latest")) {
+  for (const requested of runtimeIdsForPolicy(ids, "latest")) {
+    const name = requested.split("@")[0]!;
+    const policy = toolPolicy(name);
+    if (policy.mode === "external") { log.skip(`${name}: externally managed`); continue; }
+    const id = policy.mode === "fixed" ? `${name}@${policy.version}` : requested;
     observer.stepStart?.(id);
     log.step(`mise: ${id}`);
     log.info(`downloads from ${runtimeSource(id)}`);
@@ -460,8 +465,11 @@ export async function installRuntimes(p: Platform): Promise<void> {
 
   const { out: installed } = await run([mise, "ls", "--installed"]);
 
-  for (const runtime of DEFAULT_RUNTIMES) {
-    const name = runtime.split("@")[0]!;
+  for (const requested of DEFAULT_RUNTIMES) {
+    const name = requested.split("@")[0]!;
+    const policy = toolPolicy(name);
+    if (policy.mode === "external") { log.skip(`${name}: externally managed`); continue; }
+    const runtime = policy.mode === "fixed" ? `${name}@${policy.version}` : requested;
     if (installed.includes(name)) {
       log.skip(`${runtime} already managed by mise`);
       continue;
