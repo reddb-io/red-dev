@@ -39,8 +39,9 @@ export async function attachMachineProfile(p: Platform): Promise<MachineProfile>
 }
 /** Called only under the installation writer. Read-only commands never adopt. */
 export async function adoptMachineProfile(p: Platform): Promise<MachineProfile> {
+  await (await import("./dev-config-migration.ts")).migrateDevConfig(p);
   const profile = await attachMachineProfile(p);
-  if (JSON.stringify(readMachineProfile()) !== JSON.stringify(profile)) { writeMachineProfile(profile); log.ok(`profile: recorded ${profile.name}; legacy preferences preserved`); }
+  if (JSON.stringify(readMachineProfile()) !== JSON.stringify(profile)) { writeMachineProfile(profile); log.ok(`profile: recorded ${profile.name}; saved choices preserved`); }
   return profile;
 }
 export async function profileCommand(p: Platform, action = "show", value?: string): Promise<number> {
@@ -54,6 +55,7 @@ export async function profileCommand(p: Platform, action = "show", value?: strin
   if (action === "use" && !PROFILE_NAMES.includes(value as ProfileName)) throw new Error(`profile use expects ${PROFILE_NAMES.join(", ")}`);
   if (["enable", "disable"].includes(action) && !TOOLS.some(t => t.name === value)) throw new Error(`unknown profile tool: ${value}`);
   const held = await withUpdateLock(async () => {
+    await (await import("./dev-config-migration.ts")).migrateDevConfig(p);
     const profile = await resolveMachineProfile(p);
     const next: MachineProfile = { ...profile, tools: { ...profile.tools } };
     if (action === "use") next.name = value as ProfileName;

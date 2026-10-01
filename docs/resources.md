@@ -58,7 +58,8 @@ escolha explícita em `custom` após verificar a máquina.
 Somente `memory` e `swap` do `.wslconfig` são alterados; as outras escolhas,
 comentários, BOM e finais de linha são preservados. Valores existentes são
 mostrados na prévia. Seções/chaves duplicadas e codificações não suportadas
-são recusadas. As escolhas ficam em `profile.json`, separado das observações.
+são recusadas. As escolhas ficam em `profile.resources` de `~/.red/dev/config.yaml`,
+separadas das observações.
 O efeito fica pendente até o próximo reinício do WSL feito pelo usuário.
 Este fluxo não executa `wsl --shutdown` nem reinicia workloads.
 
@@ -102,7 +103,8 @@ red-dev resources configure system --apply
 há um histórico separado por projeto. Os backups guardam bytes e permissões
 anteriores (modo Unix, quando disponível) em arquivos privados sob o estado
 do red-dev. A restauração recusa
-sobrescrever arquivos modificados depois por outro dono. Alterações
+sobrescrever recursos modificados depois por outro dono. No YAML, preserva
+alterações posteriores de tema, agentes, políticas e outros campos. Alterações
 interrompidas mantêm evidências para restauração e repetição segura.
 
 `system` desativa a coordenação no perfil e restaura o `.wslconfig` anterior

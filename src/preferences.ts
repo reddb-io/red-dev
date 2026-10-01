@@ -8,14 +8,13 @@
  * from the distro pointed it at wsl.exe; converging from Windows pointed
  * it at Git Bash; neither was a decision anyone made.
  *
- * Stored beside the Alacritty config rather than in a home directory,
- * because that is the one location both sides of the WSL boundary
- * already agree on: under WSL red-dev resolves it to the Windows host,
- * and on Windows it is simply local. A preference that lives in two
- * places is not a preference.
+ * Stored in ~/.red/dev/config.yaml, separately for Windows and WSL.
+ * A Windows coordinator forwards known choices to its selected distro.
+ * The old Alacritty JSON file remains a read-only migration source.
  */
 
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { readDevConfig, writeDevConfig } from "./dev-config.ts";
 import type { ApplyContext } from "./providers.ts";
 import type { Platform } from "./platform.ts";
 import { isThemeSlug, resolveThemeSlug, type ThemeSlug } from "./themes.ts";
@@ -119,16 +118,22 @@ async function prefDir(p: Platform): Promise<string> {
 function join(dir: string, name: string, p: Platform): string {
   return `${dir}${p.os === "windows" ? "\\" : "/"}${name}`;
 }
+export async function legacyPreferencesPath(p: Platform): Promise<string> {
+  return join(await prefDir(p), FILE, p);
+}
 
 export async function readPreferences(p: Platform, options: { strict?: boolean; raw?: boolean } = {}): Promise<Preferences> {
+  const config = readDevConfig(); // Authoritative YAML errors must never select defaults.
   try {
-    const path = join(await prefDir(p), FILE, p);
-    const prefs = existsSync(path) ? JSON.parse(await Bun.file(path).text()) as Preferences : {};
-    if (!prefs || typeof prefs !== "object" || Array.isArray(prefs)) throw new Error(`invalid preferences: ${path}`);
-    if (options.raw) return prefs;
+    const path = config ? "red-dev config.yaml" : await legacyPreferencesPath(p);
+    const stored = config ? config.preferences ?? {} : existsSync(path) ? JSON.parse(await Bun.file(path).text()) as Preferences : {};
+    const { childPreferences } = await import("./dev-config-migration.ts");
+    const prefs = { ...stored, ...childPreferences() };
+    if (!stored || typeof stored !== "object" || Array.isArray(stored)) throw new Error(`invalid preferences: ${path}`);
+    if (options.raw) return prefs as Preferences;
     const { readMachineProfile } = await import("./machine-profile.ts");
     const profile = readMachineProfile();
-    if (!profile) return prefs;
+    if (!profile) return prefs as Preferences;
     return { ...prefs, ...Object.fromEntries(["agents", "runtimes", "apps", "distro"].flatMap(key => {
       const value = profile[key as "agents" | "runtimes" | "apps" | "distro"];
       return value === undefined ? [] : [[key, value]];
@@ -145,8 +150,8 @@ export async function readPreferences(p: Platform, options: { strict?: boolean; 
 }
 
 export async function writePreferences(p: Platform, prefs: Preferences): Promise<void> {
-  const dir = await prefDir(p);
-  mkdirSync(dir, { recursive: true });
+  const { migrateDevConfig } = await import("./dev-config-migration.ts");
+  await migrateDevConfig(p);
   const merged = { ...(await readPreferences(p, { strict: true, raw: true })), ...prefs };
   const { readMachineProfile, writeMachineProfile } = await import("./machine-profile.ts");
   const profile = readMachineProfile();
@@ -159,10 +164,12 @@ export async function writePreferences(p: Platform, prefs: Preferences): Promise
       for (const tool of TOOLS.filter(t => t.scope === "optional")) next.tools[tool.name] = prefs.apps.includes(tool.name);
     }
     if (p.os === "windows" && prefs.terminalShell) next.name = prefs.terminalShell === "gitbash" ? "windows-native" : "windows-wsl";
-    writeMachineProfile(next);
+    if (process.env.RED_DEV_PROFILE_FILE) writeMachineProfile(next);
+    else writeDevConfig(current => ({ ...current, preferences: merged, profile: next as unknown as Record<string, unknown> }));
     p.profile = next;
+    if (!process.env.RED_DEV_PROFILE_FILE) return;
   }
-  await Bun.write(join(dir, FILE, p), JSON.stringify(merged, null, 2) + "\n");
+  writeDevConfig(current => ({ ...current, preferences: merged }));
 }
 
 /**

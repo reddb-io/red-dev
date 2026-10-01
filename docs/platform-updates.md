@@ -24,8 +24,8 @@ red-dev policy claude follow
 red-dev policy claude external
 ```
 
-As políticas ficam em `red-dev/tool-policies.json` no diretório de configuração
-do usuário. Alterações explícitas são serializadas com as atualizações. No
+As políticas ficam na seção `policies` de `~/.red/dev/config.yaml`.
+O JSON antigo é importado com backup durante instalação/atualização. Alterações explícitas são serializadas com as atualizações. No
 Windows com WSL, ferramentas Linux recebem sua política no Ubuntu selecionado;
 ferramentas instaladas nos dois lados recebem a escolha nos dois lados.
 

@@ -17,7 +17,9 @@
  *    does not want their theme deleted, and there is no undo.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
+import { devConfigPath, legacyPolicyPath, legacyProfilePath } from "./dev-config.ts";
+import { dirname } from "node:path";
 import { log, RedError } from "./log.ts";
 import { providerFor, toolsInScope, isPresent, type Tool } from "./manifest.ts";
 import type { Platform } from "./platform.ts";
@@ -310,11 +312,12 @@ export async function removeConfiguration(p: Platform): Promise<string[]> {
   let preserveProfileRoot = false;
   const { profilePath, readMachineProfile } = await import("./machine-profile.ts");
   try {
-    if (readMachineProfile()) {
+    if (process.env.RED_DEV_PROFILE_FILE && readMachineProfile()) {
       const { unlinkSync } = await import("node:fs");
       unlinkSync(profilePath());
       removed.push(profilePath());
     }
+    if (!process.env.RED_DEV_PROFILE_FILE) log.skip(`Saved choices preserved: ${profilePath()}`);
   } catch (err) { preserveProfileRoot = true; log.warn(`profile preserved: ${(err as Error).message}`); }
 
   // Before the roots below, not after. Off WSL the Redwall directory
@@ -391,7 +394,11 @@ export async function removeConfiguration(p: Platform): Promise<string[]> {
     `${home}/.config/mise/conf.d/10-reddb-io.toml`,
   ];
 
+  const saved = [devConfigPath(), ...(!process.env.RED_DEV_PROFILE_FILE ? [legacyProfilePath()] : []), ...(!process.env.RED_DEV_POLICY_FILE ? [legacyPolicyPath()] : [])];
+  const oldRoot = dirname(legacyProfilePath());
+  const hasBackups = existsSync(oldRoot) && readdirSync(oldRoot).some(name => /^(profile|tool-policies)\.json\.red-dev-config-[a-f0-9]+\.bak$/.test(name));
   for (const path of targets) {
+    if (saved.some(file => existsSync(file) && (file === path || file.startsWith(`${path}/`))) || (hasBackups && oldRoot === path)) { log.skip(`preserved ${path}: saved choices or migration backups`); continue; }
     if (preserveProfileRoot && profilePath().startsWith(`${path}/`)) { log.skip(`preserved ${path}: unknown profile data`); continue; }
     if (existsSync(path)) {
       await sh(["rm", "-rf", path], { allowFailure: true });

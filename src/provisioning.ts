@@ -7,7 +7,10 @@ export interface ProvisioningPreparation {
 }
 
 const preparation: ProvisioningPreparation = {
-  migrate: async p => (await import("./migrations.ts")).runPendingMigrations(p),
+  migrate: async p => {
+    await (await import("./dev-config-migration.ts")).migrateDevConfig(p);
+    return (await import("./migrations.ts")).runPendingMigrations(p);
+  },
   adopt: async p => (await import("./profile-command.ts")).adoptMachineProfile(p),
   declareMise: async p => (await import("./mise-config.ts")).convergeMiseConfig(p),
 };

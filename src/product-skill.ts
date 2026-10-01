@@ -168,6 +168,7 @@ two do not repeat each other.
 
 | What | Where |
 | --- | --- |
+| Saved choices | \`~/.red/dev/config.yaml\` |
 | Managed configuration | \`${facts.config}\` |
 | State: transcripts, crash logs, cached observations | \`${facts.state}\` |
 | RedSkills source snapshot | \`~/.red/skills/current\` (a symlink into a versioned copy) |
@@ -181,6 +182,7 @@ or the edit disappears without anything reporting that it did.
 
 Read-only, safe to run at any time, and the right first move:
 
+- \`red-dev config --json\` — saved profile, preferences and policies, without migration.
 - \`red-dev platform\` — what red-dev thinks this machine is.
 - \`red-dev plan [scope]\` — what a converge would change, changing nothing.
 - \`red-dev doctor\` — drift against the manifest, host process health,

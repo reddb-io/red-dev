@@ -30,6 +30,7 @@ export async function policyCommand(p: Platform, name?: string, mode?: string, v
   }
   if (policy) {
     const held = await withUpdateLock(async () => {
+      await (await import("./dev-config-migration.ts")).migrateDevConfig(p);
       writeToolPolicy(key!, policy);
       convergeMiseConfig(p);
       if (policy.mode !== "external") {

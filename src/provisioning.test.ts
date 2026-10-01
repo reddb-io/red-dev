@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -56,7 +57,7 @@ test.skipIf(process.platform === "win32")("fresh and legacy machines run the rea
     expect(fragment).toContain("credential_command");
     expect(fragment).toContain("red-dev-github-auth.sh");
     if (legacy) {
-      expect(readFileSync(preferences, "utf8")).toBe(preferencesBytes);
+      expect(readFileSync(`${preferences}.red-dev-config-${createHash("sha256").update(preferencesBytes).digest("hex").slice(0, 16)}.bak`, "utf8")).toBe(preferencesBytes);
       expect(readFileSync(`${personal}.bak-red-dev-single-identity`, "utf8")).toBe(original);
       const remaining = readFileSync(personal, "utf8");
       expect(remaining).not.toContain("github:reddb-io/toon");
