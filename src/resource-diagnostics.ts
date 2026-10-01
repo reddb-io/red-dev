@@ -135,8 +135,10 @@ export async function resourceSnapshot(p: Platform, seams: { run?: Run; procRoot
   }
   const home = seams.home ?? process.env.HOME ?? process.env.USERPROFILE;
   if (home) {
+    try {
     const retired = resourceRetirementPlan(home, snapshot.wsl.path ?? undefined);
     snapshot.legacy.push(...retired.changes.map(e => ({ path: e.path, owned: true })), ...retired.preserved.map(path => ({ path, owned: false })));
+    } catch { snapshot.unknown.push("Legacy resource definitions could not all be read; ownership remains unconfirmed"); }
   }
   if (snapshot.linux?.memory.total === null) snapshot.unknown.push("Linux memory unavailable");
   return snapshot;

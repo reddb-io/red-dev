@@ -100,7 +100,8 @@ red-dev resources configure system --apply
 
 `undo` restaura a última alteração desse fluxo no ambiente onde foi aplicada;
 há um histórico separado por projeto. Os backups guardam bytes e permissões
-anteriores em arquivos privados sob o estado do red-dev. A restauração recusa
+anteriores (modo Unix, quando disponível) em arquivos privados sob o estado
+do red-dev. A restauração recusa
 sobrescrever arquivos modificados depois por outro dono. Alterações
 interrompidas mantêm evidências para restauração e repetição segura.
 

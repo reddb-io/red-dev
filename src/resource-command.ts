@@ -56,6 +56,7 @@ export async function resourceWizard(p: Platform): Promise<number> {
     if (choice === "Keep current settings") return 0;
     if (choice === "Inspect again") continue;
     if (choice === "Details") { log.plain(resourceReport(snapshot).join("\n")); await select("Resources", ["Back"], "Back"); continue; }
+    try {
     if (choice === "Undo") {
       const scope = await select("Undo which resource choice?", ["Machine", "Rust project", "Back"], "Back");
       if (scope === "Back") continue;
@@ -64,7 +65,6 @@ export async function resourceWizard(p: Platform): Promise<number> {
       if (await confirm("Restore these files?", false)) return undo(project, true);
       continue;
     }
-    try {
       let plan: ResourcePlan;
       if (choice === "Rust project") {
         const project = await text("Rust project directory", process.cwd());
