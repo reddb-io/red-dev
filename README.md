@@ -657,9 +657,11 @@ OS HTTP reachability and mise's own request. To repair the gh integration
 without upgrading any package, preview `red-dev doctor --repair mise-auth`,
 then apply with `--apply`. See [maintenance and recovery](docs/maintenance.md).
 
-red-dev runs panes, agents, compilers and package managers directly. It imposes
-no RAM/swap, CPU, I/O, task or disk-admission policy and does not limit Cargo
-parallelism. Installation and updates retire older red-dev wrappers, resource
+red-dev runs panes, agents, compilers and package managers directly. Ordinary
+provisioning adds no RAM/swap, CPU, I/O, task or disk-admission policy and does
+not limit Cargo parallelism. `red-dev resources` offers read-only diagnostics
+and explicitly chosen WSL budgets and project build settings, with previews
+and undo. See [resource choices](docs/resources.md). Installation and updates retire older red-dev wrappers, resource
 slices, Worker attachments, disk-guardian timers and marked Cargo/WSL settings.
 The cleanup archives exact original bytes, releases live controls without
 restarting workloads, and preserves definitions whose owner cannot be proven.

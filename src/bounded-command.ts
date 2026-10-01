@@ -1,4 +1,8 @@
+import { decodeWindowsOutput } from "./windows-output.ts";
+
 export interface BoundedCommandOptions {
+  /** WSL's redirected output can be UTF-16LE, including non-ASCII distro names. */
+  windowsOutput?: boolean;
   timeoutMs?: number;
   killGraceMs?: number;
   cwd?: string;
@@ -39,25 +43,27 @@ function groupExists(pid: number): boolean {
   }
 }
 
-function capture(stream: ReadableStream<Uint8Array>): {
+function capture(stream: ReadableStream<Uint8Array>, windowsOutput = false): {
   text: Promise<string>;
   cancel: () => Promise<void>;
 } {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
+  const chunks: Uint8Array[] = [];
   let value = "";
   const text = (async () => {
     try {
       for (;;) {
         const chunk = await reader.read();
         if (chunk.done) break;
-        value += decoder.decode(chunk.value, { stream: true });
+        if (windowsOutput) chunks.push(chunk.value);
+        else value += decoder.decode(chunk.value, { stream: true });
       }
       value += decoder.decode();
     } catch {
       // Cancellation after the absolute deadline returns what was captured.
     }
-    return value;
+    return windowsOutput ? decodeWindowsOutput(Buffer.concat(chunks)) : value;
   })();
   return {
     text,
@@ -91,8 +97,8 @@ export async function runBounded(
     if (!options.keepStdinOpen) proc.stdin.end();
   }
 
-  const stdout = capture(proc.stdout);
-  const stderr = capture(proc.stderr);
+  const stdout = capture(proc.stdout, options.windowsOutput);
+  const stderr = capture(proc.stderr, options.windowsOutput);
   const completed = Promise.all([proc.exited, stdout.text, stderr.text]);
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<"timeout">((resolve) => {

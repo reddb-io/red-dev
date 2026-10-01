@@ -114,6 +114,7 @@ describe("the narrow-terminal menu", () => {
       "Update",
       "Plan",
       "Doctor",
+      "Resources",
       "Learn",
       "Uninstall",
       "Platform",

@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { dirname, join } from "node:path";
 import type { Platform } from "./platform.ts";
 import { policyPath } from "./tool-policy.ts";
+import { parseResourceSettings, type ResourceSettings } from "./resource-settings.ts";
 
 export const PROFILE_NAMES = ["ubuntu-desktop", "ubuntu-server", "ubuntu-wsl", "windows-wsl", "windows-native"] as const;
 export type ProfileName = typeof PROFILE_NAMES[number];
@@ -15,6 +16,8 @@ export interface MachineProfile {
   runtimes?: string[];
   apps?: string[];
   distro?: string;
+  /** User-selected resources; ordinary install/update never reapplies them. */
+  resources?: ResourceSettings;
 }
 export const REQUIRED_TOOLS = new Set(["mise", "red-dev", "retired-resource-controls", "maintenance-schedule", "wsl-sync"]);
 export function profilePath(env: NodeJS.ProcessEnv = process.env): string {
@@ -32,6 +35,7 @@ export function parseMachineProfile(value: unknown): MachineProfile {
     if (p[key] !== undefined && (!Array.isArray(p[key]) || p[key]!.some(v => typeof v !== "string" || !v.trim()))) throw new Error(`invalid profile ${key}`);
   }
   if (p.distro !== undefined && (typeof p.distro !== "string" || !p.distro.trim() || /[\r\n\0]/.test(p.distro))) throw new Error("invalid profile distro");
+  if (p.resources !== undefined) parseResourceSettings(p.resources);
   return p;
 }
 export function readMachineProfile(env: NodeJS.ProcessEnv = process.env): MachineProfile | null {
