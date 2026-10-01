@@ -147,6 +147,17 @@ export const SECTIONS: MenuSection[] = [
     ],
   },
   {
+    key: "resources",
+    label: "Resources",
+    notes: [
+      "Inspect Windows and Linux memory,",
+      "swap, compiler processes and inherited",
+      "limits. Choose optional WSL settings",
+      "or Rust build coordination, review",
+      "the changes and restore them later.",
+    ],
+  },
+  {
     key: "apps",
     label: "Apps",
     notes: [

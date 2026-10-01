@@ -43,6 +43,9 @@ async function inspectDoctor(p: Platform, inv: Invocation): Promise<number> {
     for (const [job, state] of jobs) log.info(`${job}: ${state.outcome}; last attempt ${new Date(state.attemptedAt).toISOString()}; last success ${state.succeededAt ? new Date(state.succeededAt).toISOString() : "none"}; next automatic attempt ${new Date(state.nextAttemptAt).toISOString()}`);
   } catch (err) { log.warn(`update state unreadable: ${(err as Error).message}`); }
 
+  log.plain("\n[resources]");
+  log.info("For Rust/WSL stalls, inspect host RAM, swap, compiler processes and inherited memory limits with: red-dev resources status");
+
   log.plain("\n[host]");
   if (p.os === "linux") {
     const [{ collectLinuxHostSnapshot }, { inspectStatuslineHealth }, { buildHostReport }, { assessHost }] =

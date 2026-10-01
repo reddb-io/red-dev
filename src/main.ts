@@ -1789,6 +1789,10 @@ async function cmdUi(p: Platform, inv: Invocation): Promise<number> {
       const { networkCommand } = await import("./network-diagnostics.ts");
       return await networkCommand(inv.json);
     }
+    case "resources": {
+      const { resourceWizard } = await import("./resource-command.ts");
+      return resourceWizard(p);
+    }
     case "apps":
       return await cmdApps(p, inv);
     case "keys":
@@ -2369,6 +2373,7 @@ async function cmdMenu(p: Platform, inv: Invocation, cliHelp: string): Promise<n
     doctor: () => cmdDoctor(p, inv),
     plan: () => cmdPlan(p, inv),
     platform: () => cmdPlatform(p),
+    resources: async () => { const { resourceWizard } = await import("./resource-command.ts"); return resourceWizard(p); },
     apps: () => cmdApps(p, inv),
     keys: () => cmdKeys(p),
     emoji: () => cmdEmoji(p),
@@ -2499,6 +2504,10 @@ async function main(): Promise<number> {
     return 1;
   }
 
+  if (inv.command === "resources") {
+    const { resourceCommand } = await import("./resource-command.ts");
+    return resourceCommand(detect(), inv);
+  }
   const { resolveWorkstation } = await import("./workstation.ts");
   const p = await resolveWorkstation(detect());
 
@@ -2654,6 +2663,7 @@ async function run(): Promise<number> {
   if (
     verb === "doctor" ||
     verb === "network" ||
+    (verb === "resources" && !argv.includes("--apply") && argv[1] !== "run") ||
     verb === "logs" ||
     (verb === "desktop" && (argv[1] === undefined || argv[1] === "status")) ||
     ((verb === "rescue" || verb === "reclaim") && !argv.includes("--apply")) ||

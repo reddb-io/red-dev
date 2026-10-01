@@ -118,6 +118,22 @@ export function buildCli(): CLI {
           { name: "profile_value", description: "profile or manifest tool name", required: false },
         ],
       },
+      resources: {
+        description: "inspect resources or explicitly configure WSL and participating Rust builds",
+        positional: [
+          { name: "resource_action", description: "status, configure, project, run or undo", required: false },
+          { name: "resource_mode", description: "system, responsive or custom for configure", required: false },
+        ],
+        options: {
+          json: { type: "boolean", description: "export read-only resource observations", default: false },
+          apply: { type: "boolean", description: "save the previewed choices or restore with undo", default: false },
+          memory: { type: "number", description: "explicit WSL memory ceiling in GiB" },
+          swap: { type: "number", description: "WSL swap in GiB" },
+          slots: { type: "number", description: "concurrent builds started through resources run" },
+          jobs: { type: "number", description: "Cargo jobs for the selected Rust project" },
+          project: { type: "string", description: "Rust project directory" },
+        },
+      },
       privileged: {
         // No positional and no flags, for the same reason `redwall` has
         // none: what it does is settled by the manifest and by what this
@@ -409,6 +425,13 @@ export function buildCli(): CLI {
 }
 
 export interface Invocation {
+  resourceAction?: string;
+  resourceMode?: string;
+  resourceMemory?: number;
+  resourceSwap?: number;
+  resourceSlots?: number;
+  resourceJobs?: number;
+  resourceProject?: string;
   policyTool?: string;
   policyMode?: string;
   policyVersion?: string;
@@ -601,7 +624,29 @@ export function parseArgs(cli: CLI, argv: string[]): Invocation {
   if (desktopVerb !== undefined && desktopVerb !== "status" && desktopVerb !== "reconcile") {
     errors.push(`invalid desktop action '${desktopVerb}' (expected: status, reconcile)`);
   }
+  if (r.command[0] === "resources") {
+    const action = pos["resource_action"];
+    if (action !== undefined && !["status", "configure", "project", "run", "undo"].includes(String(action))) errors.push("unknown resources action");
+    if (pos["resource_mode"] !== undefined && (action !== "configure" || !["system", "responsive", "custom"].includes(String(pos["resource_mode"])))) errors.push("resource mode requires configure system, responsive or custom");
+    for (const [name, min, max] of [["memory", 1, 1024], ["swap", 0, 1024], ["slots", 1, 64], ["jobs", 1, 256]] as const) {
+      const value = opts[name];
+      if (value !== undefined && (typeof value !== "number" || !Number.isSafeInteger(value) || value < min || value > max)) errors.push(`--${name} must be an integer between ${min} and ${max}`);
+    }
+    if (opts["apply"] && !["configure", "project", "undo"].includes(String(action))) errors.push("resources --apply requires configure, project or undo");
+    if (action === "configure" && pos["resource_mode"] === undefined && ["apply", "memory", "swap", "slots"].some(k => opts[k] !== undefined && opts[k] !== false)) errors.push("configure options require an explicit system, responsive or custom mode");
+    if (opts["json"] === true && action !== undefined && action !== "status") errors.push("resources --json is available only for status");
+    if (["memory", "swap", "slots"].some(k => opts[k] !== undefined) && action !== "configure") errors.push("memory, swap and slots require configure");
+    if (opts["jobs"] !== undefined && action !== "project") errors.push("jobs requires project");
+    if (passthrough.length && action !== "run") errors.push("resources passthrough requires run");
+  }
   return {
+    resourceAction: typeof pos["resource_action"] === "string" ? pos["resource_action"] : undefined,
+    resourceMode: typeof pos["resource_mode"] === "string" ? pos["resource_mode"] : undefined,
+    resourceMemory: typeof opts["memory"] === "number" ? opts["memory"] : undefined,
+    resourceSwap: typeof opts["swap"] === "number" ? opts["swap"] : undefined,
+    resourceSlots: typeof opts["slots"] === "number" ? opts["slots"] : undefined,
+    resourceJobs: typeof opts["jobs"] === "number" ? opts["jobs"] : undefined,
+    resourceProject: typeof opts["project"] === "string" ? opts["project"] : undefined,
     json: opts["json"] === true,
     doctorRepair: typeof opts["repair"] === "string" ? opts["repair"] : undefined,
     doctorExport: typeof opts["export"] === "string" ? opts["export"] : undefined,

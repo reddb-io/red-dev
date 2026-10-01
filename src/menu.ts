@@ -50,6 +50,7 @@ type Handlers = {
   plan: () => Promise<number>;
   platform: () => number;
   apps: () => Promise<number>;
+  resources: () => Promise<number>;
   keys: () => Promise<number>;
   emoji: () => Promise<number>;
   learn: () => Promise<number>;
@@ -270,6 +271,7 @@ export function menuEntries(p: Platform): [string, ...string[]] {
     "Update — upgrade, then converge",
     "Plan — preview, change nothing",
     "Doctor — report drift",
+    "Resources — inspect memory and choose optional settings",
     "Learn — the README, RedSkills, and the keys viewer",
     "Uninstall — remove tools or config",
     "Platform — what this machine is",
@@ -336,6 +338,9 @@ export async function runMenu(
         break;
       case "Plan":
         last = await h.plan();
+        break;
+      case "Resources":
+        last = await h.resources();
         break;
       case "Doctor":
         last = await h.doctor();
