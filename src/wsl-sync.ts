@@ -1,4 +1,6 @@
 /** Windows coordinates its selected Ubuntu distro; Linux never calls back. */
+import { FORWARDED_PREFERENCES } from "./dev-config-migration.ts";
+import { readDevConfig, legacyDevConfig } from "./dev-config.ts";
 import { VERSION } from "./cli.ts";
 import { AGENTS } from "./agents.ts";
 import { log, RedError } from "./log.ts";
@@ -27,10 +29,14 @@ export function wslChildEnvironment(current: NodeJS.ProcessEnv = process.env, to
   const forwarded = new Set((current.WSLENV ?? "").split(":").filter(Boolean));
   for (const name of ["RED_ROUTER", "RED_ROUTER_HOST", "RED_ROUTER_PORT"]) if (current[name] !== undefined) forwarded.add(name);
   if (token) { forwarded.add("GH_TOKEN"); forwarded.add("GITHUB_TOKEN"); }
-  const profile = readMachineProfile(current);
-  if (profile?.name === "windows-wsl") forwarded.add("RED_DEV_WSL_PROFILE");
+  const profile = current.HOME || current.USERPROFILE || current.RED_DEV_CONFIG_FILE || current.RED_DEV_PROFILE_FILE ? readMachineProfile(current) : null;
+  const preferences = profile?.name === "windows-wsl" ? (readDevConfig(current) ?? legacyDevConfig(current)).preferences ?? {} : {};
+  const selected = Object.fromEntries(FORWARDED_PREFERENCES.filter(key => preferences[key] !== undefined).map(key => [key, preferences[key]]));
+  if (profile?.name === "windows-wsl") { forwarded.add("RED_DEV_WSL_PROFILE"); forwarded.add("RED_DEV_WSL_PREFERENCES"); }
+  // Absolute Windows override paths are not Linux configuration paths.
+  for (const entry of [...forwarded]) if (["RED_DEV_CONFIG_FILE", "RED_DEV_PROFILE_FILE", "RED_DEV_POLICY_FILE"].includes(entry.split("/")[0]!)) forwarded.delete(entry);
   return { ...current, ...(token ? { GH_TOKEN: token, GITHUB_TOKEN: token } : {}),
-    ...(profile?.name === "windows-wsl" ? { RED_DEV_WSL_PROFILE: JSON.stringify(profile) } : {}), WSLENV: [...forwarded].join(":") };
+    ...(profile?.name === "windows-wsl" ? { RED_DEV_WSL_PROFILE: JSON.stringify(profile), RED_DEV_WSL_PREFERENCES: JSON.stringify(selected) } : {}), WSLENV: [...forwarded].join(":") };
 }
 
 export function distroSetupCommands(shell: TerminalShell | undefined, agentKeys: string[], runtimeIds: string[]): string[] {

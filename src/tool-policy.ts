@@ -1,20 +1,18 @@
 /** User intent for portable tools. Catalog membership is not ownership. */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { devConfigPath, legacyConfigRoot, legacyPolicyPath, readDevConfig, writeDevConfig } from "./dev-config.ts";
 
 export type ToolPolicy = { mode: "follow" } | { mode: "fixed"; version: string } | { mode: "external" };
 type Env = NodeJS.ProcessEnv;
 
 export function policyPath(env: Env = process.env): string {
-  const root = env.XDG_CONFIG_HOME ?? (process.platform === "win32"
-    ? env.APPDATA ?? join(env.USERPROFILE ?? "", "AppData", "Roaming")
-    : join(env.HOME ?? "", ".config"));
-  return env.RED_DEV_POLICY_FILE ?? join(root, "red-dev", "tool-policies.json");
+  return env.RED_DEV_POLICY_FILE || devConfigPath(env);
 }
 
 export function userMisePath(env: Env = process.env): string {
-  return env.MISE_CONFIG_FILE ?? (env.MISE_CONFIG_DIR ? join(env.MISE_CONFIG_DIR, "config.toml")
-    : join(dirname(dirname(policyPath({ ...env, RED_DEV_POLICY_FILE: undefined }))), "mise", "config.toml"));
+  return env.MISE_CONFIG_FILE || (env.MISE_CONFIG_DIR ? join(env.MISE_CONFIG_DIR, "config.toml")
+    : join(legacyConfigRoot(env), "mise", "config.toml"));
 }
 
 function readObject(path: string): Record<string, unknown> {
@@ -44,7 +42,8 @@ export function configuredSelector(name: string, spec = name, env: Env = process
 }
 
 export function toolPolicy(name: string, spec = name, env: Env = process.env): ToolPolicy {
-  const policies = readObject(policyPath(env));
+  const config = !env.RED_DEV_POLICY_FILE ? readDevConfig(env) : null;
+  const policies = config ? config.policies ?? {} : readObject(legacyPolicyPath(env));
   const explicit = policies[name] ?? policies[spec];
   if (explicit !== undefined) return parsePolicy(explicit);
   const selector = configuredSelector(name, spec, env);
@@ -53,6 +52,10 @@ export function toolPolicy(name: string, spec = name, env: Env = process.env): T
 }
 
 export function writeToolPolicy(name: string, policy: ToolPolicy, env: Env = process.env): void {
+  if (!env.RED_DEV_POLICY_FILE) {
+    writeDevConfig(current => ({ ...current, policies: { ...current.policies, [name]: { ...(current.policies?.[name] as Record<string, unknown> | undefined), version: undefined, ...parsePolicy(policy) } } }), env);
+    return;
+  }
   const path = policyPath(env);
   const next = { ...readObject(path), [name]: parsePolicy(policy) };
   mkdirSync(dirname(path), { recursive: true });

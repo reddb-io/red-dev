@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "cli-args-parser": "^1.0.6",
-    "tuiuiu.js": "1.0.75"
+    "tuiuiu.js": "1.0.75",
+    "yaml": "^2.8.1"
   }
 }

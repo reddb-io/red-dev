@@ -247,7 +247,7 @@ export async function offerCrashHandoff(
     // if the rest of this run does not.
     await deps.remember({ crashHandoff: false });
     deps.say?.(
-      `not asked again — turn it back on by removing "crashHandoff" from red-dev.json`,
+      `not asked again — turn it back on by removing "crashHandoff" from preferences in ~/.red/dev/config.yaml`,
     );
     return { state: "declined" };
   }

@@ -21,6 +21,24 @@ runtime, no bash on Windows, and no second configuration to keep in sync.
 
 ---
 
+## Saved choices
+
+Setup, profiles, preferences and tool policies live in **`~/.red/dev/config.yaml`**.
+Install/update imports recognised legacy JSON files with exact backups.
+An existing YAML takes precedence, and edits preserve comments and unknown fields.
+Windows and Ubuntu/WSL have separate documents; the Windows coordinator forwards
+known choices to its selected distro. Credentials, logs and observed state stay
+outside this file. Resource restrictions require an explicit choice.
+
+```sh
+red-dev config          # path and saved choices, read-only
+red-dev config --json   # machine-readable choices, no migration
+```
+
+`RED_DEV_CONFIG_FILE` overrides the YAML path. Legacy `RED_DEV_PROFILE_FILE` and
+`RED_DEV_POLICY_FILE` still select separate JSON files for those sections.
+Uninstall preserves the YAML so a later install can reuse your choices.
+
 ## Contents
 
 Diagnostic paths, rotation and tray access: [Diagnostic logs](docs/diagnostic-logs.md).

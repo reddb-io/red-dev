@@ -23,19 +23,30 @@ desinstala pacotes. Trocar o Windows para `windows-native` escolhe Git Bash;
 
 ## Arquivo declarativo
 
-O caminho é mostrado por `red-dev profile`: `red-dev/profile.json` no diretório
-de configuração do usuário. `RED_DEV_PROFILE_FILE` permite um caminho explícito.
+As escolhas ficam em `~/.red/dev/config.yaml`. `red-dev config --json` consulta
+perfil, preferências e políticas sem criar arquivos nem executar migrações.
+`RED_DEV_CONFIG_FILE` permite outro caminho para o YAML; os overrides antigos
+`RED_DEV_PROFILE_FILE` e `RED_DEV_POLICY_FILE` continuam aceitando JSON separado.
 
-```json
-{
-  "schema": 1,
-  "name": "windows-wsl",
-  "distro": "Ubuntu-26.04",
-  "tools": { "docker": false, "antigravity": true },
-  "agents": ["redcode", "codex", "claude-code"],
-  "runtimes": ["rust@latest", "node@latest"],
-  "apps": ["antigravity"]
-}
+```yaml
+schema: 1
+profile:
+  schema: 1
+  name: windows-wsl
+  distro: Ubuntu-26.04
+  tools:
+    docker: false
+    antigravity: true
+  agents: [redcode, codex, claude-code]
+  runtimes: [rust@latest, node@latest]
+  apps: [antigravity]
+preferences:
+  theme: dark
+  font: firacode
+  defaultAgent: codex
+policies:
+  claude:
+    mode: follow
 ```
 
 `tools` aceita nomes do manifest. `false` exclui o item da instalação, da
@@ -46,8 +57,8 @@ RedRouter também deixa de gerenciar seu autostart.
 
 Os perfis definem os escopos básicos. Aplicações opcionais precisam aparecer
 em `apps` ou ser habilitadas em `tools`. `red-dev apps`, `agents` e `lang`
-continuam atualizando as escolhas do perfil. Credenciais e limites de recursos
-não entram no arquivo. Os mecanismos de migração e manutenção permanecem
+continuam atualizando as escolhas do perfil. Escolhas explícitas de recursos ficam em
+`profile.resources`; credenciais, observações e históricos ficam fora do YAML. Os mecanismos de migração e manutenção permanecem
 habilitados para poder retirar defaults antigos de forma segura.
 
 As listas `agents` e `runtimes` podem ser omitidas durante a adoção de uma
@@ -59,8 +70,10 @@ no plano e respeitam os seletores/políticas existentes do mise.
 ## Adoção e Windows/WSL
 
 Sem arquivo, o perfil é inferido das preferências existentes. Planos e consultas
-não gravam essa inferência. A instalação a registra sem reescrever o arquivo de
-preferências antigo; arquivos inválidos são reportados e preservados. Seleções
+não gravam essa inferência. A instalação importa as escolhas antigas e retira fontes JSON reconhecidas
+com backup exato `*.red-dev-config-<hash>.bak`. Arquivos inválidos e fontes
+sem propriedade reconhecida são preservados. Um YAML existente tem precedência;
+comentários e campos desconhecidos são mantidos nas alterações. Seleções
 antigas de OpenCode são normalizadas para RedCode, e Gemini deixa de ser
 gerenciado, conservando instalações existentes.
 
@@ -85,3 +98,8 @@ nunca afirma que aqueles pacotes estejam instalados.
 Isso ainda não é um lock de versões/artefatos nem uma transação de instalação.
 A observação pode mudar entre o plano e a instalação; a instalação consulta
 novamente o mesmo planejador para decidir sobre o estado atual.
+
+Windows e Ubuntu/WSL têm documentos próprios, no home de cada ambiente.
+O coordenador Windows encaminha preferências conhecidas ao distro selecionado;
+um WSL independente conserva suas escolhas. A importação WSL não remove o JSON
+compartilhado do host. A desinstalação preserva o YAML de escolhas do usuário.

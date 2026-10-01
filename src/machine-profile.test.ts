@@ -1,3 +1,5 @@
+import { writeDevConfig } from "./dev-config.ts";
+import { createHash } from "node:crypto";
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -52,7 +54,8 @@ test("adoption preserves legacy preference bytes, selectors and optional choices
   await adoptMachineProfile(p);
   expect(readMachineProfile()?.agents).toEqual(["redcode", "codex"]);
   expect(readMachineProfile()?.runtimes).toEqual(["node@lts"]);
-  expect(readFileSync(path, "utf8")).toBe(legacy);
+  expect(existsSync(path)).toBe(false);
+  expect(readFileSync(`${path}.red-dev-config-${createHash("sha256").update(legacy).digest("hex").slice(0, 16)}.bak`, "utf8")).toBe(legacy);
   expect(toolPolicy("node")).toEqual({ mode: "fixed", version: "lts" });
   expect(applicableScopes(p)).toContain("optional");
   const bytes = readFileSync(profilePath(), "utf8"); await adoptMachineProfile(p);
@@ -102,6 +105,7 @@ test("Windows forwards desired choices separately from credentials, and child ad
   expect(env.WSLENV).toContain("RED_DEV_WSL_PROFILE");
   expect(env.RED_DEV_WSL_PROFILE).not.toContain("fixture-token");
   writeMachineProfile(profile({ name: "ubuntu-wsl", tools: { docker: false } }));
+  writeDevConfig(config => ({ ...config, preferences: {} }));
   process.env.RED_DEV_WSL_CHILD = "1"; process.env.RED_DEV_WSL_PROFILE = env.RED_DEV_WSL_PROFILE;
   const wsl = { ...ubuntu, env: "wsl" } as Platform;
   const desired = await resolveMachineProfile(wsl);

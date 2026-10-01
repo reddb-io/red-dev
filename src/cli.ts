@@ -111,6 +111,10 @@ export function buildCli(): CLI {
           { name: "policy_version", description: "exact version for fixed", required: false },
         ],
       },
+      config: {
+        description: "inspect saved choices without changing configuration",
+        options: { json: { type: "boolean", description: "export choices as JSON", default: false } },
+      },
       profile: {
         description: "show or record the desired machine configuration",
         positional: [

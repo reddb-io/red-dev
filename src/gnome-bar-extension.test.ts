@@ -48,7 +48,7 @@ class Actor {
   }
 }
 
-class Menu {
+class Menu extends Actor {
   box = new Actor();
   items: Actor[] = [];
   openCount = 0;
@@ -121,7 +121,7 @@ function fixture(initial: Record<string, Actor> = {}) {
       },
     },
     SubprocessFlags: { STDOUT_PIPE: 1, STDERR_PIPE: 2 },
-    Subprocess: { new: (argv: string[]) => { launched.push(argv); return { communicate_utf8_async: () => {} }; } },
+    Subprocess: { new: (argv: string[]) => { launched.push(argv); return { communicate_utf8_async: () => {}, force_exit: () => {} }; } },
     icon_new_for_string: (path: string) => path,
     DBus: {
       session: {
@@ -243,7 +243,7 @@ describe("GNOME live named tray actors", () => {
       for (const signal of row!.signals.values()) if (signal.name === "activate") signal.handler();
     }
     expect(env.launched.map(argv => argv.slice(1))).toEqual([
-      ["logs", "--app", "red-dev", "--open"], ["logs", "--app", "redcode", "--open"],
+      ["config", "--json"], ["logs", "--app", "red-dev", "--open"], ["logs", "--app", "redcode", "--open"],
     ]);
     bar.disable();
   });

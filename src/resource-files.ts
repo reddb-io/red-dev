@@ -2,12 +2,15 @@
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { hostname } from "node:os";
 import { redDevStateRoot } from "./reclaim.ts";
+import { acquireUpdateLock } from "./update-coordinator.ts";
+import { parseDevConfig, renderDevConfig } from "./dev-config.ts";
 
-export interface ResourceEdit { path: string; before: string | null; after: string | null; mode: number; }
+export interface ResourceEdit { path: string; before: string | null; after: string | null; mode: number; section?: "resources"; }
 interface Transaction { id: string; state: "pending" | "applied"; edits: ResourceEdit[]; }
-interface History { schema: 1; transactions: Transaction[]; }
+export interface History { schema: 1; transactions: Transaction[]; }
 export function encodedFile(path: string): string | null {
   if (!existsSync(path)) { if (safeStat(path)) throw Error(`unsupported resource file: ${path}`); return null; }
   const stat = lstatSync(path);
@@ -25,7 +28,7 @@ export function resourceHistoryPath(project?: string): string {
 export function readResourceHistory(path: string): History {
   if (!existsSync(path)) return { schema: 1, transactions: [] };
   const value = JSON.parse(readFileSync(path, "utf8")) as History;
-  if (value.schema !== 1 || !Array.isArray(value.transactions) || value.transactions.some(t => !t || !["pending", "applied"].includes(t.state) || !Array.isArray(t.edits) || t.edits.some(e => !e || typeof e.path !== "string" || typeof e.mode !== "number" || (e.before !== null && typeof e.before !== "string") || (e.after !== null && typeof e.after !== "string")))) throw Error(`invalid resource history: ${path}`);
+  if (value.schema !== 1 || !Array.isArray(value.transactions) || value.transactions.some(t => !t || !["pending", "applied"].includes(t.state) || !Array.isArray(t.edits) || t.edits.some(e => !e || typeof e.path !== "string" || typeof e.mode !== "number" || (e.section !== undefined && e.section !== "resources") || (e.before !== null && typeof e.before !== "string") || (e.after !== null && typeof e.after !== "string")))) throw Error(`invalid resource history: ${path}`);
   return value;
 }
 function atomic(path: string, bytes: string | null, mode: number): void {
@@ -38,9 +41,13 @@ function atomic(path: string, bytes: string | null, mode: number): void {
 function saveHistory(path: string, value: History) { atomic(path, Buffer.from(JSON.stringify(value, null, 2) + "\n").toString("base64"), 0o600); }
 function lockFiles(edits: ResourceEdit[]): () => void {
   const held: string[] = [];
-  const release = () => held.reverse().forEach(p => rmSync(p, { force: true }));
+  const writers: (() => void)[] = [];
+  const release = () => { held.reverse().forEach(p => rmSync(p, { force: true })); writers.reverse().forEach(release => release()); };
   try {
     for (const path of [...new Set(edits.map(e => e.path))].sort()) {
+      const writer = acquireUpdateLock(`${path}.writer`);
+      if (!writer) throw Error(`resource file is being edited; retry later: ${path}`);
+      writers.push(writer);
       mkdirSync(dirname(path), { recursive: true });
       const lock = `${path}.red-dev-resources.lock`;
       const identity = { pid: process.pid, host: hostname(), platform: process.platform, distro: process.env.WSL_DISTRO_NAME ?? null };
@@ -83,6 +90,19 @@ export function undoResourcePlan(historyPath: string): ResourceEdit[] {
   if (!last) return [];
   return last.edits.map(e => {
     const current = encodedFile(e.path);
+    if (e.section === "resources" && current !== null && e.after !== null) {
+      const live = parseDevConfig(Buffer.from(current, "base64").toString("utf8"));
+      const expected = parseDevConfig(Buffer.from(e.after, "base64").toString("utf8"));
+      const original = e.before === null ? null : parseDevConfig(Buffer.from(e.before, "base64").toString("utf8"));
+      const matches = isDeepStrictEqual(live.profile?.resources, expected.profile?.resources);
+      const alreadyRestored = last.state === "pending" && isDeepStrictEqual(live.profile?.resources, original?.profile?.resources);
+      if (!matches && !alreadyRestored) throw Error(`undo preserved a file changed by another owner: ${e.path}`);
+      const profile = { ...live.profile };
+      if (original?.profile?.resources === undefined) delete profile.resources;
+      else profile.resources = original.profile.resources;
+      const text = renderDevConfig({ ...live, profile }, Buffer.from(current, "base64").toString("utf8"));
+      return { ...e, before: current, after: Buffer.from(text).toString("base64") };
+    }
     if (current !== e.after && !(last.state === "pending" && current === e.before)) throw Error(`undo preserved a file changed by another owner: ${e.path}`);
     return { ...e, before: current, after: e.before };
   });

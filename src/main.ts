@@ -2484,6 +2484,10 @@ async function main(): Promise<number> {
     return 1;
   }
 
+  if (inv.command === "config") {
+    const { configCommand } = await import("./config-command.ts");
+    return configCommand(detect(), inv.json);
+  }
   if (inv.command === "resources") {
     const { resourceCommand } = await import("./resource-command.ts");
     return resourceCommand(detect(), inv);
@@ -2641,6 +2645,7 @@ async function run(): Promise<number> {
   // not manufacture the very log pressure they are intended to diagnose.
   const verb = argv[0];
   if (
+    verb === "config" ||
     verb === "doctor" ||
     verb === "network" ||
     (verb === "resources" && !argv.includes("--apply") && argv[1] !== "run") ||

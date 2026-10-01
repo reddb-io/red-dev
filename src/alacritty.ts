@@ -141,7 +141,7 @@ export async function configDir(p: Platform): Promise<string> {
 
   if (p.env === "wsl") {
     // The terminal lives on the host, so its config does too — and this
-    // is where red-dev's own preferences live as well, which is why the
+    // was also the legacy preference location, which is why the
     // answer is remembered rather than asked for on every read. A tick
     // of the Redwall timer used to reach `readPreferences` three times
     // and pay a cmd.exe through interop for each.

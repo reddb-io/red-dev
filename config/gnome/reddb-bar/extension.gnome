@@ -47,7 +47,7 @@ function firstExecutable(paths) {
   return paths.find(path => GLib.file_test(path, GLib.FileTest.IS_EXECUTABLE)) ?? paths.at(-1);
 }
 
-function defaultAgentLabel() {
+function defaultAgentLabel(key) {
   const labels = {
     'claude-code': 'Claude Code',
     codex: 'Codex CLI',
@@ -60,27 +60,21 @@ function defaultAgentLabel() {
     muse: 'Muse',
     openclaw: 'OpenClaw',
   };
-  try {
-    const path = `${GLib.get_home_dir()}/.config/alacritty/red-dev.json`;
-    const [ok, bytes] = GLib.file_get_contents(path);
-    if (ok) {
-      const key = JSON.parse(new TextDecoder().decode(bytes)).defaultAgent;
-      if (typeof key === 'string' && key.length > 0)
-        return labels[key] ?? key;
-    }
-  } catch (error) {
-    console.error(`RedDB Menu Bar could not read the Default agent: ${error.message}`);
-  }
-  return 'Agent';
+  return typeof key === 'string' && key.length > 0 ? labels[key] ?? key : 'Agent';
 }
 
-function command(...args) {
+function redDevExecutable() {
   const home = GLib.get_home_dir();
-  const redDev = firstExecutable([
+  return firstExecutable([
+    `${home}/.local/share/mise/installs/red-dev/latest/red-dev`,
     `${home}/.local/share/mise/shims/red-dev`,
     `${home}/.local/bin/red-dev`,
     'red-dev',
   ]);
+}
+
+function command(...args) {
+  const redDev = redDevExecutable();
   const terminal = firstExecutable(['/usr/bin/alacritty', 'alacritty']);
 
   try {
@@ -652,13 +646,67 @@ const AgentsMenu = GObject.registerClass(class AgentsMenu extends PanelMenu.Butt
     this._secondaryClickId = openMenuOnSecondaryClick(this);
     const box = new St.BoxLayout({style_class: 'reddb-agents'});
     box.add_child(new St.Icon({icon_name: 'system-run-symbolic', style_class: 'reddb-agents-icon'}));
-    box.add_child(new St.Label({text: label, y_align: 2}));
+    this._agentLabel = new St.Label({text: label, y_align: 2});
+    box.add_child(this._agentLabel);
     this.add_child(box);
 
-    item(this.menu, `Launch ${label}`, 'media-playback-start-symbolic', () => command('agents', 'run'));
+    this._launchRow = item(this.menu, `Launch ${label}`, 'media-playback-start-symbolic', () => command('agents', 'run'));
     item(this.menu, 'Open multiplexer', 'view-grid-symbolic', () => herdr());
     item(this.menu, 'Choose agents', 'preferences-system-symbolic', () => command('agents'));
     item(this.menu, 'Open RedCode log', 'text-x-generic-symbolic', () => openDiagnosticLog('redcode'));
+    this._configProcess = null;
+    this._configTimeout = 0;
+    this._destroyed = false;
+    this._menuSignal = this.menu.connect('open-state-changed', (_menu, open) => {
+      if (open)
+        this._refreshAgent();
+    });
+    this._refreshAgent();
+  }
+
+  _refreshAgent() {
+    if (this._configProcess || this._destroyed)
+      return;
+    try {
+      const proc = Gio.Subprocess.new([redDevExecutable(), 'config', '--json'],
+        Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE);
+      this._configProcess = proc;
+      this._configTimeout = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 5, () => {
+        this._configTimeout = 0;
+        proc.force_exit();
+        return GLib.SOURCE_REMOVE;
+      });
+      proc.communicate_utf8_async(null, null, (child, result) => {
+        if (this._configTimeout)
+          GLib.source_remove(this._configTimeout);
+        this._configTimeout = 0;
+        this._configProcess = null;
+        try {
+          const [, stdout] = child.communicate_utf8_finish(result);
+          if (this._destroyed || !child.get_successful())
+            return;
+          const label = defaultAgentLabel(JSON.parse(stdout).preferences?.defaultAgent);
+          this._agentLabel.text = label;
+          this._launchRow.label.text = `Launch ${label}`;
+          this.accessible_name = label;
+        } catch (error) {
+          if (!this._destroyed)
+            console.error(`RedDB Menu Bar could not read the Default agent: ${error.message}`);
+        }
+      });
+    } catch (error) {
+      console.error(`RedDB Menu Bar could not start config inspection: ${error.message}`);
+    }
+  }
+
+  destroy() {
+    this._destroyed = true;
+    if (this._configTimeout)
+      GLib.source_remove(this._configTimeout);
+    this._configTimeout = 0;
+    this._configProcess?.force_exit();
+    this.menu.disconnect(this._menuSignal);
+    super.destroy();
   }
 });
 

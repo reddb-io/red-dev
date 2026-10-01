@@ -40,7 +40,7 @@ jobs:
       - name: Install
         run: bun install --frozen-lockfile
       - name: PowerShell and cmd argument forwarding
-        run: bun test src/windows-wsl-bridge.test.ts src/tool-policy.test.ts src/update-coordinator.test.ts src/maintenance-lifecycle.test.ts src/machine-profile.test.ts src/resource-choices.test.ts src/resource-diagnostics.test.ts src/resource-build.test.ts src/wizard-install.test.ts
+        run: bun test src/windows-wsl-bridge.test.ts src/tool-policy.test.ts src/update-coordinator.test.ts src/maintenance-lifecycle.test.ts src/machine-profile.test.ts src/resource-choices.test.ts src/resource-diagnostics.test.ts src/resource-build.test.ts src/wizard-install.test.ts src/dev-config.test.ts src/wsl-sync.test.ts
 
   # Does this red-dev still read what red-skills actually publishes?
   #

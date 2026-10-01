@@ -274,7 +274,7 @@ describe("the pinned interface", () => {
       await writePreferences(linux, { redwallInterface: undefined });
 
       expect(await resolveRedwallInterface(linux)).toBeNull();
-      expect(readFileSync(prefsPath(home), "utf8")).not.toContain("redwallInterface");
+      expect(readFileSync(`${home}/.red/dev/config.yaml`, "utf8")).not.toContain("redwallInterface");
     });
   });
 

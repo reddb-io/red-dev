@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { profilePath, type MachineProfile } from "./machine-profile.ts";
+import { profilePath, renderMachineProfile, type MachineProfile } from "./machine-profile.ts";
 import { resolveMachineProfile } from "./profile-command.ts";
 import type { Platform } from "./platform.ts";
 import { parseResourceSettings, type ResourceSettings } from "./resource-settings.ts";
@@ -52,7 +52,7 @@ export async function machineResourcePlan(p: Platform, settings: ResourceSetting
     if (original !== undefined) edits.push({ ...resourceEdit(snapshot.wsl.path, null), after: original });
     details.push(original === undefined ? "Existing WSL settings keep their current owner; no budget was applied by this flow." : "Restore WSL bytes from before the resource choices.");
   }
-  edits.push(resourceEdit(profilePath(), JSON.stringify(profile, null, 2) + "\n"));
+  edits.push({ ...resourceEdit(profilePath(), renderMachineProfile(profile)), ...(!process.env.RED_DEV_PROFILE_FILE ? { section: "resources" as const } : {}) });
   const restartWsl = edits.some(e => e.path === snapshot.wsl.path && e.before !== e.after);
   if (restartWsl) details.push("Pending: applies after your next WSL restart. Save work and restart it when convenient; this command does not restart it.");
   return { edits, historyPath, details, restartWsl };
