@@ -82,7 +82,15 @@ function patch(doc: Document, path: string[], next: unknown): void {
     for (const [key, value] of Object.entries(values)) if (value !== undefined) patch(doc, [...path, key], value);
   } else {
     const value = current && typeof current === "object" && "toJSON" in current ? (current as { toJSON(): unknown }).toJSON() : current;
-    if (JSON.stringify(value) !== JSON.stringify(next)) doc.setIn(path, next);
+    if (JSON.stringify(value) !== JSON.stringify(next)) {
+      const node = doc.createNode(next);
+      if (current && typeof current === "object") {
+        for (const key of ["comment", "commentBefore", "spaceBefore"] as const) {
+          if (key in current) Object.assign(node, { [key]: (current as unknown as Record<string, unknown>)[key] });
+        }
+      }
+      doc.setIn(path, node);
+    }
   }
 }
 /** Preserve comments and unknown sections when changing known choices. */

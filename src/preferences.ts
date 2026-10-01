@@ -152,24 +152,23 @@ export async function readPreferences(p: Platform, options: { strict?: boolean; 
 export async function writePreferences(p: Platform, prefs: Preferences): Promise<void> {
   const { migrateDevConfig } = await import("./dev-config-migration.ts");
   await migrateDevConfig(p);
-  const merged = { ...(await readPreferences(p, { strict: true, raw: true })), ...prefs };
+  const { TOOLS } = prefs.apps !== undefined ? await import("./manifest.ts") : { TOOLS: [] };
   const { readMachineProfile, writeMachineProfile } = await import("./machine-profile.ts");
   const profile = readMachineProfile();
   if (profile) {
     const next = { ...profile };
     for (const key of ["agents", "runtimes", "apps", "distro"] as const) if (prefs[key] !== undefined) Object.assign(next, { [key]: prefs[key] });
     if (prefs.apps !== undefined) {
-      const { TOOLS } = await import("./manifest.ts");
       next.tools = { ...next.tools };
       for (const tool of TOOLS.filter(t => t.scope === "optional")) next.tools[tool.name] = prefs.apps.includes(tool.name);
     }
     if (p.os === "windows" && prefs.terminalShell) next.name = prefs.terminalShell === "gitbash" ? "windows-native" : "windows-wsl";
     if (process.env.RED_DEV_PROFILE_FILE) writeMachineProfile(next);
-    else writeDevConfig(current => ({ ...current, preferences: merged, profile: next as unknown as Record<string, unknown> }));
+    else writeDevConfig(current => ({ ...current, preferences: { ...current.preferences, ...prefs }, profile: next as unknown as Record<string, unknown> }));
     p.profile = next;
     if (!process.env.RED_DEV_PROFILE_FILE) return;
   }
-  writeDevConfig(current => ({ ...current, preferences: merged }));
+  writeDevConfig(current => ({ ...current, preferences: { ...current.preferences, ...prefs } }));
 }
 
 /**

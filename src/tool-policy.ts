@@ -53,7 +53,7 @@ export function toolPolicy(name: string, spec = name, env: Env = process.env): T
 
 export function writeToolPolicy(name: string, policy: ToolPolicy, env: Env = process.env): void {
   if (!env.RED_DEV_POLICY_FILE) {
-    writeDevConfig(current => ({ ...current, policies: { ...current.policies, [name]: parsePolicy(policy) } }), env);
+    writeDevConfig(current => ({ ...current, policies: { ...current.policies, [name]: { ...(current.policies?.[name] as Record<string, unknown> | undefined), version: undefined, ...parsePolicy(policy) } } }), env);
     return;
   }
   const path = policyPath(env);

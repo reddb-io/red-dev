@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { devConfigPath, legacyPolicyPath, legacyProfilePath, readDevConfig, writeDevConfig } from "./dev-config.ts";
 import { forgetWindowsDirs, windowsEnvRecord } from "./windows-env.ts";
+import { redDevStateRoot } from "./reclaim.ts";
 import { childPreferences, migrateDevConfig } from "./dev-config-migration.ts";
 import { legacyPreferencesPath, readPreferences, writePreferences } from "./preferences.ts";
 import { readMachineProfile, writeMachineProfile, type MachineProfile } from "./machine-profile.ts";
@@ -55,7 +56,7 @@ test("legacy migration preserves exact CRLF/BOM bytes and unknown choices and is
     expect(existsSync(path!)).toBe(false); expect(readFileSync(backup(path!, bytes!), "utf8")).toBe(bytes!);
   }
   expect(readDevConfig()).toMatchObject({ profile, preferences: { theme: "cobalt", fontSize: 13, custom: { keep: true } }, policies: { node: { mode: "follow" } } });
-  const first = readFileSync(devConfigPath(), "utf8"); const journal = join(process.env.XDG_STATE_HOME!, "red-dev", "config-migration.json");
+  const first = readFileSync(devConfigPath(), "utf8"); const journal = join(redDevStateRoot(), "config-migration.json");
   const history = readFileSync(journal, "utf8"); await migrateDevConfig(p);
   expect(readFileSync(devConfigPath(), "utf8")).toBe(first); expect(readFileSync(journal, "utf8")).toBe(history);
 });
@@ -67,8 +68,13 @@ test("editing one section preserves comments, unknown fields, file mode and auth
   const after = readFileSync(devConfigPath(), "utf8"); expect(after).toContain("# My workstation"); expect(after).toContain("theme: dark # keep this comment");
   expect(readDevConfig()).toMatchObject({ future: { mode: "keep" }, preferences: { custom: "yes", defaultAgent: "codex" } });
   if (process.platform !== "win32") expect(statSync(devConfigPath()).mode & 0o777).toBe(0o640);
+  await writePreferences(p, { theme: "cobalt" });
+  expect(readFileSync(devConfigPath(), "utf8")).toContain("theme: cobalt # keep this comment");
+  writeDevConfig(config => ({ ...config, policies: { node: { mode: "fixed", version: "22.1.0", note: "preserve" } } }));
+  writeToolPolicy("node", { mode: "follow" });
+  expect(readDevConfig()?.policies?.node).toEqual({ mode: "follow", note: "preserve" });
   put(await legacyPreferencesPath(p), '{"theme":"cobalt"}'); await migrateDevConfig(p);
-  expect((await readPreferences(p)).theme).toBe("dark");
+  expect((await readPreferences(p)).theme).toBe("cobalt");
 });
 
 test("invalid YAML, duplicate keys, unsupported schemas and corrupt nested sections never select defaults or get overwritten", async () => {
@@ -147,7 +153,7 @@ test("legacy resource history migrates and its undo keeps subsequent YAML edits"
 
 test("an interrupted configuration migration restores exact sources then retries", async () => {
   fixture(); const path = await legacyPreferencesPath(p); const bytes = '{"theme":"cobalt"}\r\n'; put(path, bytes);
-  const journal = join(process.env.XDG_STATE_HOME!, "red-dev", "config-migration.json");
+  const journal = join(redDevStateRoot(), "config-migration.json");
   const edits = [resourceEdit(devConfigPath(), 'schema: 1\npreferences: {theme: cobalt}\n'), resourceEdit(backup(path, bytes), bytes), resourceEdit(path, null)];
   put(journal, JSON.stringify({ schema: 1, transactions: [{ id: "interrupted", state: "pending", edits }] }));
   put(devConfigPath(), 'schema: 1\npreferences: {theme: cobalt}\n'); // crash before backup/removal
