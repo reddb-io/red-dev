@@ -454,6 +454,21 @@ function failureDetail(
   return last || `mise exited ${code}`;
 }
 
+/** Include runtime dependencies of selected packages; never activate them on the Windows half of WSL. */
+export async function profileRuntimePlan(p: Platform): Promise<Array<{ id: string; reason: string }>> {
+  const { windowsWsl } = await import("./workstation.ts");
+  if (windowsWsl(p)) return [];
+  const plan = (p.profile?.runtimes ?? DEFAULT_RUNTIMES).map(id => ({ id, reason: "selected runtime" }));
+  const { miseEntries } = await import("./mise-config.ts");
+  const { AGENTS, agentRunsHere, agentInstallMethod } = await import("./agents.ts");
+  const selected = AGENTS.filter(a => p.profile?.agents?.includes(a.key) && agentRunsHere(a, p));
+  const dependencies = [
+    ...(miseEntries(p).some(e => e.spec.startsWith("npm:")) || selected.some(a => agentInstallMethod(a, p) === "npm") ? ["node@latest"] : []),
+    ...selected.flatMap(a => a.runtimeNeeds ?? []),
+  ];
+  for (const id of dependencies) if (!plan.some(row => row.id.split("@")[0] === id.split("@")[0])) plan.push({ id, reason: "required by a selected package/agent" });
+  return plan;
+}
 export async function installRuntimes(p: Platform): Promise<void> {
   const mise = await miseBin();
   if (!mise) {
@@ -465,7 +480,7 @@ export async function installRuntimes(p: Platform): Promise<void> {
 
   const { out: installed } = await run([mise, "ls", "--installed"]);
 
-  for (const requested of DEFAULT_RUNTIMES) {
+  for (const { id: requested } of await profileRuntimePlan(p)) {
     const name = requested.split("@")[0]!;
     const policy = toolPolicy(name);
     if (policy.mode === "external") { log.skip(`${name}: externally managed`); continue; }

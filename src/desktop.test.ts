@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { desktopCommand, type DesktopDeps, type DesktopCheck } from "./desktop.ts";
 import type { Platform } from "./platform.ts";
 
@@ -22,14 +24,26 @@ describe("desktop command", () => {
   test("the real CLI dispatches desktop status without mutating the host", async () => {
     // WSL is intentionally not a GNOME target. This proves actual dispatch,
     // not just parsing, without asking the test runner's desktop to change.
-    const proc = Bun.spawn([process.execPath, "src/main.ts", "desktop", "status"], {
-      env: { ...process.env, WSL_DISTRO_NAME: "red-dev-desktop-test" },
-      stdout: "pipe", stderr: "pipe",
-    });
-    const output = await new Response(proc.stdout).text();
-    expect(await proc.exited).toBe(0);
-    expect(output).toContain("desktop: GNOME menu reconciliation applies only to the Linux desktop");
-    expect(output).not.toContain("unhandled command");
+    const root = mkdtempSync(join(tmpdir(), "red-desktop-cli-"));
+    const profilePath = join(root, "profile.json");
+    writeFileSync(profilePath, JSON.stringify({ schema: 1, name: "ubuntu-wsl", tools: {} }));
+    try {
+      const proc = Bun.spawn([process.execPath, "src/main.ts", "desktop", "status"], {
+        env: { ...process.env, HOME: root, XDG_CONFIG_HOME: join(root, "config"),
+          XDG_STATE_HOME: join(root, "state"), RED_DEV_PROFILE_FILE: profilePath,
+          RED_DEV_WSL_CHILD: "", RED_DEV_WSL_PROFILE: "", WSL_DISTRO_NAME: "red-dev-desktop-test",
+          BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" },
+        stdout: "pipe", stderr: "pipe",
+      });
+      const [output, error, code] = await Promise.all([
+        new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited,
+      ]);
+      expect([code, error]).toEqual([0, ""]);
+      expect(output).toContain("desktop: GNOME menu reconciliation applies only to the Linux desktop");
+      expect(output).not.toContain("unhandled command");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test("status only inspects, and exposes drift as exit 2", async () => {

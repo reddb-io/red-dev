@@ -47,6 +47,8 @@ export interface Platform {
   /** Resolved from the durable shell choice by the Windows entry point. */
   workstation?: "windows-wsl" | "windows-native";
   wslDistro?: string;
+  /** Desired configuration resolved once at the command boundary. */
+  profile?: import("./machine-profile.ts").MachineProfile;
 }
 
 function readOsRelease(): Record<string, string> {

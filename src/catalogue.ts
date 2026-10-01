@@ -75,7 +75,8 @@ export interface CatalogueTool {
 export function catalogueTools(p: Platform): CatalogueTool[] {
   const out: CatalogueTool[] = [];
   for (const tool of toolsInScope(CATALOGUE_SCOPE)) {
-    if (providerFor(tool, p).kind === "skip") continue;
+    // The catalogue offers choices, including ones disabled in the profile.
+    if (providerFor(tool, { ...p, profile: undefined }).kind === "skip") continue;
     // `managed` means the provider owns the layout and nothing probes for
     // it, so `present` is already false — the guard is here to say why
     // rather than to leave the reason to a reader of installState.

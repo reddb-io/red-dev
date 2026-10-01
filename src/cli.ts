@@ -111,6 +111,13 @@ export function buildCli(): CLI {
           { name: "policy_version", description: "exact version for fixed", required: false },
         ],
       },
+      profile: {
+        description: "show or record the desired machine configuration",
+        positional: [
+          { name: "profile_action", description: "show, adopt, use, enable or disable", required: false },
+          { name: "profile_value", description: "profile or manifest tool name", required: false },
+        ],
+      },
       privileged: {
         // No positional and no flags, for the same reason `redwall` has
         // none: what it does is settled by the manifest and by what this
@@ -449,6 +456,8 @@ export interface Invocation {
   logsPath?: boolean;
   logsOpen?: boolean;
   logsApp?: string;
+  profileAction?: string;
+  profileValue?: string;
   /**
    * `red-skills <phase> [selector]` — its own two positionals, because
    * a phase mise invokes and a revision a person pins are different
@@ -605,6 +614,8 @@ export function parseArgs(cli: CLI, argv: string[]): Invocation {
     logsOpen: opts["open"] === true,
     logsApp: typeof opts["app"] === "string" ? opts["app"] : undefined,
     policyTool: typeof pos["policy_tool"] === "string" ? pos["policy_tool"] : undefined,
+    profileAction: typeof pos["profile_action"] === "string" ? pos["profile_action"] : undefined,
+    profileValue: typeof pos["profile_value"] === "string" ? pos["profile_value"] : undefined,
     policyMode: typeof pos["policy_mode"] === "string" ? pos["policy_mode"] : undefined,
     policyVersion: typeof pos["policy_version"] === "string" ? pos["policy_version"] : undefined,
     redSkillsPhase: typeof pos["phase"] === "string" ? pos["phase"] : undefined,

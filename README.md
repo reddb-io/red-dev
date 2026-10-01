@@ -855,6 +855,21 @@ Two things are not questions and never were. The Start Menu hotkeys and the
 RedSkills marketplace are part of `core`, so installing red-dev at all is enough
 to get them.
 
+The desired workstation configuration lives in a declarative profile:
+
+```sh
+red-dev profile
+red-dev profile adopt
+red-dev profile disable docker
+red-dev plan
+red-dev install
+```
+
+Plan and installation share provider/action decisions. Each row names its
+environment; unobserved WSL destinations and owned legacy defaults are explicit.
+Deselection preserves installed packages and personal files. See
+[machine profiles and provisioning plans](docs/machine-profiles.md).
+
 Portable tools have an explicit ownership policy. Existing selectors in your
 mise configuration are preserved, including versions and channels chosen by
 hand. `red-dev update` never moves those selectors back to `latest`.
