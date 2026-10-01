@@ -55,6 +55,16 @@ maintenance. The bootstrap and the binary arrive at the same place on purpose;
 running the one-liner is how you get the product, not a different, shorter
 version of it.
 
+The bootstrap downloads the newest **published stable release**. Completing
+Install applies that release's provisioning and recognised legacy repairs.
+The fullscreen wizard, `red-dev install` and `red-dev update` share migration,
+profile and mise preparation; the wizard's setup packages and main install
+run under one installation lock. Leaving the wizard before completing it
+does not start this preparation. Existing choices are preserved, and optional
+apps and resource budgets still require your selection. Check `red-dev
+--version` and the final installation summary to confirm what actually ran;
+failed historical repairs remain pending for a subsequent run.
+
 Neither needs administrator or root rights for red-dev itself; individual
 packages may still ask for sudo.
 
