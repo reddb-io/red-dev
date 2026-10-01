@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { redDevStateRoot } from "./reclaim.ts";
 import { readMachineProfile } from "./machine-profile.ts";
 import { readProjectResources, resourceProjectRoot } from "./resource-plan.ts";
-import { log } from "./log.ts";
+import { log, logIsCaptured } from "./log.ts";
 import { acquireUpdateLock } from "./update-coordinator.ts";
 
 interface BuildOwner { pid: number; childPid?: number; token: string; phase: "queued" | "launching" | "running"; }
@@ -66,6 +66,7 @@ export function buildEnvironment(argv: string[], jobs: number | undefined, env: 
   return jobs !== undefined && !explicit && env.CARGO_BUILD_JOBS === undefined ? { ...env, CARGO_BUILD_JOBS: String(jobs) } : { ...env };
 }
 export async function runResourceBuild(argv: string[], project?: string): Promise<number> {
+  if (logIsCaptured()) throw Error("resources run needs its own terminal; finish the fullscreen operation first");
   if (!argv.length || !/^(?:.*[\\/])?cargo(?:\.exe)?$/.test(argv[0]!)) throw Error("resources run requires -- cargo <arguments>");
   const root = resourceProjectRoot(project); const jobs = readProjectResources(root)?.jobs;
   const slots = readMachineProfile()?.resources?.buildSlots;

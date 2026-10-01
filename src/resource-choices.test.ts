@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { hostname } from "node:os";
 import { join } from "node:path";
@@ -97,6 +97,9 @@ test("resource parsing validates bounds and forwards literal Cargo arguments", (
 });
 test("actual resource status and preview commands leave desired config and state untouched", async () => {
   const r = fixture(); const name = process.platform === 'win32' ? 'windows-native' : 'ubuntu-desktop';
+  // Windows initializes this standard user folder when PowerShell/CIM starts.
+  // Real Windows profiles already have it; seed it before checking product writes.
+  if (process.platform === 'win32') mkdirSync(join(r, 'AppData/Roaming'), { recursive: true });
   writeFileSync(process.env.RED_DEV_PROFILE_FILE!, JSON.stringify({ schema: 1, name, tools: {} }));
   const before = readdirSync(r, { recursive: true }); const bytes = readFileSync(process.env.RED_DEV_PROFILE_FILE!, 'utf8');
   for (const args of [['resources', 'status', '--json'], ['resources', 'configure', 'custom', '--slots', '1']]) {

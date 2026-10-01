@@ -3,11 +3,17 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildEnvironment, takeBuildSlot } from "./resource-build.ts";
+import { buildEnvironment, takeBuildSlot, runResourceBuild } from "./resource-build.ts";
+import { captureTo } from "./log.ts";
 
 const roots: string[] = [];
 afterEach(() => roots.splice(0).forEach(p => rmSync(p, { recursive: true, force: true })));
 function fixture() { const r = mkdtempSync(join(tmpdir(), "resource-build-")); roots.push(r); return r; }
+test("a fullscreen view cannot launch Cargo into its console", async () => {
+  const release = captureTo(() => {});
+  try { await expect(runResourceBuild(['cargo', 'build'], '/nonexistent/project')).rejects.toThrow('own terminal'); }
+  finally { release(); }
+});
 test("Cargo choices preserve explicit job arguments and shell settings", () => {
   expect(buildEnvironment(['cargo', 'check'], 4, {}).CARGO_BUILD_JOBS).toBe('4');
   expect(buildEnvironment(['cargo', 'check', '-j2'], 4, {}).CARGO_BUILD_JOBS).toBeUndefined();

@@ -37,6 +37,10 @@ import { readdirSync, readFileSync } from "node:fs";
  */
 const ALLOWED = new Map<string, string>([
   [
+    "resource-build.ts",
+    "resources run is a direct CLI Cargo invocation; resource configuration menus never run builds. The runner refuses logIsCaptured() before spawning or acquiring capacity.",
+  ],
+  [
     "providers.ts",
     "spawnLogged itself. This is the uncaptured branch — the one that decides to inherit, having checked that nothing is capturing.",
   ],
