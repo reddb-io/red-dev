@@ -155,6 +155,7 @@ describe("the final converge boundary", () => {
     try {
       await Bun.sleep(60);
       expect(model.current()).toBe("nerd-font");
+      expect(model.total).toBe(2);
       expect(model.lines()).toContain(":: nerd-font — builtin:nerd-font");
       expect(model.lines()).toContain("    info downloading https://example.invalid/FiraCode.zip");
       expect(finished).toBeNull();
