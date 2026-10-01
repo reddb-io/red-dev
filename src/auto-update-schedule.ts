@@ -1,37 +1,13 @@
-/**
- * Updating on a clock, because `latest` is a selector and not a daemon.
- *
- * Every tool red-dev manages through mise is declared `latest`, and that
- * reads like "always current" while meaning "whatever was newest the
- * last time somebody ran an upgrade". Measured on the maintainer's
- * machine: Claude Code 2.1.284 published, the native installer already
- * on it, and the copy on PATH sat on 2.1.283 because nothing had asked
- * mise since. `claude update` refuses under mise, so the vendor's own
- * updater is not a way out either.
- *
- * So an hourly `red-dev update --unattended`: the suite and the agent
- * hosts, then the prune, and nothing that needs a person — apt waits for
- * a password nobody is there to type, RedSkills already has its own
- * watch timer, and a converge is not something to run while somebody is
- * working. See cmdUpdate in main.ts for where those stages are skipped.
- *
- * Linux and WSL only for now. The Windows half would be a Scheduled Task
- * through the hidden runner, the way the RedSkills watch does it, and
- * nobody has run that path yet.
- */
-
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+/** Legacy hourly timer retirement. The maintenance clock now schedules this job. */
 
 import { log } from "./log.ts";
 import type { Platform } from "./platform.ts";
 import { TRIGGER_ENV } from "./trigger.ts";
 import {
-  inheritablePath,
   type ScheduleOutcome,
   type ScheduleSeams,
   shellQuote,
   systemdQuote,
-  watchUnitDir,
 } from "./watch-schedule.ts";
 
 /** The names this owns. */
@@ -144,7 +120,6 @@ export async function convergeAutoUpdateSchedule(
   p: Platform,
   seams: ScheduleSeams & { binary?: string } = {},
 ): Promise<ScheduleOutcome> {
-  const env = seams.env ?? process.env;
   const home = seams.home ?? (process.env["HOME"] ?? "");
   if (p.os === "windows") {
     log.skip("auto-update: no Windows schedule yet; `red-dev update` stays manual there");
@@ -155,47 +130,7 @@ export async function convergeAutoUpdateSchedule(
     return "skipped";
   }
 
-  const dir = watchUnitDir(home);
-  const servicePath = `${dir}/${AUTO_UPDATE_SERVICE}`;
-  const timerPath = `${dir}/${AUTO_UPDATE_TIMER}`;
-  const run = await runner(seams);
-
-  if (!autoUpdateEnabled(env)) {
-    if (!existsSync(timerPath) && !existsSync(servicePath)) return "unchanged";
-    // Disabled before the files go, or systemd keeps a dangling symlink.
-    await run(["systemctl", "--user", "disable", "--now", AUTO_UPDATE_TIMER]);
-    rmSync(timerPath, { force: true });
-    rmSync(servicePath, { force: true });
-    await run(["systemctl", "--user", "daemon-reload"]);
-    log.ok("auto-update: the timer is off (RED_DEV_AUTO_UPDATE=0)");
-    return "removed";
-  }
-
-  const minutes = autoUpdateMinutes(env);
-  const binary = seams.binary ?? (await autoUpdateBinary());
-  const { service, timer } = autoUpdateUnits(binary, minutes, inheritablePath(env));
-  if (readIf(servicePath) + readIf(timerPath) === service + timer) return "unchanged";
-
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(servicePath, service);
-  writeFileSync(timerPath, timer);
-  await run(["systemctl", "--user", "daemon-reload"]);
-  await run(["systemctl", "--user", "enable", "--now", AUTO_UPDATE_TIMER]);
-  log.ok(`auto-update: updating every ${minutes} minutes`);
-  return "installed";
-}
-
-/** The binary the schedule names, resolved the way the watch does. */
-async function autoUpdateBinary(): Promise<string> {
-  const { redwallBinary } = await import("./redwall-hook.ts");
-  const { detect } = await import("./platform.ts");
-  return await redwallBinary(detect());
-}
-
-function readIf(path: string): string {
-  try {
-    return existsSync(path) ? readFileSync(path, "utf8") : "";
-  } catch {
-    return "";
-  }
+  const { retireUpdateUnits } = await import("./retire-update-schedule.ts");
+  const removed = await retireUpdateUnits(home, AUTO_UPDATE_SERVICE, AUTO_UPDATE_TIMER, "update --unattended", await runner(seams));
+  return removed ? "removed" : "unchanged";
 }

@@ -1,3 +1,4 @@
+import { toolPolicy } from "./tool-policy.ts";
 import { runsHere } from "./workstation.ts";
 /**
  * The mise config fragment that makes the reddb-io suite updatable.
@@ -449,7 +450,8 @@ export function miseEntries(
   // red-dev installed.
   for (const host of hosts) {
     if (host.mise && host.miseSuite && runsHere(host.placement ?? "both", p)) {
-      entries.push({ spec: host.mise, alias: host.cmd, version: "latest" });
+      const policy = toolPolicy(host.cmd, host.mise);
+      if (policy.mode !== "external") entries.push({ spec: host.mise, alias: host.cmd, version: policy.mode === "fixed" ? policy.version : "latest" });
     }
   }
 
@@ -486,7 +488,7 @@ export function miseEntries(
  * never touches. Naming the tools keeps that promise.
  */
 export function miseToolNames(p: Platform, tools: readonly Tool[] = TOOLS): string[] {
-  return miseEntries(p, tools).map((e) => e.alias ?? e.spec);
+  return miseEntries(p, tools).filter(e => toolPolicy(e.alias ?? e.spec, e.spec).mode === "follow").map((e) => e.alias ?? e.spec);
 }
 
 /**
@@ -502,7 +504,7 @@ export function miseToolNames(p: Platform, tools: readonly Tool[] = TOOLS): stri
  * needs no alias to resolve, so retention is named by spec.
  */
 export function miseToolSpecs(p: Platform, tools: readonly Tool[] = TOOLS): string[] {
-  return miseEntries(p, tools).map((e) => e.spec);
+  return miseEntries(p, tools).filter(e => toolPolicy(e.alias ?? e.spec, e.spec).mode === "follow").map((e) => e.spec);
 }
 
 export interface ConvergeMiseConfigResult {

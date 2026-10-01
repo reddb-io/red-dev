@@ -1,3 +1,5 @@
+import { toolPolicy } from "./tool-policy.ts";
+import { runUpdateJob, withUpdateLock, updateClockPath } from "./update-coordinator.ts";
 /**
  * What is out of date, written down where the desktop can read it.
  *
@@ -43,15 +45,16 @@ export function updateStatePath(env: Record<string, string | undefined> = proces
 /** The names `mise outdated` may use for a tool red-dev curates. PURE. */
 export function curatedToolNames(
   p: Platform,
-  hosts: readonly { mise?: string; cmd: string }[] = AGENTS,
+  hosts: readonly { mise?: string; cmd?: string }[] = AGENTS,
 ): Set<string> {
   const names = new Set<string>();
   for (const entry of miseEntries(p)) {
+    if (toolPolicy(entry.alias ?? entry.spec, entry.spec).mode !== "follow") continue;
     names.add(entry.spec);
     if (entry.alias) names.add(entry.alias);
   }
   for (const host of hosts) {
-    if (host.mise) names.add(host.mise);
+    if (host.mise && toolPolicy(host.cmd ?? host.mise, host.mise).mode === "follow") names.add(host.mise);
   }
   return names;
 }
@@ -100,6 +103,7 @@ export function updateCheckDue(state: UpdateState | null, nowMs: number): boolea
 }
 
 export interface RefreshOptions {
+  coordinated?: boolean;
   path?: string;
   nowMs?: number;
   run?: (argv: string[], env: Record<string, string | undefined>) => Promise<BoundedCommandResult>;
@@ -121,29 +125,30 @@ export async function refreshUpdateState(p: Platform, opts: RefreshOptions = {})
   const previous = readUpdateState(path);
   if (!updateCheckDue(previous, nowMs)) return previous;
 
-  const run = opts.run ?? ((argv, env) => runBounded(argv, { timeoutMs: 90_000, env }));
-  const { miseReleaseAgeEnv } = await import("./providers.ts");
-  let result: BoundedCommandResult;
-  try {
-    result = await run(["mise", "outdated", "--json"], {
-      ...process.env,
-      ...miseGithubEnvironment(),
-      ...miseRemoteVersionsEnv(),
-      ...miseReleaseAgeEnv(p),
-      ...opts.env,
-    });
-  } catch {
-    return previous;
-  }
-  if (result.timedOut || result.exitCode !== 0) return previous;
-
-  const state: UpdateState = {
-    checkedAt: new Date(nowMs).toISOString(),
-    outdated: parseOutdated(result.stdout, curatedToolNames(p)),
+  const refresh = async () => {
+    await runUpdateJob("metadata", UPDATE_CHECK_INTERVAL_MS, async () => {
+      const run = opts.run ?? ((argv, env) => runBounded(argv, { timeoutMs: 90_000, env }));
+      const { miseReleaseAgeEnv } = await import("./providers.ts");
+      let result: BoundedCommandResult;
+      try {
+        result = await run(["mise", "outdated", "--json"], {
+          ...process.env, ...miseGithubEnvironment(), ...miseRemoteVersionsEnv(), ...miseReleaseAgeEnv(p), ...opts.env,
+        });
+      } catch { return false; }
+      if (result.timedOut || result.exitCode !== 0) return false;
+      // Invalid output is a failed observation, never an empty successful list.
+      try { const parsed = JSON.parse(result.stdout); if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false; }
+      catch { return false; }
+      const state: UpdateState = { checkedAt: new Date(nowMs).toISOString(), outdated: parseOutdated(result.stdout, curatedToolNames(p)) };
+      mkdirSync(dirname(path), { recursive: true });
+      const temporary = `${path}.${process.pid}.tmp`;
+      writeFileSync(temporary, `${JSON.stringify(state)}\n`, { mode: 0o600 });
+      renameSync(temporary, path);
+      return true;
+    }, { path: opts.path ? `${path}.clock` : updateClockPath(), now: nowMs });
+    return readUpdateState(path) ?? previous;
   };
-  mkdirSync(dirname(path), { recursive: true });
-  const temporary = `${path}.${process.pid}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify(state)}\n`, { mode: 0o600 });
-  renameSync(temporary, path);
-  return state;
+  if (opts.coordinated) return refresh();
+  const result = await withUpdateLock(refresh, opts.path ? `${path}.clock` : updateClockPath());
+  return result.busy ? previous : result.value;
 }

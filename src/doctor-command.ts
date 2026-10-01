@@ -35,6 +35,14 @@ async function inspectDoctor(p: Platform, inv: Invocation): Promise<number> {
     log.plain("       change it with: red-dev shell");
   }
 
+  log.plain("\n[updates]");
+  try {
+    const { readUpdateClock } = await import("./update-coordinator.ts");
+    const jobs = Object.entries(readUpdateClock().jobs);
+    if (jobs.length === 0) log.info("no coordinated update has run yet");
+    for (const [job, state] of jobs) log.info(`${job}: ${state.outcome}; last attempt ${new Date(state.attemptedAt).toISOString()}; last success ${state.succeededAt ? new Date(state.succeededAt).toISOString() : "none"}; next automatic attempt ${new Date(state.nextAttemptAt).toISOString()}`);
+  } catch (err) { log.warn(`update state unreadable: ${(err as Error).message}`); }
+
   log.plain("\n[host]");
   if (p.os === "linux") {
     const [{ collectLinuxHostSnapshot }, { inspectStatuslineHealth }, { buildHostReport }, { assessHost }] =

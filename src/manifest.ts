@@ -1,3 +1,4 @@
+import { toolPolicy } from "./tool-policy.ts";
 import { runsHere } from "./workstation.ts";
 /**
  * The single place where "what to install" lives.
@@ -86,7 +87,7 @@ type ProviderSpec =
        */
       alias?: string;
       /** Always follows the publisher's latest release. */
-      version?: "latest";
+      version?: string;
       /** Approve this known package when aube's popularity gate prompts. */
       allowLowDownloads?: true;
     }
@@ -373,7 +374,7 @@ const gh = (repo: string, asset: string, bin?: string): Provider => ({
  */
 const mise = (
   spec: string,
-  opts: { alias?: string; version?: "latest"; allowLowDownloads?: true } = {},
+  opts: { alias?: string; version?: string; allowLowDownloads?: true } = {},
 ): Provider => ({
   kind: "mise",
   spec,
@@ -1476,9 +1477,11 @@ export function providerFor(tool: Tool, p: Platform): Provider {
     if (!verdict.install) return { kind: "skip", reason: verdict.reason };
   }
 
-  if (p.os === "windows") return tool.win;
-  if (versionAtLeast(p.version, "26.04")) return tool.u26 ?? tool.u24;
-  return tool.u24;
+  const provider = p.os === "windows" ? tool.win : versionAtLeast(p.version, "26.04") ? tool.u26 ?? tool.u24 : tool.u24;
+  if (provider.kind !== "mise") return provider;
+  const policy = toolPolicy(provider.alias ?? provider.spec, provider.spec);
+  if (policy.mode === "external") return skip("externally managed; red-dev only observes this tool");
+  return policy.mode === "fixed" ? { ...provider, version: policy.version } : provider;
 }
 
 /**

@@ -67,7 +67,7 @@ describe("which asset this machine would take", () => {
 });
 
 describe("taking it", () => {
-  test("a newer release is taken, and the cache is cleared first", async () => {
+  test("installs the observed exact release without clearing shared metadata", async () => {
     const h = harness();
     const result = await updateRedDev(h.opts);
 
@@ -76,12 +76,7 @@ describe("taking it", () => {
     // The whole reason this file asks the publisher instead of mise:
     // `mise upgrade` answered "All tools are up to date" against a list
     // cached before the release existed.
-    expect(h.ran.map((a) => a.join(" "))).toEqual([
-      // Unqualified: the per-tool form does not invalidate the remote
-      // version list, which is the only thing that matters here.
-      "mise cache clear",
-      "mise upgrade red-dev",
-    ]);
+    expect(h.ran.map((a) => a.join(" "))).toEqual(["mise install red-dev@1.0.100"]);
   });
 
   test("nothing newer runs nothing at all", async () => {

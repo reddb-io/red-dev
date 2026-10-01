@@ -714,7 +714,7 @@ red-dev install [scope]      # converge toward the manifest
 red-dev install --dry-run    # print the plan, touch nothing
 red-dev update               # the tools red-dev declares, RedSkills, mise's tools, the agents, then converge
 red-dev update --system      # and every other package apt or winget owns
-red-dev update --unattended  # suite, agents and prune only — what the hourly timer runs
+red-dev update --unattended  # explicitly update suite, agents and prune without prompts
 red-dev theme [name]         # dark | light | obsidian | marble | cobalt | flare
 red-dev wallpaper [source]   # theme | current | Red artwork | absolute image path | HTTPS URL
 red-dev redwall              # redraw the wallpaper carrying this machine's state
@@ -855,15 +855,29 @@ Two things are not questions and never were. The Start Menu hotkeys and the
 RedSkills marketplace are part of `core`, so installing red-dev at all is enough
 to get them.
 
-Staying current is not a question either. Every tool red-dev installs through
-mise is declared `latest`. `red-dev update` puts a hand-typed version number
-back on `latest` for those tools and passes `MISE_MINIMUM_RELEASE_AGE=0`, so a
-release installs as soon as it is published. On Linux and WSL a systemd user
-timer, `red-dev-auto-update.timer`, runs `red-dev update --unattended` every
-hour: suite, agents and prune, with no apt, no RedSkills and no converge. It is
-off with `RED_DEV_AUTO_UPDATE=0`, and `RED_DEV_AUTO_UPDATE_MINUTES` sets the
-interval (15–1440). Your own tools in `~/.config/mise/config.toml` keep whatever
-version you wrote.
+Portable tools have an explicit ownership policy. Existing selectors in your
+mise configuration are preserved, including versions and channels chosen by
+hand. `red-dev update` never moves those selectors back to `latest`.
+
+```sh
+red-dev policy                        # report portable tool policies
+red-dev policy claude fixed 2.1.283    # select and keep this version
+red-dev policy claude follow          # explicitly resume latest updates
+red-dev policy claude external        # let another owner maintain it
+```
+
+One OS schedule runs `red-dev maintenance`. It coordinates RedSkills, the
+suite/agent updates and cached update information, with one writer per side,
+independent job intervals and persistent retry delays after failures. The shell
+prompt starts no update process. Windows owns the schedule of a WSL child it
+provisions; native Ubuntu owns its own schedule. Doctor reports the last attempt,
+last success and next automatic attempt. Explicit updates can retry immediately.
+
+`RED_DEV_AUTO_UPDATE=0` disables suite updates; `RED_SKILLS_WATCH=0` disables
+RedSkills checks. Both off disables the clock. Existing interval settings are
+preserved. Owned legacy hourly units and prompt hooks are archived and retired;
+unknown owners and running updater processes are preserved. See
+[automatic updates and ownership](docs/platform-updates.md).
 
 The marketplace is checked per agent, because each one is wired differently and
 each can arrive later:

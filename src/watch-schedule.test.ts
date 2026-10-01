@@ -65,7 +65,7 @@ describe("the systemd pair", () => {
   });
 
   test("runs the same phase the shell hook does, so both land on one debounce", () => {
-    expect(service).toContain("red-skills watch due");
+    expect(service).toContain("maintenance");
     expect(service).toContain("Type=oneshot");
   });
 
@@ -97,12 +97,12 @@ describe("the Windows task", () => {
     expect(command).not.toContain('\\"');
     expect(command).toContain("red-skills-watch.cmd");
     // The command itself lives in the file.
-    expect(command).not.toContain("red-skills watch due");
+    expect(command).not.toContain("maintenance");
   });
 
   test("and the file it names holds the quoting", () => {
     const wrapper = watchWrapper("C:\\Program Files\\red-dev\\red-dev.exe");
-    expect(wrapper).toContain('"C:\\Program Files\\red-dev\\red-dev.exe" red-skills watch due');
+    expect(wrapper).toContain('"C:\\Program Files\\red-dev\\red-dev.exe" maintenance');
     // A Windows batch file, CRLF and all, and silent.
     expect(wrapper.startsWith("@echo off\r\n")).toBe(true);
     expect(wrapper.endsWith("\r\n")).toBe(true);
@@ -129,7 +129,7 @@ describe("converging the schedule", () => {
     const calls: string[][] = [];
     await convergeWatchSchedule(UBUNTU, {
       home: "/nonexistent-home",
-      env: { RED_SKILLS_WATCH: "0" },
+      env: { RED_SKILLS_WATCH: "0", RED_DEV_AUTO_UPDATE: "0" },
       run: async (argv) => {
         calls.push(argv);
         return { exitCode: 0 };

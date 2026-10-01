@@ -1,43 +1,8 @@
-/**
- * red-dev taking a red-dev.
- *
- * ADR 0017 gave this machine a trigger for RedSkills and stopped there,
- * so for a day the package set tracked the publisher within ten minutes
- * while red-dev itself moved only when somebody typed a command. Four
- * releases shipped on 2026-08-21 and not one reached either half until
- * it was asked to, twice, by hand — and one of those asks silently did
- * nothing, which is the second half of what this file is for.
- *
- * ## Two questions, two answers, and only one of them is mise's
- *
- * ADR 0008 settled that **mise owns red-dev's version**: it installs
- * every release, the shims sit ahead of boot.ps1's copy on PATH, and a
- * migration retires that copy. None of that changes here — the install
- * is still `mise upgrade`.
- *
- * What does change is who decides there is something to install.
- * `mise upgrade red-dev` answered "All tools are up to date" against a
- * cached version list that predated the release, so the upgrade was a
- * no-op, the machine stayed three versions back, and the run that
- * followed reproduced a bug that had already been fixed. Measured, and
- * then measured again on the other half the same day.
- *
- * So the question is asked of the publisher directly, by the same
- * mechanism `agents update` already uses for a GitHub-released host: a
- * HEAD against `releases/latest/download/<asset>` and the tag read off
- * the redirect. No API call, no token, no rate limit — and no cache
- * between the machine and the truth. mise is then told to install, with
- * its cache for this one tool cleared first so that it cannot answer
- * the question again and disagree.
- *
- * ## The version is what moved, not what mise said
- *
- * The verdict comes from asking the binary PATH now resolves, after the
- * fact. mise removes the previous install once the new one is in place,
- * and on Windows that removal fails while the previous one is the
- * running process — a non-zero exit for a cleanup, on an upgrade that
- * worked. Reading the exit code would call that a failure; reading the
- * version calls it what it is.
+import { toolPolicy } from "./tool-policy.ts";
+/** Ask the publisher once, then let mise install the exact observed release.
+ * User pins/external ownership suppress the probe. Shared mise metadata is kept.
+ * Verification reads the installed binary because Windows may refuse only the
+ * cleanup of the previous executable while this process is still running.
  */
 
 import { log } from "./log.ts";
@@ -117,6 +82,8 @@ const UPGRADE_MS = 300_000;
 /** Take a newer red-dev, if the publisher has one and mise can place it. */
 export async function updateRedDev(opts: SelfUpdateOptions): Promise<SelfUpdate> {
   const { current, platform } = opts;
+  const policy = toolPolicy("red-dev", "github:reddb-io/red-dev");
+  if (policy.mode !== "follow") return { outcome: "current", reason: policy.mode === "external" ? "externally managed" : `fixed selector ${policy.version}`, from: current, latest: null };
   const asset = redDevAsset(platform);
   if (asset === null) {
     return {
@@ -157,20 +124,8 @@ export async function updateRedDev(opts: SelfUpdateOptions): Promise<SelfUpdate>
   }
 
   const run = opts.run ?? boundedRun;
-  // The whole cache, not this tool's.
-  //
-  // `mise cache clear red-dev` is the obvious call and it does not do
-  // this job: measured on the machine, it left `mise latest red-dev`
-  // still answering 1.0.100 after 1.0.101 was published, and only the
-  // unqualified `mise cache clear` moved it. The remote version list is
-  // not filed under the tool whose versions it holds.
-  //
-  // Wiping every tool's list is heavier than it looks and cheaper than
-  // it sounds: this line is only reached once the publisher has already
-  // been asked and has already said there is something newer, so it
-  // runs once per release rather than once per ten minutes.
-  await run(["mise", "cache", "clear"]);
-  await run(["mise", "upgrade", "red-dev"]);
+  // Install the release already observed, without clearing other tools' metadata.
+  await run(["mise", "install", `red-dev@${latest}`]);
 
   // The verdict is the version, not the exit code — see the note at the
   // top of this file about what mise's cleanup does on Windows.
