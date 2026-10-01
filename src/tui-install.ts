@@ -346,7 +346,7 @@ export function useInstallModel(
           tool: current() || "red-dev",
           provider: "internal",
           index: completed.length + 1,
-          total,
+          total: total(),
           outcome: "failed",
           ms: 0,
           detail: message,
