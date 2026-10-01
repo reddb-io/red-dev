@@ -364,6 +364,9 @@ async function cmdInstallUnlocked(
   let extraScopes: Scope[] = [];
   let sudoPrepared = false;
 
+  const { prepareProvisioning, synchronizeProvisioning } = await import("./provisioning.ts");
+  await prepareProvisioning(p, inv.dryRun);
+
   // Ask once, on a real terminal, when this machine is new. Every ui.ts
   // primitive returns its fallback without a TTY, so this is inert in
   // CI, in a pipe and over a non-interactive SSH — which is what makes
@@ -402,19 +405,9 @@ async function cmdInstallUnlocked(
     }
   }
 
-  // Repairs before converging: a machine can be broken in a way that
-  // looks complete, and then converging finds nothing to do.
-  if (!inv.dryRun) {
-    const { runPendingMigrations } = await import("./migrations.ts");
-    await runPendingMigrations(p);
-  }
-
   const scopes = [...resolveScopes(p, inv.scope), ...extraScopes];
   if (!inv.dryRun) {
-    const { adoptMachineProfile } = await import("./profile-command.ts");
-    await adoptMachineProfile(p);
-    const { convergeMiseConfig } = await import("./mise-config.ts");
-    convergeMiseConfig(p);
+    await synchronizeProvisioning(p);
   }
 
   // Move the declared packages forward before converging over them —
@@ -821,10 +814,8 @@ async function cmdUpdate(p: Platform, inv: Invocation): Promise<number> {
 }
 
 async function cmdUpdateUnlocked(p: Platform, inv: Invocation, includeWsl = true): Promise<number> {
-  if (!inv.dryRun) {
-    const { runPendingMigrations } = await import("./migrations.ts");
-    await runPendingMigrations(p);
-  }
+  const { prepareProvisioning } = await import("./provisioning.ts");
+  await prepareProvisioning(p, inv.dryRun);
 
   const { runUpdate } = await import("./update-order.ts");
 
@@ -1714,15 +1705,14 @@ async function cmdUi(p: Platform, inv: Invocation): Promise<number> {
   // The questions existed and were unreachable from this path — gated on
   // a first run and on there being no scope argument — so the one-liner,
   // which is how anyone actually arrives, never asked anything.
-  const { buildSetupSteps, applySetupAnswers } = await import("./firstrun.ts");
+  const { buildSetupSteps } = await import("./firstrun.ts");
+  const { createWizardInstall } = await import("./wizard-install.ts");
+  const installer = createWizardInstall(p, inv);
   const { steps, wizard } = await buildSetupSteps(p);
   const setup = {
     steps,
     wizard,
-    apply: (
-      answers: Awaited<ReturnType<typeof applySetupAnswers>>["answers"],
-      observer?: Parameters<typeof applySetupAnswers>[3],
-    ) => applySetupAnswers(p, inv, answers, observer),
+    apply: installer.apply,
   };
 
   // The converge is handed to the interface rather than run after it.
@@ -1738,17 +1728,7 @@ async function cmdUi(p: Platform, inv: Invocation): Promise<number> {
       ctx: await contextFor(p, inv, "install"),
       scopes: resolveScopes(p, inv.scope),
       converge: async (options, observer) => {
-        const { withUpdateLock } = await import("./update-coordinator.ts");
-        const held = await withUpdateLock(async () => {
-          const { adoptMachineProfile } = await import("./profile-command.ts");
-          await adoptMachineProfile(p);
-          const { convergeMiseConfig } = await import("./mise-config.ts");
-          convergeMiseConfig(p);
-          const { converge } = await import("./converge.ts");
-          return converge({ ...options, scopes: resolveScopes(p, inv.scope) }, observer);
-        });
-        if (held.busy) throw new Error("another installation or update is running");
-        return held.value;
+        return installer.converge({ ...options, scopes: resolveScopes(p, inv.scope) }, observer);
       },
     },
     // Every one of these runs inside the interface now. Choosing a theme

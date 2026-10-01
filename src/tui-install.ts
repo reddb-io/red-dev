@@ -167,7 +167,7 @@ export function useInstallModel(
   logScroll: ScrollAreaState,
   onFinish: (outcome: InstallOutcome) => void,
 ): InstallModel {
-  const total = countSteps(opts.scopes);
+  const [total, setTotal] = useState(countSteps(opts.scopes));
 
   const [lines, setLines] = useState<string[]>([]);
   const [results, setResults] = useState<StepResult[]>([]);
@@ -294,6 +294,9 @@ export function useInstallModel(
           releaseBatch = null;
         },
         stepStart: (e) => {
+          // Setup answers can add or remove scopes after this model was
+          // created. The executing plan owns the final progress denominator.
+          setTotal(e.total);
           setCurrent(e.tool);
           push(`:: ${e.tool} — ${e.provider}`);
           releaseStep = captureTo((line) => push(`    ${plain(line)}`));
@@ -343,7 +346,7 @@ export function useInstallModel(
           tool: current() || "red-dev",
           provider: "internal",
           index: completed.length + 1,
-          total,
+          total: total(),
           outcome: "failed",
           ms: 0,
           detail: message,
@@ -385,7 +388,7 @@ export function useInstallModel(
       if (startedAt() === 0) return 0;
       return (finishedAt() === 0 ? Date.now() : finishedAt()) - startedAt();
     },
-    total,
+    get total() { return total(); },
     logScroll,
     // The phase before the converge: agents and runtimes, run from the
     // wizard's answers. Starts the clock and names itself in the header
