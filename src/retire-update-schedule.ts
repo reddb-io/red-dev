@@ -23,6 +23,12 @@ export async function retireUpdateUnits(home: string, service: string, timer: st
   bytes.forEach((value, i) => { if (value) archiveUpdateTrigger(home, i === 0 ? service : timer, value); });
   if ((await run(["systemctl", "--user", "disable", "--now", timer])).exitCode !== 0) throw new Error(`could not disable ${timer}; retirement remains pending`);
   paths.forEach(path => rmSync(path, { force: true }));
-  if ((await run(["systemctl", "--user", "daemon-reload"])).exitCode !== 0) throw new Error("systemd reload failed after update trigger retirement");
+  try {
+    if ((await run(["systemctl", "--user", "daemon-reload"])).exitCode !== 0) throw new Error("systemd reload failed after update trigger retirement; retirement remains pending");
+  } catch (err) {
+    // Retain the ownership evidence so the next converge retries the reload.
+    bytes.forEach((value, i) => { if (value && !existsSync(paths[i]!)) writeFileSync(paths[i]!, value); });
+    throw err;
+  }
   return true;
 }

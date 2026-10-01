@@ -122,7 +122,7 @@ export async function convergeAutoUpdateSchedule(
 ): Promise<ScheduleOutcome> {
   const home = seams.home ?? (process.env["HOME"] ?? "");
   if (p.os === "windows") {
-    log.skip("auto-update: no Windows schedule yet; `red-dev update` stays manual there");
+    log.skip("auto-update: maintenance owns the Windows schedule");
     return "skipped";
   }
   if (!p.caps.systemd) {

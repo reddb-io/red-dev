@@ -2048,17 +2048,11 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
         // own declaration standing where red-dev would have put its.
         await applyRedwallHook(ctx.platform);
 
-        // Beside it because both are "what asks red-dev something while
-        // nobody is typing", and this one is the floor under the shell
-        // coordinator. See src/watch-schedule.ts
-        // for why a timer is defensible here and was not for the
-        // Redwall.
+        // One OS schedule owns maintenance; prompts no longer update tools.
         const { convergeWatchSchedule } = await import("./watch-schedule.ts");
         await convergeWatchSchedule(ctx.platform);
 
-        // And the one that keeps `latest` meaning the latest: an hourly
-        // unattended update of the suite and the agent hosts. See
-        // src/auto-update-schedule.ts.
+        // Retire the separate hourly clock left by earlier installations.
         const { convergeAutoUpdateSchedule } = await import("./auto-update-schedule.ts");
         await convergeAutoUpdateSchedule(ctx.platform);
         return;
