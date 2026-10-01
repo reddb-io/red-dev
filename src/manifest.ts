@@ -207,6 +207,7 @@ type ProviderSpec =
         | "codex-statusline"
         | "claude-keybindings"
         | "redwall-hook"
+        | "maintenance-schedule"
         | "puppeteer"
         | "ssh-server"
         | "red-router-autostart";
@@ -426,6 +427,7 @@ const builtin = (
     | "codex-statusline"
     | "claude-keybindings"
     | "redwall-hook"
+    | "maintenance-schedule"
     | "puppeteer"
     | "ssh-server"
     | "red-router-autostart",
@@ -1390,6 +1392,14 @@ export const TOOLS: Tool[] = [
     managed: true,
     u24: builtin("redwall-hook"),
     win: builtin("redwall-hook"),
+  },
+  {
+    name: "maintenance-schedule", placement: "both",
+    about: "coordinates updates and retires legacy schedules",
+    scope: "core",
+    managed: true,
+    u24: builtin("maintenance-schedule"),
+    win: builtin("maintenance-schedule"),
   },
   {
     name: "wsl-interop", placement: "linux",

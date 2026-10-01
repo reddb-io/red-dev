@@ -2047,8 +2047,11 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
         // printed one — including the refusal, which is the operator's
         // own declaration standing where red-dev would have put its.
         await applyRedwallHook(ctx.platform);
-
+        return;
+      }
+      if (pr.name === "maintenance-schedule") {
         // One OS schedule owns maintenance; prompts no longer update tools.
+        // WSL must converge this even though its desktop hook lives on Windows.
         const { convergeWatchSchedule } = await import("./watch-schedule.ts");
         await convergeWatchSchedule(ctx.platform);
 

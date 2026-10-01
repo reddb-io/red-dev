@@ -7,6 +7,7 @@ import { windowsOwnsMaintenance } from "./maintenance-owner.ts";
 import { autoUpdateUnits, AUTO_UPDATE_SERVICE, AUTO_UPDATE_TIMER } from "./auto-update-schedule.ts";
 import { convergeWatchSchedule, watchWrapper, WATCH_SERVICE } from "./watch-schedule.ts";
 import type { Platform } from "./platform.ts";
+import { providerFor, TOOLS } from "./manifest.ts";
 const roots: string[] = [];
 afterEach(() => roots.splice(0).forEach(r => rmSync(r, { recursive: true, force: true })));
 function home() { const root = mkdtempSync(join(tmpdir(), "red-maintenance-life-")); roots.push(root); return root; }
@@ -93,4 +94,12 @@ test("Windows-owned WSL clocks remain owned across later local invocations; nati
   const nativeRoot = home();
   expect(windowsOwnsMaintenance({ ...wsl, env: "desktop" }, nativeRoot, { RED_DEV_WSL_CHILD: "1" })).toBe(false);
   expect(existsSync(join(nativeRoot, ".local/state/red-dev/maintenance-owner.json"))).toBe(false);
+});
+test("WSL converges its schedule retirement independently of the Windows desktop hook", () => {
+  const wsl = { os: "linux", env: "wsl", distro: "ubuntu", version: "26.04" } as Platform;
+  const schedule = TOOLS.find(tool => tool.name === "maintenance-schedule")!;
+  expect(schedule.managed).toBe(true);
+  expect(schedule.scope).toBe("core");
+  expect(providerFor(schedule, wsl)).toEqual({ kind: "builtin", name: "maintenance-schedule" });
+  expect(providerFor(TOOLS.find(tool => tool.name === "redwall-hook")!, wsl).kind).toBe("skip");
 });
