@@ -83,6 +83,8 @@ export interface Preferences {
   crashHandoff?: boolean;
   /** mise runtime ids chosen for this workstation. */
   runtimes?: string[];
+  /** Optional manifest applications explicitly chosen in setup/catalogue. */
+  apps?: string[];
   /**
    * The RedSkills plugins switched on in the agent hosts — see
    * src/red-skills-plugins.ts.
@@ -118,12 +120,24 @@ function join(dir: string, name: string, p: Platform): string {
   return `${dir}${p.os === "windows" ? "\\" : "/"}${name}`;
 }
 
-export async function readPreferences(p: Platform): Promise<Preferences> {
+export async function readPreferences(p: Platform, options: { strict?: boolean; raw?: boolean } = {}): Promise<Preferences> {
   try {
     const path = join(await prefDir(p), FILE, p);
-    if (!existsSync(path)) return {};
-    return JSON.parse(await Bun.file(path).text()) as Preferences;
-  } catch {
+    const prefs = existsSync(path) ? JSON.parse(await Bun.file(path).text()) as Preferences : {};
+    if (!prefs || typeof prefs !== "object" || Array.isArray(prefs)) throw new Error(`invalid preferences: ${path}`);
+    if (options.raw) return prefs;
+    const { readMachineProfile } = await import("./machine-profile.ts");
+    const profile = readMachineProfile();
+    if (!profile) return prefs;
+    return { ...prefs, ...Object.fromEntries(["agents", "runtimes", "apps", "distro"].flatMap(key => {
+      const value = profile[key as "agents" | "runtimes" | "apps" | "distro"];
+      return value === undefined ? [] : [[key, value]];
+    })), ...(p.os === "windows" ? { terminalShell: profile.name === "windows-native" ? "gitbash" : "wsl" } : {}) };
+  } catch (err) {
+    if (options.strict) throw err;
+    // Profile data is authoritative and must not fall back after corruption.
+    const { readMachineProfile } = await import("./machine-profile.ts");
+    readMachineProfile();
     // A corrupt preferences file must not stop a converge; the defaults
     // below are all recoverable.
     return {};
@@ -133,7 +147,21 @@ export async function readPreferences(p: Platform): Promise<Preferences> {
 export async function writePreferences(p: Platform, prefs: Preferences): Promise<void> {
   const dir = await prefDir(p);
   mkdirSync(dir, { recursive: true });
-  const merged = { ...(await readPreferences(p)), ...prefs };
+  const merged = { ...(await readPreferences(p, { strict: true, raw: true })), ...prefs };
+  const { readMachineProfile, writeMachineProfile } = await import("./machine-profile.ts");
+  const profile = readMachineProfile();
+  if (profile) {
+    const next = { ...profile };
+    for (const key of ["agents", "runtimes", "apps", "distro"] as const) if (prefs[key] !== undefined) Object.assign(next, { [key]: prefs[key] });
+    if (prefs.apps !== undefined) {
+      const { TOOLS } = await import("./manifest.ts");
+      next.tools = { ...next.tools };
+      for (const tool of TOOLS.filter(t => t.scope === "optional")) next.tools[tool.name] = prefs.apps.includes(tool.name);
+    }
+    if (p.os === "windows" && prefs.terminalShell) next.name = prefs.terminalShell === "gitbash" ? "windows-native" : "windows-wsl";
+    writeMachineProfile(next);
+    p.profile = next;
+  }
   await Bun.write(join(dir, FILE, p), JSON.stringify(merged, null, 2) + "\n");
 }
 

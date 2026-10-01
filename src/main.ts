@@ -11,12 +11,7 @@ import { recordCrash } from "./crash.ts";
 import { log } from "./log.ts";
 import {
   applicableScopes,
-  describeProvider,
-  installedVersion,
-  installState,
-  isInstalled,
   providerFor,
-  toolsInScope,
   type Scope,
 } from "./manifest.ts";
 import { detect, summary, type Platform } from "./platform.ts";
@@ -56,30 +51,24 @@ function cmdPlatform(p: Platform): number {
 
 async function cmdPlan(p: Platform, inv: Invocation): Promise<number> {
   await contextFor(p, inv, "plan");
+  const { provisionPlan, planLine } = await import("./provision-plan.ts");
+  log.plain(`\n[profile: ${p.profile?.name ?? "inferred"}]`);
   const scopes = resolveScopes(p, inv.scope);
   for (const scope of scopes) {
     log.plain(`\n[${scope}]`);
-    for (const tool of toolsInScope(scope)) {
-      const pr = providerFor(tool, p);
-      // A skipped tool is not also "managed": the skip already says the
-      // provider will not run, and printing both reads as a
-      // contradiction.
-      const state =
-        pr.kind === "skip"
-          ? ""
-          : tool.managed
-            ? " (managed)"
-            : isInstalled(tool)
-              ? " (present)"
-              : installState(tool) === "outdated"
-                ? ` (outdated, wants ${tool.minVersion})`
-                : installState(tool) === "mismatched"
-                  ? // Both numbers, because the found one may be the
-                    // higher: "wants 0.44.1" alone reads as an upgrade
-                    // on a machine that has to go the other way.
-                    ` (${installedVersion(tool) ?? "unknown"}, pinned to ${tool.pinVersion})`
-                  : "";
-      log.plain(`  ${tool.name.padEnd(17)}${describeProvider(pr)}${state}`);
+    for (const step of provisionPlan(p, [scope])) log.plain(`  ${planLine(step)}`);
+  }
+  if (scopes.includes("core")) {
+    const { profileRetirementLines } = await import("./profile-retirements.ts");
+    for (const line of profileRetirementLines(p)) log.plain(`  ${line}`);
+    const { profileAgentPlan } = await import("./profile-agents.ts");
+    for (const step of await profileAgentPlan(p)) log.plain(`  agent:${step.agent.key} ${step.action} · ${step.target} · ${step.method ?? "no local provider"}${step.policy ? `; ${step.policy.mode}` : ""}`);
+    const { profileRuntimePlan } = await import("./runtimes.ts");
+    const { toolPolicy } = await import("./tool-policy.ts");
+    for (const row of await profileRuntimePlan(p)) {
+      const policy = toolPolicy(row.id.split("@")[0]!);
+      const selector = policy.mode === "fixed" ? policy.version : row.id.split("@")[1];
+      log.plain(`  runtime:${row.id.split("@")[0]}@${selector} · ${p.os === "windows" ? "Windows" : p.env === "wsl" ? "Ubuntu/WSL" : "Ubuntu"} · ${row.reason}; ${policy.mode}`);
     }
   }
   // Last, where a summary belongs: the rows it names have just been
@@ -93,13 +82,11 @@ async function cmdPlan(p: Platform, inv: Invocation): Promise<number> {
     const distro = await defaultDistroInfo(p);
     if (distro?.version === 2 && await distroVersion(distro.name)) return relayWslCommand(p, `red-dev plan ${inv.scope ?? ""}`);
     const linux: Platform = { ...p, os: "linux", env: "wsl", distro: "ubuntu", version: "24.04", workstation: undefined,
+      profile: p.profile ? { ...p.profile, name: "ubuntu-wsl" } : undefined,
       caps: { apt: true, gui: false, systemd: true, winget: false, flatpak: false } };
     log.plain("\n[Ubuntu/WSL — planned destinations; installation not observed]");
     for (const scope of resolveScopes(linux, inv.scope)) {
-      for (const tool of toolsInScope(scope)) {
-        const provider = providerFor(tool, linux);
-        if (provider.kind !== "skip") log.plain(`  ${tool.name.padEnd(17)}${describeProvider(provider)}`);
-      }
+      for (const step of provisionPlan(linux, [scope], { observed: false })) log.plain(`  ${planLine(step)}`);
     }
   }
   return 0;
@@ -423,6 +410,12 @@ async function cmdInstallUnlocked(
   }
 
   const scopes = [...resolveScopes(p, inv.scope), ...extraScopes];
+  if (!inv.dryRun) {
+    const { adoptMachineProfile } = await import("./profile-command.ts");
+    await adoptMachineProfile(p);
+    const { convergeMiseConfig } = await import("./mise-config.ts");
+    convergeMiseConfig(p);
+  }
 
   // Move the declared packages forward before converging over them —
   // see installRefreshesDeclared for why install has to do this itself.
@@ -1278,6 +1271,11 @@ async function cmdApps(p: Platform, inv: Invocation): Promise<number> {
     ticked,
   );
   const chosen = new Set(picked);
+  const { writePreferences } = await import("./preferences.ts");
+  await writePreferences(p, { apps: picked.flatMap(label => {
+    const row = byLabel.get(label)?.row;
+    return row?.kind === "tool" ? [row.tool.tool.name] : [];
+  }) });
 
   // Named first and taken out first, so the list a person confirms is
   // the list they were looking at rather than one an install has already
@@ -1739,6 +1737,19 @@ async function cmdUi(p: Platform, inv: Invocation): Promise<number> {
       platform: p,
       ctx: await contextFor(p, inv, "install"),
       scopes: resolveScopes(p, inv.scope),
+      converge: async (options, observer) => {
+        const { withUpdateLock } = await import("./update-coordinator.ts");
+        const held = await withUpdateLock(async () => {
+          const { adoptMachineProfile } = await import("./profile-command.ts");
+          await adoptMachineProfile(p);
+          const { convergeMiseConfig } = await import("./mise-config.ts");
+          convergeMiseConfig(p);
+          const { converge } = await import("./converge.ts");
+          return converge({ ...options, scopes: resolveScopes(p, inv.scope) }, observer);
+        });
+        if (held.busy) throw new Error("another installation or update is running");
+        return held.value;
+      },
     },
     // Every one of these runs inside the interface now. Choosing a theme
     // used to leave the fullscreen, apply it, and print to the console
@@ -2542,6 +2553,10 @@ async function main(): Promise<number> {
       const { policyCommand } = await import("./policy-command.ts");
       return policyCommand(p, inv.policyTool, inv.policyMode, inv.policyVersion);
     }
+    case "profile": {
+      const { profileCommand } = await import("./profile-command.ts");
+      return profileCommand(p, inv.profileAction, inv.profileValue);
+    }
     case "privileged":
       return await cmdPrivileged(p, inv);
     case "theme":
@@ -2649,6 +2664,7 @@ async function run(): Promise<number> {
   ) return await main();
 
   const { startTranscript, finishTranscript } = await import("./transcript.ts");
+  if (argv[0] === "plan" || (argv[0] === "profile" && (!argv[1] || argv[1] === "show"))) return main();
   const command = argv.join(" ") || "menu";
   await startTranscript(command, VERSION, new Date());
 

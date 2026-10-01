@@ -11,6 +11,7 @@ import { readWindowsOutput } from "./windows-output.ts";
 import { unattendedShellCommand } from "./unattended.ts";
 import { windowsWsl } from "./workstation.ts";
 import { githubToken } from "./github-token.ts";
+import { readMachineProfile, profileToolEnabled } from "./machine-profile.ts";
 
 const BOOT_URL = "https://raw.githubusercontent.com/reddb-io/red-dev/main/boot.sh";
 export const DEFAULT_WSL_DISTRO = "Ubuntu-24.04";
@@ -26,7 +27,10 @@ export function wslChildEnvironment(current: NodeJS.ProcessEnv = process.env, to
   const forwarded = new Set((current.WSLENV ?? "").split(":").filter(Boolean));
   for (const name of ["RED_ROUTER", "RED_ROUTER_HOST", "RED_ROUTER_PORT"]) if (current[name] !== undefined) forwarded.add(name);
   if (token) { forwarded.add("GH_TOKEN"); forwarded.add("GITHUB_TOKEN"); }
-  return { ...current, ...(token ? { GH_TOKEN: token, GITHUB_TOKEN: token } : {}), WSLENV: [...forwarded].join(":") };
+  const profile = readMachineProfile(current);
+  if (profile?.name === "windows-wsl") forwarded.add("RED_DEV_WSL_PROFILE");
+  return { ...current, ...(token ? { GH_TOKEN: token, GITHUB_TOKEN: token } : {}),
+    ...(profile?.name === "windows-wsl" ? { RED_DEV_WSL_PROFILE: JSON.stringify(profile) } : {}), WSLENV: [...forwarded].join(":") };
 }
 
 export function distroSetupCommands(shell: TerminalShell | undefined, agentKeys: string[], runtimeIds: string[]): string[] {
@@ -172,10 +176,12 @@ export async function syncWslDistro(p: Platform, seams: WslSyncSeams = {}): Prom
   if (await execute(selected.name, command) !== 0) throw new RedError(`${selected.name}: Linux installation incomplete; retry red-dev install from PowerShell`);
   if (seams.scope === "optional" && await execute(selected.name, "red-dev install optional --yes") !== 0) throw new RedError(`${selected.name}: optional Linux packages failed`);
   if (await syncSelectedTooling(p, selected, { ...seams, run: execute, ensure: async () => 0 }) !== 0) throw new RedError(`${selected.name}: selected Linux tools failed`);
-  const services = process.env.RED_ROUTER === "0" ? "redskilled.service" : "redskilled.service red-router.service";
-  if (await execute(selected.name, `systemctl --user is-active ${services}`) !== 0) throw new RedError(`${selected.name}: Linux services are not active; finish WSL systemd setup and retry from PowerShell`);
+  const services = [ ...(profileToolEnabled(p, "red-skills") ? ["redskilled.service"] : []),
+    ...(process.env.RED_ROUTER !== "0" && profileToolEnabled(p, "red-router") && profileToolEnabled(p, "red-router-autostart") ? ["red-router.service"] : []) ];
+  if (services.length && await execute(selected.name, `systemctl --user is-active ${services.join(" ")}`) !== 0) throw new RedError(`${selected.name}: Linux services are not active; finish WSL systemd setup and retry from PowerShell`);
   const migrate = seams.migrate ?? (await import("./windows-wsl-migration.ts")).retireWindowsServices;
-  await migrate(p, selected.name);
+  if (profileToolEnabled(p, "red-skills") && profileToolEnabled(p, "red-router") && profileToolEnabled(p, "red-router-autostart")) await migrate(p, selected.name);
+  else log.skip("native services preserved: the profile leaves a service outside managed migration");
   log.ok(`Windows + Ubuntu/WSL ${selected.name}: configured`);
 }
 

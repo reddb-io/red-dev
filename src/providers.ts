@@ -1952,6 +1952,11 @@ export async function applyProvider(pr: Provider, ctx: ApplyContext): Promise<vo
         await installRuntimes(ctx.platform);
         return;
       }
+      if (pr.name === "selected-agents") {
+        const { convergeProfileAgents } = await import("./profile-agents.ts");
+        await convergeProfileAgents(ctx.platform);
+        return;
+      }
       if (pr.name === "retired-resource-controls") {
         const { convergeBuildResources } = await import("./build-resources.ts");
         await convergeBuildResources(ctx.platform);

@@ -158,6 +158,7 @@ export function planAgentUpdate(
   res: UpdateResolution,
 ): AgentUpdatePlan {
   const { key, label } = a;
+  if (p.profile?.agents !== undefined && !p.profile.agents.includes(key)) return { state: "skip", key, label, reason: "not selected in the machine profile" };
   if (a.mise) {
     const policy = toolPolicy(a.cmd, a.mise);
     if (policy.mode !== "follow") return { state: "skip", key, label, reason: policy.mode === "external" ? "externally managed" : `fixed selector ${policy.version}` };

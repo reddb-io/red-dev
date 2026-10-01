@@ -196,6 +196,7 @@ type ProviderSpec =
         | "blesh"
         | "retired-resource-controls"
         | "runtimes"
+        | "selected-agents"
         | "shared-root"
         | "hotkeys"
         | "gnome-bar"
@@ -417,6 +418,7 @@ const builtin = (
     | "blesh"
     | "retired-resource-controls"
     | "runtimes"
+    | "selected-agents"
     | "shared-root"
     | "hotkeys"
     | "gnome-bar"
@@ -853,6 +855,14 @@ export const TOOLS: Tool[] = [
     // not wait for a red-dev release before workstations can receive it.
     //
     // The package only. What keeps it running is the row below.
+    name: "selected-agents", placement: "both",
+    about: "converges the CLI agents explicitly selected in the profile",
+    scope: "core",
+    managed: true,
+    u24: builtin("selected-agents"),
+    win: builtin("selected-agents"),
+  },
+  {
     name: "red-router", placement: "linux",
     about: "one local endpoint for every coding agent, routed across many AI providers",
     cmd: ["red-router"],
@@ -1466,6 +1476,9 @@ export const TOOLS: Tool[] = [
 
 /** Pick the provider column that applies to this machine. */
 export function providerFor(tool: Tool, p: Platform): Provider {
+  const { profileToolEnabled } = requireProfile();
+  if (!profileToolEnabled(p, tool.name, tool.scope)) return skip("not selected in the machine profile");
+  if (tool.name === "red-router-autostart" && !profileToolEnabled(p, "red-router")) return skip("red-router is not selected in the machine profile");
   if (tool.placement && !runsHere(tool.placement, p)) {
     return skip(tool.placement === "linux" ? "owned by Ubuntu/WSL" : "owned by the graphical host");
   }
@@ -1500,6 +1513,10 @@ export function providerFor(tool: Tool, p: Platform): Provider {
  * to keep the module graph acyclic.
  */
 let dockerModule: typeof import("./docker.ts") | null = null;
+let profileModule: typeof import("./machine-profile.ts") | null = null;
+function requireProfile(): typeof import("./machine-profile.ts") {
+  return profileModule ??= require("./machine-profile.ts") as typeof import("./machine-profile.ts");
+}
 function requireDocker(): typeof import("./docker.ts") {
   if (!dockerModule) {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -1515,6 +1532,13 @@ function requireDocker(): typeof import("./docker.ts") {
  * apps`, never by running install.
  */
 export function applicableScopes(p: Platform): Scope[] {
+  if (p.profile) {
+    const scopes: Scope[] = ["core"];
+    if (["ubuntu-desktop", "windows-wsl", "windows-native"].includes(p.profile.name)) scopes.push("desktop");
+    if (p.profile.name === "ubuntu-wsl") scopes.push("wsl");
+    if ((p.profile.apps?.length ?? 0) > 0 || TOOLS.some(t => t.scope === "optional" && p.profile?.tools[t.name] === true)) scopes.push("optional");
+    return scopes;
+  }
   const scopes: Scope[] = ["core"];
   if (p.caps.gui) scopes.push("desktop");
   if (p.env === "wsl") scopes.push("wsl");

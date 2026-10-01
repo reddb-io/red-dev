@@ -36,6 +36,7 @@ import { verifyInstalled } from "./verify-install.ts";
 import { formatDuration, log } from "./log.ts";
 import type { Platform } from "./platform.ts";
 import { windowsWsl } from "./workstation.ts";
+import { planTool, provisionPlan, plannedFoundVersion } from "./provision-plan.ts";
 
 /**
  * `deferred` is the one that is not a verdict on the work.
@@ -382,19 +383,16 @@ export async function converge(
   // that prints thirty-seven rows of work it did not do buries the one
   // row it did.
   for (const scope of onlyPrivileged ? [] : scopes) {
-    const tools = toolsInScope(scope).filter((t) => !batched.has(t.name) && !(coordinate && t.name === "wsl-sync"));
-    observer.scopeStart?.(scope, tools.length);
+    const plan = provisionPlan(p, [scope]).filter(s => !batched.has(s.tool.name) && !(coordinate && s.tool.name === "wsl-sync"));
+    observer.scopeStart?.(scope, plan.length);
 
     // apt is batched: twenty sequential apt-get calls is the slowest
     // part of a fresh provision, and each one re-reads the package
     // lists. Resolved up front so the per-tool loop can still report
     // each package as its own step instead of hiding them all behind
     // one opaque transaction.
-    const pending: Tool[] = tools.filter(
-      (t) => providerFor(t, p).kind !== "skip" && !isInstalled(t),
-    );
-    const aptPkgs = pending
-      .map((t) => providerFor(t, p))
+    const aptPkgs = plan.filter(s => s.action !== "keep")
+      .map(s => s.provider)
       .filter((pr): pr is { kind: "apt"; pkg: string } => pr.kind === "apt")
       .map((pr) => pr.pkg);
 
@@ -404,16 +402,15 @@ export async function converge(
       aptError = await runAptBatch(aptPkgs, observer);
     }
 
-    for (const tool of tools) {
-      const pr = providerFor(tool, p);
+    for (const step of plan) {
+      const { tool, provider: pr, state } = step;
       const { finish, finishError } = open(scope, tool, describeProvider(pr));
 
       if (pr.kind === "skip") {
         finish("skipped", pr.reason);
         continue;
       }
-      const state = installState(tool);
-      if (state === "ok") {
+      if (step.action === "keep") {
         finish("present");
         continue;
       }
@@ -432,7 +429,7 @@ export async function converge(
           tool: tool.name,
           state,
           provider: describeProvider(pr),
-          found: state === "absent" ? null : installedVersion(tool),
+          found: plannedFoundVersion(step),
           ...(tool.pinVersion ? { pinVersion: tool.pinVersion } : {}),
           ...(tool.minVersion ? { minVersion: tool.minVersion } : {}),
           ...(tool.managed ? { managed: tool.managed } : {}),
@@ -495,8 +492,9 @@ export async function converge(
       // that lists them among their scopes describes an ordering the
       // real run does not have.
       for (const tool of batch) {
-        const { finish } = open(tool.scope, tool, describeProvider(providerFor(tool, p)));
-        if (isInstalled(tool)) finish("present");
+        const step = planTool(tool, p);
+        const { finish } = open(tool.scope, tool, describeProvider(step.provider));
+        if (step.action === "keep") finish("present");
         else finish("skipped", "dry run");
       }
     } else {

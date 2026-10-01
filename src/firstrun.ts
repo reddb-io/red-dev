@@ -74,6 +74,7 @@ export function preferencesFromAnswers(answers: SetupAnswers): Preferences {
     blesh: answers.blesh,
     redwall: answers.redwall,
     agents: answers.agents,
+    apps: answers.apps,
     ...(answers.sshGithubUser ? { sshGithubUser: answers.sshGithubUser } : {}),
     runtimes: answers.runtimes,
     // Conditional like the Default agent below: an interview that never

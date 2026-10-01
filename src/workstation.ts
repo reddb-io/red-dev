@@ -18,7 +18,7 @@ export function applyWorkstationPreferences(p: Platform, prefs: Preferences): Pl
   return p;
 }
 export async function resolveWorkstation(p: Platform): Promise<Platform> {
-  if (p.os !== "windows") return p;
-  const { readPreferences } = await import("./preferences.ts");
-  return applyWorkstationPreferences(p, await readPreferences(p));
+  const { attachMachineProfile } = await import("./profile-command.ts");
+  await attachMachineProfile(p);
+  return p;
 }

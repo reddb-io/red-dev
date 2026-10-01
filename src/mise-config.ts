@@ -440,7 +440,7 @@ export function renderMiseConfig(
 export function miseEntries(
   p: Platform,
   tools: readonly Tool[] = TOOLS,
-  hosts: readonly { mise?: string; miseSuite?: true; cmd: string; placement?: import("./workstation.ts").Placement }[] = AGENTS,
+  hosts: readonly { key?: string; mise?: string; miseSuite?: true; cmd: string; placement?: import("./workstation.ts").Placement }[] = AGENTS,
 ): MiseEntry[] {
   const entries: MiseEntry[] = [];
 
@@ -449,6 +449,7 @@ export function miseEntries(
   // this projection `mise upgrade` would know nothing about the copy
   // red-dev installed.
   for (const host of hosts) {
+    if (p.profile?.agents !== undefined && !p.profile.agents.includes(host.key ?? host.cmd)) continue;
     if (host.mise && host.miseSuite && runsHere(host.placement ?? "both", p)) {
       const policy = toolPolicy(host.cmd, host.mise);
       if (policy.mode !== "external") entries.push({ spec: host.mise, alias: host.cmd, version: policy.mode === "fixed" ? policy.version : "latest" });

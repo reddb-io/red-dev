@@ -307,6 +307,15 @@ export async function removeConfiguration(p: Platform): Promise<string[]> {
   if (!home) throw new RedError("neither HOME nor USERPROFILE is set");
 
   const removed: string[] = [];
+  let preserveProfileRoot = false;
+  const { profilePath, readMachineProfile } = await import("./machine-profile.ts");
+  try {
+    if (readMachineProfile()) {
+      const { unlinkSync } = await import("node:fs");
+      unlinkSync(profilePath());
+      removed.push(profilePath());
+    }
+  } catch (err) { preserveProfileRoot = true; log.warn(`profile preserved: ${(err as Error).message}`); }
 
   // Before the roots below, not after. Off WSL the Redwall directory
   // sits inside `~/.local/share/red-dev`, and removing the root first
@@ -383,6 +392,7 @@ export async function removeConfiguration(p: Platform): Promise<string[]> {
   ];
 
   for (const path of targets) {
+    if (preserveProfileRoot && profilePath().startsWith(`${path}/`)) { log.skip(`preserved ${path}: unknown profile data`); continue; }
     if (existsSync(path)) {
       await sh(["rm", "-rf", path], { allowFailure: true });
       removed.push(path);
