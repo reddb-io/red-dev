@@ -47,7 +47,8 @@ function filesystemObservation(tool: Tool, provider: Provider): { state: Install
   if (tool.signature && !foundVersion) return { state: "absent", uncertain: true };
   const exact = tool.pinVersion ?? (provider.kind === "mise" && /^v?\d+\.\d+/.test(provider.version ?? "") ? provider.version : undefined);
   if ((exact || tool.minVersion) && !foundVersion) return { state: "absent", uncertain: true };
-  if (exact && compareVersions(foundVersion!, exact.replace(/^v/, "")) !== 0) return { state: "mismatched", foundVersion };
+  if (exact) return { state: compareVersions(foundVersion!, exact.replace(/^v/, "")) !== 0 ? "mismatched" : "ok", foundVersion };
+  if (provider.kind === "mise" && toolPolicy(provider.alias ?? provider.spec, provider.spec).mode === "fixed") return { state: "ok", foundVersion };
   if (tool.minVersion && compareVersions(foundVersion!, tool.minVersion) < 0) return { state: "outdated", foundVersion };
   return { state: "ok", foundVersion };
 }

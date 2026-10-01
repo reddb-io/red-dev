@@ -155,13 +155,15 @@ test("selected npm packages declare their runtime dependency, while Windows dele
   expect(await profileRuntimePlan({ ...windows, profile: profile({ name: "windows-wsl", runtimes: [] }) })).toEqual([]);
 });
 test("the actual plan CLI is read-only and reports desired actions", async () => {
-  const root = fixture(); writeMachineProfile(profile({ tools: { docker: false }, agents: [], runtimes: [] }));
+  const root = fixture();
+  const name = process.platform === "win32" ? "windows-native" : "ubuntu-desktop";
+  writeMachineProfile(profile({ name, tools: { docker: false }, agents: [], runtimes: [] }));
   const before = readdirSync(root); const bytes = readFileSync(profilePath(), "utf8");
   const child = Bun.spawn([process.execPath, fileURLToPath(new URL("./main.ts", import.meta.url)), "plan", "core"], {
     env: { ...process.env, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" }, stdout: "pipe", stderr: "pipe" });
   const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
   expect([code, stderr]).toEqual([0, ""]);
-  expect(stdout).toContain("unmanage"); expect(stdout).toContain("[profile: ubuntu-desktop]");
+  expect(stdout).toContain("unmanage"); expect(stdout).toContain(`[profile: ${name}]`);
   expect(readdirSync(root, { recursive: true })).toEqual(before);
   expect(readFileSync(profilePath(), "utf8")).toBe(bytes);
 });
@@ -174,4 +176,14 @@ test("the plan names only owned legacy defaults for retirement and leaves exact 
   const lines = profileRetirementLines(ubuntu, root);
   expect(lines.some(line => line.includes("preserve unknown owner") && line.includes(path))).toBe(true);
   expect(lines.some(line => line.includes("retire owned default") && line.includes(path))).toBe(false);
+});
+test("a fixed version takes precedence over a catalog minimum without executing its binary", () => {
+  const root = fixture();
+  const dir = join(root, "installs/neovim/0.10.0/bin"); mkdirSync(dir, { recursive: true });
+  const binary = join(dir, "nvim"); writeFileSync(binary, "not executable");
+  writeFileSync(process.env.MISE_CONFIG_FILE!, '[tools]\nneovim="0.10.0"\n');
+  const step = planTool({ ...tool("neovim"), cmd: [binary] }, ubuntu);
+  expect(step.policy).toEqual({ mode: "fixed", version: "0.10.0" });
+  expect(step.action).toBe("keep");
+  expect(step.foundVersion).toBe("0.10.0");
 });

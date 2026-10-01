@@ -832,6 +832,14 @@ export const TOOLS: Tool[] = [
     win: builtin("runtimes"),
   },
   {
+    name: "selected-agents", placement: "both",
+    about: "converges the CLI agents explicitly selected in the profile",
+    scope: "core",
+    managed: true,
+    u24: builtin("selected-agents"),
+    win: builtin("selected-agents"),
+  },
+  {
     // The one endpoint every coding agent on this machine can point at.
     // red-router sits at http://localhost:25050/v1, speaks both the OpenAI
     // and the Claude wire formats, and routes each request across the
@@ -842,9 +850,9 @@ export const TOOLS: Tool[] = [
     // some hosts route through it and some do not is two environments
     // wearing one name.
     //
-    // Straight after `runtimes`, and the order is load-bearing: the
-    // package is npm, so mise's `npm:` backend needs the node the row
-    // above just installed. The publisher's postinstall pulls sql.js and
+    // After `runtimes`, and the order is load-bearing: the
+    // package is npm, so mise's `npm:` backend needs the node the runtime step
+    // just installed. The publisher's postinstall pulls sql.js and
     // better-sqlite3 into ~/.red-router/runtime rather than into the
     // package tree, and cli.js re-checks them on every start, so a
     // gated postinstall (npm 11) installs cleanly and still works.
@@ -855,14 +863,6 @@ export const TOOLS: Tool[] = [
     // not wait for a red-dev release before workstations can receive it.
     //
     // The package only. What keeps it running is the row below.
-    name: "selected-agents", placement: "both",
-    about: "converges the CLI agents explicitly selected in the profile",
-    scope: "core",
-    managed: true,
-    u24: builtin("selected-agents"),
-    win: builtin("selected-agents"),
-  },
-  {
     name: "red-router", placement: "linux",
     about: "one local endpoint for every coding agent, routed across many AI providers",
     cmd: ["red-router"],
