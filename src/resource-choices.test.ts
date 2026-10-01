@@ -64,6 +64,24 @@ test("system choice restores the original WSL budget after repeated explicit cha
   const system = await machineResourcePlan(windows, { mode: "system" }, snapshot(path, readFileSync(path, 'utf8')));
   applyResourceEdits(system.edits, system.historyPath); expect(readFileSync(path, 'utf8')).toBe(source);
 });
+test("an unavailable Windows bridge cannot silently discard an active WSL choice", async () => {
+  const r = fixture(); const path = join(r, '.wslconfig');
+  writeFileSync(process.env.RED_DEV_PROFILE_FILE!, JSON.stringify({ schema: 1, name: 'windows-native', tools: {}, resources: { mode: 'custom', wsl: { memoryGiB: 8, swapGiB: 4 } } }));
+  const source = readFileSync(process.env.RED_DEV_PROFILE_FILE!, 'utf8');
+  await expect(machineResourcePlan({ ...ubuntu, os: 'windows', env: 'windows' }, { mode: 'system' }, { ...snapshot(path, null), wsl: { path: null, source: null, memory: null, swap: null, runningDistro: null } })).rejects.toThrow('cannot be restored');
+  expect(readFileSync(process.env.RED_DEV_PROFILE_FILE!, 'utf8')).toBe(source);
+});
+test("actual partial build selection retains the recorded WSL choice without reapplying its file", async () => {
+  const r = fixture(); if (process.platform === 'win32') mkdirSync(join(r, 'AppData/Roaming'), { recursive: true });
+  const name = process.platform === 'win32' ? 'windows-native' : 'ubuntu-desktop';
+  writeFileSync(process.env.RED_DEV_PROFILE_FILE!, JSON.stringify({ schema: 1, name, tools: {}, resources: { mode: 'custom', wsl: { memoryGiB: 8, swapGiB: 4 }, buildSlots: 2 } }));
+  const path = join(r, '.wslconfig'); const source = '[wsl2]\nmemory=6GB\nswap=4GB\n'; writeFileSync(path, source);
+  const child = Bun.spawn([process.execPath, fileURLToPath(new URL('./main.ts', import.meta.url)), 'resources', 'configure', 'custom', '--slots', '1', '--apply'], { env: { ...process.env, BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0' }, stdout: 'pipe', stderr: 'pipe' });
+  const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+  expect([code, err]).toEqual([0, '']); expect(out).toContain('WSL file unchanged');
+  expect(JSON.parse(readFileSync(process.env.RED_DEV_PROFILE_FILE!, 'utf8')).resources).toEqual({ mode: 'custom', wsl: { memoryGiB: 8, swapGiB: 4 }, buildSlots: 1 });
+  expect(readFileSync(path, 'utf8')).toBe(source);
+}, 15000);
 test("preview races and later edits are preserved; undo checks every file before writing any", () => {
   const r = fixture(); const a = join(r, 'a'), b = join(r, 'b'); writeFileSync(a, 'original'); writeFileSync(b, 'original');
   const edits = [resourceEdit(a, 'chosen'), resourceEdit(b, 'chosen')]; const history = resourceHistoryPath();

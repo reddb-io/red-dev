@@ -40,12 +40,14 @@ function commandSettings(p: Platform, inv: Invocation, snapshot: ResourceSnapsho
     return { mode: "system" };
   }
   if (mode !== "custom" && mode !== "responsive") throw Error("configure expects system, responsive or custom");
+  const previous = readMachineProfile()?.resources;
   const wsl = p.os === "windows" || p.env === "wsl";
-  const memory = inv.resourceMemory ?? (mode === "responsive" && wsl ? suggestedWslMemory(snapshot.windows?.total ?? null) : undefined);
+  const memory = inv.resourceMemory ?? (mode === "responsive" && wsl ? suggestedWslMemory(snapshot.windows?.total ?? null) : previous?.wsl?.memoryGiB);
   if (mode === "responsive" && wsl && memory === null) throw Error("Windows RAM could not be measured; choose custom with an explicit memory value");
-  if (inv.resourceSwap !== undefined && memory === undefined) throw Error("--swap requires --memory");
-  return { mode, ...(memory !== undefined && memory !== null ? { wsl: { memoryGiB: memory, swapGiB: inv.resourceSwap ?? 4 } } : {}),
-    ...(inv.resourceSlots !== undefined || mode === "responsive" ? { buildSlots: inv.resourceSlots ?? 1 } : {}) };
+  if (inv.resourceSwap !== undefined && inv.resourceMemory === undefined && mode !== "responsive") throw Error("--swap requires --memory");
+  const slots = inv.resourceSlots ?? (mode === "responsive" ? 1 : previous?.buildSlots);
+  return { mode, ...(memory !== undefined && memory !== null ? { wsl: { memoryGiB: memory, swapGiB: inv.resourceSwap ?? previous?.wsl?.swapGiB ?? 4 } } : {}),
+    ...(slots !== undefined ? { buildSlots: slots } : {}) };
 }
 export async function resourceWizard(p: Platform): Promise<number> {
   if (!interactive()) { log.plain(resourceReport(await resourceSnapshot(p)).join("\n")); return 0; }
@@ -83,7 +85,7 @@ export async function resourceWizard(p: Platform): Promise<number> {
             settings.wsl = { memoryGiB: memory === null || memory === undefined ? Number(await text("Verified WSL memory ceiling in GiB")) : await number("WSL memory ceiling (GiB)", memory, { min: 1, max: 1024 }),
               swapGiB: await number("WSL swap (GiB); swap can absorb peaks but prolonged swapping slows builds", current?.wsl?.swapGiB ?? 4, { min: 0, max: 1024 }) };
           }
-          if (await confirm("Coordinate builds started through red-dev in this environment?", false)) settings.buildSlots = await number("Concurrent participating builds", current?.buildSlots ?? 1, { min: 1, max: 64 });
+          if (await confirm("Coordinate builds started through red-dev in this environment?", current?.buildSlots !== undefined)) settings.buildSlots = await number("Concurrent participating builds", current?.buildSlots ?? 1, { min: 1, max: 64 });
           if (!settings.wsl && settings.buildSlots === undefined) { log.plain("No resource changes selected."); continue; }
         }
         plan = await machineResourcePlan(p, settings, snapshot);
@@ -121,7 +123,7 @@ async function executeResourceCommand(p: Platform, inv: Invocation): Promise<num
     return 0;
   }
   if (action !== "configure") throw Error("resources expects status, configure, project, run or undo");
-  return apply(await machineResourcePlan(p, commandSettings(p, inv, snapshot), snapshot), inv.apply);
+  return apply(await machineResourcePlan(p, commandSettings(p, inv, snapshot), snapshot, { editWsl: inv.resourceMode === "responsive" || inv.resourceMode === "system" || inv.resourceMemory !== undefined }), inv.apply);
 }
 export async function resourceCommand(p: Platform, inv: Invocation): Promise<number> {
   try { return await executeResourceCommand(p, inv); }

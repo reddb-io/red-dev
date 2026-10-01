@@ -29,20 +29,25 @@ export function editWslResources(source: string, memoryGiB: number, swapGiB: num
   }
   return bom + lines.join(newline);
 }
-export async function machineResourcePlan(p: Platform, settings: ResourceSettings, snapshot: ResourceSnapshot): Promise<ResourcePlan> {
+export async function machineResourcePlan(p: Platform, settings: ResourceSettings, snapshot: ResourceSnapshot, options: { editWsl?: boolean } = {}): Promise<ResourcePlan> {
   parseResourceSettings(settings);
-  if (settings.wsl && p.os !== "windows" && p.env !== "wsl") throw Error("a WSL budget requires Windows or WSL");
-  if (settings.wsl && snapshot.windows?.total !== null && snapshot.windows?.total !== undefined && settings.wsl.memoryGiB * 1024 ** 3 >= snapshot.windows.total) throw Error("choose a WSL ceiling below host RAM to leave room for Windows");
-  const profile: MachineProfile = { ...await resolveMachineProfile(p), resources: settings };
+  const editWsl = options.editWsl !== false;
+  if (settings.wsl && editWsl && p.os !== "windows" && p.env !== "wsl") throw Error("a WSL budget requires Windows or WSL");
+  if (settings.wsl && editWsl && snapshot.windows?.total !== null && snapshot.windows?.total !== undefined && settings.wsl.memoryGiB * 1024 ** 3 >= snapshot.windows.total) throw Error("choose a WSL ceiling below host RAM to leave room for Windows");
+  const previous = await resolveMachineProfile(p);
+  if (settings.mode === "system" && previous.resources?.wsl && !snapshot.wsl.path) throw Error("Windows bridge unavailable; the previous WSL budget cannot be restored. Existing choices are preserved.");
+  const profile: MachineProfile = { ...previous, resources: settings };
   const historyPath = resourceHistoryPath(); const edits: ResourceEdit[] = [];
   const details = [`Choice: ${settings.mode}`, `Build slots: ${settings.buildSlots ?? "system scheduling"}; applies only to red-dev resources run in this environment`];
-  if (settings.wsl) {
+  if (settings.wsl && editWsl) {
     if (!snapshot.wsl.path) throw Error("Windows .wslconfig path unavailable; no resource settings written");
     const before = encodedFile(snapshot.wsl.path);
     if ((before === null ? null : Buffer.from(before, "base64").toString("utf8")) !== snapshot.wsl.source) throw Error("WSL config changed since diagnosis; inspect again");
     edits.push(resourceEdit(snapshot.wsl.path, editWslResources(snapshot.wsl.source ?? "", settings.wsl.memoryGiB, settings.wsl.swapGiB)));
     details.push(`WSL memory: ${snapshot.wsl.memory ?? "system default"} -> ${settings.wsl.memoryGiB} GiB`, `WSL swap: ${snapshot.wsl.swap ?? "system default"} -> ${settings.wsl.swapGiB} GiB`, "The ceiling is shared by WSL 2 distros, is not a Windows RAM reservation and can still cause OOM inside Linux.");
-  } else if (settings.mode === "system" && snapshot.wsl.path) {
+  } else if (settings.wsl) {
+    details.push("WSL file unchanged; the previous budget choice is retained in the profile.");
+  } else if (settings.mode === "system" && previous.resources?.wsl && snapshot.wsl.path) {
     const original = originalResourceBytes(snapshot.wsl.path, historyPath);
     if (original !== undefined) edits.push({ ...resourceEdit(snapshot.wsl.path, null), after: original });
     details.push(original === undefined ? "Existing WSL settings keep their current owner; no budget was applied by this flow." : "Restore WSL bytes from before the resource choices.");
