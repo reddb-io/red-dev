@@ -78,6 +78,8 @@ export function watchUnits(
     "[Service]",
     "Type=oneshot",
     "TimeoutStartSec=30min",
+    // A previous-version hourly updater has no coordinator lease. Let it finish.
+    "ExecCondition=/bin/bash -c '! systemctl --user is-active --quiet red-dev-auto-update.service'",
     // Through a login shell, and not the binary alone.
     //
     // A systemd user service inherits systemd's PATH, which on this

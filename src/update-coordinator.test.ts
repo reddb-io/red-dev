@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { acquireUpdateLock, jobDue, nextJobState, readUpdateClock, runUpdateJob, withUpdateLock } from "./update-coordinator.ts";
 import { runMaintenance } from "./maintenance.ts";
 import type { Platform } from "./platform.ts";
@@ -24,6 +25,23 @@ test("a crashed owner is recovered, while unknown owners are preserved", async (
   mkdirSync(`${p}.lock`); writeFileSync(join(`${p}.lock`, "owner.json"), "unknown");
   expect(acquireUpdateLock(p)).toBeNull();
   expect(readFileSync(join(`${p}.lock`, "owner.json"), "utf8")).toBe("unknown");
+});
+test("a compiled handover/postinstall child uses its parent's lease, while another invocation cannot enter", async () => {
+  const p = path();
+  await withUpdateLock(async () => {
+    const module = fileURLToPath(new URL("./update-coordinator.ts", import.meta.url));
+    const script = `import { withUpdateLock } from ${JSON.stringify(module)}; const result = await withUpdateLock(async () => 9, ${JSON.stringify(p)}); process.stdout.write(JSON.stringify(result));`;
+    const child = Bun.spawn([process.execPath, "-e", script], { stdout: "pipe", stderr: "pipe", env: { ...process.env } });
+    expect(await new Response(child.stdout).text()).toBe('{"busy":false,"value":9}');
+    expect(await child.exited).toBe(0);
+    const stranger = Bun.spawn([process.execPath, "-e", script], { stdout: "pipe", stderr: "pipe",
+      env: { ...process.env, RED_DEV_UPDATE_LEASE: "unrelated" } });
+    expect(await new Response(stranger.stdout).text()).toBe('{"busy":true}');
+    expect(await stranger.exited).toBe(0);
+  }, p);
+  const release = acquireUpdateLock(p);
+  expect(release).not.toBeNull();
+  release!();
 });
 test("failure is persisted and suppresses repeated automatic requests without erasing the last success", async () => {
   const p = path(); let calls = 0; const start = 100_000;

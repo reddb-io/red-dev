@@ -8,6 +8,8 @@ if [[ ${PROMPT_COMMAND+x} && ${PROMPT_COMMAND@a} == *a* ]]; then
   PROMPT_COMMAND=("${_red_watch_commands[@]}")
 else
   # The generated hook prepended one exact token. Preserve other shell code.
+  # This branch is the scalar representation, selected above at runtime.
+  # shellcheck disable=SC2178
   case ${PROMPT_COMMAND-} in
     _red_skills_watch_tick) PROMPT_COMMAND="" ;;
     _red_skills_watch_tick\;*) PROMPT_COMMAND="${PROMPT_COMMAND#_red_skills_watch_tick;}" ;;

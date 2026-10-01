@@ -41,7 +41,7 @@ function alive(pid: number): boolean {
   catch (err) { return (err as NodeJS.ErrnoException).code !== "ESRCH"; }
 }
 /** Never expire a live writer just because a download is slow. */
-export function acquireUpdateLock(path = updateClockPath()): (() => void) | null {
+export function acquireUpdateLock(path = updateClockPath()): ((() => void) & { token: string }) | null {
   const lock = `${path}.lock`;
   mkdirSync(dirname(path), { recursive: true });
   const take = () => {
@@ -49,10 +49,11 @@ export function acquireUpdateLock(path = updateClockPath()): (() => void) | null
     const token = crypto.randomUUID();
     try { writeFileSync(join(lock, "owner.json"), JSON.stringify({ pid: process.pid, token }), { mode: 0o600 }); }
     catch (err) { rmSync(lock, { recursive: true }); throw err; }
-    return () => {
+    const release = () => {
       try { if (JSON.parse(readFileSync(join(lock, "owner.json"), "utf8")).token === token) rmSync(lock, { recursive: true }); }
       catch { /* Already released; never remove another owner's lock. */ }
     };
+    return Object.assign(release, { token });
   };
   const first = take();
   if (first) return first;
@@ -72,9 +73,27 @@ export function acquireUpdateLock(path = updateClockPath()): (() => void) | null
 }
 
 export async function withUpdateLock<T>(run: () => Promise<T>, path = updateClockPath()): Promise<{ busy: true } | { busy: false; value: T }> {
+  // Compiled handovers and mise postinstall children participate in the same
+  // operation. An unrelated invocation or a concurrent callback cannot enter.
+  let inherited = false;
+  if (process.env.RED_DEV_UPDATE_CLOCK === path && process.env.RED_DEV_UPDATE_LEASE) {
+    try {
+      const owner = JSON.parse(readFileSync(join(`${path}.lock`, "owner.json"), "utf8"));
+      inherited = owner.pid !== process.pid && Number.isInteger(owner.pid) && owner.pid > 0 && alive(owner.pid)
+        && owner.token === process.env.RED_DEV_UPDATE_LEASE;
+    } catch { /* No valid parent lease: acquire normally. */ }
+  }
+  if (inherited) return { busy: false, value: await run() };
   const release = acquireUpdateLock(path);
   if (!release) return { busy: true };
-  try { return { busy: false, value: await run() }; } finally { release(); }
+  const oldClock = process.env.RED_DEV_UPDATE_CLOCK;
+  const oldLease = process.env.RED_DEV_UPDATE_LEASE;
+  process.env.RED_DEV_UPDATE_CLOCK = path; process.env.RED_DEV_UPDATE_LEASE = release.token;
+  try { return { busy: false, value: await run() }; } finally {
+    if (oldClock === undefined) delete process.env.RED_DEV_UPDATE_CLOCK; else process.env.RED_DEV_UPDATE_CLOCK = oldClock;
+    if (oldLease === undefined) delete process.env.RED_DEV_UPDATE_LEASE; else process.env.RED_DEV_UPDATE_LEASE = oldLease;
+    release();
+  }
 }
 /** Call under withUpdateLock. Persist failure before accepting another trigger. */
 export async function runUpdateJob(name: string, interval: number, run: () => Promise<boolean>, opts: { path?: string; now?: number; force?: boolean; random?: number } = {}): Promise<"ok" | "failed" | "not-due"> {
@@ -85,8 +104,9 @@ export async function runUpdateJob(name: string, interval: number, run: () => Pr
   let ok = false;
   try { ok = await run(); }
   finally {
-    clock.jobs[name] = nextJobState(clock.jobs[name], ok, now, interval, opts.random);
-    writeClock(path, clock);
+    const current = readUpdateClock(path);
+    current.jobs[name] = nextJobState(clock.jobs[name], ok, now, interval, opts.random);
+    writeClock(path, current);
   }
   return ok ? "ok" : "failed";
 }

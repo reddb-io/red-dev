@@ -77,4 +77,15 @@ describe("explicit portable tool ownership", () => {
     expect(await policyCommand(p, "claude", "external", undefined, { run })).toBe(0);
     expect(commands).toHaveLength(2);
   });
+  test("Windows reads and writes Linux-owned policies through the WSL owner", async () => {
+    fixture();
+    const windows = { ...p, os: "windows", workstation: "windows-wsl" } as Platform;
+    const commands: string[] = [];
+    const seams = { relay: async (_p: Platform, command: string) => { commands.push(command); return 0; },
+      run: async () => { throw Error("must not install on Windows"); } };
+    expect(await policyCommand(windows, "red-router", undefined, undefined, seams)).toBe(0);
+    expect(await policyCommand(windows, "red-router", "fixed", "0.13.0", seams)).toBe(0);
+    expect(commands).toEqual(["red-dev policy red-router", "red-dev policy red-router fixed 0.13.0"]);
+    expect(toolPolicy("red-router")).toEqual({ mode: "follow" });
+  });
 });

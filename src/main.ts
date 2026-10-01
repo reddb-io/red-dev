@@ -355,7 +355,15 @@ async function cmdReclaim(p: Platform, inv: Invocation): Promise<number> {
   return result.skipped.length > 0 || result.failed.length > 0 || cacheFailed ? 1 : 0;
 }
 
-async function cmdInstall(
+async function cmdInstall(p: Platform, inv: Invocation, entry: "install" | "update" = "install"): Promise<number> {
+  if (inv.dryRun) return cmdInstallUnlocked(p, inv, entry);
+  const { withUpdateLock } = await import("./update-coordinator.ts");
+  const held = await withUpdateLock(() => cmdInstallUnlocked(p, inv, entry));
+  if (held.busy) { log.warn("another installation or update is running"); return 2; }
+  return held.value;
+}
+
+async function cmdInstallUnlocked(
   p: Platform,
   inv: Invocation,
   entry: "install" | "update" = "install",
@@ -722,11 +730,16 @@ async function cmdRedSkills(p: Platform, inv: Invocation): Promise<number> {
     return 1;
   }
   const { chosenPlugins } = await import("./red-skills-plugins.ts");
-  return await runPluginPhase(phase, {
+  const runPhase = async () => runPluginPhase(phase, {
     manifestPlatform: p,
     activated: await chosenPlugins(p),
     ...(inv.redSkillsSelector ? { selector: inv.redSkillsSelector } : {}),
   });
+  if (phase === "list-all" || phase === "latest-stable") return runPhase();
+  const { withUpdateLock } = await import("./update-coordinator.ts");
+  const held = await withUpdateLock(runPhase);
+  if (held.busy) { log.warn("another installation or update is running"); return 2; }
+  return held.value;
 }
 
 /**
@@ -761,6 +774,12 @@ async function cmdRedSkillsAdopt(): Promise<number> {
  * — so a second sync with no edits in between writes nothing at all.
  */
 async function cmdRedSkillsSync(p: Platform, inv: Invocation): Promise<number> {
+  const { withUpdateLock } = await import("./update-coordinator.ts");
+  const held = await withUpdateLock(() => cmdRedSkillsSyncUnlocked(p, inv));
+  if (held.busy) { log.warn("another installation or update is running"); return 2; }
+  return held.value;
+}
+async function cmdRedSkillsSyncUnlocked(p: Platform, inv: Invocation): Promise<number> {
   const dir = inv.redSkillsSelector;
   if (!dir) {
     log.err("red-skills sync needs the checkout to sync: `red-dev red-skills sync <path>`");
@@ -878,7 +897,7 @@ async function cmdUpdateUnlocked(p: Platform, inv: Invocation, includeWsl = true
     // binary replaced), so always re-converge afterwards.
     converge: async () => {
       const { convergeUpdatedBinary } = await import("./update-handover.ts");
-      return convergeUpdatedBinary(VERSION, inv, () => cmdInstall(p, inv, "update"));
+      return convergeUpdatedBinary(VERSION, inv, () => cmdInstallUnlocked(p, inv, "update"));
     },
 
     // And then the versions nobody points at any more, which nothing on

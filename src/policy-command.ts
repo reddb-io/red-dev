@@ -9,7 +9,7 @@ import { windowsWsl, runsHere } from "./workstation.ts";
 import { withUpdateLock } from "./update-coordinator.ts";
 
 export async function policyCommand(p: Platform, name?: string, mode?: string, version?: string,
-  seams: { run?: (argv: string[]) => Promise<number> } = {}): Promise<number> {
+  seams: { run?: (argv: string[]) => Promise<number>; relay?: (p: Platform, command: string) => Promise<number> } = {}): Promise<number> {
   // Include external tools whose generated declaration has already been retired.
   const entries: Array<{ alias?: string; spec: string }> = [ ...miseEntries(p), ...AGENTS.filter(a => a.mise).map(a => ({ alias: a.cmd, spec: a.mise! })),
     ...TOOLS.flatMap(t => [t.u24, t.win].filter(pr => pr.kind === "mise").map(pr => pr as { alias?: string; spec: string })),
@@ -18,17 +18,17 @@ export async function policyCommand(p: Platform, name?: string, mode?: string, v
   const key = name && (tools.has(name) ? name : [...tools].find(([, spec]) => spec === name)?.[0]);
   if (name && !key) { log.err(`unknown portable tool '${name}'`); return 1; }
   if (!name && mode) { log.err("choose a tool first"); return 1; }
-  if (mode) {
-    const policy = parsePolicy({ mode, version });
-    if (mode !== "fixed" && version) throw new Error("only fixed takes a version");
-    const agent = AGENTS.find(a => a.cmd === key);
-    const tool = TOOLS.find(t => t.name === key);
-    const linux = (agent && !runsHere(agent.placement ?? "both", p)) || (tool && !runsHere(tool.placement ?? "both", p))
-      || OFFERED_RUNTIMES.some(r => r.id.split("@")[0] === key);
-    if (windowsWsl(p) && linux) {
-      const { relayWslCommand } = await import("./wsl-sync.ts");
-      return relayWslCommand(p, `red-dev policy ${key} ${mode}${version ? ` ${version}` : ""}`);
-    }
+  const agent = AGENTS.find(a => a.cmd === key);
+  const tool = TOOLS.find(t => t.name === key);
+  const linux = (agent && !runsHere(agent.placement ?? "both", p)) || (tool && !runsHere(tool.placement ?? "both", p))
+    || OFFERED_RUNTIMES.some(r => r.id.split("@")[0] === key);
+  const policy = mode ? parsePolicy({ mode, version }) : undefined;
+  if (mode !== "fixed" && version) throw new Error("only fixed takes a version");
+  if (windowsWsl(p) && linux) {
+    const { relayWslCommand } = await import("./wsl-sync.ts");
+    return (seams.relay ?? relayWslCommand)(p, `red-dev policy ${key}${mode ? ` ${mode}` : ""}${version ? ` ${version}` : ""}`);
+  }
+  if (policy) {
     const held = await withUpdateLock(async () => {
       writeToolPolicy(key!, policy);
       convergeMiseConfig(p);
@@ -45,7 +45,7 @@ export async function policyCommand(p: Platform, name?: string, mode?: string, v
     if (held.value !== 0) return held.value;
     if (windowsWsl(p) && (agent?.placement === "both" || tool?.placement === "both")) {
       const { relayWslCommand } = await import("./wsl-sync.ts");
-      const code = await relayWslCommand(p, `red-dev policy ${key} ${mode}${version ? ` ${version}` : ""}`);
+      const code = await (seams.relay ?? relayWslCommand)(p, `red-dev policy ${key} ${mode}${version ? ` ${version}` : ""}`);
       if (code !== 0) return code;
     }
   }
