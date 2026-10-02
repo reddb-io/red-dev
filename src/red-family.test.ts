@@ -137,7 +137,7 @@ describe("the dedicated RedDB setup page", () => {
       cursor: () => 0,
       selection: () => selected,
       pickedFor: (id: string) => id === "reddb" ? selected : [],
-      wizard: { isCompleted: () => false },
+      isCompleted: () => false,
     } as unknown as SetupModel;
     const frame = renderToString(SetupLayout(model, DESKTOP, 110, 34), 110, 34)
       .replace(/\x1b\[[0-9;]*m/g, "");

@@ -38,7 +38,7 @@ function runtimesFrame(selection: string[]): string {
     cursor: () => 0,
     selection: () => selection,
     pickedFor: () => [],
-    wizard: { isCompleted: () => false },
+    isCompleted: () => false,
   } as unknown as SetupModel;
   return strip(renderToString(SetupLayout(model, UBUNTU_26, 100, 30), 100, 30));
 }

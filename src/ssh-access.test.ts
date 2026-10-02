@@ -333,17 +333,20 @@ describe("the question never appears in the non-interactive install path", () =>
 
   test("and both setup interfaces apply the selected account before convergence", () => {
     const firstRun = readFileSync("src/firstrun.ts", "utf8");
+    const record = firstRun.indexOf("export async function recordSetupAnswers(");
     const apply = firstRun.indexOf("export async function applySetupAnswers(");
-    const authorize = firstRun.indexOf("await applySetupSshAccess(p, answers);", apply);
+    const authorize = firstRun.indexOf("await applySetupSshAccess(p, answers);", record);
+    const recorded = firstRun.indexOf("await recordSetupAnswers(p, given)", apply);
     const choices = firstRun.indexOf("await carryOutChoices(", apply);
-    expect(apply).toBeGreaterThan(-1);
-    expect(authorize).toBeGreaterThan(apply);
-    expect(authorize).toBeLessThan(choices);
+    expect(authorize).toBeGreaterThan(record);
+    expect(authorize).toBeLessThan(apply);
+    expect(recorded).toBeGreaterThan(apply);
+    expect(recorded).toBeLessThan(choices);
 
-    // The narrow-terminal fallback asks explicitly in askFirstRun; no
-    // authorization prompt lives in the converge or provider layers.
-    const linear = firstRun.indexOf("offerGithubKeys, rememberGithubUser");
-    expect(linear).toBeGreaterThan(firstRun.indexOf("export async function askFirstRun"));
+    // The fallback collects SSH through the same interview, then uses
+    // the same recording boundary before installing selected tools.
+    const first = firstRun.indexOf("export async function askFirstRun");
+    expect(firstRun.indexOf("return recordSetupAnswers(p, given)", first)).toBeGreaterThan(first);
   });
 
   test("the explicit command is the other way in", () => {

@@ -142,15 +142,12 @@ describe("the first-run answer", () => {
   });
 
   test("is carried out of both interviews", () => {
-    // The fullscreen menu and the standalone first run map the wizard's
-    // answers separately. A question only one of them reads is a
-    // question the other silently discards.
+    // Both entries must keep using the shared answer model.
     const model = readFileSync("src/tui-setup-model.ts", "utf8");
-    const tui = readFileSync("src/tui-setup.ts", "utf8");
-    for (const src of [model, tui]) {
-      expect(src).toContain('redwall: get("redwall")[0] === "yes"');
-      expect(src).toContain('get("wallpaper")[0]');
-    }
+    expect(model).toContain('redwall: get("redwall")[0] === "yes"');
+    expect(model).toContain('get("wallpaper")[0]');
+    expect(model).toContain("answers: () => setupAnswersFrom(steps, get)");
+    expect(readFileSync("src/tui-setup.ts", "utf8")).toContain("useSetupModel(steps, wizard)");
   });
 
   test("the linear fallback asks it too", () => {
@@ -158,8 +155,8 @@ describe("the first-run answer", () => {
     // wizard, and a question that exists on only one of those paths is
     // one somebody never gets asked.
     const src = readFileSync("src/firstrun.ts", "utf8");
-    expect(src).toContain('confirm("Enable Redwall?", true)');
-    expect(src).toContain("redwall,");
+    expect(src).toContain("runSetupPrompts(interview.steps)");
+    expect(src).toContain("return setupAnswersFrom(steps, get)");
   });
 });
 

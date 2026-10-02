@@ -15,7 +15,7 @@ import { Text, renderToString } from "tuiuiu.js";
 import { Screen, Surface } from "./tui-chrome.ts";
 import { ui } from "./tui-theme.ts";
 
-const VIEWS = ["src/tui.ts", "src/tui-setup.ts", "src/tui-install.ts"] as const;
+const VIEWS = ["src/tui.ts", "src/tui-setup-model.ts", "src/tui-install.ts"] as const;
 const sourceOf = (p: string): string => readFileSync(p, "utf8");
 
 /** SGR parameters, not the whole escape: bold and a background merge in. */
@@ -25,6 +25,9 @@ const sgrBg = (hex: string): string => {
 };
 
 describe("every fullscreen view", () => {
+  test("standalone setup delegates its screen to the shared layout", () => {
+    expect(sourceOf("src/tui-setup.ts")).toContain("return SetupLayout(");
+  });
   for (const view of VIEWS) {
     test(`${view} paints the screen instead of inheriting the terminal`, () => {
       // The bug this replaces: all three returned a bare Box, so the

@@ -44,10 +44,12 @@ import {
 const AT = "2026-08-18T00:00:00Z";
 const FIXTURES = join(import.meta.dir, "fixtures", "workstation-lock");
 const UBUNTU = "ubuntu-24.04-x64";
+const UBUNTU_26 = "ubuntu-26.04-x64";
 const WINDOWS = "windows-11-x64+wsl-ubuntu-24.04";
 
 const FIXTURE_FILES: Record<string, string> = {
   [UBUNTU]: "ubuntu-24.04-x64.json",
+  [UBUNTU_26]: "ubuntu-26.04-x64.json",
   [WINDOWS]: "windows-11-x64-wsl-ubuntu-24.04.json",
 };
 
@@ -95,7 +97,7 @@ async function resolvedLock(targetId: string): Promise<WorkstationLock> {
 }
 
 describe("resolving a lock", () => {
-  test.each([UBUNTU, WINDOWS])("%s resolves to exactly its committed fixture", async (id) => {
+  test.each([UBUNTU, UBUNTU_26, WINDOWS])("%s resolves to exactly its committed fixture", async (id) => {
     const target = workstationTarget(id);
     expect(target).not.toBeNull();
     const result = await resolveWorkstationLock(target!, AT, fixtureResolver, "fixture");
@@ -107,8 +109,8 @@ describe("resolving a lock", () => {
     expect(encodeWorkstationLock(result.lock)).toBe(fixtureBytes(id));
   });
 
-  test("both fixtures parse, and carry every required application", () => {
-    for (const id of [UBUNTU, WINDOWS]) {
+  test("every fixture parses, and carries every required application", () => {
+    for (const id of [UBUNTU, UBUNTU_26, WINDOWS]) {
       const lock = fixtureLock(id);
       expect(lock.origin).toBe("fixture");
       expect(auditWorkstationLock(lock)).toEqual([]);
@@ -117,7 +119,7 @@ describe("resolving a lock", () => {
   });
 
   test("every entry names an exact version, an official source and a checksum", () => {
-    for (const id of [UBUNTU, WINDOWS]) {
+    for (const id of [UBUNTU, UBUNTU_26, WINDOWS]) {
       for (const app of fixtureLock(id).apps) {
         expect(isExactVersion(app.version)).toBe(true);
         expect(app.source.coordinate).toContain(app.version);
@@ -188,6 +190,83 @@ describe("resolving a lock", () => {
       expect(isExactVersion(value)).toBe(true);
     },
   );
+});
+
+describe("the Ubuntu 26 target", () => {
+  test("it is the Ubuntu desktop again, at the release that names it", () => {
+    const target = workstationTarget(UBUNTU_26);
+    expect(target).not.toBeNull();
+    expect(target!.surfaces).toHaveLength(1);
+    expect(target!.surfaces[0]).toMatchObject({
+      id: UBUNTU_26,
+      os: "linux",
+      distro: "ubuntu",
+      version: "26.04",
+      arch: "x64",
+      env: "desktop",
+      role: "both",
+    });
+  });
+
+  test("it places every application exactly where the Ubuntu 24 desktop does", async () => {
+    // The whole claim of #213 is that a second Ubuntu is a surface and a
+    // fixture rather than a second implementation, and this is what that
+    // means concretely: the same applications, on one surface, from the
+    // same channels. Only the surface name differs.
+    const [older, newer] = await Promise.all([resolvedLock(UBUNTU), resolvedLock(UBUNTU_26)]);
+    expect(newer.apps.map((a) => a.id)).toEqual(older.apps.map((a) => a.id));
+    expect(new Set(newer.apps.map((a) => a.surface))).toEqual(new Set([UBUNTU_26]));
+    expect(newer.apps.map((a) => a.source.kind)).toEqual(older.apps.map((a) => a.source.kind));
+  });
+
+  test("a resolver that answers with an Ubuntu 24 build is refused", async () => {
+    const noble: ReleaseResolver = async (app, surface) => {
+      const honest = await fixtureResolver(app, surface);
+      if (app.id !== "herdr") return honest;
+      const name = "herdr_0.9.4~noble_amd64.deb";
+      return { version: honest.version, artifact: { name, sha256: honest.artifact.sha256 } };
+    };
+    const result = await resolveWorkstationLock(workstationTarget(UBUNTU_26)!, AT, noble);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe(
+      `herdr on ${UBUNTU_26}: artifact herdr_0.9.4~noble_amd64.deb is built for Ubuntu 24.04, not 26.04`,
+    );
+  });
+
+  test("a resolver that answers with another platform's build is refused", async () => {
+    const foreign: ReleaseResolver = async (app, surface) => {
+      const honest = await fixtureResolver(app, surface);
+      if (app.id !== "red-dev") return honest;
+      const name = "red-dev-windows-x64.exe";
+      return { version: honest.version, artifact: { name, sha256: honest.artifact.sha256 } };
+    };
+    const result = await resolveWorkstationLock(workstationTarget(UBUNTU_26)!, AT, foreign);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe(
+      `red-dev on ${UBUNTU_26}: artifact red-dev-windows-x64.exe is built for windows, not linux`,
+    );
+  });
+
+  test("the same refusal reaches a lock that was already written down", () => {
+    const lock = fixtureLock(UBUNTU_26);
+    const app = lock.apps.find((a) => a.id === "vscode");
+    expect(app).toBeDefined();
+    const tampered: WorkstationLock = {
+      ...lock,
+      apps: lock.apps.map((a) =>
+        a.id === "vscode"
+          ? { ...a, artifact: { ...a.artifact, name: "code_1.104.2-1~noble_amd64.deb" } }
+          : a,
+      ),
+    };
+    // The digest complaint comes too, and that is fine: what matters is
+    // that an import cannot be handed a 24-only artifact and proceed.
+    expect(auditWorkstationLock(tampered)).toContain(
+      `vscode on ${UBUNTU_26}: artifact code_1.104.2-1~noble_amd64.deb is built for Ubuntu 24.04, not 26.04`,
+    );
+  });
 });
 
 describe("reading a lock back", () => {

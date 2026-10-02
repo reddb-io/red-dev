@@ -42,7 +42,7 @@ function setupFrame(width: number, height: number): string[] {
     cursor: () => 0,
     selection: () => ["node@24"],
     pickedFor: () => [],
-    wizard: { isCompleted: (index: number) => index < runtimeStep },
+    isCompleted: (index: number) => index < runtimeStep,
   } as unknown as SetupModel;
   return strip(renderToString(SetupLayout(model, UBUNTU_26, width, height), width, height))
     .split("\n");

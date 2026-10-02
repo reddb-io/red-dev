@@ -134,6 +134,8 @@ export interface InstallModel {
   setupStepStart: (step: SetupPlanStep) => void;
   setupStepEnd: (result: SetupStepResult) => void;
   begin: () => void;
+  /** Clear a completed run before another explicit installation. */
+  reset: () => void;
   /**
    * Add a line to the log from outside the converge.
    *
@@ -183,6 +185,7 @@ export function useInstallModel(
   const [following, setFollowing] = useState(true);
   const [startedAt, setStartedAt] = useState(0);
   const [started, setStarted] = useState(false);
+  const [runNumber, setRunNumber] = useState(0);
   // A timer, not just events: a single apt step can run for minutes
   // without emitting anything, and a frozen clock reads as a hang.
   const [, setTick] = useState(0);
@@ -219,7 +222,7 @@ export function useInstallModel(
   });
 
   useEffect(() => {
-    if (!started()) return;
+    if (!runNumber()) return;
 
     // A step owns a live redirect for exactly as long as it runs. Holding
     // these lines until stepEnd made the current provider completely silent:
@@ -405,6 +408,23 @@ export function useInstallModel(
       if (started()) return;
       if (startedAt() === 0) setStartedAt(Date.now());
       setStarted(true);
+      setRunNumber((previous) => previous + 1);
+    },
+    reset: () => {
+      if (started() && !finished()) return;
+      setStarted(false);
+      setFinished(false);
+      setStartedAt(0);
+      setFinishedAt(0);
+      setLines([]);
+      setResults([]);
+      setSetupResults([]);
+      setSetupTotal(0);
+      setTotal(countSteps(opts.scopes));
+      setCurrent("");
+      setScope("");
+      setFollowing(true);
+      logScroll.scrollTo(0);
     },
     note: (line) => push(line.replace(/\x1b\[[0-9;]*m/g, "").trimEnd()),
   };

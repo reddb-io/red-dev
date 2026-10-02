@@ -19,12 +19,14 @@ import {
   ProgressBar,
   Text,
   useState,
+  wrapText,
 } from "tuiuiu.js";
 // createWizard lives under the hooks subpath rather than the root
 // export; importing it from "tuiuiu.js" resolves to createId and fails
 // with a suggestion that looks like a typo correction.
 import { createWizard } from "tuiuiu.js/hooks";
 import type { Platform } from "./platform.ts";
+import type { Preferences } from "./preferences.ts";
 import { summary } from "./platform.ts";
 import {
   defaultAgentCandidates,
@@ -151,8 +153,13 @@ export function stepHasChoices(q: Question): boolean {
 }
 
 /** Start a mixed inventory/choice page on the first row Space can change. */
-export function stepInitialCursor(q: Question): number {
-  const first = q.choices.findIndex((choice) => choiceSelectable(q, choice));
+export function stepInitialCursor(q: Question, picked?: Picked): number {
+  const options = picked ? stepChoices(q, picked) : q.choices;
+  if (!q.multi) {
+    const selected = picked?.(q.id) ?? q.preset;
+    return Math.max(0, options.findIndex(choice => selected.includes(choice.key)));
+  }
+  const first = options.findIndex((choice) => choiceSelectable(q, choice));
   return first < 0 ? 0 : first;
 }
 
@@ -167,6 +174,33 @@ export function selectedSetupApps(steps: readonly Question[], picked: Picked): s
     ...picked("apps"),
     ...picked("reddb").filter((key) => redOptionalApps.includes(key)),
   ];
+}
+
+/** Map every interview through one answer contract. */
+export function setupAnswersFrom(steps: readonly Question[], get: Picked): SetupAnswers {
+  // Resolved rather than read straight out of the step, because the
+  // step may never have been drawn: one CLI host answers this
+  // question by existing, and someone who narrowed the selection
+  // after answering it leaves a key here that is no longer chosen.
+  const defaultAgent = defaultAgentFrom(get("agents"), get("default-agent")[0]);
+  return {
+    theme: get("theme")[0] ?? DEFAULT_THEME,
+    ...(get("wallpaper")[0] && get("wallpaper")[0] !== "theme"
+      ? { wallpaper: get("wallpaper")[0] as string }
+      : {}),
+    font: get("font")[0] ?? "firacode",
+    apps: selectedSetupApps(steps, get),
+    runtimes: get("runtimes"),
+    agents: get("agents"),
+    ...(get("ssh")[0] ? { sshGithubUser: get("ssh")[0] } : {}),
+    redSkillsPlugins: get("redskills"),
+    ...(defaultAgent ? { defaultAgent } : {}),
+    blesh: get("plugins").includes("blesh"),
+    redwall: get("redwall")[0] === "yes",
+    share: get("share")[0] === "yes",
+    ...(get("shell")[0] ? { terminalShell: get("shell")[0] as "wsl" | "gitbash" } : {}),
+    completed: true,
+  };
 }
 
 const FONTS: Choice[] = [
@@ -186,6 +220,8 @@ export interface SetupFacts {
   currentWallpaper?: string | null;
   /** Authenticated or previously selected GitHub account, when one can be identified. */
   githubUser?: string | null;
+  /** Saved answers to review instead of replacing them with first-run defaults. */
+  preferences?: Preferences;
 }
 
 /** The wallpaper answer that keeps the desktop's own image. */
@@ -500,7 +536,36 @@ export function questions(
       applies: () => true,
     },
   ];
-  return all.filter((q) => q.applies(p));
+  const prefs = facts.preferences;
+  const saved: Record<string, string[] | undefined> = {
+    agents: prefs?.agents?.map(key => key === "opencode" ? "redcode" : key),
+    "default-agent": prefs?.defaultAgent ? [prefs.defaultAgent] : undefined,
+    redskills: prefs?.redSkillsPlugins,
+    runtimes: prefs?.runtimes?.flatMap(id => {
+      const offered = runtimes.find(runtime => runtime.key.split("@")[0] === id.split("@")[0]);
+      return offered ? [offered.key] : [];
+    }),
+    apps: prefs?.apps,
+    "desktop-apps": prefs?.apps,
+    reddb: prefs?.apps,
+    plugins: prefs?.blesh === undefined ? undefined : prefs.blesh ? ["blesh"] : [],
+    font: prefs?.font ? [prefs.font] : undefined,
+    theme: prefs?.theme ? [prefs.theme] : undefined,
+    wallpaper: prefs?.setupCompleted ? [prefs.wallpaper ?? "theme"] : undefined,
+    redwall: prefs?.redwall === undefined ? undefined : [prefs.redwall ? "yes" : "no"],
+    shell: prefs?.terminalShell ? [prefs.terminalShell] : undefined,
+  };
+  if (prefs?.wallpaper?.startsWith("custom:")) {
+    all.find(step => step.id === "wallpaper")!.choices.push({
+      key: prefs.wallpaper, label: "Keep the saved wallpaper", note: "your imported image",
+    });
+  }
+  return all.filter((q) => q.applies(p)).map(q => {
+    const preset = saved[q.id];
+    if (preset === undefined) return q;
+    const keys = q.choicesFrom ? preset : preset.filter(key => q.choices.some(choice => choice.key === key));
+    return { ...q, preset: q.multi || keys.length ? keys : q.preset };
+  });
 }
 
 
@@ -523,6 +588,9 @@ export interface SetupModel {
   selection: () => string[];
   pickedFor: (id: string) => string[];
   wizard: ReturnType<typeof createWizard>;
+  isCompleted: (index: number) => boolean;
+  /** Reopen at the first question, retaining the answers. */
+  reopen: () => void;
   /** Consumes a key. Returns "done" when the last answer is in. */
   handleKey: (input: string, key: SetupKey) => "done" | "quit" | "handled";
   answers: () => SetupAnswers;
@@ -541,10 +609,11 @@ interface SetupKey {
 
 export function useSetupModel(steps: Question[], wizard: ReturnType<typeof createWizard>): SetupModel {
   const [stepIndex, setStepIndex] = useState(0);
-  const [cursor, setCursor] = useState(0);
+  const [cursor, setCursor] = useState(stepInitialCursor(steps[0]!));
   const [picked, setPicked] = useState<Record<string, string[]>>(
     Object.fromEntries(steps.map((s) => [s.id, [...s.preset]])),
   );
+  const [completed, setCompleted] = useState<number[]>([]);
 
   const step = (): Question => steps[stepIndex()]!;
   const selection = (): string[] => picked()[step().id] ?? [];
@@ -574,31 +643,15 @@ export function useSetupModel(steps: Question[], wizard: ReturnType<typeof creat
     selection,
     pickedFor: get,
     wizard,
-    answers: () => {
-      // Resolved rather than read straight out of the step, because the
-      // step may never have been drawn: one CLI host answers this
-      // question by existing, and someone who narrowed the selection
-      // after answering it leaves a key here that is no longer chosen.
-      const defaultAgent = defaultAgentFrom(get("agents"), get("default-agent")[0]);
-      return {
-        theme: get("theme")[0] ?? DEFAULT_THEME,
-        ...(get("wallpaper")[0] && get("wallpaper")[0] !== "theme"
-          ? { wallpaper: get("wallpaper")[0] as string }
-          : {}),
-        font: get("font")[0] ?? "firacode",
-        apps: selectedSetupApps(steps, get),
-        runtimes: get("runtimes"),
-        agents: get("agents"),
-        ...(get("ssh")[0] ? { sshGithubUser: get("ssh")[0] } : {}),
-        redSkillsPlugins: get("redskills"),
-        ...(defaultAgent ? { defaultAgent } : {}),
-        blesh: get("plugins").includes("blesh"),
-        redwall: get("redwall")[0] === "yes",
-        share: get("share")[0] === "yes",
-        ...(get("shell")[0] ? { terminalShell: get("shell")[0] as "wsl" | "gitbash" } : {}),
-        completed: true,
-      };
+    isCompleted: (index) => completed().includes(index),
+    reopen: () => {
+      setStepIndex(0);
+      setCursor(stepInitialCursor(steps[0]!, get));
+      setCompleted([]);
+      wizard.first();
+      wizard.clearHistory();
     },
+    answers: () => setupAnswersFrom(steps, get),
     handleKey: (input, key) => {
       const q = step();
       const options = choices();
@@ -621,7 +674,7 @@ export function useSetupModel(steps: Question[], wizard: ReturnType<typeof creat
         return "handled";
       }
       if (key.downArrow || input === "j") {
-        setCursor(Math.min(max, cursor() + 1));
+        setCursor(Math.max(0, Math.min(max, cursor() + 1)));
         return "handled";
       }
       if (input === " " && q.multi) {
@@ -645,11 +698,11 @@ export function useSetupModel(steps: Question[], wizard: ReturnType<typeof creat
           ? picked()
           : { ...picked(), [q.id]: [options[cursor()]!.key] };
         if (answered !== picked()) setPicked(answered);
-        wizard.markCompleted(from);
+        setCompleted((previous) => previous.includes(from) ? previous : [...previous, from]);
         const next = adjacent(from, 1, answered);
         if (next === null) return "done";
         setStepIndex(next);
-        setCursor(stepInitialCursor(steps[next]!));
+        setCursor(stepInitialCursor(steps[next]!, id => answered[id] ?? []));
         // Once per step crossed, so the wizard's own position keeps up
         // with a jump over a question that had nothing to ask.
         for (let i = from; i < next; i++) wizard.next();
@@ -660,7 +713,7 @@ export function useSetupModel(steps: Question[], wizard: ReturnType<typeof creat
         const back = adjacent(from, -1, picked());
         if (back !== null) {
           setStepIndex(back);
-          setCursor(stepInitialCursor(steps[back]!));
+          setCursor(stepInitialCursor(steps[back]!, get));
           for (let i = back; i < from; i++) wizard.prev();
         }
         return "handled";
@@ -708,6 +761,25 @@ export function SetupLayout(m: SetupModel, p: Platform, width: number, height: n
   const isTextInput = q.textInput !== undefined;
   const options = stepChoices(q, m.pickedFor);
   const activeKey = options[m.cursor()]?.key ?? "";
+  const contentWidth = Math.max(1, rightWidth - 3);
+  const descriptionLines = wrapText(q.description, contentWidth).split("\n");
+  const descriptionLimit = Math.max(1, bodyRows - 8);
+  const description = descriptionLines.length > descriptionLimit
+    ? [...descriptionLines.slice(0, descriptionLimit - 1), "…"].join("\n")
+    : descriptionLines.join("\n");
+  const noteVisible = (choice: Choice) => !isRuntimes && (q.id !== "reddb" || choiceSelectable(q, choice));
+  const rowHeight = (choice: Choice) => noteVisible(choice) && choice.note ? 2 : 1;
+  const optionRows = Math.max(1, bodyRows - description.split("\n").length - 4 - (isTheme ? 2 : 0));
+  const scrolling = options.reduce((sum, choice) => sum + rowHeight(choice), 0) > optionRows;
+  const budget = Math.max(1, optionRows - (scrolling ? 1 : 0));
+  let first = 0;
+  let used = options.slice(0, m.cursor() + 1).reduce((sum, choice) => sum + rowHeight(choice), 0);
+  while (used > budget && first < m.cursor()) used -= rowHeight(options[first++]!);
+  let last = first;
+  used = 0;
+  while (last < options.length && used + rowHeight(options[last]!) <= budget) used += rowHeight(options[last++]!);
+  // Keep a focused row reachable even in a terminal with room for one line.
+  if (last === first && options[first]) last++;
   // A step the answers have ruled out is not a step someone is going to
   // reach, so it does not belong in the timeline or in the count of how
   // much is left.
@@ -725,7 +797,9 @@ export function SetupLayout(m: SetupModel, p: Platform, width: number, height: n
     Box(
       { flexDirection: "row", justifyContent: "space-between" },
       Text({ color: ui.accent, bold: true }, "red-dev setup"),
-      Text({ color: muted }, summary(p).split("\n")[0] ?? ""),
+      Box({ width: Math.max(1, frame.width - 16) },
+        Text({ color: muted, wrap: "truncate-end" }, summary(p).split("\n")[0] ?? ""),
+      ),
     ),
 
     Box(
@@ -751,7 +825,7 @@ export function SetupLayout(m: SetupModel, p: Platform, width: number, height: n
                 ListItem({
                   primary: step.title,
                   selected: index === m.stepIndex(),
-                  status: m.wizard.isCompleted(index)
+                  status: m.isCompleted(index)
                     ? "success"
                     : index === m.stepIndex()
                       ? "running"
@@ -769,7 +843,7 @@ export function SetupLayout(m: SetupModel, p: Platform, width: number, height: n
           bodyRows,
           Text({ color: ui.accent, bold: true }, q.title),
           Text({}, ""),
-          Text({ color: muted }, q.description),
+          Text({ color: muted }, description),
           Text({}, ""),
           ...(isTextInput
             ? [
@@ -784,10 +858,11 @@ export function SetupLayout(m: SetupModel, p: Platform, width: number, height: n
                     : `Blank — configure later; example: ${q.textInput!.placeholder}`,
                 ),
               ]
-            : options.map((c, i) => {
+            : options.slice(first, last).map((c, offset) => {
+                const i = first + offset;
                 const checked = m.selection().includes(c.key);
                 const selectable = choiceSelectable(q, c);
-                const showNote = !isRuntimes && (q.id !== "reddb" || selectable);
+                const showNote = noteVisible(c);
                 const inventoryMarker = c.marker === "elsewhere" ? "→ " : "• ";
                 return ListItem({
                   primary: isRuntimes
@@ -797,6 +872,9 @@ export function SetupLayout(m: SetupModel, p: Platform, width: number, height: n
                   selected: i === m.cursor(),
                 });
               })),
+          ...(!isTextInput && scrolling
+            ? [Text({ color: muted }, `${first + 1}–${last} of ${options.length}`)]
+            : []),
           // The reason this screen exists: the palette is visible while
           // the cursor moves, not after the choice is made.
           ...(isTheme

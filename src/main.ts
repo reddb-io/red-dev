@@ -342,10 +342,20 @@ async function cmdReclaim(p: Platform, inv: Invocation): Promise<number> {
   return result.skipped.length > 0 || result.failed.length > 0 || cacheFailed ? 1 : 0;
 }
 
-async function cmdInstall(p: Platform, inv: Invocation, entry: "install" | "update" = "install"): Promise<number> {
+async function cmdInstall(
+  p: Platform, inv: Invocation, entry: "install" | "update" = "install",
+  answers?: import("./tui-setup-model.ts").SetupAnswers,
+): Promise<number> {
   if (inv.dryRun) return cmdInstallUnlocked(p, inv, entry);
+  // Collect a first interview before acquiring the writer lease or migrating
+  // configuration. The menu keeps setup and progress in one tuiuiu render.
+  if (!answers && entry === "install" && !inv.yes && !inv.unattended && !inv.scope &&
+      interactive() && (process.stdout.columns ?? 0) >= 60) {
+    const { isFirstRun } = await import("./firstrun.ts");
+    if (await isFirstRun(p)) return cmdUi(p, inv, true);
+  }
   const { withUpdateLock } = await import("./update-coordinator.ts");
-  const held = await withUpdateLock(() => cmdInstallUnlocked(p, inv, entry));
+  const held = await withUpdateLock(() => cmdInstallUnlocked(p, inv, entry, answers));
   if (held.busy) { log.warn("another installation or update is running"); return 2; }
   return held.value;
 }
@@ -354,6 +364,7 @@ async function cmdInstallUnlocked(
   p: Platform,
   inv: Invocation,
   entry: "install" | "update" = "install",
+  answers?: import("./tui-setup-model.ts").SetupAnswers,
 ): Promise<number> {
   if (process.env["RED_DEV_UPDATE_CONVERGE"] === "1") {
     entry = "update";
@@ -371,10 +382,11 @@ async function cmdInstallUnlocked(
   // primitive returns its fallback without a TTY, so this is inert in
   // CI, in a pipe and over a non-interactive SSH — which is what makes
   // asking safe rather than something to avoid entirely.
-  if (!inv.dryRun && !inv.yes && !inv.scope) {
-    const { isFirstRun, askFirstRun, writeShellEnv, carryOutChoices } = await import("./firstrun.ts");
-    if (await isFirstRun(p)) {
-      const choices = await askFirstRun(p);
+  if (!inv.dryRun && (answers || (!inv.yes && !inv.unattended && !inv.scope))) {
+    const { isFirstRun, askFirstRun, recordSetupAnswers, writeShellEnv, carryOutChoices } = await import("./firstrun.ts");
+    if (answers || await isFirstRun(p)) {
+      const choices = answers ? await recordSetupAnswers(p, answers) : await askFirstRun(p);
+      if (!choices && interactive()) return 0;
       if (choices) {
         // The answers override the flag defaults for this run.
         ctx = {
@@ -390,10 +402,10 @@ async function cmdInstallUnlocked(
         // provider. This is a visible top-level authentication, never a
         // prompt hidden inside one of their unattended children.
         if (!inv.yes && interactive()) {
-          sudoPrepared = await prepareSudo(p, [
+          sudoPrepared = await prepareSudo(p, [...new Set([
             ...resolveScopes(p, inv.scope),
             ...extraScopes,
-          ]);
+          ])]);
         }
 
         // One implementation, reachable from both paths. It used to live
@@ -405,7 +417,7 @@ async function cmdInstallUnlocked(
     }
   }
 
-  const scopes = [...resolveScopes(p, inv.scope), ...extraScopes];
+  const scopes = [...new Set([...resolveScopes(p, inv.scope), ...extraScopes])];
   if (!inv.dryRun) {
     await synchronizeProvisioning(p);
   }
@@ -456,7 +468,7 @@ async function cmdInstallUnlocked(
   // Fullscreen when there is a terminal wide enough for it: the live
   // view is the default experience, and the line report is what runs in
   // CI, in a pipe, over a dumb SSH session and on a narrow window.
-  if (!inv.dryRun && interactive() && (process.stdout.columns ?? 0) >= 60 && !windowsWsl(p)) {
+  if (!answers && !inv.dryRun && interactive() && (process.stdout.columns ?? 0) >= 60 && !windowsWsl(p)) {
     const { runInstallTui } = await import("./tui-install.ts");
     const outcome = await runInstallTui({ platform: p, ctx, scopes });
     // The banner again, after the frame is released. The completion
@@ -1681,9 +1693,7 @@ async function cmdUninstall(p: Platform): Promise<number> {
  * underneath a live layout would fight it for the terminal. It exits
  * first, then the chosen command runs normally.
  */
-async function cmdUi(p: Platform, inv: Invocation): Promise<number> {
-  // The Windows/WSL installer needs the console for OS setup and sudo.
-  if (windowsWsl(p)) return cmdMenu(p, inv, buildCli().help());
+async function cmdUi(p: Platform, inv: Invocation, startSetup = false): Promise<number> {
   if (!interactive()) {
     log.err("the fullscreen interface needs a terminal");
     log.plain("     Use `red-dev` for the menu, or a command directly.");
@@ -1693,7 +1703,7 @@ async function cmdUi(p: Platform, inv: Invocation): Promise<number> {
   // The bootstrap one-liner is an explicit installation entry. Warm sudo
   // before its first fullscreen frame; later bare `red-dev` launches are a
   // menu and must not demand a password merely to inspect a theme or doctor.
-  if (process.env["RED_DEV_BOOTSTRAP"] === "1" && !inv.yes) {
+  if ((startSetup || process.env["RED_DEV_BOOTSTRAP"] === "1") && !inv.yes) {
     await prepareSudo(p, resolveScopes(p, inv.scope));
   }
 
@@ -1713,6 +1723,10 @@ async function cmdUi(p: Platform, inv: Invocation): Promise<number> {
     steps,
     wizard,
     apply: installer.apply,
+    start: startSetup,
+    // WSL provisioning and native installers may need the real console.
+    // Keep the visual interview, then release its single render before work.
+    finishOutside: p.os === "windows",
   };
 
   // The converge is handed to the interface rather than run after it.
@@ -1752,6 +1766,8 @@ async function cmdUi(p: Platform, inv: Invocation): Promise<number> {
   );
 
   switch (result.action) {
+    case "setup":
+      return result.answers ? cmdInstall(p, inv, "install", result.answers) : 0;
     case "theme":
       return result.theme ? await cmdTheme(p, inv, result.theme) : 0;
     case "wallpaper":
@@ -2342,7 +2358,7 @@ async function cmdMenu(p: Platform, inv: Invocation, cliHelp: string): Promise<n
     return 0;
   }
 
-  if ((process.stdout.columns ?? 0) >= 60 && !windowsWsl(p)) {
+  if ((process.stdout.columns ?? 0) >= 60) {
     return await cmdUi(p, inv);
   }
 
