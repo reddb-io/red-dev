@@ -1,5 +1,5 @@
 /**
- * The Ubuntu 24 rollback journey, end to end, in one function.
+ * The rollback journey for one Ubuntu desktop, end to end, in one function.
  *
  * Spec #201's rollback criteria are five sentences about time rather than
  * about a machine: a workstation that moved N-2 → N-1 → N has to be able
@@ -13,6 +13,19 @@
  * `bun run e2e:rollback-ubuntu24` call, and it returns the checks it made
  * rather than printing them, so the two callers cannot disagree about
  * what passed.
+ *
+ * `target` is a parameter for the reason src/offline-depot-e2e.ts takes
+ * one: #213 asks for this whole journey on Ubuntu 26.04, and a second
+ * copy of it would be a second opinion about what a rollback means.
+ *
+ * ## And then it all comes off again
+ *
+ * The last two checks uninstall the workstation the first thirteen
+ * built. That belongs here rather than in a journey of its own because
+ * an uninstall is only interesting against a machine with revisions,
+ * retained locks and machine-owned depots on it — which is exactly what
+ * this journey has by the time the rollback has settled — and because
+ * the thing worth proving is as much what survives as what goes.
  *
  * ## The three revisions, and the one that failed
  *
@@ -59,7 +72,7 @@
  * than having been given one, and that the two Workers are still two.
  */
 
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -73,7 +86,7 @@ import {
   rehearsalVerifier,
   UBUNTU,
 } from "./fixtures/offline-depot/rehearsal.ts";
-import type { JourneyCheck, JourneyResult } from "./offline-depot-e2e.ts";
+import { journeyLines, type JourneyCheck, type JourneyResult } from "./offline-depot-e2e.ts";
 import {
   DEPOT_SET_DIR,
   exportDepot,
@@ -97,9 +110,10 @@ import {
   workstationRollbackReport,
   workstationRollbackRows,
 } from "./workstation-rollback.ts";
+import { uninstallWorkstation } from "./workstation-uninstall.ts";
 import type { ObservedApp, ObservedTarget, WorkstationLock } from "./workstation-lock.ts";
 
-/** The target this journey rolls back, named once. */
+/** The target the Ubuntu 24 rollback journey rolls back, named once. */
 export const ROLLBACK_TARGET = UBUNTU;
 
 /**
@@ -116,6 +130,8 @@ export const SET_RELEASES = [
 ] as const;
 
 export interface RollbackJourneyOptions {
+  /** Which workstation is rolled back. Defaults to the Ubuntu 24 desktop. */
+  target?: string;
   /** Where the machines are built. Defaults to a temporary directory. */
   root?: string;
   /** The export instant. Fixed by default: a journey never reads a clock. */
@@ -154,12 +170,20 @@ interface Revision {
  * the whole shape of what broke, not the first fact that stopped being
  * true.
  */
-export async function runUbuntu24RollbackJourney(
+export async function runRollbackJourney(
   opts: RollbackJourneyOptions = {},
 ): Promise<JourneyResult> {
+  const target = opts.target ?? UBUNTU;
   const root = opts.root ?? mkdtempSync(join(tmpdir(), "red-rollback-journey-"));
   const at = opts.at ?? "2026-08-19T00:00:00Z";
   const home = join(root, "target", "home");
+  // Somebody's own configuration, on the machine before red-dev is and
+  // asserted to still be there after red-dev has been taken off again.
+  // src/uninstall.ts settles this rule for one tool; the uninstall at
+  // the end of this journey is where it has to hold for fourteen.
+  const keepsake = join(home, ".claude", "settings.json");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  writeFileSync(keepsake, '{"theme":"red"}\n', "utf8");
   const checks: JourneyCheck[] = [];
   const check = (name: string, ok: boolean, detail: string): boolean => {
     checks.push({ name, ok, detail });
@@ -167,7 +191,7 @@ export async function runUbuntu24RollbackJourney(
   };
   const finish = (): JourneyResult => {
     if (!opts.keep) rmSync(root, { recursive: true, force: true });
-    return { ok: checks.every((c) => c.ok), checks, root: opts.keep ? root : null };
+    return { ok: checks.every((c) => c.ok), target, checks, root: opts.keep ? root : null };
   };
 
   // ---------------------------------------------------- the connected machine
@@ -178,7 +202,7 @@ export async function runUbuntu24RollbackJourney(
     const release = SET_RELEASES[generation];
     if (release === undefined) continue;
     const setDir = rehearsalPackageSet(join(root, "connected", `set-${generation}`), release);
-    const lock = await rehearsalLock(at, "resolved", generation);
+    const lock = await rehearsalLock(at, "resolved", generation, target);
     const previous = depots[depots.length - 1]?.packageSet ?? null;
     const exported = await exportDepot({
       lock,
@@ -206,11 +230,11 @@ export async function runUbuntu24RollbackJourney(
     "export",
     new Set(depots.map((d) => d.packageSet.digest)).size === 3 &&
       new Set(depots.map((d) => d.lock.lockDigest)).size === 3,
-    `three complete revisions cut for ${ROLLBACK_TARGET}: ${depots.map((d) => d.packageSet.key).join(" -> ")}`,
+    `three complete revisions cut for ${target}: ${depots.map((d) => d.packageSet.key).join(" -> ")}`,
   );
 
   // ------------------------------------------------- the network-denied target
-  const observed = cleanUbuntu();
+  const observed = cleanUbuntu(target);
   const installed: ObservedApp[] = [];
   const install: DepotInstaller = async (step, artifact) => {
     if (artifact.bytes.toString("utf8") !== rehearsalArtifact(step.app)) {
@@ -464,7 +488,72 @@ export async function runUbuntu24RollbackJourney(
       : rows.filter((row) => row.status === "err").map((row) => row.detail).join("; "),
   );
 
+  // ------------------------------------------------------------ the uninstall
+  // And then all of it comes off: every application the lock names, the
+  // revisions, the retained locks and the machine-owned depots the whole
+  // journey was served from. With egress still denied, because removing
+  // a workstation is not a reason to phone home either.
+  const removed: string[] = [];
+  const uninstallEgress = denyEgress();
+  let gone;
+  try {
+    gone = await uninstallWorkstation({
+      home,
+      observed: machine(),
+      remove: async (app) => {
+        const at_ = installed.findIndex((a) => a.id === app.id && a.surface === app.surface);
+        if (at_ === -1) return { ok: false, detail: "this machine does not have it" };
+        installed.splice(at_, 1);
+        removed.push(`${app.id} on ${app.surface}`);
+        return { ok: true };
+      },
+      workers: async () => 0,
+    });
+  } finally {
+    uninstallEgress.restore();
+  }
+  const ownedRoot = join(home, ".red-skills");
+  check(
+    "uninstall",
+    gone.code === 0 &&
+      gone.outcome === "removed" &&
+      removed.length === previous.lock.apps.length &&
+      installed.length === 0 &&
+      !existsSync(ownedRoot) &&
+      existsSync(keepsake) &&
+      uninstallEgress.attempts.length === 0,
+    gone.outcome === "removed"
+      ? `all ${removed.length} applications and ${gone.writes.length} machine-owned path(s) went, and the configuration nobody locked is still there`
+      : gone.reason,
+  );
+
+  const secondUninstall = await uninstallWorkstation({
+    home,
+    observed: machine(),
+    remove: async () => ({ ok: false, detail: "an uninstalled machine must remove nothing" }),
+    workers: async () => 0,
+  });
+  check(
+    "uninstall-idempotent",
+    secondUninstall.outcome === "absent" &&
+      secondUninstall.writes.length === 0 &&
+      secondUninstall.code === 0,
+    secondUninstall.writes.length === 0
+      ? `a second uninstall removed nothing: ${secondUninstall.reason}`
+      : `a second uninstall removed ${secondUninstall.writes.length} path(s)`,
+  );
+
   return finish();
+}
+
+/**
+ * The Ubuntu 24 rollback journey, under the name its command and its
+ * test use. A one-line alias, for the reason the depot journey has one.
+ */
+export function runUbuntu24RollbackJourney(
+  opts: RollbackJourneyOptions = {},
+): Promise<JourneyResult> {
+  return runRollbackJourney({ ...opts, target: ROLLBACK_TARGET });
 }
 
 /** Record one fatal check and stop. */
@@ -480,11 +569,5 @@ function finish_(
 
 /** The journey as lines, for the command that runs it. PURE. */
 export function rollbackJourneyLines(result: JourneyResult): string[] {
-  const lines = result.checks.map((c) => `${c.ok ? "ok  " : "FAIL"} ${c.name} — ${c.detail}`);
-  lines.push(
-    result.ok
-      ? `\n${ROLLBACK_TARGET} rollback journey: ${result.checks.length} checks passed`
-      : `\n${ROLLBACK_TARGET} rollback journey: ${result.checks.filter((c) => !c.ok).length} of ${result.checks.length} checks failed`,
-  );
-  return lines;
+  return journeyLines(result, "rollback journey");
 }

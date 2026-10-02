@@ -44,6 +44,8 @@ describe("the ubuntu 24.04 rollback journey", () => {
       "lock",
       "idempotent",
       "doctor",
+      "uninstall",
+      "uninstall-idempotent",
     ]);
     expect(result.root).toBeNull();
   });
@@ -92,6 +94,7 @@ describe("the ubuntu 24.04 rollback journey", () => {
   test("the lines a person reads say which check failed", () => {
     const lines = rollbackJourneyLines({
       ok: false,
+      target: "ubuntu-24.04-x64",
       root: null,
       checks: [
         { name: "retention", ok: true, detail: "two revisions remain" },
@@ -100,6 +103,6 @@ describe("the ubuntu 24.04 rollback journey", () => {
     });
     expect(lines[0]).toBe("ok   retention — two revisions remain");
     expect(lines[1]).toBe("FAIL rollback — the retained lock is gone");
-    expect(lines[2]).toContain("1 of 2 checks failed");
+    expect(lines[2]).toContain("ubuntu-24.04-x64 rollback journey: 1 of 2 checks failed");
   });
 });
