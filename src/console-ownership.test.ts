@@ -62,7 +62,7 @@ const ALLOWED = new Map<string, string>([
   ],
   [
     "wsl-provision.ts",
-    "`wsl --install` and `--set-version` prompt for a UNIX username and take minutes. They need real stdin, which spawnLogged's captured branch sets to ignore — so routing them through it would hang rather than tear. Known gap: reachable from the TUI menu, where it WOULD tear. Not fixed here because the fix is to refuse the capture, not to pipe it.",
+    "`wsl --install` and `--set-version` need real console stdin. The Windows wizard returns its answers and releases the renderer before installation invokes these commands.",
   ],
 ]);
 

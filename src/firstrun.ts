@@ -19,8 +19,7 @@ import type { StepOutcome } from "./converge.ts";
 import type { Platform } from "./platform.ts";
 import type { SetupAnswers, SetupFacts } from "./tui-setup-model.ts";
 import { readPreferences, writePreferences, type Preferences } from "./preferences.ts";
-import { DEFAULT_THEME, themeNames } from "./themes.ts";
-import { checkbox, confirm, interactive, select } from "./ui.ts";
+import { checkbox, interactive, select, text } from "./ui.ts";
 
 export interface FirstRunChoices {
   theme?: string;
@@ -30,7 +29,7 @@ export interface FirstRunChoices {
   apps: string[];
   /** mise runtime ids. */
   runtimes: string[];
-  /** Agent keys chosen, when the fullscreen setup ran. */
+  /** Agent keys chosen in either setup interface. */
   agents?: string[];
   sshGithubUser?: string;
   blesh: boolean;
@@ -142,13 +141,6 @@ export async function setupPlan(
   return plan;
 }
 
-const FONTS = [
-  "firacode — the default; ligatures",
-  "jetbrainsmono — taller x-height",
-  "hack — no ligatures",
-  "caskaydiacove — Microsoft's Cascadia",
-] as const;
-
 /**
  * Has this machine been set up before?
  *
@@ -210,11 +202,12 @@ export async function buildSetupSteps(p: Platform) {
 export async function setupFacts(p: Platform): Promise<SetupFacts> {
   const { currentWallpaperLabel } = await import("./wallpaper.ts");
   const { detectGithubUser } = await import("./ssh-access.ts");
-  const [wallpaper, githubUser] = await Promise.all([
+  const [wallpaper, githubUser, preferences] = await Promise.all([
     currentWallpaperLabel(p).catch(() => null),
     detectGithubUser(p).catch(() => null),
+    readPreferences(p),
   ]);
-  return { currentWallpaper: wallpaper, githubUser };
+  return { currentWallpaper: wallpaper, githubUser, preferences };
 }
 
 /** Apply the explicit SSH choice made in either setup interface. */
@@ -279,18 +272,9 @@ async function resolveKeptWallpaper(
   }
 }
 
-/**
- * Carry out what the interview decided, before the converge starts.
- *
- * The same body askFirstRun runs after its own wizard, reachable from
- * the fullscreen menu — which is where the questions were missing.
- */
-export async function applySetupAnswers(
-  p: Platform,
-  inv: { scope?: string | undefined },
-  given: SetupAnswers,
-  observer: SetupProgressObserver = {},
-): Promise<{ answers: SetupAnswers }> {
+/** Record a completed interview before installing any selected tools. */
+export async function recordSetupAnswers(p: Platform, given: SetupAnswers): Promise<SetupAnswers> {
+  if (!given.completed) throw new Error("setup was not completed");
   const answers = await resolveSetupWallpaper(p, given);
   if (answers.share) {
     const { chooseSharedRoot } = await import("./shared-root.ts");
@@ -303,6 +287,17 @@ export async function applySetupAnswers(
 
   await writePreferences(p, preferencesFromAnswers(answers));
   await applySetupSshAccess(p, answers);
+  await resolveWorkstation(p);
+  return answers;
+}
+
+export async function applySetupAnswers(
+  p: Platform,
+  inv: { scope?: string | undefined },
+  given: SetupAnswers,
+  observer: SetupProgressObserver = {},
+): Promise<{ answers: SetupAnswers }> {
+  const answers = await recordSetupAnswers(p, given);
   await writeShellEnv(p, answers.blesh);
   await carryOutChoices(p, {
     agents: answers.agents,
@@ -441,279 +436,51 @@ export async function carryOutChoices(
 
 }
 
+/** The compact fallback asks the same questions and records the same answers. */
+export async function runSetupPrompts(
+  steps: ReturnType<typeof import("./tui-setup-model.ts").setupSteps>["steps"],
+  prompts = { checkbox, select, text },
+): Promise<SetupAnswers> {
+  const { stepAvailable, stepChoices, choiceSelectable, setupAnswersFrom } =
+    await import("./tui-setup-model.ts");
+  const picked = Object.fromEntries(steps.map(step => [step.id, [...step.preset]]));
+  const get = (id: string) => picked[id] ?? [];
+  for (const step of steps) {
+    if (!stepAvailable(step, get)) continue;
+    log.step(step.title);
+    log.plain(step.description);
+    if (step.textInput) {
+      const answer = (await prompts.text(step.textInput.placeholder, get(step.id)[0] ?? "")).trim();
+      picked[step.id] = answer ? [answer] : [];
+      continue;
+    }
+    const options = stepChoices(step, get);
+    const offered = step.multi ? options.filter(choice => choiceSelectable(step, choice)) : options;
+    for (const item of options.filter(choice => step.multi && !choiceSelectable(step, choice))) {
+      log.plain(`     ${item.label}: ${item.note}`);
+    }
+    if (!offered.length) continue;
+    const labels = offered.map(choice => `${choice.label}${choice.note ? `: ${choice.note}` : ""}`) as [string, ...string[]];
+    const presets = labels.filter((_, i) => get(step.id).includes(offered[i]!.key));
+    const chosen = step.multi
+      ? await prompts.checkbox(step.title, labels, presets)
+      : [await prompts.select(step.title, labels, presets[0] ?? labels[0])];
+    picked[step.id] = offered.filter((_, i) => chosen.includes(labels[i]!)).map(choice => choice.key);
+  }
+  return setupAnswersFrom(steps, get);
+}
+
 export async function askFirstRun(p: Platform): Promise<FirstRunChoices | null> {
   if (!interactive()) return null;
-
-  // Fullscreen when the terminal will take it, which is what was asked
-  // for: the theme step previews the palette while the cursor moves, and
-  // a linear prompt cannot. The prompt sequence below stays as the
-  // fallback for terminals too small to lay out two columns and for
-  // anything that reports no size at all.
-  const columns = process.stdout.columns ?? 0;
-  if (columns >= 60) {
-    const { runSetupTui } = await import("./tui-setup.ts");
-    const { availableAgents, isAgentInstalled } = await import("./agents.ts");
-    const { desktopAppChoices } = await import("./desktop-apps.ts");
-    const { otherOptionalChoices, redFamilyChoices } = await import("./red-family.ts");
-    const { OFFERED_RUNTIMES } = await import("./runtimes.ts");
-
-    const agents = availableAgents(p).map((a) => ({
-      key: a.key,
-      label: a.label,
-      note: isAgentInstalled(a) ? `${a.about} — installed` : a.about,
-      // What the Agents page arrives with ticked. See Choice.recommended.
-      recommended: a.recommended,
-    }));
-
-    const given = await runSetupTui(
-      p,
-      agents,
-      otherOptionalChoices(p),
-      OFFERED_RUNTIMES.map((r) => ({ key: r.id, label: r.label, note: r.about })),
-      redFamilyChoices(p, agents),
-      [],
-      await setupFacts(p),
-      desktopAppChoices(p),
-    );
-
-    if (!given) {
-      // Left early: no answers recorded, so the next run asks again
-      // rather than silently keeping half a set.
-      log.skip("setup skipped — run `red-dev` when you want to choose");
-      return null;
-    }
-    const answers = await resolveSetupWallpaper(p, given);
-
-    // Established before the converge writes anything, which is the
-    // whole point of asking it first: configuration should be born in
-    // the share rather than written locally and migrated afterwards.
-    if (answers.share) {
-      const { chooseSharedRoot } = await import("./shared-root.ts");
-      try {
-        await chooseSharedRoot(p);
-      } catch (err) {
-        // Never fatal. A first run that cannot reach the Windows side is
-        // a first run that should still finish.
-        log.warn(`shared root: ${(err as Error).message}`);
-      }
-    }
-
-    await writePreferences(p, preferencesFromAnswers(answers));
-    await applySetupSshAccess(p, answers);
-
-    return {
-      theme: answers.theme,
-      wallpaper: answers.wallpaper,
-      font: answers.font,
-      apps: answers.apps,
-      runtimes: answers.runtimes,
-      agents: answers.agents,
-      sshGithubUser: answers.sshGithubUser,
-      blesh: answers.blesh,
-    };
+  const interview = await buildSetupSteps(p);
+  const given = (process.stdout.columns ?? 0) >= 60
+    ? await (await import("./tui-setup.ts")).runSetupTui(p, interview)
+    : await runSetupPrompts(interview.steps);
+  if (!given) {
+    log.skip("setup cancelled — run `red-dev` when you want to choose");
+    return null;
   }
-
-  log.plain("");
-  log.step("First run on this machine — a few choices, then it stays quiet.");
-  log.plain("     Every one of these is changeable later; nothing here is final.");
-  log.plain("");
-
-  // ---------------------------------------------------------------
-  // Order: structural first, cosmetic last.
-  //
-  // This asked the colour scheme first and whether the machine gets a
-  // Linux side at all near the end, which is exactly backwards. On a
-  // fresh Windows the WSL answer changes what every later question even
-  // means — which shell the terminal opens, where the tools land — and
-  // a palette changes nothing. Anyone can abandon the sequence after
-  // the decisions that matter and lose only the paint.
-  // ---------------------------------------------------------------
-
-  // 1. Does this machine get a Linux side? Nothing else reframes the
-  //    rest of the run the way this does.
-  // 2. Where a terminal lands, now that we know whether both sides
-  //    exist.
-  let terminalShell: Preferences["terminalShell"];
-  if (p.env === "wsl" || p.os === "windows") {
-    const distro = process.env["WSL_DISTRO_NAME"] ?? "your WSL distro";
-    const picked = await select(
-      "When you open a terminal, where should it land?",
-      [`wsl — ${distro}, in its own filesystem`, "gitbash — stay on Windows, same dotfiles"] as const,
-      `wsl — ${distro}, in its own filesystem`,
-    );
-    terminalShell = picked.startsWith("wsl") ? "wsl" : "gitbash";
-    const { applyWorkstationPreferences } = await import("./workstation.ts");
-    applyWorkstationPreferences(p, { terminalShell });
-  }
-
-  // 3. What you build with.
-  const { OFFERED_RUNTIMES, runtimeIdsForPolicy, runtimeSelectedByDefault } =
-    await import("./runtimes.ts");
-  const runtimeLabels = OFFERED_RUNTIMES.map((r) => `${r.id} — ${r.about}`);
-  const pickedRuntimes = await checkbox(
-    "Language runtimes for mise to manage?",
-    runtimeLabels as [string, ...string[]],
-    runtimeLabels.filter((label) => runtimeSelectedByDefault(label.split(" ")[0]!)),
-  );
-  const selectedRuntimes = runtimeIdsForPolicy(
-    pickedRuntimes.map((label) => label.split(" ")[0]!),
-    "latest",
-  );
-
-  // 3b. Which RedSkills plugins the agent hosts switch on. Asked here
-  //     rather than beside the paint because it decides what runs in
-  //     every agent session: a plugin that is off is not installed into
-  //     any host, so none of its hooks or MCP servers run there.
-  const { DEFAULT_ACTIVATED_PLUGINS, PLUGIN_CHOICES } = await import("./red-skills-plugins.ts");
-  const pluginLabels = PLUGIN_CHOICES.map((plugin) => `${plugin.key} — ${plugin.note}`);
-  const pickedPlugins = await checkbox(
-    "RedSkills plugins to switch on in the agent hosts? (memory brings dev along)",
-    pluginLabels as [string, ...string[]],
-    pluginLabels.filter((label) => DEFAULT_ACTIVATED_PLUGINS.includes(label.split(" ")[0]!)),
-  );
-  const redSkillsPlugins = pickedPlugins.map((label) => label.split(" ")[0]!);
-
-  // 4. The RedDB family: inventory beside the optional integrations.
-  const { availableAgents } = await import("./agents.ts");
-  const { desktopAppChoices } = await import("./desktop-apps.ts");
-  const { otherOptionalChoices, redFamilyChoices } = await import("./red-family.ts");
-  const redFamily = redFamilyChoices(
-    p,
-    availableAgents(p).map((agent) => ({
-      key: agent.key,
-      label: agent.label,
-      note: agent.about,
-    })),
-  );
-  log.plain("");
-  log.step("RedDB family:");
-  for (const product of redFamily.filter((choice) => choice.selectable === false)) {
-    const marker = product.marker === "elsewhere" ? "→" : "•";
-    log.plain(`     ${marker} ${product.label} — ${product.note}`);
-  }
-  const redOptional = redFamily.filter((choice) => choice.answer === "apps");
-  const redLabels = redOptional.map((choice) => `${choice.key} — ${choice.note}`);
-  const pickedRedApps = redLabels.length > 0
-    ? await checkbox(
-        "Optional RedDB integrations? (space to untick)",
-        redLabels as [string, ...string[]],
-        redLabels,
-      )
-    : [];
-
-  // 5. Extra tools, all of them ticked.
-  //
-  // This used to default to none and call empty a good answer. That is
-  // true for a list you have to evaluate and wrong for a curated one —
-  // the point of an omakase setup is that somebody already chose, and
-  // none of these is installed by a plain converge, so this list is the
-  // only thing that decides.
-  const appLabels = otherOptionalChoices(p).map((choice) => `${choice.key} — ${choice.note}`);
-  const pickedApps =
-    appLabels.length > 0
-      ? await checkbox(
-          "Optional tools? (space to untick what you do not want)",
-          appLabels as [string, ...string[]],
-          appLabels,
-        )
-      : [];
-
-  // Graphical assistants are applications, not agent hosts. They are
-  // opt-in and stay on the desktop side of a Windows+WSL workstation.
-  const desktopLabels = desktopAppChoices(p).map((choice) => `${choice.key} — ${choice.note}`);
-  const pickedDesktopApps = desktopLabels.length > 0
-    ? await checkbox(
-        "Optional desktop apps? (space to select)",
-        desktopLabels as [string, ...string[]],
-        [],
-      )
-    : [];
-
-  // 6. Plugins — things that attach to bash rather than sit beside it.
-  //    The caveat stays visible, but the answer follows the same opt-out
-  //    contract as every other install choice.
-  log.plain("");
-  log.plain("     ble.sh adds autosuggestions and syntax highlighting to bash.");
-  log.plain("     It replaces the line editor that atuin, fzf and carapace bind");
-  log.plain("     into; untick it if you prefer the stock line editor.");
-  const blesh = await confirm("Enable ble.sh?", true);
-
-  // 7. Paint. Last, because it is the only thing here that changes
-  //    nothing but how it looks — and `red-dev theme` previews these
-  //    live, which this linear prompt cannot.
-  const font = (await select("Terminal font?", FONTS, FONTS[0])).split(" ")[0]!;
-  const theme = await select(
-    "Colour scheme?  (red-dev ui previews these)",
-    themeNames() as [string, ...string[]],
-    DEFAULT_THEME,
-  );
-
-  const facts = await setupFacts(p);
-  const keepCurrent = facts.currentWallpaper
-    ? `current — keep ${facts.currentWallpaper}; Redwall draws over it`
-    : null;
-  const wallpaperChoice = await select(
-    "Wallpaper?",
-    [
-      "theme — follow the colour theme",
-      ...(keepCurrent ? [keepCurrent] : []),
-      ...themeNames(),
-    ] as [string, ...string[]],
-    "theme — follow the colour theme",
-  );
-  let wallpaper: string | undefined = wallpaperChoice.startsWith("theme ")
-    ? undefined
-    : wallpaperChoice.split(" ")[0]!;
-  if (wallpaperChoice === keepCurrent) {
-    const { KEEP_CURRENT_WALLPAPER } = await import("./tui-setup-model.ts");
-    wallpaper = KEEP_CURRENT_WALLPAPER;
-  }
-
-  // 8. And whether that wallpaper reports on the machine it is sitting
-  //    on. Asked after the theme because it draws over whatever the
-  //    theme chose. It follows the setup's opt-out contract.
-  log.plain("");
-  log.plain("     Redwall draws live machine state over the selected wallpaper —");
-  log.plain("     Workers running, and the address this machine answers on —");
-  log.plain("     so the lock screen reports without being unlocked.");
-  const redwall = await confirm("Enable Redwall?", true);
-
-  // `current` is resolved into a recorded pin before anything is
-  // written, the same way the fullscreen interview resolves it.
-  wallpaper = await resolveKeptWallpaper(p, wallpaper);
-
-  const choices: FirstRunChoices = {
-    theme,
-    wallpaper,
-    font,
-    apps: [...pickedDesktopApps, ...pickedApps, ...pickedRedApps].map((l) => l.split(" ")[0]!),
-    runtimes: selectedRuntimes,
-    blesh,
-  };
-
-  await writePreferences(p, {
-    setupCompleted: true,
-    theme,
-    wallpaper,
-    font,
-    blesh,
-    redwall,
-    runtimes: choices.runtimes,
-    redSkillsPlugins,
-    ...(terminalShell ? { terminalShell } : {}),
-    ...(terminalShell === "wsl" && process.env["WSL_DISTRO_NAME"]
-      ? { distro: process.env["WSL_DISTRO_NAME"] }
-      : {}),
-  });
-
-  // The compact linear fallback cannot render the SSH selection page,
-  // so it asks here. This remains outside every converge path.
-  const { offerGithubKeys, rememberGithubUser } = await import("./ssh-access.ts");
-  const authorized = await offerGithubKeys(p);
-  if (authorized) await rememberGithubUser(p, authorized);
-
-  log.plain("");
-  return choices;
+  return recordSetupAnswers(p, given);
 }
 
 /**

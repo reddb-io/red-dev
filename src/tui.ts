@@ -9,9 +9,8 @@
  *
  * So this is the reactive half of tuiuiu rather than the prompt half: a
  * render loop, signals, and a layout with a panel that reacts to the
- * selection. The prompts stay for `install`'s first run, where a linear
- * sequence of questions is exactly right and a fullscreen takeover
- * would be worse.
+ * selection. Installation uses the same reactive wizard; linear prompts
+ * remain available when the terminal is too narrow for the visual layout.
  *
  * Both halves are optional. Without a TTY neither runs, and every
  * command reachable here is reachable as a plain argument.
@@ -208,6 +207,8 @@ export const SECTIONS: MenuSection[] = [
 export interface TuiResult {
   /** Command the user chose to run after leaving the interface. */
   action: string | null;
+  /** Completed interview handed to an installer that needs the console. */
+  answers?: SetupAnswers;
   /** Theme they settled on, when they chose one. */
   theme?: string;
   /** Failures, when the converge ran inside the interface. */
@@ -259,6 +260,8 @@ export interface TuiActions {
     steps: SetupModel["steps"];
     wizard: SetupModel["wizard"];
     apply: (answers: SetupAnswers, observer?: SetupProgressObserver) => Promise<unknown>;
+    start?: boolean;
+    finishOutside?: boolean;
   };
 }
 
@@ -281,7 +284,7 @@ export async function runTui(
     // "sections" browses the left column; "themes" browses the palette
     // list, with the panel previewing whatever is highlighted.
     const [mode, setMode] = useState<"sections" | "themes" | "setup" | "install" | "task">(
-      "sections",
+      actions.setup?.start ? "setup" : "sections",
     );
     const [sectionIndex, setSectionIndex] = useState(0);
     const [themeIndex, setThemeIndex] = useState(0);
@@ -384,7 +387,15 @@ export async function runTui(
           setMode("sections");
         } else if (verdict === "done") {
           const answers = setup.answers();
+          if (actions.setup.finishOutside) {
+            result = { action: "setup", answers };
+            exit();
+            return;
+          }
           setMode("install");
+          setDone(null);
+          setReviewing(false);
+          model?.reset();
           // Captured, like every other command that runs in here.
           //
           // Recording the shared root speaks through `log`, and without
@@ -467,8 +478,14 @@ export async function runTui(
           // answering is the point of choosing it. Previous answers come
           // back as the presets, so agreeing again is enter, enter,
           // enter.
-          if (setup) setMode("setup");
+          if (setup) {
+            setup.reopen();
+            setMode("setup");
+          }
           else {
+            setDone(null);
+            setReviewing(false);
+            model.reset();
             setMode("install");
             model.begin();
           }

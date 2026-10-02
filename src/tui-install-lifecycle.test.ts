@@ -47,6 +47,41 @@ const base: Omit<InstallTuiOptions, "converge"> = {
 };
 
 describe("the final converge boundary", () => {
+  test("a second explicit run executes again and clears the first run's progress", async () => {
+    let calls = 0;
+    const runner: typeof converge = async (_opts, observer = {}) => {
+      const step = { scope: "desktop" as const, tool: `run-${++calls}`, provider: "test", index: 1, total: 1 };
+      observer.stepStart?.(step);
+      const result = { ...step, outcome: "present" as const, ms: 0 };
+      observer.stepEnd?.(result);
+      return { results: [result], failed: 0, deferred: 0 };
+    };
+    let model!: InstallModel;
+    const outcomes: InstallOutcome[] = [];
+    const scroll = createScrollArea({ height: 10, content: [], autoScroll: true });
+    const app = render(() => {
+      model = useInstallModel({ ...base, converge: runner }, scroll, outcome => { outcomes.push(outcome); });
+      return InstallLayout(model, 96, 30);
+    }, { ...terminal(), fullHeight: true });
+    try {
+      model.begin();
+      model.begin(); // Repeated calls while started remain idempotent.
+      await Bun.sleep(60);
+      expect(calls).toBe(1);
+      expect(model.finished()).toBe(true);
+      model.reset();
+      model.prelude("agents & runtimes");
+      model.setupStepEnd({ tool: "codex", outcome: "present" });
+      model.begin(); // Reset and begin may occur before the next frame.
+      await Bun.sleep(60);
+      expect(calls).toBe(2);
+      expect(model.results().map(result => result.tool)).toEqual(["run-2"]);
+      expect(model.lines().join("\n")).not.toContain("run-1");
+      expect(outcomes).toHaveLength(2);
+      expect(outcomes[1]?.results.map(result => result.tool)).toEqual(["codex", "run-2"]);
+    } finally { app.unmount(); }
+  });
+
   test("the fullscreen completion explains a sudo deferral without opening the log", () => {
     const frame = renderToString(
       CompletionLayout(

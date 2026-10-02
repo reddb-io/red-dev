@@ -83,6 +83,11 @@ apps and resource budgets still require your selection. Check `red-dev
 --version` and the final installation summary to confirm what actually ran;
 failed historical repairs remain pending for a subsequent run.
 
+The menu and first-run install use the same tuiuiu.js wizard, with saved
+choices and live palette previews. Narrow terminals use the same questions
+as linear prompts. On Windows, the wizard releases the console before WSL
+provisioning or native installers need input.
+
 Neither needs administrator or root rights for red-dev itself; individual
 packages may still ask for sudo.
 
