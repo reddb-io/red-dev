@@ -17,6 +17,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { redSkillsRoot } from "./red-skills-root.ts";
 
 import { fixtureResolver } from "./fixtures/workstation-lock/releases.ts";
 import {
@@ -48,7 +49,7 @@ async function lockFor(target: string): Promise<WorkstationLock> {
 /** A home with a lock, every machine-owned entry, and one file that is not ours. */
 function provisionedHome(lock: WorkstationLock): { home: string; keepsake: string } {
   const home = mkdtempSync(join(tmpdir(), "red-uninstall-"));
-  const owned = join(home, ".red-skills");
+  const owned = redSkillsRoot(home);
   mkdirSync(owned, { recursive: true });
   for (const entry of MACHINE_OWNED_ENTRIES) {
     if (entry.endsWith(".json")) writeFileSync(join(owned, entry), "{}\n");
@@ -75,6 +76,34 @@ function machine(lock: WorkstationLock): ObservedTarget {
 }
 
 describe("uninstalling a locked workstation", () => {
+  test("unknown worker state preserves all machine state", async () => {
+    const lock = await lockFor(TARGET);
+    const { home } = provisionedHome(lock);
+    let removed = 0;
+    try {
+      const result = await uninstallWorkstation({ home, observed: machine(lock),
+        remove: async () => { removed++; return { ok: true }; }, workers: async () => null });
+      expect(result.outcome).toBe("refused");
+      expect(removed).toBe(0);
+      expect(result.writes).toEqual([]);
+      expect(existsSync(workstationLockPath(home))).toBe(true);
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+
+  test("unrecognized state inside the managed root survives removal", async () => {
+    const lock = await lockFor(TARGET);
+    const { home } = provisionedHome(lock);
+    const foreign = join(redSkillsRoot(home), "personal-note.txt");
+    writeFileSync(foreign, "keep this file\n");
+    try {
+      const result = await uninstallWorkstation({ home, observed: machine(lock),
+        remove: async () => ({ ok: true }), workers: async () => 0 });
+      expect(result.outcome).toBe("removed");
+      expect(existsSync(foreign)).toBe(true);
+      expect(existsSync(workstationLockPath(home))).toBe(false);
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+
   test("everything the lock names goes, and the machine-owned state with it", async () => {
     const lock = await lockFor(TARGET);
     const { home, keepsake } = provisionedHome(lock);
@@ -98,7 +127,7 @@ describe("uninstalling a locked workstation", () => {
     expect(result.removed).toHaveLength(lock.apps.length);
     expect(existsSync(workstationLockPath(home))).toBe(false);
     for (const entry of MACHINE_OWNED_ENTRIES) {
-      expect(existsSync(join(home, ".red-skills", entry))).toBe(false);
+      expect(existsSync(join(redSkillsRoot(home), entry))).toBe(false);
     }
     // The one rule this shares with removing a single tool: configuration
     // is never removed as a side effect of removing a binary.

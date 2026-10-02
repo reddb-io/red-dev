@@ -69,31 +69,6 @@
       }
     },
     {
-      "id": "gemini",
-      "label": "Gemini CLI",
-      "kind": "coder",
-      "surface": "ubuntu-26.04-x64",
-      "version": "0.14.2",
-      "source": {
-        "kind": "npm",
-        "coordinate": "@google/gemini-cli@0.14.2",
-        "origin": "https://registry.npmjs.org/@google/gemini-cli/-/gemini-cli-0.14.2.tgz",
-        "publisher": "Google"
-      },
-      "artifact": {
-        "name": "gemini-cli-0.14.2.tgz",
-        "sha256": "19a8d0c785349febe5ad11af060afb9309a636b0347848b5ed4e60df859ed320"
-      },
-      "provenance": {
-        "attestation": "npm-provenance",
-        "reference": "https://registry.npmjs.org/-/npm/v1/attestations/@google/gemini-cli@0.14.2"
-      },
-      "cloudAuth": {
-        "service": "Google",
-        "evidence": "~/.gemini/oauth_creds.json"
-      }
-    },
-    {
       "id": "herdr",
       "label": "Herdr",
       "kind": "companion",
@@ -348,5 +323,5 @@
       "cloudAuth": null
     }
   ],
-  "lockDigest": "c82d492116c958c442e801aa427c8bc25bf782442f186c58af40d51ffa407b69"
+  "lockDigest": "8033494840a10927b93459fc77767fe2382fea16469faa1b0e90dd6f733e65ed"
 }

@@ -18,7 +18,7 @@
  *    that has already confirmed, a journey that is rehearsing — decides
  *    how bytes leave the disk.
  *  - Configuration is never removed as a side effect. Everything this
- *    touches is under `~/.red-skills`, and it is enumerated below rather
+ *    touches is under `~/.red/skills`, and it is enumerated below rather
  *    than swept, so a directory a later ticket puts there for somebody's
  *    choices does not quietly become collateral.
  *
@@ -41,6 +41,7 @@
 
 import { existsSync, lstatSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { redSkillsRoot } from "./red-skills-root.ts";
 
 import {
   readWorkstationLock,
@@ -51,7 +52,7 @@ import {
 import { countRunningWorkers } from "./workstation-rollback.ts";
 
 /**
- * Everything under `~/.red-skills` this project owns outright, sorted.
+ * Everything under `~/.red/skills` this project owns outright, sorted.
  *
  * One list, because it is the whole of what an uninstall may delete and
  * the whole of what a test can assert went. Entries are named rather
@@ -150,6 +151,9 @@ export async function uninstallWorkstation(
   }
 
   const workers = await (opts.workers ?? countRunningWorkers)();
+  if (workers === null) {
+    return empty("refused", "running Workers could not be observed: nothing is removed until their state is known");
+  }
   if (workers !== null && workers > 0) {
     return empty(
       "held",
@@ -189,7 +193,7 @@ export async function uninstallWorkstation(
   const writes = removeMachineOwned(home);
   return {
     outcome: "removed",
-    reason: `${removed.length} application(s) and ${writes.length} machine-owned path(s) were removed; nothing outside ${join(home, ".red-skills")} was touched`,
+    reason: `${removed.length} application(s) and ${writes.length} machine-owned path(s) were removed; nothing outside ${redSkillsRoot(home)} was touched`,
     removed,
     absent,
     failed,
@@ -200,14 +204,14 @@ export async function uninstallWorkstation(
 }
 
 /**
- * Remove what this project owns under `~/.red-skills`, and nothing else.
+ * Remove what this project owns under `~/.red/skills`, and nothing else.
  *
  * The lock goes last because it is the description everything above was
  * derived from, and the directory itself goes only when it is empty: a
  * file nobody here put there is a file nobody here may delete.
  */
 function removeMachineOwned(home: string): string[] {
-  const owned = join(home, ".red-skills");
+  const owned = redSkillsRoot(home);
   const writes: string[] = [];
   const lockFile = "workstation-lock.json";
   const order = [...MACHINE_OWNED_ENTRIES.filter((e) => e !== lockFile), lockFile];
