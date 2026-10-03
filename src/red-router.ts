@@ -45,6 +45,24 @@ export function routerHost(env: NodeJS.ProcessEnv = process.env): string {
   return env["RED_ROUTER_HOST"]?.trim() || DEFAULT_ROUTER_HOST;
 }
 
+/** Read only RedRouter's declared configuration; never execute or rewrite its unit. */
+export function routerServiceConfiguration(text: string | null): { port: number; host: string } | null {
+  if (!text?.includes("Description=RedRouter AI routing gateway")) return null;
+  const port = Number(/^Environment="RED_ROUTER_PORT=(\d+)"$/m.exec(text)?.[1]);
+  const host = /^Environment="RED_ROUTER_SERVER_HOST=([a-zA-Z0-9.:[\]-]+)"$/m.exec(text)?.[1];
+  return Number.isInteger(port) && port > 0 && port <= 65535 && host ? { port, host } : null;
+}
+
+function serviceEnvironment(env: NodeJS.ProcessEnv, text: string | null): NodeJS.ProcessEnv {
+  const saved = routerServiceConfiguration(text);
+  if (!saved) return env;
+  return {
+    ...env,
+    RED_ROUTER_PORT: String(saved.port),
+    RED_ROUTER_HOST: saved.host,
+  };
+}
+
 async function runner(seams: RouterSeams) {
   if (seams.run) return seams.run;
   const { runBounded } = await import("./bounded-command.ts");
@@ -216,8 +234,22 @@ export function startupShortcutScript(runnerPath: string, wrapper: string): stri
   ].join("\n");
 }
 
-export function routerWrapper(mise: string, port: number, host: string): string {
-  return `@echo off\r\n"${mise}" exec red-router -- red-router -t --skip-update -n -p ${port} -H "${host}"\r\n`;
+export function routerWrapper(mise: string): string {
+  return `@echo off\r\n"${mise}" exec red-router -- red-router -t --skip-update -n\r\n`;
+}
+
+/** Retire generated Windows network flags, retaining exact legacy bytes for recovery. */
+export function updateRouterWrapper(path: string, mise: string): "changed" | "unchanged" | "unowned" {
+  const body = routerWrapper(mise);
+  const before = readOptional(path);
+  if (before === body) return "unchanged";
+  if (before !== null) {
+    const generated = /^@echo off\r?\n"[^"\r\n]+" exec red-router -- red-router -t --skip-update -n(?: -p \d+ -H "[^"\r\n]+")?\r?\n$/;
+    if (!generated.test(before)) return "unowned";
+    writeFileSync(`${path}.before-network-delegation-${Date.now()}.bak`, before, { flag: "wx" });
+  }
+  writeFileSync(path, body);
+  return "changed";
 }
 
 async function retireLegacyPackage(run: Awaited<ReturnType<typeof runner>>, seams: RouterSeams): Promise<void> {
@@ -244,7 +276,10 @@ async function convergeLinux(p: Platform, seams: RouterSeams, env: NodeJS.Proces
   const before = readOptional(unitPath);
   const wasActive = (await run(["systemctl", "--user", "is-active", ROUTER_SERVICE])).exitCode === 0;
   const retired = await retireLegacyLinux(run, home);
-  const argv = await routerArgv(["service", routerEnabled(env) ? "install" : "uninstall", "-p", String(routerPort(env)), "-H", routerHost(env)], seams);
+  // Omitted options let the Router preserve its own saved configuration. Defaults
+  // are for new installations, not permission to overwrite choices made in Settings.
+  const args = ["service", routerEnabled(env) ? "install" : "uninstall"];
+  const argv = await routerArgv(args, seams);
   if (!argv) {
     log.warn("red-router: package is not installed — `red-dev install red-router`");
     return "skipped";
@@ -260,13 +295,14 @@ async function convergeLinux(p: Platform, seams: RouterSeams, env: NodeJS.Proces
       const restarted = await run(["systemctl", "--user", "restart", ROUTER_SERVICE]);
       if (restarted.exitCode !== 0) {
         log.warn("red-router: the restart reported a failure; waiting for the supervisor's retry");
-        if (!(await restartRecovered(run, seams, env))) {
+        if (!(await restartRecovered(run, seams, serviceEnvironment(env, after)))) {
           throw new Error("red-router service definition moved, but its running process could not be restarted");
         }
       }
     }
     await retireLegacyPackage(run, seams);
-    log.ok(`red-router: running as ${ROUTER_SERVICE} on http://${routerHost(env)}:${routerPort(env)}`);
+    const effective = serviceEnvironment(env, after);
+    log.ok(`red-router: running as ${ROUTER_SERVICE} on http://${routerHost(effective)}:${routerPort(effective)}`);
     return retired || before !== after ? "installed" : "unchanged";
   }
   log.ok("red-router: service is off (RED_ROUTER=0)");
@@ -296,10 +332,13 @@ async function convergeWindows(p: Platform, seams: RouterSeams, env: NodeJS.Proc
     : await (await import("./redwall-hook.ts")).hiddenRunnerPath(p);
   if (!hidden) return "skipped";
 
-  const body = routerWrapper(mise, routerPort(env), routerHost(env));
   mkdirSync(wrapper.slice(0, wrapper.lastIndexOf("\\")), { recursive: true });
-  const changed = !existsSync(wrapper) || readFileSync(wrapper, "utf8") !== body;
-  if (changed) writeFileSync(wrapper, body);
+  const updated = updateRouterWrapper(wrapper, mise);
+  if (updated === "unowned") {
+    log.warn("red-router: preserving a Startup wrapper owned by the operator");
+    return "skipped";
+  }
+  const changed = updated === "changed";
   const shortcut = await run(["powershell.exe", "-NoProfile", "-Command", startupShortcutScript(hidden, wrapper)]);
   if (shortcut.exitCode !== 0) return "skipped";
   const answering = seams.answering ? await seams.answering() : await portAnswers(routerPort(env), routerHost(env));
@@ -342,7 +381,10 @@ export async function removeRouterAutostart(p: Platform, seams: RouterSeams = {}
 }
 
 export async function inspectRouter(p: Platform, seams: RouterSeams = {}): Promise<DriftCheck[]> {
-  const env = seams.env ?? process.env;
+  const configured = seams.env ?? process.env;
+  const env = p.os === "linux" && p.caps.systemd
+    ? serviceEnvironment(configured, readOptional(routerUnitPath(homeOf(seams))))
+    : configured;
   const name = "red-router";
   if (!routerEnabled(env)) return [{ name, status: "ok", detail: "service turned off (RED_ROUTER=0)" }];
   const answering = seams.answering ? await seams.answering() : await portAnswers(routerPort(env), routerHost(env));

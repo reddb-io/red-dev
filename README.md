@@ -311,8 +311,15 @@ systemctl --user status red-router.service
 | Variable | Effect |
 | --- | --- |
 | `RED_ROUTER=0` | no service; the package stays installed |
-| `RED_ROUTER_PORT` | another port (1024–65535); the default is 25050 |
-| `RED_ROUTER_HOST` | another interface; the default is loopback |
+| `RED_ROUTER_PORT` | endpoint probe port for launchers without a saved Linux service |
+| `RED_ROUTER_HOST` | endpoint probe host for launchers without a saved Linux service |
+
+On Linux/WSL, RedRouter owns its bind address, port and data directory. Configure
+network access in RedRouter Settings or with `red-router service install --expose`
+(`--local` returns to loopback). red-dev delegates installation without network
+options, preserving those choices through upgrades. Its diagnostics read the saved
+RedRouter service configuration. Windows Startup wrappers also omit network options;
+generated legacy wrappers are backed up before their host/port overrides are retired.
 
 Provider credentials belong to RedRouter. Configure them in the dashboard;
 red-dev neither reads nor writes them.

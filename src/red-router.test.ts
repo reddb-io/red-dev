@@ -1,10 +1,11 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 
 import {
   convergeRouterAutostart,
+  inspectRouter,
   DEFAULT_ROUTER_HOST,
   DEFAULT_ROUTER_PORT,
   LEGACY_ROUTER_SERVICE,
@@ -13,7 +14,9 @@ import {
   routerHost,
   routerPort,
   routerServiceNeedsRestart,
+  routerServiceConfiguration,
   routerWrapper,
+  updateRouterWrapper,
 } from "./red-router.ts";
 import type { Platform } from "./platform.ts";
 
@@ -39,9 +42,33 @@ describe("RedRouter service contract", () => {
   });
 
   test("Windows starts the official command in tray mode", () => {
-    expect(routerWrapper("C:\\mise.exe", 25050, "127.0.0.1")).toContain(
-      '"C:\\mise.exe" exec red-router -- red-router -t --skip-update -n -p 25050 -H "127.0.0.1"',
+    expect(routerWrapper("C:\\mise.exe")).toContain(
+      '"C:\\mise.exe" exec red-router -- red-router -t --skip-update -n',
     );
+    expect(routerWrapper("C:\\mise.exe")).not.toContain(" -H ");
+    expect(routerWrapper("C:\\mise.exe")).not.toContain(" -p ");
+  });
+
+  test("Windows retires generated bind flags with an exact backup and preserves unknown wrappers", () => {
+    const dir = mkdtempSync(join(tmpdir(), "red-router-wrapper-retirement-"));
+    const path = join(dir, "router.cmd");
+    const legacy = '@echo off\r\n"C:\\mise.exe" exec red-router -- red-router -t --skip-update -n -p 26400 -H "0.0.0.0"\r\n';
+    try {
+      writeFileSync(path, legacy);
+      expect(updateRouterWrapper(path, "C:\\mise.exe")).toBe("changed");
+      expect(readFileSync(path, "utf8")).toBe(routerWrapper("C:\\mise.exe"));
+      const backups = readdirSync(dir).filter((name) => name.endsWith(".bak"));
+      expect(backups).toHaveLength(1);
+      expect(readFileSync(join(dir, backups[0]!), "utf8")).toBe(legacy);
+      expect(updateRouterWrapper(path, "C:\\mise.exe")).toBe("unchanged");
+      expect(readdirSync(dir).filter((name) => name.endsWith(".bak"))).toHaveLength(1);
+      const custom = "@echo off\r\nREM Operator-owned launcher\r\ncustom-router.exe\r\n";
+      writeFileSync(path, custom);
+      expect(updateRouterWrapper(path, "C:\\mise.exe")).toBe("unowned");
+      expect(readFileSync(path, "utf8")).toBe(custom);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("restarts a live service only when its generated definition moved", () => {
@@ -143,8 +170,58 @@ describe("RedRouter service contract", () => {
 
     expect(installs).toBe(2);
     expect(calls.filter((argv) => argv[0] === binary)).toEqual([
-      [binary, "service", "install", "-p", "25050", "-H", "127.0.0.1"],
-      [binary, "service", "install", "-p", "25050", "-H", "127.0.0.1"],
+      [binary, "service", "install"],
+      [binary, "service", "install"],
     ]);
+  });
+
+  test("upgrades delegate network choices to RedRouter and diagnostics read its saved configuration", async () => {
+    const home = mkdtempSync(join(tmpdir(), "red-router-network-owner-"));
+    const unit = join(home, ".config/systemd/user/red-router.service");
+    mkdirSync(join(home, ".config/systemd/user"), { recursive: true });
+    const original = [
+      "Description=RedRouter AI routing gateway",
+      "# Operator-owned network choice",
+      "ExecStart=/old/red-router",
+      'Environment="RED_ROUTER_PORT=26400"',
+      'Environment="RED_ROUTER_SERVER_HOST=0.0.0.0"',
+      "",
+    ].join("\n");
+    writeFileSync(unit, original);
+    const calls: string[][] = [];
+    const seams = {
+      home,
+      // Even old red-dev defaults must not be passed as Router configuration.
+      env: { RED_ROUTER_PORT: "25050", RED_ROUTER_HOST: "127.0.0.1" },
+      routerBinary: "/fixture/red-router",
+      miseBinary: null,
+      answering: async () => true,
+      run: async (argv: string[]) => {
+        calls.push(argv);
+        if (argv[0] === "/fixture/red-router") {
+          expect(argv).toEqual(["/fixture/red-router", "service", "install"]);
+          writeFileSync(unit, original.replace("/old/red-router", "/new/red-router"));
+        }
+        return { exitCode: 0 };
+      },
+    };
+    try {
+      expect(await convergeRouterAutostart(SYSTEMD, seams)).toBe("installed");
+      expect(routerServiceConfiguration(readFileSync(unit, "utf8"))).toEqual({
+        port: 26400,
+        host: "0.0.0.0",
+      });
+      expect(readFileSync(unit, "utf8").replace("/new/red-router", "/old/red-router")).toBe(original);
+      const [status] = await inspectRouter(SYSTEMD, seams);
+      expect(status?.status).toBe("ok");
+      expect(status?.detail).toContain("http://0.0.0.0:26400");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test("saved service diagnostics reject unrelated or malformed units", () => {
+    expect(routerServiceConfiguration('Environment="RED_ROUTER_SERVER_HOST=0.0.0.0"')).toBeNull();
+    expect(routerServiceConfiguration('Description=RedRouter AI routing gateway\nEnvironment="RED_ROUTER_PORT=70000"\nEnvironment="RED_ROUTER_SERVER_HOST=0.0.0.0"')).toBeNull();
   });
 });
