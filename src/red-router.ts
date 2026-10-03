@@ -259,21 +259,39 @@ function readOptional(path: string): string | null {
   }
 }
 
-async function retireLegacyLinux(run: Awaited<ReturnType<typeof runner>>, home: string): Promise<boolean> {
+async function retireLegacyLinux(
+  run: Awaited<ReturnType<typeof runner>>,
+  home: string,
+): Promise<{ retired: boolean; preservePackage: boolean }> {
   const path = legacyUnitPath(home);
-  const declared = existsSync(path);
-  const enabled = (await run(["systemctl", "--user", "is-enabled", LEGACY_ROUTER_SERVICE])).exitCode === 0;
-  if (!declared && !enabled) {
-    await run(["systemctl", "--user", "reset-failed", LEGACY_ROUTER_SERVICE]);
-    return false;
+  // A temporary HOME still shares the caller's session manager. Only retire
+  // a regular unit whose bytes establish ownership in the selected home.
+  if (!existsSync(path)) return { retired: false, preservePackage: true };
+  const text = lstatSync(path).isFile() ? readOptional(path) : null;
+  if (text === null || !ownedRouterUnit(LEGACY_ROUTER_SERVICE, text)) {
+    log.warn(`red-router: preserving unknown legacy service owner: ${path}`);
+    return { retired: false, preservePackage: true };
   }
-  await run(["systemctl", "--user", "disable", "--now", LEGACY_ROUTER_SERVICE]);
-  rmSync(path, { force: true });
-  await run(["systemctl", "--user", "daemon-reload"]);
-  // systemd remembers a failed unit after its file is gone. Clear that
-  // tombstone so `list-units --all` does not keep showing 9router.
+  const bytes = readFileSync(path);
+  const backup = `${path}.red-dev-migration-${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}.bak`;
+  if (!existsSync(backup)) writeFileSync(backup, bytes, { mode: 0o600 });
+  if (!readFileSync(backup).equals(bytes)) throw new Error(`router backup mismatch: ${path}`);
+  if ((await run(["systemctl", "--user", "disable", "--now", LEGACY_ROUTER_SERVICE])).exitCode !== 0) {
+    throw new Error("legacy router retirement failed; retry install");
+  }
+  rmSync(path);
+  if ((await run(["systemctl", "--user", "daemon-reload"])).exitCode !== 0) {
+    throw new Error("legacy router retirement reload failed; restore the backup or retry install");
+  }
   await run(["systemctl", "--user", "reset-failed", LEGACY_ROUTER_SERVICE]);
-  return true;
+  return { retired: true, preservePackage: false };
+}
+
+/** An invocation changes when systemd actually starts a new service process. */
+async function routerInvocation(run: Awaited<ReturnType<typeof runner>>): Promise<string | null> {
+  const result = await run(["systemctl", "--user", "show", ROUTER_SERVICE, "--property=InvocationID", "--value"]);
+  const value = result.out?.trim();
+  return result.exitCode === 0 && value && /^[a-f0-9]{32}$/i.test(value) ? value : null;
 }
 
 function shortcutRemovalScript(names: string[]): string {
@@ -349,7 +367,8 @@ async function convergeLinux(p: Platform, seams: RouterSeams, env: NodeJS.Proces
   const unitPath = routerUnitPath(home);
   const before = readOptional(unitPath);
   const wasActive = (await run(["systemctl", "--user", "is-active", ROUTER_SERVICE])).exitCode === 0;
-  const retired = await retireLegacyLinux(run, home);
+  const beforeInvocation = wasActive ? await routerInvocation(run) : null;
+  const legacy = await retireLegacyLinux(run, home);
   // Omitted options let the Router preserve its own saved configuration. Defaults
   // are for new installations, not permission to overwrite choices made in Settings.
   const args = ["service", routerEnabled(env) ? "install" : "uninstall"];
@@ -365,7 +384,9 @@ async function convergeLinux(p: Platform, seams: RouterSeams, env: NodeJS.Proces
   if (result.exitCode !== 0) throw new Error(`red-router service ${routerEnabled(env) ? "install" : "uninstall"} exited ${result.exitCode}`);
   if (routerEnabled(env)) {
     const after = readOptional(unitPath);
-    if (routerServiceNeedsRestart(before, after, wasActive)) {
+    const afterInvocation = wasActive ? await routerInvocation(run) : null;
+    const installerRestarted = beforeInvocation !== null && afterInvocation !== null && beforeInvocation !== afterInvocation;
+    if (routerServiceNeedsRestart(before, after, wasActive) && !installerRestarted) {
       const restarted = await run(["systemctl", "--user", "restart", ROUTER_SERVICE]);
       if (restarted.exitCode !== 0) {
         log.warn("red-router: the restart reported a failure; waiting for the supervisor's retry");
@@ -374,10 +395,10 @@ async function convergeLinux(p: Platform, seams: RouterSeams, env: NodeJS.Proces
         }
       }
     }
-    await retireLegacyPackage(run, seams);
+    if (!legacy.preservePackage) await retireLegacyPackage(run, seams);
     const effective = serviceEnvironment(env, after);
     log.ok(`red-router: running as ${ROUTER_SERVICE} on http://${routerHost(effective)}:${routerPort(effective)}`);
-    return retired || before !== after ? "installed" : "unchanged";
+    return legacy.retired || before !== after ? "installed" : "unchanged";
   }
   log.ok("red-router: service is off (RED_ROUTER=0)");
   return "removed";
