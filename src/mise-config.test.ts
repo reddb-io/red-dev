@@ -18,12 +18,13 @@
 
 import { AGENTS } from "./agents.ts";
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, chmodSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync, chmodSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import {
   miseConfigPath,
+  convergeMiseConfig,
   miseEntries,
   miseDataRoot,
   miseInstallRoot,
@@ -47,6 +48,34 @@ const UBUNTU: Platform = {
   arch: "x64",
   caps: { apt: true, gui: true, systemd: true, winget: false, flatpak: false },
 };
+
+test("retiring old mandatory product declarations backs up exact bytes and leaves personal mise configuration alone", () => {
+  const home = mkdtempSync(join(tmpdir(), "red-optional-mise-"));
+  const path = miseConfigPath(home);
+  const personal = join(home, ".config/mise/config.toml");
+  const original = renderMiseConfig([
+    { spec: "github:reddb-io/reddb", alias: "red", version: "latest" },
+    { spec: "npm:@reddb-io/red-router", alias: "red-router", version: "latest", postinstall: "red-dev red-router install" },
+  ]).replaceAll("\n", "\r\n");
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, original);
+    writeFileSync(personal, '[tools]\nnode = "lts"\n');
+    const p = { ...UBUNTU, profile: { schema: 1 as const, name: "ubuntu-desktop" as const, tools: {}, agents: [], apps: [] } };
+    convergeMiseConfig(p, { home });
+    expect(convergeMiseConfig(p, { home }).changed).toBe(false);
+    const backups = readdirSync(dirname(path)).filter(name => name.endsWith(".bak"));
+    expect(backups).toHaveLength(1);
+    expect(readFileSync(join(dirname(path), backups[0]!), "utf8")).toBe(original);
+    const { tools } = Bun.TOML.parse(readFileSync(path, "utf8")) as { tools: Record<string, unknown> };
+    expect(tools.red).toBeUndefined(); expect(tools["red-router"]).toBeUndefined();
+    expect(readFileSync(path, "utf8")).not.toContain("red-dev red-router install");
+    expect(readFileSync(personal, "utf8")).toBe('[tools]\nnode = "lts"\n');
+    writeFileSync(path, '[tools]\nred-router = "latest"\n');
+    expect(() => convergeMiseConfig(p, { home })).toThrow("unknown mise fragment owner");
+    expect(readFileSync(path, "utf8")).toBe('[tools]\nred-router = "latest"\n');
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
 
 const WINDOWS: Platform = {
   ...UBUNTU,
@@ -185,9 +214,7 @@ describe("miseEntries", () => {
 
     expect(ours).toEqual({
       dit: "github:reddb-io/dit",
-      red: "github:reddb-io/reddb",
       "red-dev": "github:reddb-io/red-dev",
-      "red-router": "npm:@reddb-io/red-router",
       "red-skills": "npm:@reddb-io/red-skills",
       "red-skills-brain": "npm:@reddb-io/red-skills-brain",
       "red-skills-dev": "npm:@reddb-io/red-skills-dev",
@@ -200,7 +227,7 @@ describe("miseEntries", () => {
 
   test("the suite CLIs are there, under the names people type", () => {
     const aliases = miseEntries(UBUNTU).map((e) => e.alias);
-    expect(aliases).toContain("red");
+    expect(aliases).not.toContain("red");
     expect(aliases).toContain("tq");
   });
 

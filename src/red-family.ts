@@ -4,7 +4,7 @@
  * The manifest remains the source of truth for whether a product exists on
  * this target and how it is installed. This file only gives those rows a
  * product-facing order and label. Base rows are inventory: the converge owns
- * them. Optional companion rows remain real choices and are projected back
+ * them. Optional products and integrations are choices projected back
  * into SetupAnswers.apps.
  */
 
@@ -18,8 +18,10 @@ import {
 import type { Platform } from "./platform.ts";
 import type { Choice } from "./tui-setup-model.ts";
 import { DESKTOP_APP_NAMES } from "./desktop-apps.ts";
+import { OPT_IN_PRODUCTS } from "./machine-profile.ts";
 
 export const RED_FAMILY_OPTIONAL = new Set([
+  ...OPT_IN_PRODUCTS,
   "red-skills-vscode",
   "red-skills-herdr",
 ]);
@@ -33,6 +35,7 @@ interface FamilyRow {
 const FAMILY_ROWS: readonly FamilyRow[] = [
   { tool: "red-dev", label: "red-dev" },
   { tool: "red", label: "RedDB (red)" },
+  { tool: "red-router", label: "RedRouter" },
   { tool: "tq", label: "TOON (tq)" },
   { tool: "red-request", label: "red-request" },
   { tool: "red-ui", label: "red-ui" },
@@ -62,7 +65,9 @@ function toolNamed(name: string): Tool | undefined {
 }
 
 function availableOn(tool: Tool, p: Platform): boolean {
-  if (providerFor(tool, p).kind === "skip") return false;
+  // Offer unselected products too; the profile gates installation, not discovery.
+  const offered = { ...p, profile: { schema: 1 as const, name: p.profile?.name ?? "ubuntu-desktop" as const, tools: { [tool.name]: true } } };
+  if (providerFor(tool, offered).kind === "skip") return false;
   return tool.scope === "optional" || applicableScopes(p).includes(tool.scope);
 }
 
@@ -79,6 +84,7 @@ export function redFamilyChoices(p: Platform, agents: readonly Choice[]): Choice
       label: row.label,
       note: row.note ?? `${optional ? "optional" : "included"} — ${tool.about ?? tool.name}`,
       selectable: optional,
+      ...(OPT_IN_PRODUCTS.has(tool.name) ? { recommended: tool.name === "red-router" } : {}),
       ...(!optional ? { marker: "included" as const } : {}),
       ...(optional ? { answer: "apps" as const } : {}),
     });

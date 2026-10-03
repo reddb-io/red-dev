@@ -39,6 +39,38 @@ function fixture() {
 const profile = (over: Partial<MachineProfile> = {}): MachineProfile => ({ schema: 1, name: "ubuntu-desktop", tools: {}, ...over });
 const tool = (name: string): Tool => TOOLS.find(t => t.name === name)!;
 
+test("RedDB and RedRouter enter install/update plans only through independent opt-ins", () => {
+  fixture();
+  for (const selected of [[], ["red"], ["red-router"], ["red", "red-router"]]) {
+    const p = { ...ubuntu, profile: profile({ apps: selected }) };
+    const aliases = miseEntries(p).map(entry => entry.alias);
+    const upgrades = miseToolNames(p);
+    for (const name of ["red", "red-router"]) {
+      expect(providerFor(tool(name), p).kind).toBe(selected.includes(name) ? "mise" : "skip");
+      expect(aliases.includes(name)).toBe(selected.includes(name));
+      expect(upgrades.includes(name)).toBe(selected.includes(name));
+      expect(provisionPlan(p, ["core"]).some(step => step.tool.name === name)).toBe(false);
+    }
+    expect(providerFor(tool("red-router-autostart"), p).kind).toBe(selected.includes("red-router") ? "builtin" : "skip");
+  }
+  for (const name of ["red", "red-router", "red-router-autostart"]) {
+    expect(providerFor(tool(name), { ...ubuntu, profile: undefined }).kind).toBe("skip");
+  }
+});
+
+test("wizard selections persist and an empty answer excludes both products on subsequent installs", async () => {
+  fixture(); writeMachineProfile(profile());
+  const p = { ...ubuntu };
+  await writePreferences(p, { apps: ["red-router"] });
+  expect(readMachineProfile()?.tools.red).toBe(false);
+  expect(readMachineProfile()?.tools["red-router"]).toBe(true);
+  expect(miseToolNames(p)).toContain("red-router");
+  await writePreferences(p, { apps: [] });
+  await adoptMachineProfile(p);
+  expect(miseToolNames(p)).not.toContain("red-router");
+  expect(miseToolNames(p)).not.toContain("red");
+});
+
 test("fresh plan infers a profile and writes no desired configuration", async () => {
   const root = fixture();
   expect((await resolveMachineProfile(ubuntu)).name).toBe("ubuntu-desktop");
@@ -121,18 +153,18 @@ test("Windows-native profile records the terminal choice without forcing WSL", a
   expect(readMachineProfile()?.name).toBe("windows-native");
 });
 test("Windows/WSL plan distinguishes host ownership and unobserved remote tools without probing the Linux host", () => {
-  fixture(); const host = { ...windows, profile: profile({ name: "windows-wsl" }) };
+  fixture(); const host = { ...windows, profile: profile({ name: "windows-wsl", tools: { "red-router": true } }) };
   expect(planTool(tool("alacritty"), host, { state: () => "ok" }).target).toBe("Windows");
   expect(planTool(tool("red-router"), host).action).toBe("skip");
-  const remote = { ...ubuntu, env: "wsl", profile: profile({ name: "ubuntu-wsl" }) } as Platform;
+  const remote = { ...ubuntu, env: "wsl", profile: profile({ name: "ubuntu-wsl", tools: { "red-router": true } }) } as Platform;
   const step = planTool(tool("red-router"), remote, { observed: false, state: () => { throw Error("must not probe local installation"); } });
   expect(step.target).toBe("Ubuntu/WSL");
   expect(planLine(step)).toContain("installation not observed");
 });
 test("the installation reports the same providers and exclusions as the reviewed plan", async () => {
   fixture(); const p = { ...ubuntu, profile: profile({ tools: { docker: false, "red-router": false } }) };
-  const plan = provisionPlan(p, ["core"]);
-  const result = await converge({ platform: p, ctx: { platform: p, theme: "ember", font: "firacode", opacity: 90 }, scopes: ["core"], dryRun: true });
+  const plan = provisionPlan(p, ["core", "optional"]);
+  const result = await converge({ platform: p, ctx: { platform: p, theme: "ember", font: "firacode", opacity: 90 }, scopes: ["core", "optional"], dryRun: true });
   for (const name of ["docker", "red-router", "red-router-autostart"]) {
     const step = plan.find(s => s.tool.name === name)!;
     const applied = result.results.find(s => s.tool === name)!;

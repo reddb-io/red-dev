@@ -616,9 +616,7 @@ export const TOOLS: Tool[] = [
     win: mise("github:reddb-io/toon", { alias: "tq" }),
   },
   {
-    // The database this whole organisation is named after, and the one
-    // tool here whose absence would be strange. A CLI, so core: it is
-    // the same binary on the desktop, in WSL and on Windows.
+    // The database CLI offered on the RedDB page; installation is an explicit choice.
     //
     // `red`, not `red_client` — the release publishes both, plus a
     // -static variant of each, and only the first is the command people
@@ -631,7 +629,7 @@ export const TOOLS: Tool[] = [
     // installs at /usr/bin/red. Without this the probe found that,
     // called it present, and the RedDB CLI never installed at all.
     signature: /reddb/i,
-    scope: "core",
+    scope: "optional",
     u24: mise("github:reddb-io/reddb", { alias: "red" }),
     win: mise("github:reddb-io/reddb", { alias: "red" }),
   },
@@ -845,10 +843,8 @@ export const TOOLS: Tool[] = [
     // and the Claude wire formats, and routes each request across the
     // providers a person has connected — subscription first, then cheap,
     // then free — so a rate limit on one host is not the end of the
-    // session. It is core rather than an agent-page choice because it
-    // is the thing the agents are configured *against*: a machine where
-    // some hosts route through it and some do not is two environments
-    // wearing one name.
+    // session. Offered independently on the RedDB page; selecting an
+    // agent never implies installing the router.
     //
     // After `runtimes`, and the order is load-bearing: the
     // package is npm, so mise's `npm:` backend needs the node the runtime step
@@ -866,7 +862,7 @@ export const TOOLS: Tool[] = [
     name: "red-router", placement: "linux",
     about: "one local endpoint for every coding agent, routed across many AI providers",
     cmd: ["red-router"],
-    scope: "core",
+    scope: "optional",
     u24: mise("npm:@reddb-io/red-router", { alias: "red-router", allowLowDownloads: true }),
     win: mise("npm:@reddb-io/red-router", { alias: "red-router", allowLowDownloads: true }),
   },

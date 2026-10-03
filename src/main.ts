@@ -1279,6 +1279,7 @@ async function cmdApps(p: Platform, inv: Invocation): Promise<number> {
     const row = byLabel.get(label)?.row;
     return row?.kind === "tool" ? [row.tool.tool.name] : [];
   }) });
+  await (await import("./provisioning.ts")).synchronizeProvisioning(p);
 
   // Named first and taken out first, so the list a person confirms is
   // the list they were looking at rather than one an install has already
@@ -1324,6 +1325,7 @@ async function cmdApps(p: Platform, inv: Invocation): Promise<number> {
     if (row.kind === "tool") {
       const { tool, installed } = row.tool;
       if (installed && !tool.managed) {
+        if (tool.name === "red-router") await (await import("./red-router.ts")).convergeRouterAutostart(p);
         log.skip(`${tool.name} already present`);
         continue;
       }

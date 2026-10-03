@@ -44,6 +44,12 @@ const noNode = async () => false;
 const hasNode = async () => true;
 
 describe("the setup work plan", () => {
+  test("selecting only RedRouter supplies node, while RedDB alone needs no runtime", async () => {
+    expect(await setupPlan(wsl, { agents: [], runtimes: [], apps: ["red-router"] }, noNode))
+      .toEqual([{ key: "node@latest", tool: "node@latest", kind: "runtime" }]);
+    expect(await setupPlan(wsl, { agents: [], runtimes: [], apps: ["red"] }, noNode)).toEqual([]);
+    expect(await setupPlan(wsl, { agents: [], runtimes: [], apps: ["red-router"] }, hasNode)).toEqual([]);
+  });
   test("an npm agent brings its runtimes and every unit appears once", async () => {
     const plan = await setupPlan(windows, {
       agents: ["hermes"],

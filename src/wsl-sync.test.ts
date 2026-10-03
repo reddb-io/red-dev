@@ -5,7 +5,7 @@ import type { Platform } from "./platform.ts";
 const WINDOWS: Platform = { os: "windows", env: "windows", distro: null, version: null, codename: null, arch: "x64", caps: { apt: false, gui: true, systemd: false, winget: true, flatpak: false } };
 import type { WslState } from "./wsl-provision.ts";
 const state: WslState = { available: true, distros: ["docker-desktop", "Ubuntu-24.04", "Ubuntu-26.04"], detail: "installed", distributions: [ { name: "docker-desktop", version: 2, default: true }, { name: "Ubuntu-24.04", version: 2, default: false }, { name: "Ubuntu-26.04", version: 2, default: false } ] };
-const p = () => ({ ...WINDOWS, workstation: "windows-wsl" as const });
+const p = (): Platform => ({ ...WINDOWS, workstation: "windows-wsl", profile: { schema: 1, name: "windows-wsl", tools: { "red-router": true } } });
 function seams(calls: string[], run: NonNullable<WslSyncSeams["run"]> = async (_distro, cmd) => { calls.push(cmd); return 0; }): WslSyncSeams {
   return { state: async () => state, install: async () => { throw Error("unexpected WSL install"); }, user: async () => true, ensure: async name => { calls.push(`ensure ${name}`); return 0; }, preferences: async () => ({ terminalShell: "wsl", agents: ["redcode", "codex"], runtimes: ["rust@latest"] }), record: async (_p, prefs) => { calls.push(`record ${prefs.distro}`); }, prepare: async () => { calls.push("preserve data"); }, migrate: async () => { calls.push("retire native services"); }, run };
 }

@@ -8,7 +8,7 @@ import type { Platform } from "./platform.ts";
 
 export const WINDOWS: Platform = { os: "windows", env: "windows", distro: null, version: null, codename: null, arch: "x64", caps: { apt: false, gui: true, systemd: false, winget: true, flatpak: false } };
 const WSL: Platform = { ...WINDOWS, os: "linux", env: "wsl", distro: "ubuntu", version: "24.04", caps: { ...WINDOWS.caps, apt: true, gui: false, systemd: true } };
-const owned = (name: string, p: Platform) => providerFor(TOOLS.find(t => t.name === name)!, p).kind;
+const owned = (name: string, p: Platform) => providerFor(TOOLS.find(t => t.name === name)!, { ...p, profile: { schema: 1, name: "ubuntu-desktop", tools: { "red-router": true } } }).kind;
 describe("workstation placement", () => {
   test("defaults Windows to WSL and preserves an explicit native choice", () => {
     expect(applyWorkstationPreferences({ ...WINDOWS }, {}).workstation).toBe("windows-wsl");

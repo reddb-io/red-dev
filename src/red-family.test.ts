@@ -55,6 +55,7 @@ describe("the dedicated RedDB setup page", () => {
     expect(keys).toEqual([
       "red-dev",
       "red",
+      "red-router",
       "tq",
       "red-request",
       "red-ui",
@@ -80,7 +81,7 @@ describe("the dedicated RedDB setup page", () => {
       .toContain("reddb");
   });
 
-  test("distinguishes base inventory from genuine optional integrations", () => {
+  test("distinguishes base inventory from optional products and integrations", () => {
     const choices = redFamilyChoices(DESKTOP, agents);
     const optional = choices.filter((choice) => choice.answer === "apps");
     expect(optional.map((choice) => choice.key)).toEqual([...RED_FAMILY_OPTIONAL]);
@@ -113,17 +114,33 @@ describe("the dedicated RedDB setup page", () => {
       if (id === "apps") return ["just"];
       return [];
     };
-    expect(selectedSetupApps(steps, picked)).toEqual(["just", "red-skills-vscode"]);
+    expect(selectedSetupApps(steps, picked)).toEqual(["just", "red", "red-skills-vscode"]);
   });
 
-  test("cannot toggle a base product and starts on the first real choice", () => {
+  test("offers both products independently with RedRouter selected by default", () => {
+    const red = redFamilyChoices(DESKTOP, agents);
+    const page = questions(DESKTOP, agents, [], [], red).find(step => step.id === "reddb")!;
+    for (const key of ["red", "red-router"]) {
+      expect(choiceSelectable(page, page.choices.find(choice => choice.key === key)!)).toBe(true);
+      expect(page.preset.includes(key)).toBe(key === "red-router");
+      expect(otherOptionalChoices(DESKTOP).map(choice => choice.key)).not.toContain(key);
+    }
+    for (const selected of [[], ["red"], ["red-router"], ["red", "red-router"]]) {
+      const steps = questions(DESKTOP, agents, [], [], red, [], { preferences: { apps: selected } });
+      const saved = steps.find(step => step.id === "reddb")!;
+      expect(saved.preset).toEqual(selected);
+      expect(selectedSetupApps(steps, id => id === "reddb" ? saved.preset : [])).toEqual(selected);
+    }
+  });
+
+  test("cannot toggle red-dev and starts on the first real choice", () => {
     const step = questions(DESKTOP, agents, [], [], redFamilyChoices(DESKTOP, agents))
       .find((candidate) => candidate.id === "reddb")!;
-    expect(choiceSelectable(step, step.choices.find((choice) => choice.key === "red")!)).toBe(false);
+    expect(choiceSelectable(step, step.choices.find((choice) => choice.key === "red-dev")!)).toBe(false);
     expect(
       choiceSelectable(step, step.choices.find((choice) => choice.key === "red-skills-vscode")!),
     ).toBe(true);
-    expect(step.choices[stepInitialCursor(step)]?.key).toBe("red-skills-vscode");
+    expect(step.choices[stepInitialCursor(step)]?.key).toBe("red");
   });
 
   test("renders inventory, cross-reference, and optional checkboxes", () => {

@@ -14,6 +14,7 @@ import {
 } from "./update-state.ts";
 
 const UBUNTU: Platform = {
+  profile: { schema: 1, name: "ubuntu-desktop", tools: { "red-router": true } },
   os: "linux",
   distro: "ubuntu",
   version: "24.04",

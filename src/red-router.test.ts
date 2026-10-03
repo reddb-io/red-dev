@@ -18,10 +18,12 @@ import {
   routerServiceConfiguration,
   routerWrapper,
   updateRouterWrapper,
+  retireDeselectedRouterAutostart,
 } from "./red-router.ts";
 import type { Platform } from "./platform.ts";
 
 const SYSTEMD: Platform = {
+  profile: { schema: 1, name: "ubuntu-desktop", tools: { "red-router": true } },
   os: "linux",
   distro: "ubuntu",
   version: "24.04",
@@ -30,6 +32,76 @@ const SYSTEMD: Platform = {
   arch: "x64",
   caps: { apt: true, gui: true, systemd: true, winget: false, flatpak: false },
 };
+
+describe("optional router lifecycle", () => {
+  const off: Platform = { ...SYSTEMD, profile: { schema: 1, name: "ubuntu-desktop", tools: { "red-router": false } } };
+
+  test("an unselected router reports no drift and never probes or starts a process", async () => {
+    const home = mkdtempSync(join(tmpdir(), "red-router-unselected-"));
+    try {
+      const seams = { home, run: async () => { throw new Error("must not execute"); }, answering: async () => { throw new Error("must not probe"); } };
+      expect((await inspectRouter(off, seams))[0]?.status).toBe("n/a");
+      expect(await convergeRouterAutostart(off, seams)).toBe("skipped");
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+
+  test("upgrades disable owned boot hooks with backups, preserve live workloads and remain idempotent", async () => {
+    const home = mkdtempSync(join(tmpdir(), "red-router-opt-out-"));
+    const unit = join(home, ".config/systemd/user/red-router.service");
+    const tray = join(home, ".config/autostart/red-router.desktop");
+    const unitBytes = "[Unit]\r\nDescription=RedRouter AI routing gateway\r\n[Service]\r\nExecStart=/mise/red-router/bin/omniroute.mjs serve\r\n";
+    const trayBytes = "[Desktop Entry]\nExec=mise exec red-router -- red-router tray start --port 25050\nX-RedRouter-Managed=service-tray\n";
+    const calls: string[][] = []; let enabled = true;
+    try {
+      mkdirSync(join(home, ".config/systemd/user"), { recursive: true });
+      mkdirSync(join(home, ".config/autostart"), { recursive: true });
+      mkdirSync(join(home, ".red/router"), { recursive: true });
+      writeFileSync(unit, unitBytes); writeFileSync(tray, trayBytes);
+      const data = join(home, ".red/router/db.json"); writeFileSync(data, "personal data");
+      const seams = { home, run: async (argv: string[]) => {
+        calls.push(argv);
+        if (argv.includes("is-enabled")) return { exitCode: enabled ? 0 : 1, out: enabled ? "enabled" : "disabled" };
+        if (argv.includes("disable")) enabled = false;
+        return { exitCode: 0 };
+      } };
+      await retireDeselectedRouterAutostart(off, seams);
+      await retireDeselectedRouterAutostart(off, seams);
+      expect(calls.filter(call => call.includes("disable"))).toEqual([["systemctl", "--user", "disable", "red-router.service"]]);
+      expect(calls.flat()).not.toContain("--now");
+      expect(calls.flat()).not.toContain("stop");
+      expect(readFileSync(unit, "utf8")).toBe(unitBytes);
+      expect(readFileSync(data, "utf8")).toBe("personal data");
+      for (const [path, original] of [[unit, unitBytes], [tray, trayBytes]]) {
+        const dir = path!.slice(0, path!.lastIndexOf("/"));
+        const backups = readdirSync(dir).filter(name => name.endsWith(".bak"));
+        expect(backups).toHaveLength(1);
+        expect(readFileSync(join(dir, backups[0]!), "utf8")).toBe(original!);
+      }
+      expect(readdirSync(join(home, ".config/autostart"))).not.toContain("red-router.desktop");
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+
+  test("unknown owners are preserved and a failed retirement is retried", async () => {
+    const home = mkdtempSync(join(tmpdir(), "red-router-retirement-retry-"));
+    const unit = join(home, ".config/systemd/user/red-router.service");
+    try {
+      mkdirSync(join(home, ".config/systemd/user"), { recursive: true });
+      writeFileSync(unit, "[Service]\nExecStart=/my/custom-router\n");
+      await retireDeselectedRouterAutostart(off, { home, run: async () => { throw Error("unknown unit must not be touched"); } });
+      expect(readFileSync(unit, "utf8")).toContain("/my/custom-router");
+      writeFileSync(unit, "Description=RedRouter AI routing gateway\nExecStart=/mise/red-router serve\n");
+      let fail = true; let tries = 0;
+      const seams = { home, run: async (argv: string[]) => {
+        if (argv.includes("disable")) { tries++; return { exitCode: fail ? 1 : 0 }; }
+        return { exitCode: 0 };
+      } };
+      await expect(retireDeselectedRouterAutostart(off, seams)).rejects.toThrow("retirement failed");
+      fail = false;
+      await retireDeselectedRouterAutostart(off, seams);
+      expect(tries).toBe(2);
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+});
 
 describe("RedRouter service contract", () => {
   test("uses the official package defaults and service name", () => {

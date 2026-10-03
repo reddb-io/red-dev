@@ -118,6 +118,7 @@ export async function setupPlan(
   if (!runtimes.some((runtime) => runtime.startsWith("node"))) {
     const needsNpm =
       chosen.some((agent) => agentInstallMethod(agent, p) === "npm") ||
+      (!windowsWsl(p) && choices.apps.includes("red-router")) ||
       choices.apps.includes("puppeteer");
     // And only when this machine has none. `mise use -g` sets the
     // global node rather than adding one, so adding `node@latest` here to
