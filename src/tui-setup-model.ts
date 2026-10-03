@@ -396,8 +396,8 @@ export function questions(
       description:
         "The RedDB family red-dev keeps together. A dot means the base converge " +
         "already includes it; an arrow points to a choice on another page, and " +
-        "checkboxes choose optional products and integrations. RedDB and RedRouter " +
-        "start off; Space selects either one independently.",
+        "checkboxes choose optional products and integrations. RedRouter starts " +
+        "selected and RedDB starts off; Space changes either choice independently.",
       multi: true,
       choices: redApps,
       preset: redApps.filter((app) => app.recommended !== false).map((app) => app.key),

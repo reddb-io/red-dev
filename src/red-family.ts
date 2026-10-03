@@ -84,7 +84,7 @@ export function redFamilyChoices(p: Platform, agents: readonly Choice[]): Choice
       label: row.label,
       note: row.note ?? `${optional ? "optional" : "included"} — ${tool.about ?? tool.name}`,
       selectable: optional,
-      ...(OPT_IN_PRODUCTS.has(tool.name) ? { recommended: false } : {}),
+      ...(OPT_IN_PRODUCTS.has(tool.name) ? { recommended: tool.name === "red-router" } : {}),
       ...(!optional ? { marker: "included" as const } : {}),
       ...(optional ? { answer: "apps" as const } : {}),
     });

@@ -89,9 +89,9 @@ function toolRow(over: Partial<CatalogueTool> & { name: string }): CatalogueTool
   };
 }
 
-test("the apps catalogue also keeps absent RedDB and RedRouter unchecked, while installed copies stay selected", () => {
+test("the apps catalogue selects RedRouter by default and leaves absent RedDB unchecked", () => {
   const tools = [toolRow({ name: "red", present: false, installed: false }), toolRow({ name: "red-router", present: false, installed: false })];
-  expect(catalogueLines({ tools, webApps: [], canAdd: false }).map(line => line.ticked)).toEqual([false, false]);
+  expect(catalogueLines({ tools, webApps: [], canAdd: false }).map(line => line.ticked)).toEqual([false, true]);
   expect(catalogueLines({ tools: tools.map(tool => ({ ...tool, present: true })), webApps: [], canAdd: false }).every(line => line.ticked)).toBe(true);
 });
 

@@ -36,7 +36,6 @@ import { isInstalled, isPresent, providerFor, toolsInScope, type Tool } from "./
 import type { Platform } from "./platform.ts";
 import { removalFor, type Removal } from "./uninstall.ts";
 import type { WebApp, WebAppRow } from "./webapps.ts";
-import { OPT_IN_PRODUCTS } from "./machine-profile.ts";
 
 /**
  * The one scope the Catalogue may offer, exported so a test can say so.
@@ -132,7 +131,7 @@ export function catalogueLines(opts: {
   for (const t of opts.tools) {
     // Every tool opens ticked: a curated list is an opt-out, and the
     // ones that are not installed cost nothing by being on.
-    lines.push({ label: toolLabel(t), row: { kind: "tool", tool: t }, ticked: OPT_IN_PRODUCTS.has(t.tool.name) ? t.present : true });
+    lines.push({ label: toolLabel(t), row: { kind: "tool", tool: t }, ticked: t.tool.name === "red" ? t.present : true });
   }
 
   for (const row of opts.webApps) {

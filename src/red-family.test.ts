@@ -117,12 +117,12 @@ describe("the dedicated RedDB setup page", () => {
     expect(selectedSetupApps(steps, picked)).toEqual(["just", "red", "red-skills-vscode"]);
   });
 
-  test("offers RedDB and RedRouter independently, initially unchecked", () => {
+  test("offers both products independently with RedRouter selected by default", () => {
     const red = redFamilyChoices(DESKTOP, agents);
     const page = questions(DESKTOP, agents, [], [], red).find(step => step.id === "reddb")!;
     for (const key of ["red", "red-router"]) {
       expect(choiceSelectable(page, page.choices.find(choice => choice.key === key)!)).toBe(true);
-      expect(page.preset).not.toContain(key);
+      expect(page.preset.includes(key)).toBe(key === "red-router");
       expect(otherOptionalChoices(DESKTOP).map(choice => choice.key)).not.toContain(key);
     }
     for (const selected of [[], ["red"], ["red-router"], ["red", "red-router"]]) {

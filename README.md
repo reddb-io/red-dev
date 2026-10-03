@@ -288,7 +288,7 @@ and says so rather than composing over it. See
 `carapace` · `direnv`
 
 **[RedRouter](https://github.com/reddb-io/red-router)** is optional and starts
-unchecked on the setup wizard's RedDB page. Selecting it exposes the
+checked on the setup wizard's RedDB page; untick it to skip installation. It exposes the
 OpenAI-compatible API at `http://localhost:25050/v1`
 and its dashboard at `http://localhost:25050/dashboard`. mise installs the
 published `@reddb-io/red-router` package, and `red-dev update` advances it with
@@ -296,8 +296,8 @@ the rest of the selected suite. Choosing an agent does not select RedRouter.
 
 RedRouter stays available after boot through its own service contract. Linux
 and WSL use `red-router.service` under `systemd --user`; Windows starts
-`red-router -t` from the Startup folder. The service binds to `127.0.0.1` by
-default. During migration red-dev disables and removes the old
+`red-router -t` from the Startup folder. RedRouter owns its network configuration;
+red-dev does not restrict it to localhost. During migration red-dev disables and removes the old
 `red-dev-9router.service` or Startup shortcut, but preserves `~/.9router` so
 RedRouter can migrate existing credentials and settings into `~/.red-router`.
 
@@ -326,7 +326,8 @@ Provider credentials belong to RedRouter. Configure them in the dashboard;
 red-dev neither reads nor writes them.
 
 **The RedDB tools** have their own page in setup. The RedDB CLI (`red`) and
-RedRouter are independent optional choices, both unchecked by default:
+RedRouter are independent optional choices. RedRouter starts checked; `red`
+starts unchecked:
 
 | | | |
 | --- | --- | --- |

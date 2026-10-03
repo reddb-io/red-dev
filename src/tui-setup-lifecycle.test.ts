@@ -19,11 +19,11 @@ const hosts: Choice[] = [
   { key: "codex", label: "Codex", note: "OpenAI", recommended: true },
 ];
 
-function interview(agents = ["claude-code", "codex"], redApps: Choice[] = []) {
+function interview(agents = ["claude-code", "codex"], redApps: Choice[] = [], apps: string[] | null = []) {
   return setupSteps(desktop, hosts, [], [{ key: "node@latest", label: "Node", note: "" }], redApps, [], {
     githubUser: "octocat",
     preferences: {
-      setupCompleted: true, agents, defaultAgent: "codex", runtimes: [], apps: [],
+      setupCompleted: true, agents, defaultAgent: "codex", runtimes: [], ...(apps ? { apps } : {}),
       redSkillsPlugins: [], font: "hack", theme: "cobalt", blesh: false,
       redwall: false, wallpaper: "custom:abc123",
     },
@@ -38,8 +38,8 @@ function terminal() {
   return { stdin, stdout };
 }
 
-function renderedWizard(agents?: string[], redApps: Choice[] = []) {
-  const { steps, wizard } = interview(agents, redApps);
+function renderedWizard(agents?: string[], redApps: Choice[] = [], apps: string[] | null = []) {
+  const { steps, wizard } = interview(agents, redApps, apps);
   const { stdin, stdout } = terminal();
   let model!: SetupModel;
   let answers: SetupAnswers | undefined;
@@ -59,6 +59,25 @@ function renderedWizard(agents?: string[], redApps: Choice[] = []) {
 }
 
 describe("the shared setup through the real renderer", () => {
+  test("accepting a new RedDB page installs RedRouter by default and can opt out", async () => {
+    for (const optOut of [false, true]) {
+      const view = renderedWizard([], redFamilyChoices(desktop, hosts), null);
+      try {
+        while (view.model().steps[view.model().stepIndex()]!.id !== "reddb") await view.press("\r");
+        expect(view.model().selection()).toContain("red-router");
+        expect(view.model().selection()).not.toContain("red");
+        if (optOut) {
+          const options = view.model().steps[view.model().stepIndex()]!.choices;
+          const target = options.findIndex(choice => choice.key === "red-router");
+          while (view.model().cursor() < target) await view.press("\x1b[B");
+          await view.press(" ");
+        }
+        for (let count = 0; count < 20 && !view.answers(); count++) await view.press("\r");
+        expect(view.answers()?.apps.includes("red-router")).toBe(!optOut);
+        expect(view.answers()?.apps).not.toContain("red");
+      } finally { view.app.unmount(); }
+    }
+  });
   test("Space opts into either product and leaving the RedDB page alone installs neither", async () => {
     for (const selected of [undefined, "red", "red-router"]) {
       const view = renderedWizard([], redFamilyChoices(desktop, hosts));
