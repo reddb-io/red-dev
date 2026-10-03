@@ -20,6 +20,8 @@ export interface MachineProfile {
   resources?: ResourceSettings;
 }
 export const REQUIRED_TOOLS = new Set(["mise", "red-dev", "retired-resource-controls", "maintenance-schedule", "wsl-sync"]);
+/** RedDB products installed only after an explicit selection. */
+export const OPT_IN_PRODUCTS = new Set(["red", "red-router"]);
 export function profilePath(env: NodeJS.ProcessEnv = process.env): string {
   return env.RED_DEV_PROFILE_FILE || devConfigPath(env);
 }
@@ -77,8 +79,9 @@ export function inferredProfileName(p: Platform, shell?: string): ProfileName {
 }
 export function profileToolEnabled(p: Platform, name: string, scope?: string): boolean {
   const profile = p.profile;
-  if (!profile || REQUIRED_TOOLS.has(name)) return true;
+  if (REQUIRED_TOOLS.has(name)) return true;
+  if (!profile) return !OPT_IN_PRODUCTS.has(name);
   if (profile.tools[name] !== undefined) return profile.tools[name]!;
-  if (scope === "optional") return profile.apps?.includes(name) ?? false;
+  if (scope === "optional" || OPT_IN_PRODUCTS.has(name)) return profile.apps?.includes(name) ?? false;
   return true;
 }

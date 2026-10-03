@@ -36,6 +36,7 @@ import { isInstalled, isPresent, providerFor, toolsInScope, type Tool } from "./
 import type { Platform } from "./platform.ts";
 import { removalFor, type Removal } from "./uninstall.ts";
 import type { WebApp, WebAppRow } from "./webapps.ts";
+import { OPT_IN_PRODUCTS } from "./machine-profile.ts";
 
 /**
  * The one scope the Catalogue may offer, exported so a test can say so.
@@ -76,7 +77,8 @@ export function catalogueTools(p: Platform): CatalogueTool[] {
   const out: CatalogueTool[] = [];
   for (const tool of toolsInScope(CATALOGUE_SCOPE)) {
     // The catalogue offers choices, including ones disabled in the profile.
-    if (providerFor(tool, { ...p, profile: undefined }).kind === "skip") continue;
+    const offered = { ...p, profile: { schema: 1 as const, name: p.profile?.name ?? "ubuntu-desktop" as const, tools: { [tool.name]: true } } };
+    if (providerFor(tool, offered).kind === "skip") continue;
     // `managed` means the provider owns the layout and nothing probes for
     // it, so `present` is already false — the guard is here to say why
     // rather than to leave the reason to a reader of installState.
@@ -85,7 +87,7 @@ export function catalogueTools(p: Platform): CatalogueTool[] {
       tool,
       installed: isInstalled(tool),
       present,
-      removal: present ? removalFor(tool, p) : null,
+      removal: present ? removalFor(tool, offered) : null,
     });
   }
   return out;
@@ -130,7 +132,7 @@ export function catalogueLines(opts: {
   for (const t of opts.tools) {
     // Every tool opens ticked: a curated list is an opt-out, and the
     // ones that are not installed cost nothing by being on.
-    lines.push({ label: toolLabel(t), row: { kind: "tool", tool: t }, ticked: true });
+    lines.push({ label: toolLabel(t), row: { kind: "tool", tool: t }, ticked: OPT_IN_PRODUCTS.has(t.tool.name) ? t.present : true });
   }
 
   for (const row of opts.webApps) {

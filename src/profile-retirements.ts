@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Platform } from "./platform.ts";
 import { resourceRetirementPlan } from "./resource-retirement.ts";
+import { routerSelected, ownedRouterUnit, ROUTER_SERVICE, LEGACY_ROUTER_SERVICE } from "./red-router.ts";
 
 export function profileRetirementLines(p: Platform, home = process.env.HOME ?? process.env.USERPROFILE ?? ""): string[] {
   if (!home) return [];
@@ -11,6 +12,20 @@ export function profileRetirementLines(p: Platform, home = process.env.HOME ?? p
   const lines = resources.changes.map(change => `retire owned default · ${change.path} · exact backup; no workload restart`);
   lines.push(...resources.preserved.map(path => `preserve unknown owner · ${path}`));
   if (p.os === "linux") {
+    if (!routerSelected(p)) {
+      for (const name of [ROUTER_SERVICE, LEGACY_ROUTER_SERVICE]) {
+        const path = join(home, ".config/systemd/user", name);
+        if (!existsSync(path)) continue;
+        const owned = ownedRouterUnit(name, readFileSync(path, "utf8"));
+        lines.push(`${owned ? "disable optional router startup" : "preserve unknown owner"} · ${path}${owned ? " · exact backup; running router preserved" : ""}`);
+      }
+      const path = join(home, ".config/autostart/red-router.desktop");
+      if (existsSync(path)) {
+        const text = readFileSync(path, "utf8");
+        const owned = text.includes("X-RedRouter-Managed=service-tray") && /^Exec=.*red-router.*tray start/m.test(text);
+        lines.push(`${owned ? "retire optional router tray startup" : "preserve unknown owner"} · ${path}${owned ? " · exact backup" : ""}`);
+      }
+    }
     const service = join(home, ".config/systemd/user/red-dev-auto-update.service");
     const timer = join(home, ".config/systemd/user/red-dev-auto-update.timer");
     const paths = [service, timer].filter(path => existsSync(path));

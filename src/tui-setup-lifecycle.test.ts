@@ -3,6 +3,7 @@ import { PassThrough } from "node:stream";
 import { render, renderToString, useInput } from "tuiuiu.js";
 import type { Platform } from "./platform.ts";
 import { runSetupPrompts } from "./firstrun.ts";
+import { redFamilyChoices } from "./red-family.ts";
 import {
   SetupLayout, setupSteps, useSetupModel,
   type Choice, type SetupAnswers, type SetupModel,
@@ -18,11 +19,11 @@ const hosts: Choice[] = [
   { key: "codex", label: "Codex", note: "OpenAI", recommended: true },
 ];
 
-function interview(agents = ["claude-code", "codex"]) {
-  return setupSteps(desktop, hosts, [], [{ key: "node@latest", label: "Node", note: "" }], [], [], {
+function interview(agents = ["claude-code", "codex"], redApps: Choice[] = []) {
+  return setupSteps(desktop, hosts, [], [{ key: "node@latest", label: "Node", note: "" }], redApps, [], {
     githubUser: "octocat",
     preferences: {
-      setupCompleted: true, agents, defaultAgent: "codex", runtimes: [],
+      setupCompleted: true, agents, defaultAgent: "codex", runtimes: [], apps: [],
       redSkillsPlugins: [], font: "hack", theme: "cobalt", blesh: false,
       redwall: false, wallpaper: "custom:abc123",
     },
@@ -37,8 +38,8 @@ function terminal() {
   return { stdin, stdout };
 }
 
-function renderedWizard(agents?: string[]) {
-  const { steps, wizard } = interview(agents);
+function renderedWizard(agents?: string[], redApps: Choice[] = []) {
+  const { steps, wizard } = interview(agents, redApps);
   const { stdin, stdout } = terminal();
   let model!: SetupModel;
   let answers: SetupAnswers | undefined;
@@ -58,6 +59,23 @@ function renderedWizard(agents?: string[]) {
 }
 
 describe("the shared setup through the real renderer", () => {
+  test("Space opts into either product and leaving the RedDB page alone installs neither", async () => {
+    for (const selected of [undefined, "red", "red-router"]) {
+      const view = renderedWizard([], redFamilyChoices(desktop, hosts));
+      try {
+        while (view.model().steps[view.model().stepIndex()]!.id !== "reddb") await view.press("\r");
+        expect(view.model().selection()).toEqual([]);
+        if (selected) {
+          const options = view.model().steps[view.model().stepIndex()]!.choices;
+          const target = options.findIndex(choice => choice.key === selected);
+          while (view.model().cursor() < target) await view.press("\x1b[B");
+          await view.press(" ");
+        }
+        for (let count = 0; count < 20 && !view.answers(); count++) await view.press("\r");
+        expect(view.answers()?.apps).toEqual(selected ? [selected] : []);
+      } finally { view.app.unmount(); }
+    }
+  });
   test("SSH typing and Enter complete without an empty-choice crash or lost answers", async () => {
     const view = renderedWizard();
     try {
@@ -145,4 +163,19 @@ test("the narrow fallback uses the same saved choices and dependent steps", asyn
     runtimes: [], redSkillsPlugins: [], blesh: false, redwall: false,
     wallpaper: "custom:abc123",
   });
+});
+
+test("the narrow fallback offers both products unchecked and records just the selected router", async () => {
+  const { steps } = interview([], redFamilyChoices(desktop, hosts));
+  const answers = await runSetupPrompts(steps, {
+    checkbox: async (title, choices, fallback) => {
+      if (title !== "RedDB") return fallback ?? [];
+      expect(fallback).toEqual([]);
+      expect(choices.some(choice => choice.startsWith("RedDB (red):"))).toBe(true);
+      return [choices.find(choice => choice.startsWith("RedRouter:"))!];
+    },
+    select: async (_title, _choices, fallback) => fallback,
+    text: async (_title, fallback = "") => fallback,
+  });
+  expect(answers.apps).toEqual(["red-router"]);
 });

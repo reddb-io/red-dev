@@ -4,6 +4,7 @@ export interface ProvisioningPreparation {
   migrate: (p: Platform) => Promise<unknown>;
   adopt: (p: Platform) => Promise<unknown>;
   declareMise: (p: Platform) => unknown;
+  retireDefaults?: (p: Platform) => Promise<unknown>;
 }
 
 const preparation: ProvisioningPreparation = {
@@ -13,12 +14,14 @@ const preparation: ProvisioningPreparation = {
   },
   adopt: async p => (await import("./profile-command.ts")).adoptMachineProfile(p),
   declareMise: async p => (await import("./mise-config.ts")).convergeMiseConfig(p),
+  retireDefaults: async p => (await import("./red-router.ts")).retireDeselectedRouterAutostart(p),
 };
 
 /** Refresh declarations after setup choices change the desired profile. */
 export async function synchronizeProvisioning(p: Platform, deps = preparation): Promise<void> {
   await deps.adopt(p);
   await deps.declareMise(p);
+  await deps.retireDefaults?.(p);
 }
 
 /** Install, update and the bootstrap wizard share this writer preparation. */

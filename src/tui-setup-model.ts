@@ -81,17 +81,7 @@ export interface Choice {
   key: string;
   label: string;
   note: string;
-  /**
-   * Ticked when the page is first drawn.
-   *
-   * Read only by the Agents page, and that is the point of it being
-   * here: every other list red-dev offers is curated and arrives fully
-   * ticked, but an agent host is an account, a vendor and a network
-   * call, and plenty of machines are not allowed to have most of them.
-   * A page that arrives with nine assistants ticked asks somebody to
-   * untick eight, and the one they miss is the one their employer
-   * refuses.
-   */
+  /** Agents require true to start selected; RedDB products use false to opt in. */
   recommended?: boolean;
   /** False when a page is identifying an item owned by another scope. */
   selectable?: boolean;
@@ -406,10 +396,11 @@ export function questions(
       description:
         "The RedDB family red-dev keeps together. A dot means the base converge " +
         "already includes it; an arrow points to a choice on another page, and " +
-        "checkboxes are optional integrations you can untick.",
+        "checkboxes choose optional products and integrations. RedDB and RedRouter " +
+        "start off; Space selects either one independently.",
       multi: true,
       choices: redApps,
-      preset: redApps.map((app) => app.key),
+      preset: redApps.filter((app) => app.recommended !== false).map((app) => app.key),
       applies: () => redApps.length > 0,
     },
     {

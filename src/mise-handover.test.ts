@@ -29,6 +29,7 @@ import { runtimeBinDir } from "./red-skills-companions.ts";
 import { locateTool } from "./verify-install.ts";
 
 const ubuntu: Platform = {
+  profile: { schema: 1, name: "ubuntu-desktop", tools: { red: true } },
   os: "linux",
   env: "desktop",
   distro: "ubuntu",

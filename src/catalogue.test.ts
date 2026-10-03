@@ -89,6 +89,12 @@ function toolRow(over: Partial<CatalogueTool> & { name: string }): CatalogueTool
   };
 }
 
+test("the apps catalogue also keeps absent RedDB and RedRouter unchecked, while installed copies stay selected", () => {
+  const tools = [toolRow({ name: "red", present: false, installed: false }), toolRow({ name: "red-router", present: false, installed: false })];
+  expect(catalogueLines({ tools, webApps: [], canAdd: false }).map(line => line.ticked)).toEqual([false, false]);
+  expect(catalogueLines({ tools: tools.map(tool => ({ ...tool, present: true })), webApps: [], canAdd: false }).every(line => line.ticked)).toBe(true);
+});
+
 function webRow(name: string, installed: boolean): WebAppRow {
   return { app: { name, url: `https://${name.toLowerCase()}.example/` }, installed, ticked: installed };
 }

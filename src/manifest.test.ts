@@ -190,17 +190,16 @@ describe("the manifest itself", () => {
     expect(providerFor(tool!, WSL24)).toEqual({ kind: "apt", pkg: "bash-completion" });
   });
 
-  test("red-router is core on every target, and mise owns it through npm", () => {
-    // The router is what the agents are configured against, so a target
-    // without it is a different environment rather than a smaller one.
+  test("red-router is optional on every target, and mise owns it through npm", () => {
+    // An explicit selection installs the package through mise.
     // npm, not github: the package ships a node tree with a bin shim,
     // not a release binary, and mise's npm backend is what red-skills
     // already uses for exactly that shape.
     const tool = TOOLS.find((t) => t.name === "red-router");
-    expect(tool).toMatchObject({ scope: "core", cmd: ["red-router"] });
+    expect(tool).toMatchObject({ scope: "optional", cmd: ["red-router"] });
     expect(tool?.managed).toBeUndefined();
     for (const p of [WSL24, DESKTOP, WINDOWS]) {
-      expect(providerFor(tool!, p)).toEqual({
+      expect(providerFor(tool!, { ...p, profile: { schema: 1, name: "ubuntu-desktop", tools: { "red-router": true } } })).toEqual({
         kind: "mise",
         spec: "npm:@reddb-io/red-router",
         alias: "red-router",
@@ -216,7 +215,7 @@ describe("the manifest itself", () => {
     const tool = TOOLS.find((t) => t.name === "red-router-autostart");
     expect(tool).toMatchObject({ scope: "core", managed: true });
     for (const p of [WSL24, DESKTOP, WINDOWS]) {
-      expect(providerFor(tool!, p)).toEqual({ kind: "builtin", name: "red-router-autostart" });
+      expect(providerFor(tool!, { ...p, profile: { schema: 1, name: "ubuntu-desktop", tools: { "red-router": true } } })).toEqual({ kind: "builtin", name: "red-router-autostart" });
     }
     const names = TOOLS.map((t) => t.name);
     expect(names.indexOf("red-router-autostart")).toBe(names.indexOf("red-router") + 1);

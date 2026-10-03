@@ -287,11 +287,12 @@ and says so rather than composing over it. See
 `neovim` · `docker` · `delta` · `yazi` · `tldr` · `starship` · `atuin` ·
 `carapace` · `direnv`
 
-**[RedRouter](https://github.com/reddb-io/red-router)** is core on every
-target. It exposes the OpenAI-compatible API at `http://localhost:25050/v1`
+**[RedRouter](https://github.com/reddb-io/red-router)** is optional and starts
+unchecked on the setup wizard's RedDB page. Selecting it exposes the
+OpenAI-compatible API at `http://localhost:25050/v1`
 and its dashboard at `http://localhost:25050/dashboard`. mise installs the
 published `@reddb-io/red-router` package, and `red-dev update` advances it with
-the rest of the suite.
+the rest of the selected suite. Choosing an agent does not select RedRouter.
 
 RedRouter stays available after boot through its own service contract. Linux
 and WSL use `red-router.service` under `systemd --user`; Windows starts
@@ -324,12 +325,12 @@ generated legacy wrappers are backed up before their host/port overrides are ret
 Provider credentials belong to RedRouter. Configure them in the dashboard;
 red-dev neither reads nor writes them.
 
-**The RedDB tools** come with it, because this is the environment a RedDB
-developer works in:
+**The RedDB tools** have their own page in setup. The RedDB CLI (`red`) and
+RedRouter are independent optional choices, both unchecked by default:
 
 | | | |
 | --- | --- | --- |
-| [`red`](https://github.com/reddb-io/reddb) | the RedDB CLI | every target |
+| [`red`](https://github.com/reddb-io/reddb) | the RedDB CLI | optional; Linux/WSL or native Windows |
 | [`tq`](https://github.com/reddb-io/toon) | query and convert TOON | every target |
 | [`red-request`](https://github.com/reddb-io/red-request) | API client, powered by recker | desktop sessions |
 | [`red-ui`](https://github.com/reddb-io/red-ui) | universal client for reddb | desktop sessions — see below |
@@ -339,7 +340,7 @@ developer works in:
 First-run setup gives this family its own **RedDB** page instead of mixing it
 into the generic Tools list. A dot identifies products the base converge already
 includes, an arrow points to RedCode's choice on the Agents page, and checkboxes
-control the optional RedSkills integrations for VS Code and Herdr. The Dev,
+control RedDB, RedRouter and the optional RedSkills integrations for VS Code and Herdr. The Dev,
 Memory and Brain RedSkills payloads are named individually in the inventory.
 
 Which of those plugins the agent hosts switch on is its own **RedSkills** page,
@@ -364,7 +365,13 @@ that came on and remove the one that went off (`--keep-data`, so nothing it
 stored is deleted), OpenCode, RedCode and pi are regenerated, and the files a
 switched-off plugin left behind are removed. A running host is told to restart.
 
-`red` and `tq` are CLIs, so they are `core` and land on all five targets.
+`tq` remains `core`. `red` and `red-router` belong to `optional`; install and
+update manage them only while the saved profile selects them. Reopening setup
+restores these choices. Deselecting them in setup preserves installed binaries,
+credentials and data. For RedRouter it also retires owned boot hooks with exact
+backups, without stopping a running router. Unknown service/shortcut owners are
+preserved. `red-dev apps` also offers both products; its separate, explicit removal
+flow still applies when unticking an installed package there.
 `red-request`, `red-ui` and `dit` are `desktop`, which also means WSL never
 attempts them: installing a Linux GUI app inside a distro with no display is the
 mistake this project exists to avoid, and the Windows target already covers that

@@ -150,7 +150,7 @@ describe("writing it, and then not writing it again", () => {
 
 describe("the fragment tells mise to call red-dev back", () => {
   test("the two resident services and desktop config carry reconciliation postinstalls", () => {
-    const entries = miseEntries(UBUNTU);
+    const entries = miseEntries({ ...UBUNTU, profile: { schema: 1, name: "ubuntu-desktop", tools: { "red-router": true } } });
     const core = entries.find((e) => e.spec === REDSKILLS_CORE_SPEC);
     const router = entries.find((e) => e.alias === "red-router");
     expect(core?.postinstall).toBe(REDSKILLS_RECONCILE_POSTINSTALL);
@@ -196,7 +196,7 @@ describe("the fragment tells mise to call red-dev back", () => {
   });
 
   test("the rendering is still deterministic, postinstall and all", () => {
-    const entries = miseEntries(UBUNTU);
+    const entries = miseEntries({ ...UBUNTU, profile: { schema: 1, name: "ubuntu-desktop", tools: { "red-router": true } } });
     expect(renderMiseConfig(entries)).toBe(renderMiseConfig([...entries].reverse()));
   });
 });

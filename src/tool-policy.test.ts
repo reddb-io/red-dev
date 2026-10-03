@@ -12,7 +12,8 @@ import { parseArgs, buildCli } from "./cli.ts";
 import { policyCommand } from "./policy-command.ts";
 import type { Platform } from "./platform.ts";
 
-const p: Platform = { os: "linux", env: "desktop", distro: "ubuntu", version: "24.04", codename: "noble", arch: "x64",
+const p: Platform = {
+  profile: { schema: 1, name: "ubuntu-desktop", tools: { "red-router": true } }, os: "linux", env: "desktop", distro: "ubuntu", version: "24.04", codename: "noble", arch: "x64",
   caps: { apt: true, gui: true, systemd: true, winget: false, flatpak: false } };
 const roots: string[] = [];
 let restore: (() => void) | undefined;

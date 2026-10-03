@@ -78,7 +78,7 @@ describe("findShadowed", () => {
 
   test("the mise copy is identified even when it loses", () => {
     const found = findShadowed(
-      UBUNTU,
+      { ...UBUNTU, profile: { schema: 1, name: "ubuntu-desktop", tools: { red: true } } },
       (name) =>
         name === "red"
           ? ["/home/u/.local/bin/red", `${MISE_ROOT}/github-reddb-io-reddb/1.23.2/red`]
