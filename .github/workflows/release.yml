@@ -23,20 +23,7 @@ name: Release
 # confusing way to discover a requirement.
 
 on:
-  # Every push to main is a release.
-  #
-  # The alternative — remembering to bump package.json and push a tag —
-  # was tried and lost: main carried five merged changes across two days
-  # while the last release stayed on the version before them, so the only
-  # way to run the current code was to build it locally. A release nobody
-  # cuts is a release nobody can install.
-  #
-  # This does not loop. The version bump is committed and tagged with
-  # GITHUB_TOKEN, and GitHub deliberately does not trigger workflows for
-  # pushes made with that token — so the tag this job creates arrives as
-  # data, not as a second run.
   push:
-    branches: ["main"]
     tags: ["v*.*.*"]
   workflow_dispatch:
     inputs:

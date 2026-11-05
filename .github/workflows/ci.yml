@@ -8,17 +8,7 @@ name: CI
 # Blacksmith remains reserved for the explicit release build in release.yml.
 
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
-  # The contract job below asks a question about somebody else's
-  # repository, so it has to be asked when they change rather than only
-  # when we do. red-skills 4.0 moved the package-set schema on a day
-  # red-dev published nothing, and the first thing to notice was a
-  # workstation.
-  schedule:
-    - cron: "17 6 * * *"
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
