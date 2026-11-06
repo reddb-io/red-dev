@@ -37,6 +37,10 @@ on:
         description: Version for stable (e.g. 0.3.0)
         required: false
 
+      preview_platforms:
+        type: boolean
+        description: Show selected platforms without running builds, tests or publication
+        default: false
 permissions:
   contents: write
 
@@ -47,6 +51,62 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  platforms:
+    name: Select platforms
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions: {}
+    outputs:
+      linux_x64: ${{ steps.select.outputs.linux_x64 }}
+      linux_arm64: ${{ steps.select.outputs.linux_arm64 }}
+      windows_x64: ${{ steps.select.outputs.windows_x64 }}
+      windows_arm64: ${{ steps.select.outputs.windows_arm64 }}
+      macos_x64: ${{ steps.select.outputs.macos_x64 }}
+      macos_arm64: ${{ steps.select.outputs.macos_arm64 }}
+      linux_armv7: ${{ steps.select.outputs.linux_armv7 }}
+      linux_x86: ${{ steps.select.outputs.linux_x86 }}
+      any: ${{ steps.select.outputs.any }}
+      docker_platforms: ${{ steps.select.outputs.docker_platforms }}
+    steps:
+      - id: select
+        name: Filter platforms before allocating runners
+        shell: python
+        env:
+          PLATFORM_DEFAULTS: '{"linux_x64":true,"linux_arm64":true,"windows_x64":true,"windows_arm64":false,"macos_x64":false,"macos_arm64":false,"linux_armv7":false,"linux_x86":false}'
+          PLATFORM_AVAILABLE: '["linux_x64", "windows_x64"]'
+          PLATFORM_MATRICES: |
+            {}
+        run: |
+          import json
+          import os
+
+          defaults = json.loads(os.environ["PLATFORM_DEFAULTS"])
+          enabled = {}
+          for key in defaults:
+              name = "ENABLE_" + key.upper()
+              value = os.environ[name].lower()
+              if value not in ("true", "false"):
+                  raise SystemExit(f"{name} must be true or false, got {value!r}")
+              enabled[key] = value == "true"
+
+          matrices = json.loads(os.environ["PLATFORM_MATRICES"])
+          available = json.loads(os.environ["PLATFORM_AVAILABLE"])
+          output = {key: str(value).lower() for key, value in enabled.items()}
+          output["any"] = str(any(enabled[key] for key in available)).lower()
+          for job, entries in matrices.items():
+              selected = [entry["row"] for entry in entries if enabled[entry["flag"]]]
+              output["enabled_" + job] = str(bool(selected)).lower()
+              # A placeholder keeps GitHub's matrix schema valid when the job is skipped.
+              output["matrix_" + job] = json.dumps({"include": selected or [entries[0]["row"]]}, separators=(",", ":"))
+          docker = [target for key, target in (("linux_x64", "linux/amd64"), ("linux_arm64", "linux/arm64")) if enabled[key]]
+          output["docker_platforms"] = ",".join(docker)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              for key, value in output.items():
+                  handle.write(f"{key}={value}\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as handle:
+              handle.write("### Selected platforms\n\n")
+              for key in available:
+                  handle.write(f"- {key}: {str(enabled[key]).lower()}\n")
   plan:
     name: Plan release
     runs-on: ubuntu-latest
@@ -185,10 +245,15 @@ jobs:
           git tag -a "$TAG" -m "red-dev ${VERSION}"
           git push origin "$TAG"
 
+    needs:
+      - platforms
+    if: ${{ !inputs.preview_platforms && (needs.platforms.outputs.any == 'true') }}
   build:
     name: Build binaries
-    needs: [plan]
-    if: needs.plan.outputs.should_skip != 'true'
+    needs:
+      - plan
+      - platforms
+    if: ${{ !inputs.preview_platforms && ((needs.plan.outputs.should_skip != 'true') && (needs.platforms.outputs.any == 'true')) }}
     # The last billed job. See the note at the top: releases are now one
     # per merge, and two spare minutes per release is not worth paying
     # for on repeat.
@@ -241,7 +306,11 @@ jobs:
           echo "package.json set to ${VERSION}"
 
       - name: Build
-        run: bun run build
+        run: |
+          set -euo pipefail
+          if [[ "$ENABLE_LINUX_X64" == true ]]; then bun run build:linux; fi
+          if [[ "$ENABLE_WINDOWS_X64" == true ]]; then bun run build:windows; fi
+
 
       - name: Smoke the built binary
         run: |
@@ -256,11 +325,12 @@ jobs:
           ./dist/red-dev-linux-x64 plan core
           bun scripts/network-cli-smoke.ts ./dist/red-dev-linux-x64
 
+        if: env.ENABLE_LINUX_X64 == 'true'
       - name: Checksums
         run: |
           set -euo pipefail
           cd dist
-          sha256sum red-dev-linux-x64 red-dev-windows-x64.exe > SHA256SUMS
+          sha256sum red-dev-* > SHA256SUMS
           cp SHA256SUMS checksums.txt
           cat SHA256SUMS
 
@@ -272,7 +342,7 @@ jobs:
   publish:
     name: GitHub Release
     needs: [plan, build]
-    if: needs.plan.outputs.should_skip != 'true'
+    if: ${{ !inputs.preview_platforms && (needs.plan.outputs.should_skip != 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -367,3 +437,12 @@ jobs:
           generate_release_notes: true
           files: release/*
           token: ${{ secrets.GITHUB_TOKEN }}
+env:
+  ENABLE_LINUX_X64: ${{ vars.ENABLE_LINUX_X64 || 'true' }}
+  ENABLE_LINUX_ARM64: ${{ vars.ENABLE_LINUX_ARM64 || 'true' }}
+  ENABLE_WINDOWS_X64: ${{ vars.ENABLE_WINDOWS_X64 || 'true' }}
+  ENABLE_WINDOWS_ARM64: ${{ vars.ENABLE_WINDOWS_ARM64 || 'false' }}
+  ENABLE_MACOS_X64: ${{ vars.ENABLE_MACOS_X64 || 'false' }}
+  ENABLE_MACOS_ARM64: ${{ vars.ENABLE_MACOS_ARM64 || 'false' }}
+  ENABLE_LINUX_ARMV7: ${{ vars.ENABLE_LINUX_ARMV7 || 'false' }}
+  ENABLE_LINUX_X86: ${{ vars.ENABLE_LINUX_X86 || 'false' }}
